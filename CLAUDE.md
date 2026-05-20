@@ -1,22 +1,19 @@
-# CLAUDE.md — pitolick/affilicard
+# CLAUDE.md — affilicard
 
 ## プロジェクト概要
 
-「ええこみ！」ブログ（`e-comi.pitolick.com`）で使用する **汎用アフィリエイト商品カード WordPress プラグイン**。
+**汎用アフィリエイト商品カード WordPress プラグイン**。複数のアフィリエイト商品ジャンル（漫画・VOD・家電・雑貨など）に対応する設計。
 
-- **ecomi リポジトリのサブモジュール**として `plugins/affilicard/` に配置される
-- 漫画に限らず VOD・家電・雑貨など将来の商品ジャンルへの転用を前提とした設計
-- ええこみ固有の処理は含めない。ジャンル固有の処理は `Types/` に追加する
-
-Issue の起票・Claude Code GitHub Actions の起動は **`pitolick/ecomi` リポジトリで行う**。
-このリポジトリへの直接 PR は手動モード時に発生する。
+- 単独で動作する WordPress プラグイン（複数サイトから利用可能）
+- ジャンル固有の処理は `Types/` ディレクトリに PHP クラスを追加する拡張パターン
+- サイト固有の処理は含めない（汎用性を維持する）
 
 ---
 
 ## このリポジトリの責務
 
 | クラス | 役割 |
-|--------|------|
+| --- | --- |
 | `src/Core/ProductCardBase.php` | カスタム投稿タイプ・REST API・Gutenberg ブロック基盤 |
 | `src/Core/PriceManager.php` | 価格更新・タイムスタンプ管理（WP-Cron 週1回） |
 | `src/Core/LinkChecker.php` | アフィリエイトリンク確認（WP-Cron 週1回）・予約投稿昇格 |
@@ -36,17 +33,15 @@ Issue の起票・Claude Code GitHub Actions の起動は **`pitolick/ecomi` リ
 ```
 affilicard/
 ├── CLAUDE.md
+├── README.md
 ├── composer.json
-├── grumphp.yml
 ├── phpcs.xml
 ├── .php-cs-fixer.php
 ├── phpunit.xml
-├── .coderabbit.yaml
 ├── .env.example
 ├── .github/
 │   ├── workflows/
-│   │   ├── ci.yml
-│   │   └── auto-merge.yml
+│   │   └── ci.yml
 │   ├── dependabot.yml
 │   └── pull_request_template.md
 ├── src/
@@ -90,14 +85,14 @@ interface ProductTypeInterface {
 ### REST API エンドポイント
 
 ```
-POST  /wp-json/affilicard/v1/products          商品登録
+POST  /wp-json/affilicard/v1/products              商品登録
 PATCH /wp-json/affilicard/v1/products/{id}/prices  価格更新
-GET   /wp-json/affilicard/v1/products/{id}     商品取得
+GET   /wp-json/affilicard/v1/products/{id}         商品取得
 ```
 
 ### AI での記事挿入
 
-AI が記事中に商品カードを挿入する際はショートコードを使う（Gutenberg ブロックは人間の手動編集用）。
+外部から記事中に商品カードを挿入する際はショートコードを使う（Gutenberg ブロックは人間の手動編集用）。
 
 ```
 [affilicard id="123"]
@@ -117,12 +112,11 @@ API キーはすべて WordPress 管理画面から設定し、`update_option()`
 ## 技術スタック
 
 | 項目 | 採用技術 |
-|------|---------|
+| --- | --- |
 | 言語 | PHP 8.1 |
 | テスト | PHPUnit + WP_Mock |
 | Lint | PHP_CodeSniffer（WordPress Coding Standards） |
 | フォーマット | PHP CS Fixer |
-| Git フック | GrumPHP |
 
 ---
 
@@ -130,7 +124,7 @@ API キーはすべて WordPress 管理画面から設定し、`update_option()`
 
 - コミットメッセージ・PR・Issue はすべて日本語で記述する
 - 新機能・バグ修正には必ず `tests/Unit/` にユニットテストを追加する
-- ええこみ固有のコードを混入させない（汎用性を損なう変更は却下）
+- 特定サイト固有のコードを混入させない（汎用性を損なう変更は却下）
 
 ### コミットメッセージ形式
 
@@ -147,16 +141,4 @@ style: フォーマット修正
 
 ## 仕様書の場所
 
-| ドキュメント | 参照すべきセクション |
-|------------|------------------|
-| Cowork: `docs/01_企画・要件定義.md` | §4-4（商品カードプラグイン仕様・UI 仕様・フェーズ定義） |
-| Cowork: `docs/02_プラグイン開発・運用手順書.md` | §6（テスト）・§7（lint）・§5（環境変数管理） |
-
----
-
-## 関連リポジトリ
-
-| リポジトリ | 関係 |
-|-----------|------|
-| `pitolick/ecomi` | 親リポジトリ（このリポジトリをサブモジュールとして管理・Issue はここに起票） |
-| `pitolick/ai-article-poster` | `[affilicard id="xxx"]` ショートコードを記事に埋め込む |
+設計の全体像は利用側プロジェクトの設計書を参照する。このリポジトリ単体での公開仕様は README.md に集約する。
