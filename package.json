@@ -1,0 +1,23 @@
+{
+	"name": "affilicard",
+	"version": "0.1.0",
+	"private": true,
+	"license": "MIT",
+	"description": "汎用アフィリエイト商品カード WordPress プラグインの JS ビルド",
+	"engines": {
+		"node": ">=18.12.0"
+	},
+	"volta": {
+		"node": "20.18.1"
+	},
+	"scripts": {
+		"build": "wp-scripts build src/Block/index.js src/Admin/settings.js src/Admin/metabox.js --output-path=build",
+		"start": "wp-scripts start src/Block/index.js src/Admin/settings.js src/Admin/metabox.js --output-path=build",
+		"lint:js": "wp-scripts lint-js src",
+		"test:js": "wp-scripts test-unit-js",
+		"format:js": "wp-scripts format src"
+	},
+	"devDependencies": {
+		"@wordpress/scripts": "^32.3.0"
+	}
+}
