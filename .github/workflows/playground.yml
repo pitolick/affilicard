@@ -17,3 +17,4 @@ jobs:
         with:
           plugin-path: /
           mode: comment
+          github-token: ${{ secrets.GITHUB_TOKEN }}
