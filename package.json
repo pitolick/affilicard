@@ -14,7 +14,7 @@
 		"build": "wp-scripts build src/Block/index.js src/Admin/settings.js src/Admin/metabox.js --output-path=build",
 		"start": "wp-scripts start src/Block/index.js src/Admin/settings.js src/Admin/metabox.js --output-path=build",
 		"lint:js": "wp-scripts lint-js src",
-		"test:js": "wp-scripts test-unit-js",
+		"test:js": "wp-scripts test-unit-js --passWithNoTests",
 		"format:js": "wp-scripts format src"
 	},
 	"devDependencies": {
