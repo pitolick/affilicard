@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PHP セットアップ
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+          coverage: none
+      - name: Node セットアップ
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: 本番依存のみインストール
+        run: composer install --no-dev --optimize-autoloader --no-progress --no-interaction
+      - name: npm install
+        run: npm ci
+      - name: JS ビルド
+        run: npm run build
+      - name: Release zip 作成
+        run: |
+          mkdir -p dist/affilicard
+          rsync -av \
+            --exclude='node_modules' \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='src/Admin/components' \
+            --exclude='src/Admin/api' \
+            --exclude='tests' \
+            --exclude='blueprints' \
+            --exclude='composer.lock' \
+            --exclude='package-lock.json' \
+            --exclude='phpcs.xml.dist' \
+            --exclude='phpunit.xml.dist' \
+            --exclude='.php-cs-fixer.dist.php' \
+            --exclude='.php-cs-fixer.cache' \
+            --exclude='.phpunit.cache' \
+            --exclude='dist' \
+            ./ dist/affilicard/
+          cd dist
+          zip -r ../affilicard-${{ github.ref_name }}.zip affilicard
+      - name: GitHub Release 作成
+        uses: softprops/action-gh-release@v2
+        with:
+          files: affilicard-${{ github.ref_name }}.zip
+          generate_release_notes: true
