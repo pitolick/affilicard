@@ -64,7 +64,7 @@ final class DashboardWidgetTest extends TestCase {
 			return $post_ids;
 		};
 		// stdClass にメソッドはバインドできないため Mockery で wpdb 風オブジェクトを構築する。
-		$mock = Mockery::mock( 'wpdb' );
+		$mock           = Mockery::mock( 'wpdb' );
 		$mock->postmeta = 'wp_postmeta';
 		$mock->shouldReceive( 'prepare' )->andReturnUsing(
 			static function ( string $sql ) {

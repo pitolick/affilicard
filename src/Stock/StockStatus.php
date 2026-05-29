@@ -8,9 +8,9 @@ namespace Affilicard\Stock;
  */
 final class StockStatus {
 
-	public const AVAILABLE     = 'available';
-	public const OUT_OF_STOCK  = 'out_of_stock';
-	public const DISCONTINUED  = 'discontinued';
+	public const AVAILABLE    = 'available';
+	public const OUT_OF_STOCK = 'out_of_stock';
+	public const DISCONTINUED = 'discontinued';
 
 	/**
 	 * @return list<string>

@@ -193,10 +193,10 @@ final class DmmProvider implements ProviderInterface {
 	 * @return array<string, mixed>
 	 */
 	private static function normalizeItem( array $item ): array {
-		$prices      = isset( $item['prices'] ) && is_array( $item['prices'] ) ? $item['prices'] : array();
-		$price       = isset( $prices['price'] ) ? (string) $prices['price'] : '';
-		$list_price  = isset( $prices['list_price'] ) ? (string) $prices['list_price'] : '';
-		$badge       = '';
+		$prices     = isset( $item['prices'] ) && is_array( $item['prices'] ) ? $item['prices'] : array();
+		$price      = isset( $prices['price'] ) ? (string) $prices['price'] : '';
+		$list_price = isset( $prices['list_price'] ) ? (string) $prices['list_price'] : '';
+		$badge      = '';
 		if ( '' !== $price && '' !== $list_price && is_numeric( $price ) && is_numeric( $list_price ) ) {
 			$p = (float) $price;
 			$l = (float) $list_price;

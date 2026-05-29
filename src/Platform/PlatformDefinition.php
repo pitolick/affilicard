@@ -34,15 +34,15 @@ final class PlatformDefinition {
 	 */
 	public function toArray(): array {
 		return array(
-			'code'             => $this->code,
-			'name'             => $this->name,
-			'provider'         => $this->provider,
-			'displayOrder'     => $this->displayOrder,
-			'enabled'          => $this->enabled,
-			'applicableTypes'  => $this->applicableTypes,
-			'buttonLabel'      => $this->buttonLabel,
-			'brandColor'       => $this->brandColor,
-			'buttonTextColor'  => $this->buttonTextColor,
+			'code'            => $this->code,
+			'name'            => $this->name,
+			'provider'        => $this->provider,
+			'displayOrder'    => $this->displayOrder,
+			'enabled'         => $this->enabled,
+			'applicableTypes' => $this->applicableTypes,
+			'buttonLabel'     => $this->buttonLabel,
+			'brandColor'      => $this->brandColor,
+			'buttonTextColor' => $this->buttonTextColor,
 		);
 	}
 

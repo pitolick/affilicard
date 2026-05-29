@@ -31,8 +31,8 @@ final class ProviderRegistryTest extends TestCase {
 
 	public function test_all_and_codes_return_registered_providers(): void {
 		$registry = new ProviderRegistry();
-		$a       = $this->makeProvider( 'a-code' );
-		$b       = $this->makeProvider( 'b-code' );
+		$a        = $this->makeProvider( 'a-code' );
+		$b        = $this->makeProvider( 'b-code' );
 
 		$registry->register( $a );
 		$registry->register( $b );
@@ -65,7 +65,10 @@ final class ProviderRegistryTest extends TestCase {
 				return array();
 			}
 			public function testConnection( array $credentials ): array {
-				return array( 'ok' => true, 'message' => '' );
+				return array(
+					'ok'      => true,
+					'message' => '',
+				);
 			}
 		};
 	}

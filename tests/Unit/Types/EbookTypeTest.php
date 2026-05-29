@@ -62,9 +62,21 @@ final class EbookTypeTest extends TestCase {
 
 		$this->assertSame(
 			array(
-				array( 'key' => 'author',    'label' => '著者',    'value' => '夏目漱石' ),
-				array( 'key' => 'publisher', 'label' => '出版社',  'value' => 'Pitolick Books' ),
-				array( 'key' => 'isbn',      'label' => 'ISBN',    'value' => '978-4-1234-5678-9' ),
+				array(
+					'key'   => 'author',
+					'label' => '著者',
+					'value' => '夏目漱石',
+				),
+				array(
+					'key'   => 'publisher',
+					'label' => '出版社',
+					'value' => 'Pitolick Books',
+				),
+				array(
+					'key'   => 'isbn',
+					'label' => 'ISBN',
+					'value' => '978-4-1234-5678-9',
+				),
 			),
 			$result
 		);
@@ -110,19 +122,48 @@ final class EbookTypeTest extends TestCase {
 
 		$result = $type->validateExtras(
 			array(
-				array( 'label' => '著者',     'value' => '夏目漱石',  'key' => 'author' ),
-				array( 'label' => 'カラー',   'value' => '赤',        'key' => 'randomkey' ),
-				array( 'label' => 'ISBN',     'value' => '978-foo',  'key' => 'isbn' ),
-				array( 'label' => '',         'value' => 'dropped'  ),
-				array( 'label' => 'no-value', 'value' => '' ),
+				array(
+					'label' => '著者',
+					'value' => '夏目漱石',
+					'key'   => 'author',
+				),
+				array(
+					'label' => 'カラー',
+					'value' => '赤',
+					'key'   => 'randomkey',
+				),
+				array(
+					'label' => 'ISBN',
+					'value' => '978-foo',
+					'key'   => 'isbn',
+				),
+				array(
+					'label' => '',
+					'value' => 'dropped',
+				),
+				array(
+					'label' => 'no-value',
+					'value' => '',
+				),
 			)
 		);
 
 		$this->assertSame(
 			array(
-				array( 'label' => '著者',   'value' => '夏目漱石', 'key' => 'author' ),
-				array( 'label' => 'カラー', 'value' => '赤' ),
-				array( 'label' => 'ISBN',   'value' => '978-foo',  'key' => 'isbn' ),
+				array(
+					'label' => '著者',
+					'value' => '夏目漱石',
+					'key'   => 'author',
+				),
+				array(
+					'label' => 'カラー',
+					'value' => '赤',
+				),
+				array(
+					'label' => 'ISBN',
+					'value' => '978-foo',
+					'key'   => 'isbn',
+				),
 			),
 			$result
 		);

@@ -38,7 +38,10 @@ final class JsonFieldTest extends TestCase {
 
 	public function test_decode_valid_json_returns_array(): void {
 		$this->assertSame(
-			array( 'a' => 1, 'b' => 2 ),
+			array(
+				'a' => 1,
+				'b' => 2,
+			),
 			JsonField::decode( '{"a":1,"b":2}' )
 		);
 	}

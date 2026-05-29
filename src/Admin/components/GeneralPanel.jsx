@@ -37,7 +37,7 @@ export function GeneralPanel() {
 				type: 'success',
 				message: __( '保存しました', 'affilicard' ),
 			} );
-		} catch ( e ) {
+		} catch {
 			setNotice( {
 				type: 'error',
 				message: __( '保存に失敗しました', 'affilicard' ),
@@ -86,11 +86,7 @@ export function GeneralPanel() {
 
 			{ settings.cron_enabled && <CronHelpBox /> }
 
-			<Button
-				variant="primary"
-				onClick={ onSave }
-				disabled={ saving }
-			>
+			<Button variant="primary" onClick={ onSave } disabled={ saving }>
 				{ saving
 					? __( '保存中…', 'affilicard' )
 					: __( '保存', 'affilicard' ) }

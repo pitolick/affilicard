@@ -46,7 +46,7 @@ export function CredentialEditor( { platformCode, schema } ) {
 				ok: true,
 				message: __( '認証情報を保存しました', 'affilicard' ),
 			} );
-		} catch ( e ) {
+		} catch {
 			setResult( {
 				ok: false,
 				message: __( '保存に失敗しました', 'affilicard' ),
@@ -62,7 +62,7 @@ export function CredentialEditor( { platformCode, schema } ) {
 		try {
 			const r = await testConnection( platformCode, values );
 			setResult( r );
-		} catch ( e ) {
+		} catch {
 			setResult( {
 				ok: false,
 				message: __( '接続テストに失敗しました', 'affilicard' ),

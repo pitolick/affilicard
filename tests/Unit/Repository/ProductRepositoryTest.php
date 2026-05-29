@@ -49,7 +49,7 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	public function test_find_returns_null_when_post_type_mismatches(): void {
-		$post            = (object) array(
+		$post = (object) array(
 			'ID'        => 7,
 			'post_type' => 'post',
 		);

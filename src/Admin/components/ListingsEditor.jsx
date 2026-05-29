@@ -65,14 +65,7 @@ export function ListingsEditor( { listings, onChange } ) {
 	const addRow = () => onChange( [ ...rows, { ...EMPTY_LISTING } ] );
 
 	if ( platforms === null ) {
-		return (
-			<p>
-				{ __(
-					'プラットフォーム読み込み中…',
-					'affilicard'
-				) }
-			</p>
-		);
+		return <p>{ __( 'プラットフォーム読み込み中…', 'affilicard' ) }</p>;
 	}
 
 	const platformOptions = [
@@ -82,9 +75,7 @@ export function ListingsEditor( { listings, onChange } ) {
 
 	return (
 		<div className="affilicard-listings-editor">
-			<h3>
-				{ __( 'プラットフォーム listing', 'affilicard' ) }
-			</h3>
+			<h3>{ __( 'プラットフォーム listing', 'affilicard' ) }</h3>
 			{ rows.length === 0 && (
 				<p className="description">
 					{ __( 'listing がありません', 'affilicard' ) }
@@ -104,9 +95,7 @@ export function ListingsEditor( { listings, onChange } ) {
 						label={ __( 'プラットフォーム', 'affilicard' ) }
 						value={ row.platform }
 						options={ platformOptions }
-						onChange={ ( v ) =>
-							updateRow( i, { platform: v } )
-						}
+						onChange={ ( v ) => updateRow( i, { platform: v } ) }
 					/>
 					<ToggleControl
 						label={ __( '有効', 'affilicard' ) }
@@ -117,9 +106,7 @@ export function ListingsEditor( { listings, onChange } ) {
 						label={ __( '更新モード', 'affilicard' ) }
 						value={ row.update_mode }
 						options={ UPDATE_MODE_OPTIONS }
-						onChange={ ( v ) =>
-							updateRow( i, { update_mode: v } )
-						}
+						onChange={ ( v ) => updateRow( i, { update_mode: v } ) }
 					/>
 					{ row.update_mode === 'api' && (
 						<ToggleControl
@@ -133,16 +120,12 @@ export function ListingsEditor( { listings, onChange } ) {
 					<TextControl
 						label={ __( '外部 ID', 'affilicard' ) }
 						value={ row.external_id }
-						onChange={ ( v ) =>
-							updateRow( i, { external_id: v } )
-						}
+						onChange={ ( v ) => updateRow( i, { external_id: v } ) }
 					/>
 					<TextControl
 						label={ __( '通常 URL', 'affilicard' ) }
 						value={ row.regular_url }
-						onChange={ ( v ) =>
-							updateRow( i, { regular_url: v } )
-						}
+						onChange={ ( v ) => updateRow( i, { regular_url: v } ) }
 					/>
 					<TextControl
 						label={ __( 'アフィリエイト URL', 'affilicard' ) }
@@ -159,9 +142,7 @@ export function ListingsEditor( { listings, onChange } ) {
 					<TextControl
 						label={ __( '参考価格', 'affilicard' ) }
 						value={ row.list_price }
-						onChange={ ( v ) =>
-							updateRow( i, { list_price: v } )
-						}
+						onChange={ ( v ) => updateRow( i, { list_price: v } ) }
 					/>
 					<TextControl
 						label={ __( 'バッジ', 'affilicard' ) }
@@ -171,9 +152,7 @@ export function ListingsEditor( { listings, onChange } ) {
 					<TextControl
 						label={ __( '画像 URL', 'affilicard' ) }
 						value={ row.image_url }
-						onChange={ ( v ) =>
-							updateRow( i, { image_url: v } )
-						}
+						onChange={ ( v ) => updateRow( i, { image_url: v } ) }
 					/>
 					<TextControl
 						label={ __( 'ボタンラベル上書き', 'affilicard' ) }

@@ -51,10 +51,23 @@ final class GenericTypeTest extends TestCase {
 
 		$result = $type->validateExtras(
 			array(
-				array( 'label' => 'Color', 'value' => 'Red', 'key' => 'somekey' ),
-				array( 'label' => '', 'value' => 'no-label' ),
-				array( 'label' => 'no-value', 'value' => '' ),
-				array( 'label' => '  Size  ', 'value' => '  Large  ' ),
+				array(
+					'label' => 'Color',
+					'value' => 'Red',
+					'key'   => 'somekey',
+				),
+				array(
+					'label' => '',
+					'value' => 'no-label',
+				),
+				array(
+					'label' => 'no-value',
+					'value' => '',
+				),
+				array(
+					'label' => '  Size  ',
+					'value' => '  Large  ',
+				),
 				'not-an-array',
 			)
 		);
@@ -62,8 +75,14 @@ final class GenericTypeTest extends TestCase {
 		// GenericType の schema は空なので、'somekey' を含むあらゆる key が剥がされる。
 		$this->assertSame(
 			array(
-				array( 'label' => 'Color', 'value' => 'Red' ),
-				array( 'label' => 'Size', 'value' => 'Large' ),
+				array(
+					'label' => 'Color',
+					'value' => 'Red',
+				),
+				array(
+					'label' => 'Size',
+					'value' => 'Large',
+				),
 			),
 			$result
 		);

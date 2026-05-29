@@ -1,4 +1,8 @@
-import { TextControl, ToggleControl, SelectControl } from '@wordpress/components';
+import {
+	TextControl,
+	ToggleControl,
+	SelectControl,
+} from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import { CredentialEditor } from './CredentialEditor';
 

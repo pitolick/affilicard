@@ -19,9 +19,7 @@ export function PlatformsPanel() {
 		return <p>{ __( '読み込み中…', 'affilicard' ) }</p>;
 	}
 	if ( platforms.length === 0 ) {
-		return (
-			<p>{ __( 'プラットフォームがありません', 'affilicard' ) }</p>
-		);
+		return <p>{ __( 'プラットフォームがありません', 'affilicard' ) }</p>;
 	}
 
 	const onChange = ( idx ) => ( next ) => {
@@ -40,7 +38,7 @@ export function PlatformsPanel() {
 				type: 'success',
 				message: __( '保存しました', 'affilicard' ),
 			} );
-		} catch ( e ) {
+		} catch {
 			setNotice( {
 				type: 'error',
 				message: __( '保存に失敗しました', 'affilicard' ),
@@ -68,11 +66,7 @@ export function PlatformsPanel() {
 					onChange={ onChange( i ) }
 				/>
 			) ) }
-			<Button
-				variant="primary"
-				onClick={ onSave }
-				disabled={ saving }
-			>
+			<Button variant="primary" onClick={ onSave } disabled={ saving }>
 				{ saving
 					? __( '保存中…', 'affilicard' )
 					: __( '保存', 'affilicard' ) }
