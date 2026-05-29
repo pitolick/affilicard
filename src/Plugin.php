@@ -3,14 +3,16 @@ declare(strict_types=1);
 
 namespace Affilicard;
 
+use Affilicard\PostType\ProductPostType;
+
 /**
  * プラグインのブートストラップ。
  *
- * Phase 4a-0 では空 boot。後続 Phase で CPT/REST/Settings/Block を配線する。
+ * Phase 4a-0 では CPT 登録のみ。後続 Phase で REST/Settings/Block を配線する。
  */
 final class Plugin {
 
 	public static function boot(): void {
-		// Phase 4a-1 以降で hook を追加する。
+		add_action( 'init', array( ProductPostType::class, 'register' ) );
 	}
 }
