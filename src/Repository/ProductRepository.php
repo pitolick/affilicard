@@ -1,0 +1,235 @@
+<?php
+declare(strict_types=1);
+
+namespace Affilicard\Repository;
+
+use Affilicard\PostType\ProductPostType;
+use Affilicard\Schema\SchemaVersion;
+use Affilicard\Stock\StockStatus;
+use Affilicard\Util\JsonField;
+
+/**
+ * `affilicard_product` CPT に対する CRUD ラッパ。
+ *
+ * 値の入出力はすべて配列で行い、メタの JSON シリアライズは JsonField に委譲する。
+ */
+final class ProductRepository {
+
+	/**
+	 * 投稿 ID から商品データを取得する。
+	 *
+	 * @return array{
+	 *   id: int,
+	 *   title: string,
+	 *   content: string,
+	 *   status: string,
+	 *   product_type: string,
+	 *   stock_status: string,
+	 *   extras: array<int, mixed>,
+	 *   listings: array<int, mixed>,
+	 *   schema_version: string,
+	 *   modified: string,
+	 * }|null
+	 */
+	public function find( int $postId ): ?array {
+		$post = get_post( $postId );
+		if ( null === $post ) {
+			return null;
+		}
+		if ( ! isset( $post->post_type ) || ProductPostType::POST_TYPE !== $post->post_type ) {
+			return null;
+		}
+
+		$extras_raw   = get_post_meta( $postId, ProductPostType::META_EXTRAS, true );
+		$listings_raw = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
+
+		$extras   = is_string( $extras_raw ) ? JsonField::decode( $extras_raw, array() ) : array();
+		$listings = is_string( $listings_raw ) ? JsonField::decode( $listings_raw, array() ) : array();
+
+		return array(
+			'id'             => (int) $post->ID,
+			'title'          => (string) ( $post->post_title ?? '' ),
+			'content'        => (string) ( $post->post_content ?? '' ),
+			'status'         => (string) ( $post->post_status ?? '' ),
+			'product_type'   => (string) get_post_meta( $postId, ProductPostType::META_PRODUCT_TYPE, true ),
+			'stock_status'   => StockStatus::normalize( (string) get_post_meta( $postId, ProductPostType::META_STOCK_STATUS, true ) ),
+			'extras'         => $extras,
+			'listings'       => $listings,
+			'schema_version' => (string) get_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, true ),
+			'modified'       => (string) ( $post->post_modified ?? '' ),
+		);
+	}
+
+	/**
+	 * 外部 ID（platform 別）を元に商品を 1 件検索する。
+	 */
+	public function findByExternalId( string $platformCode, string $externalId ): ?array {
+		$meta_key = ProductPostType::externalIdMetaKey( $platformCode );
+
+		$posts = get_posts(
+			array(
+				'post_type'      => ProductPostType::POST_TYPE,
+				'post_status'    => 'any',
+				'posts_per_page' => 1,
+				'no_found_rows'  => true,
+				'fields'         => 'ids',
+				'meta_query'     => array(
+					array(
+						'key'     => $meta_key,
+						'value'   => $externalId,
+						'compare' => '=',
+					),
+				),
+			)
+		);
+
+		if ( ! is_array( $posts ) || array() === $posts ) {
+			return null;
+		}
+
+		$first = $posts[0];
+		$id    = is_object( $first ) && isset( $first->ID ) ? (int) $first->ID : (int) $first;
+
+		return $this->find( $id );
+	}
+
+	/**
+	 * 商品データを保存（新規 or 更新）し、post ID を返す。
+	 *
+	 * @param array<string, mixed> $data
+	 */
+	public function save( array $data ): int {
+		$is_update = isset( $data['id'] ) && (int) $data['id'] > 0;
+
+		$post_args = array(
+			'post_type'    => ProductPostType::POST_TYPE,
+			'post_title'   => isset( $data['title'] ) ? (string) $data['title'] : '',
+			'post_content' => isset( $data['content'] ) ? (string) $data['content'] : '',
+			'post_status'  => isset( $data['status'] ) ? (string) $data['status'] : 'publish',
+		);
+
+		if ( $is_update ) {
+			$post_args['ID'] = (int) $data['id'];
+			$post_id         = (int) wp_update_post( $post_args, true );
+		} else {
+			$post_id = (int) wp_insert_post( $post_args, true );
+		}
+
+		if ( $post_id <= 0 ) {
+			return 0;
+		}
+
+		$product_type = isset( $data['product_type'] ) && '' !== (string) $data['product_type']
+			? (string) $data['product_type']
+			: 'generic';
+		$stock_status = StockStatus::normalize(
+			isset( $data['stock_status'] ) ? (string) $data['stock_status'] : null
+		);
+		$extras       = isset( $data['extras'] ) && is_array( $data['extras'] ) ? $data['extras'] : array();
+		$listings     = isset( $data['listings'] ) && is_array( $data['listings'] ) ? $data['listings'] : array();
+
+		update_post_meta( $post_id, ProductPostType::META_PRODUCT_TYPE, $product_type );
+		update_post_meta( $post_id, ProductPostType::META_STOCK_STATUS, $stock_status );
+		update_post_meta( $post_id, ProductPostType::META_EXTRAS, JsonField::encode( $extras ) );
+		update_post_meta( $post_id, ProductPostType::META_LISTINGS, JsonField::encode( $listings ) );
+		update_post_meta( $post_id, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
+
+		$this->syncExternalIdMirror( $post_id, $listings );
+
+		return $post_id;
+	}
+
+	public function delete( int $postId ): bool {
+		$result = wp_delete_post( $postId, true );
+		return false !== $result && null !== $result;
+	}
+
+	/**
+	 * 「affiliate_url が空のまま regular_url のみ持つ」商品の件数を返す（フォールバック表示中の件数）。
+	 *
+	 * 厳密な計数は post_meta の JSON を PHP 側で再パースして実施する。
+	 */
+	public function countFallbackProducts(): int {
+		global $wpdb;
+		if ( ! isset( $wpdb ) ) {
+			return 0;
+		}
+
+		$sql = $wpdb->prepare(
+			'SELECT post_id FROM ' . $wpdb->postmeta . ' WHERE meta_key = %s AND meta_value LIKE %s',
+			ProductPostType::META_LISTINGS,
+			'%"affiliate_url":""%'
+		);
+
+		$post_ids = $wpdb->get_col( $sql );
+		if ( ! is_array( $post_ids ) || array() === $post_ids ) {
+			return 0;
+		}
+
+		$count = 0;
+		foreach ( $post_ids as $post_id ) {
+			$id  = (int) $post_id;
+			$raw = get_post_meta( $id, ProductPostType::META_LISTINGS, true );
+			if ( ! is_string( $raw ) || '' === $raw ) {
+				continue;
+			}
+			$listings = JsonField::decode( $raw, array() );
+			if ( self::hasFallbackListing( $listings ) ) {
+				++$count;
+			}
+		}
+
+		return $count;
+	}
+
+	/**
+	 * 各 listing の external_id を `affilicard_extid_<platform>` meta にミラーする。
+	 *
+	 * Phase 4a-1 では削除済み platform の stale meta クリーンアップは行わない（4a-3 で対応）。
+	 *
+	 * @param array<int, mixed> $listings
+	 */
+	private function syncExternalIdMirror( int $postId, array $listings ): void {
+		foreach ( $listings as $listing ) {
+			if ( ! is_array( $listing ) ) {
+				continue;
+			}
+			$platform    = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
+			$external_id = isset( $listing['external_id'] ) ? (string) $listing['external_id'] : '';
+			if ( '' === $platform || '' === $external_id ) {
+				continue;
+			}
+			update_post_meta(
+				$postId,
+				ProductPostType::externalIdMetaKey( $platform ),
+				$external_id
+			);
+		}
+	}
+
+	/**
+	 * 商品キャッシュ用 transient のキー。
+	 */
+	private function transient_key( int $postId ): string {
+		return 'affilicard_product_' . $postId;
+	}
+
+	/**
+	 * 1 件以上の listing が affiliate_url='' かつ regular_url!='' か判定する。
+	 *
+	 * @param array<int, mixed> $listings
+	 */
+	private static function hasFallbackListing( array $listings ): bool {
+		foreach ( $listings as $listing ) {
+			if ( ! is_array( $listing ) ) {
+				continue;
+			}
+			$affiliate = isset( $listing['affiliate_url'] ) ? (string) $listing['affiliate_url'] : '';
+			$regular   = isset( $listing['regular_url'] ) ? (string) $listing['regular_url'] : '';
+			if ( '' === $affiliate && '' !== $regular ) {
+				return true;
+			}
+		}
+		return false;
+	}
+}
