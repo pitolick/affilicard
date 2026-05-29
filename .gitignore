@@ -34,6 +34,9 @@ Thumbs.db
 /.phpunit.result.cache
 /.phpunit.cache/
 
+# PHP CS Fixer
+.php-cs-fixer.cache
+
 # WordPress local
 wp-config.php
 /wp-content/uploads/
