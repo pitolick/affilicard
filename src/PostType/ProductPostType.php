@@ -12,6 +12,22 @@ final class ProductPostType {
 
 	public const POST_TYPE = 'affilicard_product';
 
+	public const META_PRODUCT_TYPE   = 'affilicard_product_type';
+	public const META_STOCK_STATUS   = 'affilicard_stock_status';
+	public const META_EXTRAS         = 'affilicard_extras';
+	public const META_LISTINGS       = 'affilicard_listings';
+	public const META_SCHEMA_VERSION = 'affilicard_schema_version';
+	public const META_EXTID_PREFIX   = 'affilicard_extid_';
+
+	/**
+	 * プラットフォーム別の外部 ID を保存する meta キーを生成する。
+	 *
+	 * 例: externalIdMetaKey('dmm-books') => 'affilicard_extid_dmm-books'
+	 */
+	public static function externalIdMetaKey( string $platform_code ): string {
+		return self::META_EXTID_PREFIX . $platform_code;
+	}
+
 	public static function register(): void {
 		register_post_type(
 			self::POST_TYPE,

@@ -23,6 +23,26 @@ final class ProductPostTypeTest extends TestCase {
 		$this->assertSame( 'affilicard_product', ProductPostType::POST_TYPE );
 	}
 
+	public function test_meta_key_constants_match_design(): void {
+		$this->assertSame( 'affilicard_product_type', ProductPostType::META_PRODUCT_TYPE );
+		$this->assertSame( 'affilicard_stock_status', ProductPostType::META_STOCK_STATUS );
+		$this->assertSame( 'affilicard_extras', ProductPostType::META_EXTRAS );
+		$this->assertSame( 'affilicard_listings', ProductPostType::META_LISTINGS );
+		$this->assertSame( 'affilicard_schema_version', ProductPostType::META_SCHEMA_VERSION );
+		$this->assertSame( 'affilicard_extid_', ProductPostType::META_EXTID_PREFIX );
+	}
+
+	public function test_external_id_meta_key_appends_platform_code(): void {
+		$this->assertSame(
+			'affilicard_extid_dmm-books',
+			ProductPostType::externalIdMetaKey( 'dmm-books' )
+		);
+		$this->assertSame(
+			'affilicard_extid_amazon',
+			ProductPostType::externalIdMetaKey( 'amazon' )
+		);
+	}
+
 	public function test_register_invokes_register_post_type_with_capability_type_post(): void {
 		WP_Mock::userFunction( '__' )
 			->andReturnUsing(
