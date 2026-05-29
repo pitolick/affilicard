@@ -22,7 +22,9 @@
 		"@testing-library/jest-dom": "^6.9.1",
 		"@testing-library/react": "^16.3.2",
 		"@testing-library/user-event": "^14.6.1",
-		"@wordpress/scripts": "^32.3.0"
+		"@wordpress/scripts": "^32.3.0",
+		"eslint": "^10.4.0",
+		"prettier": "^3.8.3"
 	},
 	"dependencies": {
 		"@wordpress/api-fetch": "^7.47.0",

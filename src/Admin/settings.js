@@ -9,25 +9,25 @@ export function SettingsApp() {
     <TabPanel
       className="affilicard-settings-tabs"
       activeClass="is-active"
-      tabs={ [
-        { name: 'general', title: __( '一般', 'affilicard' ) },
+      tabs={[
+        { name: 'general', title: __('一般', 'affilicard') },
         {
           name: 'platforms',
-          title: __( 'プラットフォーム', 'affilicard' ),
+          title: __('プラットフォーム', 'affilicard'),
         },
-      ] }
+      ]}
     >
-      { ( tab ) => ( tab.name === 'general' ? <GeneralPanel /> : <PlatformsPanel /> ) }
+      {(tab) => (tab.name === 'general' ? <GeneralPanel /> : <PlatformsPanel />)}
     </TabPanel>
   );
 }
 
-document.addEventListener( 'DOMContentLoaded', () => {
-  const root = document.getElementById( 'affilicard-settings-root' );
-  if ( ! root ) {
+document.addEventListener('DOMContentLoaded', () => {
+  const root = document.getElementById('affilicard-settings-root');
+  if (!root) {
     return;
   }
-  if ( typeof createRoot === 'function' ) {
-    createRoot( root ).render( createElement( SettingsApp ) );
+  if (typeof createRoot === 'function') {
+    createRoot(root).render(createElement(SettingsApp));
   }
-} );
+});
