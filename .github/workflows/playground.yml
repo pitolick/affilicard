@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: WordPress/action-wp-playground-pr-preview@v2
+      - uses: WordPress/action-wp-playground-pr-preview@v3
         with:
           plugin-path: /
           mode: comment
