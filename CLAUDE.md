@@ -2,110 +2,122 @@
 
 ## プロジェクト概要
 
-**汎用アフィリエイト商品カード WordPress プラグイン**。複数のアフィリエイト商品ジャンル（漫画・VOD・家電・雑貨など）に対応する設計。
+**汎用アフィリエイト商品カード WordPress プラグイン**。複数のアフィリエイト商品ジャンル（電子書籍・VOD・家電・雑貨など）に対応する拡張可能設計。
 
 - 単独で動作する WordPress プラグイン（複数サイトから利用可能）
-- ジャンル固有の処理は `Types/` ディレクトリに PHP クラスを追加する拡張パターン
+- ジャンル固有の処理は `src/Types/` に PHP クラスを追加する拡張パターン
+- 外部 API 連携は `src/Provider/` に PHP クラスを追加する拡張パターン
 - サイト固有の処理は含めない（汎用性を維持する）
 
 ---
 
-## このリポジトリの責務
+## アーキテクチャ (v4)
 
-| クラス | 役割 |
+| 名前空間 / クラス | 役割 |
 | --- | --- |
-| `src/Core/ProductCardBase.php` | カスタム投稿タイプ・REST API・Gutenberg ブロック基盤 |
-| `src/Core/PriceManager.php` | 価格更新・タイムスタンプ管理（WP-Cron 週1回） |
-| `src/Core/LinkChecker.php` | アフィリエイトリンク確認（WP-Cron 週1回）・予約投稿昇格 |
-| `src/Core/AffiliateButtons.php` | ボタン描画（商品タイプ別に動的切り替え） |
-| `src/Settings/AmazonSettings.php` | Amazon PA API キーを WP 管理画面で設定 |
-| `src/Settings/DmmSettings.php` | DMM API キー・アフィリエイト ID を WP 管理画面で設定 |
-| `src/Settings/RakutenSettings.php` | 楽天アプリ ID・アフィリエイト ID を WP 管理画面で設定 |
-| `src/Settings/LinkCheckerSettings.php` | リンク確認後の自動予約投稿昇格 ON/OFF トグル |
-| `src/Types/ProductTypeInterface.php` | 全商品タイプが実装する PHP インターフェース |
-| `src/Types/MangaType.php` | 漫画固有フィールド・ボタン定義 |
-| `src/Blocks/product-card/` | Gutenberg ブロック（管理画面ビジュアル編集用） |
+| `Affilicard\Plugin` | プラグインのブートストラップ。CPT + REST + Admin の配線、`onActivate` で seed |
+| `Affilicard\PostType\ProductPostType` | CPT `affilicard_product` の登録、`META_*` 定数、`externalIdMetaKey()` |
+| `Affilicard\PostType\ProductMetaBox` | 商品編集画面の React metabox 登録 + script enqueue |
+| `Affilicard\PostType\ProductListColumns` | CPT 一覧の Fallback カスタム列 |
+| `Affilicard\Repository\ProductRepository` | CRUD + extid mirror + `countFallbackProducts()` |
+| `Affilicard\Platform\PlatformDefinition` | 1 プラットフォームの設定値オブジェクト |
+| `Affilicard\Platform\PlatformConfig` | `affilicard_platforms` option の get/save + `defaults()` |
+| `Affilicard\Types\ProductTypeInterface` | 商品タイプの拡張ポイント |
+| `Affilicard\Types\AbstractProductType` | Hybrid `validateExtras` の共通実装 |
+| `Affilicard\Types\GenericType` / `EbookType` | 汎用 / 電子書籍タイプ |
+| `Affilicard\Types\ProductTypeRegistry` | 商品タイプのレジストリ |
+| `Affilicard\Provider\ProviderInterface` | Provider の拡張ポイント (`credentialsSchema` + `testConnection` 含む) |
+| `Affilicard\Provider\ProviderRegistry` | Provider のレジストリ |
+| `Affilicard\Provider\ProviderCredentials` | AES-256-CBC で認証情報を暗号化保存 (`patch` 的更新) |
+| `Affilicard\Provider\ManualProvider` | 手動入力（API 不要） |
+| `Affilicard\Provider\Dmm\DmmProvider` | DMM Web Service API v3 |
+| `Affilicard\Rest\RestController` | `affilicard/v1` 名前空間のルート集約 |
+| `Affilicard\Rest\ProductSchema` | Product CRUD の REST schema + sanitize |
+| `Affilicard\Rest\ProductsController` | `/products` CRUD + search |
+| `Affilicard\Rest\SettingsController` | `/settings` GET/PUT |
+| `Affilicard\Rest\PlatformsController` | `/platforms` GET/PUT |
+| `Affilicard\Rest\CredentialsController` | `/platforms/{code}/credentials` + `/test-connection` |
+| `Affilicard\Settings\GeneralSettings` | `affilicard_general` option ハンドリング |
+| `Affilicard\Settings\PlatformsSettings` | `PlatformConfig` の REST wrapper |
+| `Affilicard\Settings\DashboardWidget` | WP ダッシュボードに Fallback 件数表示 |
+| `Affilicard\Stock\StockStatus` | `available` / `out_of_stock` / `discontinued` |
+| `Affilicard\Schema\SchemaVersion` | schema migration トリガ用バージョン番号 (現在 `'1'`) |
+| `Affilicard\Util\Crypto` | AES-256-CBC ラッパ |
+| `Affilicard\Util\JsonField` | 防御的 JSON encode/decode |
+| `Affilicard\Uninstall` | 全 `affilicard_*` option + CPT 削除 (uninstall.php から呼出) |
+| `src/Admin/` (React) | Settings + Metabox の React UI (`@wordpress/scripts`) |
+| `src/Block/` | Gutenberg Block `affilicard/product-card` (Phase 4a-2 で本格実装) |
 
 ---
 
 ## ディレクトリ構成
 
-```
+```text
 affilicard/
-├── CLAUDE.md
-├── README.md
+├── affilicard.php             # プラグインエントリ + plugin-update-checker
+├── uninstall.php              # アンインストール時の全削除
 ├── composer.json
-├── phpcs.xml
-├── .php-cs-fixer.php
-├── phpunit.xml
-├── .env.example
+├── package.json
+├── phpcs.xml.dist
+├── phpunit.xml.dist
+├── .php-cs-fixer.dist.php
 ├── .github/
-│   ├── workflows/
-│   │   └── ci.yml
-│   ├── dependabot.yml
-│   └── pull_request_template.md
+│   └── workflows/             # ci / playground / release
+├── blueprints/dev.json        # WP Playground PR preview 用 blueprint
 ├── src/
-│   ├── Core/
-│   ├── Settings/
+│   ├── Plugin.php
+│   ├── Admin/
+│   │   ├── settings.js        # Settings ページの React エントリ
+│   │   ├── metabox.js         # 商品編集 metabox の React エントリ
+│   │   ├── api/               # @wordpress/api-fetch ラッパ
+│   │   └── components/        # React コンポーネント
+│   ├── Block/index.js         # Phase 4a-2 で実装
+│   ├── PostType/
+│   ├── Platform/
+│   ├── Provider/
 │   ├── Types/
-│   │   ├── ProductTypeInterface.php
-│   │   └── MangaType.php
-│   └── Blocks/
-│       └── product-card/
+│   ├── Repository/
+│   ├── Rest/
+│   ├── Settings/
+│   ├── Stock/
+│   ├── Schema/
+│   ├── Util/
+│   └── Uninstall.php
 ├── tests/
-│   └── Unit/
-├── vendor/                   # gitignore 対象
-└── affilicard.php
+│   ├── bootstrap.php          # WP_Mock + WP_Error/WP_REST_* stub
+│   ├── Unit/                  # PHPUnit (WP_Mock)
+│   └── js/                    # Jest + @testing-library/react
+└── vendor/                    # gitignore 対象
 ```
 
 ---
 
 ## 重要な設計制約
 
-### PHP インターフェース型の拡張パターン
+### Block-first (Shortcode は実装しない)
 
-新ジャンルの追加は `src/Types/` に PHP クラスを 1 ファイル追加するだけで完結する設計を維持すること。
+外部から商品カードを挿入する場合は **REST 経由で商品を upsert し、Gutenberg Block 形式でコンテンツに埋め込む** 方針。Shortcode は実装しない（旧設計から変更）。
 
-```php
-// ProductTypeInterface.php が定義するメソッドを実装する
-interface ProductTypeInterface {
-    public function getFields(): array;
-    public function getButtons(int $productId): array;
-    public function getButtonLayout(): string; // 'grid' | 'stack'
-}
-```
+### REST API 二段階 capability
 
-### 商品カード UI 仕様
+- Product CRUD は `edit_posts` (CPT `capability_type='post' + map_meta_cap=true`) で自分の投稿のみ判定
+- Settings / Platforms / Credentials は `manage_options`
 
-- 価格が `null` の場合は該当プラットフォームの行ごと非表示（`―` 表示は禁止）
-- 価格とリンクボタンは分離して表示する
-- ボタンのレイアウトは CSS Grid / Flexbox でレスポンシブに対応する
-- プラットフォームの自動ソートは行わない（登録順を維持）
+### Hybrid extras 形式
 
-### REST API エンドポイント
+`[{key?, label, value}]` 配列。schema 由来は `key` 付き、カスタム追加は `key` なし。
 
-```
-POST  /wp-json/affilicard/v1/products              商品登録
-PATCH /wp-json/affilicard/v1/products/{id}/prices  価格更新
-GET   /wp-json/affilicard/v1/products/{id}         商品取得
-```
+### URL フォールバック
 
-### AI での記事挿入
+全タイプ共通で `affiliate_url ?? regular_url`。両方空なら CTA 非表示。発生時は admin 可視化（CPT 一覧 + ダッシュボードウィジェット）。
 
-外部から記事中に商品カードを挿入する際はショートコードを使う（Gutenberg ブロックは人間の手動編集用）。
+### Credentials 部分更新 (PATCH 的)
 
-```
-[affilicard id="123"]
-```
+`ProviderCredentials::patch()` は未指定フィールドを保持。`null` で skip、空文字で明示クリア。
 
-### API キー管理
+### 自動更新
 
-API キーはすべて WordPress 管理画面から設定し、`update_option()` で AES-256-CBC 暗号化して DB に保存する。`.env` ファイルはローカル開発時のみ使用する。
-
-### Amazon 価格取得フェーズ
-
-- **Phase 1（現在）**: Amazon PA API が未解放のため、価格はスクレイピングで取得
-- **Phase 2（PA API 解放後）**: PA API に切り替え（エンドポイント・フィールド構造は変更しない設計で実装すること）
+WP 公式ディレクトリは経由せず、`yahnis-elsts/plugin-update-checker ^5.7` で GitHub Releases から取得。v5.7 の `allowAutoupdateField()` で WP 自動更新 ON 対応。
 
 ---
 
@@ -113,32 +125,42 @@ API キーはすべて WordPress 管理画面から設定し、`update_option()`
 
 | 項目 | 採用技術 |
 | --- | --- |
-| 言語 | PHP 8.1 |
-| テスト | PHPUnit + WP_Mock |
-| Lint | PHP_CodeSniffer（WordPress Coding Standards） |
-| フォーマット | PHP CS Fixer |
+| 言語 | PHP 8.1+, JavaScript (React 18) |
+| WordPress | 6.8+ |
+| テスト (PHP) | PHPUnit 9.6 + WP_Mock 1.x |
+| テスト (JS) | Jest (`@wordpress/scripts` 経由) + `@testing-library/react` |
+| Lint (PHP) | PHP_CodeSniffer (WordPress Coding Standards) |
+| Lint (JS) | ESLint (`wp-scripts lint-js`) |
+| フォーマット | PHP CS Fixer 3 / `wp-scripts format` |
+| ビルド | `@wordpress/scripts ^32.3.0` (webpack + Babel) |
+| 認証情報暗号化 | AES-256-CBC (`openssl_*`) + `wp_salt('auth')` 派生鍵 |
+| 自動更新 | `yahnis-elsts/plugin-update-checker ^5.7` |
 
 ---
 
 ## 開発ルール
 
 - コミットメッセージ・PR・Issue はすべて日本語で記述する
-- 新機能・バグ修正には必ず `tests/Unit/` にユニットテストを追加する
+- Conventional Commits prefix (`feat:` / `fix:` / `chore:` / `test:` / `refactor:` / `style:` / `ci:` / `docs:`)
+- 新機能・バグ修正には必ず `tests/Unit/` (PHP) または `tests/js/` (React) にユニットテストを追加する
+- 外部 API (DMM / Amazon / 楽天 / WP REST 等) はすべてモックする
 - 特定サイト固有のコードを混入させない（汎用性を損なう変更は却下）
 
-### コミットメッセージ形式
+### ローカル PHP 実行
 
+ローカル Mac には PHP/Composer を入れず、Docker イメージで実行する:
+
+```bash
+docker run --rm -v "$(pwd):/app" -w /app composer:2 composer install
+docker run --rm -v "$(pwd):/app" -w /app php:8.2-cli php vendor/bin/phpunit
 ```
-feat: 〇〇機能を追加
-fix: 〇〇のバグを修正
-chore: ライブラリを更新
-test: テストを追加・修正
-refactor: 〇〇をリファクタリング
-style: フォーマット修正
-```
+
+### vendor/ なし環境のフォールバック
+
+`affilicard.php` は `vendor/autoload.php` 不在時に `spl_autoload_register` で簡易 PSR-4 autoloader を登録する（WP Playground の `git:directory` 展開向け α 案）。自動更新機能 (plugin-update-checker) のみ無効化される。
 
 ---
 
-## 仕様書の場所
+## 計画書の場所
 
-設計の全体像は利用側プロジェクトの設計書を参照する。このリポジトリ単体での公開仕様は README.md に集約する。
+設計の全体像は利用側プロジェクト（`pitolick/e-comi`）の `docs/superpowers/plans/2026-05-28-phase4a-affilicard-mvp.md` (v4) を参照する。
