@@ -16,6 +16,11 @@ module.exports = {
 		),
 		'<rootDir>/tests/js/setup.js',
 	],
+	moduleNameMapper: {
+		...( defaultConfig.moduleNameMapper || {} ),
+		'^@wordpress/components$':
+			'<rootDir>/tests/js/__mocks__/wordpress-components.js',
+	},
 	testMatch: [
 		'<rootDir>/tests/js/**/*.test.js',
 		'<rootDir>/tests/js/**/*.test.jsx',

@@ -1,62 +1,12 @@
 /**
  * Tests for src/Admin/components/GeneralPanel.jsx
  *
- * We mock @wordpress/components into thin DOM-ish stand-ins to avoid the heavy
- * SVG/emotion rendering pipeline which doesn't cleanly work under JSDOM.
- * This keeps tests focused on our component's logic (state, conditional render,
- * save callback) rather than third-party UI internals.
+ * @wordpress/components is mocked globally via jest.config.js moduleNameMapper
+ * (see tests/js/__mocks__/wordpress-components.js) to avoid JSDOM rendering
+ * issues with the real emotion/ariakit/SVG-icon stack.
  */
 
 jest.mock( '../../../src/Admin/api/settings' );
-
-jest.mock( '@wordpress/components', () => ( {
-	__esModule: true,
-	TextControl: ( { label, value, onChange, type } ) => (
-		<label>
-			{ label }
-			<input
-				type={ type ?? 'text' }
-				value={ value }
-				onChange={ ( e ) => onChange( e.target.value ) }
-			/>
-		</label>
-	),
-	ToggleControl: ( { label, checked, onChange } ) => (
-		<label>
-			{ label }
-			<input
-				type="checkbox"
-				checked={ checked }
-				onChange={ ( e ) => onChange( e.target.checked ) }
-			/>
-		</label>
-	),
-	SelectControl: ( { label, value, options, onChange } ) => (
-		<label>
-			{ label }
-			<select
-				value={ value }
-				onChange={ ( e ) => onChange( e.target.value ) }
-			>
-				{ options.map( ( o ) => (
-					<option key={ o.value } value={ o.value }>
-						{ o.label }
-					</option>
-				) ) }
-			</select>
-		</label>
-	),
-	Button: ( { children, onClick, disabled } ) => (
-		<button onClick={ onClick } disabled={ disabled } type="button">
-			{ children }
-		</button>
-	),
-	Notice: ( { children, status } ) => (
-		<div role="alert" data-status={ status }>
-			{ children }
-		</div>
-	),
-} ) );
 
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { GeneralPanel } from '../../../src/Admin/components/GeneralPanel';
