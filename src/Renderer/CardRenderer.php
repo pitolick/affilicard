@@ -79,10 +79,15 @@ final class CardRenderer {
 		);
 		$parts = array();
 		foreach ( $map as $key => $var ) {
-			$value = isset( $colors[ $key ] ) ? trim( (string) $colors[ $key ] ) : '';
-			if ( '' !== $value ) {
-				$parts[] = $var . ':' . $value;
+			$raw = isset( $colors[ $key ] ) ? trim( (string) $colors[ $key ] ) : '';
+			if ( '' === $raw ) {
+				continue;
 			}
+			$value = (string) sanitize_hex_color( $raw );
+			if ( '' === $value ) {
+				continue;
+			}
+			$parts[] = $var . ':' . $value;
 		}
 		return array() === $parts ? '' : implode( ';', $parts ) . ';';
 	}
@@ -136,11 +141,18 @@ final class CardRenderer {
 				continue;
 			}
 
-			$label = isset( $listing['button_label_override'] ) && '' !== trim( (string) $listing['button_label_override'] )
-				? trim( (string) $listing['button_label_override'] )
-				: $platform->buttonLabel;
+			$override = isset( $listing['button_label_override'] ) ? trim( (string) $listing['button_label_override'] ) : '';
+			$label    = '' !== $override ? $override : $platform->buttonLabel;
 
-			$btn_style = 'background:var(--affilicard-cta-bg,' . $platform->brandColor . ');color:var(--affilicard-cta-text,' . $platform->buttonTextColor . ');';
+			$brand = (string) sanitize_hex_color( $platform->brandColor );
+			if ( '' === $brand ) {
+				$brand = '#444444';
+			}
+			$text = (string) sanitize_hex_color( $platform->buttonTextColor );
+			if ( '' === $text ) {
+				$text = '#ffffff';
+			}
+			$btn_style = 'background:var(--affilicard-cta-bg,' . $brand . ');color:var(--affilicard-cta-text,' . $text . ');';
 
 			$price_html = '';
 			$price      = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';

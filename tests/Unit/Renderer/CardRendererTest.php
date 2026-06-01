@@ -18,6 +18,7 @@ final class CardRendererTest extends TestCase {
 		WP_Mock::passthruFunction( 'esc_html__' );
 		WP_Mock::passthruFunction( 'wp_kses_post' );
 		WP_Mock::userFunction( '__', array( 'return_arg' => 0 ) );
+		WP_Mock::userFunction( 'sanitize_hex_color', array( 'return_arg' => 0 ) );
 	}
 
 	protected function tearDown(): void {
@@ -231,5 +232,67 @@ final class CardRendererTest extends TestCase {
 		);
 		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
 		$this->assertStringContainsString( 'var(--affilicard-cta-bg,#2563eb)', $html );
+	}
+
+	public function test_listing_disabled_flag_suppresses_cta(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'      => 'example-store',
+						'enabled'       => false,
+						'affiliate_url' => 'https://x',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__cta', $html );
+	}
+
+	public function test_renders_price_span_when_price_present(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'      => 'example-store',
+						'enabled'       => true,
+						'affiliate_url' => 'https://x',
+						'price'         => '¥1,200',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringContainsString( 'affilicard-card__price', $html );
+		$this->assertStringContainsString( '¥1,200', $html );
+	}
+
+	public function test_renders_discontinued_badge(): void {
+		$product = $this->product( array( 'stock_status' => 'discontinued' ) );
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringContainsString( 'affilicard-card__badge--discontinued', $html );
+		$this->assertStringContainsString( '取扱終了', $html );
+	}
+
+	public function test_skips_extra_row_with_empty_value(): void {
+		$product = $this->product(
+			array(
+				'extras' => array(
+					array(
+						'label' => 'カラー',
+						'value' => '',
+					),
+					array(
+						'label' => 'サイズ',
+						'value' => 'L',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringNotContainsString( 'カラー', $html );
+		$this->assertStringContainsString( 'サイズ', $html );
+		$this->assertStringContainsString( 'L', $html );
 	}
 }
