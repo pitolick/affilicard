@@ -1,0 +1,121 @@
+/* Affilicard 商品カード — フロント + エディタ共通スタイル。
+   全色は --affilicard-* CSS 変数で公開し、block 属性で root に上書き注入される。 */
+.affilicard-card {
+	--affilicard-card-bg: #ffffff;
+	--affilicard-card-border: #e5e7eb;
+	display: flex;
+	gap: 16px;
+	padding: 16px;
+	border: 1px solid var(--affilicard-card-border);
+	border-radius: 12px;
+	background: var(--affilicard-card-bg);
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.affilicard-card__media {
+	flex: 0 0 120px;
+}
+
+.affilicard-card__media img {
+	width: 100%;
+	height: auto;
+	border-radius: 8px;
+	display: block;
+}
+
+.affilicard-card__body {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.affilicard-card__title {
+	margin: 0 0 8px;
+	font-size: 1.1rem;
+	line-height: 1.4;
+}
+
+.affilicard-card__badge {
+	display: inline-block;
+	padding: 2px 8px;
+	margin-bottom: 8px;
+	border-radius: 4px;
+	font-size: 0.8rem;
+	font-weight: 700;
+	color: #ffffff;
+	background: #6b7280;
+}
+
+.affilicard-card__badge--out_of_stock {
+	background: #d97706;
+}
+
+.affilicard-card__badge--discontinued {
+	background: #b91c1c;
+}
+
+.affilicard-card__desc {
+	margin: 0 0 12px;
+	font-size: 0.9rem;
+	color: #374151;
+}
+
+.affilicard-card__extras {
+	margin: 0 0 12px;
+	font-size: 0.85rem;
+}
+
+.affilicard-card__extra {
+	display: flex;
+	gap: 8px;
+}
+
+.affilicard-card__extra dt {
+	flex: 0 0 6em;
+	font-weight: 600;
+	color: #6b7280;
+}
+
+.affilicard-card__extra dd {
+	margin: 0;
+}
+
+.affilicard-card__listings {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.affilicard-card__cta {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	padding: 10px 16px;
+	border-radius: 8px;
+	font-weight: 700;
+	text-decoration: none;
+	transition: opacity 0.15s ease;
+}
+
+.affilicard-card__cta:hover {
+	opacity: 0.88;
+}
+
+.affilicard-card__price {
+	font-size: 0.9em;
+	opacity: 0.9;
+}
+
+@media (max-width: 480px) {
+	.affilicard-card {
+		flex-direction: column;
+	}
+
+	.affilicard-card__media {
+		flex-basis: auto;
+		max-width: 160px;
+	}
+}
