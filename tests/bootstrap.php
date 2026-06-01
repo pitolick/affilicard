@@ -3,6 +3,16 @@ declare(strict_types=1);
 
 require_once dirname( __DIR__ ) . '/vendor/autoload.php';
 
+if ( ! defined( 'AFFILICARD_PLUGIN_DIR' ) ) {
+	define( 'AFFILICARD_PLUGIN_DIR', dirname( __DIR__ ) . '/' );
+}
+if ( ! defined( 'AFFILICARD_PLUGIN_URL' ) ) {
+	define( 'AFFILICARD_PLUGIN_URL', 'https://example.com/wp-content/plugins/affilicard/' );
+}
+if ( ! defined( 'AFFILICARD_VERSION' ) ) {
+	define( 'AFFILICARD_VERSION', '0.0.0-test' );
+}
+
 if ( ! class_exists( 'WP_Error' ) ) {
 	class WP_Error {} // @phpstan-ignore-line
 }
