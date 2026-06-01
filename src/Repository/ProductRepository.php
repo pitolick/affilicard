@@ -94,6 +94,35 @@ final class ProductRepository {
 	}
 
 	/**
+	 * post_name（スラッグ）から商品を 1 件検索する。
+	 */
+	public function findBySlug( string $slug ): ?array {
+		if ( '' === $slug ) {
+			return null;
+		}
+
+		$posts = get_posts(
+			array(
+				'post_type'      => ProductPostType::POST_TYPE,
+				'post_status'    => 'any',
+				'name'           => $slug,
+				'posts_per_page' => 1,
+				'no_found_rows'  => true,
+				'fields'         => 'ids',
+			)
+		);
+
+		if ( ! is_array( $posts ) || array() === $posts ) {
+			return null;
+		}
+
+		$first = $posts[0];
+		$id    = is_object( $first ) && isset( $first->ID ) ? (int) $first->ID : (int) $first;
+
+		return $this->find( $id );
+	}
+
+	/**
 	 * 商品データを保存（新規 or 更新）し、post ID を返す。
 	 *
 	 * @param array<string, mixed> $data
