@@ -295,4 +295,58 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( 'サイズ', $html );
 		$this->assertStringContainsString( 'L', $html );
 	}
+
+	private function dmmBooks(): PlatformDefinition {
+		return new PlatformDefinition( 'dmm-books', 'DMMブックス', 'dmm-ebook', 1, true, array( 'ebook' ), 'この値段で読む →', '#d72d65', '#ffffff' );
+	}
+
+	public function test_ebook_renders_dmm_listing_with_brand_color(): void {
+		$product = $this->product(
+			array(
+				'product_type' => 'ebook',
+				'title'        => 'テスト漫画 1巻',
+				'listings'     => array(
+					array(
+						'platform'      => 'dmm-books',
+						'enabled'       => true,
+						'affiliate_url' => 'https://al.dmm.com/x',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->dmmBooks() ) );
+		$this->assertStringContainsString( 'この値段で読む →', $html );
+		$this->assertStringContainsString( 'var(--affilicard-cta-bg,#d72d65)', $html );
+	}
+
+	public function test_ebook_renders_author_and_publisher_extras(): void {
+		// EbookType 由来の key 付き extras（著者/出版社/ISBN）。
+		$product = $this->product(
+			array(
+				'product_type' => 'ebook',
+				'extras'       => array(
+					array(
+						'key'   => 'author',
+						'label' => '著者',
+						'value' => '手塚治虫',
+					),
+					array(
+						'key'   => 'publisher',
+						'label' => '出版社',
+						'value' => '虫プロ',
+					),
+					array(
+						'key'   => 'isbn',
+						'label' => 'ISBN',
+						'value' => '978-4-00-000000-0',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->dmmBooks() ) );
+		$this->assertStringContainsString( '著者', $html );
+		$this->assertStringContainsString( '手塚治虫', $html );
+		$this->assertStringContainsString( '出版社', $html );
+		$this->assertStringContainsString( 'ISBN', $html );
+	}
 }
