@@ -12,6 +12,9 @@ if ( ! defined( 'AFFILICARD_PLUGIN_URL' ) ) {
 if ( ! defined( 'AFFILICARD_VERSION' ) ) {
 	define( 'AFFILICARD_VERSION', '0.0.0-test' );
 }
+if ( ! defined( 'AFFILICARD_PLUGIN_FILE' ) ) {
+	define( 'AFFILICARD_PLUGIN_FILE', dirname( __DIR__ ) . '/affilicard.php' );
+}
 
 if ( ! class_exists( 'WP_Error' ) ) {
 	class WP_Error {} // @phpstan-ignore-line
