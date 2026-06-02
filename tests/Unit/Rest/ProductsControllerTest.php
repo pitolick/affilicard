@@ -253,6 +253,32 @@ final class ProductsControllerTest extends TestCase {
 		$this->assertSame( 'new', $data['title'] );
 	}
 
+	public function test_update_preserves_existing_title_when_omitted(): void {
+		// metabox の部分更新は title を送らない（stock_status/extras/listings のみ）。
+		// 既存タイトルが空文字で上書きされず保持されることを検証する。
+		$this->mockFindReturnsProduct( 7, 'Keep Title' );
+
+		WP_Mock::userFunction( 'wp_update_post' )
+			->once()
+			->andReturnUsing(
+				function ( $args, $wp_error ) {
+					$this->assertSame( 7, $args['ID'] );
+					$this->assertSame( 'Keep Title', $args['post_title'] );
+					return 7;
+				}
+			);
+		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
+
+		$controller = new ProductsController( new ProductRepository() );
+		$request    = new WP_REST_Request( 'PATCH', '/affilicard/v1/products/7' );
+		$request->set_param( 'id', 7 );
+		$request->set_param( 'stock_status', 'out_of_stock' );
+
+		$response = $controller->update( $request );
+
+		$this->assertSame( 200, $response->get_status() );
+	}
+
 	public function test_permission_callbacks_check_current_user_can(): void {
 		WP_Mock::userFunction( 'current_user_can' )
 			->with( 'edit_posts' )

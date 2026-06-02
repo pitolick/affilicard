@@ -67,7 +67,7 @@ final class ProductsController {
 					'methods'             => 'PATCH',
 					'callback'            => array( $this, 'update' ),
 					'permission_callback' => array( $this, 'canEditPostFromRequest' ),
-					'args'                => ProductSchema::args(),
+					'args'                => ProductSchema::updateArgs(),
 				),
 				array(
 					'methods'             => 'DELETE',
@@ -185,8 +185,9 @@ final class ProductsController {
 	}
 
 	public function update( WP_REST_Request $request ): WP_REST_Response {
-		$id = (int) $request->get_param( 'id' );
-		if ( null === $this->repository->find( $id ) ) {
+		$id       = (int) $request->get_param( 'id' );
+		$existing = $this->repository->find( $id );
+		if ( null === $existing ) {
 			return new WP_REST_Response(
 				array(
 					'code'    => 'affilicard_not_found',
@@ -196,7 +197,9 @@ final class ProductsController {
 			);
 		}
 
-		$data       = $this->extractProductData( $request );
+		// PATCH は部分更新。送信されたフィールドだけを既存値の上に重ね、
+		// 未送信フィールド（metabox では title / content / status 等）は既存値を保持する。
+		$data       = array_merge( $existing, $this->extractProductData( $request ) );
 		$data['id'] = $id;
 
 		$saved_id = $this->repository->save( $data );

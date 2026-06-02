@@ -57,6 +57,26 @@ final class ProductSchema {
 	}
 
 	/**
+	 * PATCH（部分更新）用の args。
+	 *
+	 * create 用 {@see self::args()} から `required` と `default` を取り除く。
+	 * これにより未送信フィールドは `WP_REST_Request::get_param()` で null となり、
+	 * ProductsController::update() のマージで既存値が保持される（真の部分更新）。
+	 * 例えば metabox は title を送らないため、title を必須にすると 400 になり保存できない。
+	 *
+	 * @return array<string, array<string, mixed>>
+	 */
+	public static function updateArgs(): array {
+		$args = self::args();
+		foreach ( $args as $key => $definition ) {
+			unset( $definition['required'] );
+			unset( $definition['default'] );
+			$args[ $key ] = $definition;
+		}
+		return $args;
+	}
+
+	/**
 	 * Hybrid extras を sanitize する。
 	 *
 	 * - 各エントリは ['label' => string, 'value' => string, 'key' => string?] を期待
