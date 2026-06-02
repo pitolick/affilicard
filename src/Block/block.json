@@ -9,14 +9,18 @@
 	"textdomain": "affilicard",
 	"supports": {
 		"html": false,
-		"align": [ "wide" ]
+		"align": ["wide"]
 	},
 	"attributes": {
 		"productId": { "type": "integer" },
 		"externalId": { "type": "string" },
 		"platform": { "type": "string" },
 		"slug": { "type": "string" },
-		"hidePlatforms": { "type": "array", "items": { "type": "string" }, "default": [] },
+		"hidePlatforms": {
+			"type": "array",
+			"items": { "type": "string" },
+			"default": []
+		},
 		"ctaBgColor": { "type": "string" },
 		"ctaTextColor": { "type": "string" },
 		"cardBgColor": { "type": "string" },
