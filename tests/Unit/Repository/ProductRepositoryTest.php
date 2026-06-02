@@ -363,6 +363,73 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertNull( $repo->findBySlug( 'missing' ) );
 	}
 
+	public function test_saveMeta_calls_update_post_meta_for_five_keys_and_does_not_call_insert_or_update_post(): void {
+		// wp_update_post / wp_insert_post should never be called.
+		WP_Mock::userFunction( 'wp_update_post' )->never();
+		WP_Mock::userFunction( 'wp_insert_post' )->never();
+
+		$extras   = array(
+			array(
+				'label' => '著者',
+				'value' => 'たろう',
+			),
+		);
+		$listings = array(
+			array(
+				'platform'    => 'dmm-books',
+				'external_id' => 'ext-1',
+			),
+		);
+
+		$called_keys = array();
+		WP_Mock::userFunction( 'update_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$called_keys, $extras, $listings ) {
+					$this->assertSame( 5, $post_id );
+					$called_keys[] = $key;
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$repo->saveMeta(
+			5,
+			array(
+				'product_type' => 'ebook',
+				'stock_status' => 'available',
+				'extras'       => $extras,
+				'listings'     => $listings,
+			)
+		);
+
+		$this->assertContains( ProductPostType::META_PRODUCT_TYPE, $called_keys );
+		$this->assertContains( ProductPostType::META_STOCK_STATUS, $called_keys );
+		$this->assertContains( ProductPostType::META_EXTRAS, $called_keys );
+		$this->assertContains( ProductPostType::META_LISTINGS, $called_keys );
+		$this->assertContains( ProductPostType::META_SCHEMA_VERSION, $called_keys );
+	}
+
+	public function test_saveMeta_uses_generic_when_product_type_empty(): void {
+		WP_Mock::userFunction( 'wp_update_post' )->never();
+		WP_Mock::userFunction( 'wp_insert_post' )->never();
+
+		$seen_type = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$seen_type ) {
+					if ( ProductPostType::META_PRODUCT_TYPE === $key ) {
+						$seen_type = $value;
+					}
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$repo->saveMeta( 5, array() );
+
+		$this->assertSame( 'generic', $seen_type );
+	}
+
 	public function test_count_fallback_products_counts_listings_with_empty_affiliate_url(): void {
 		$wpdb           = Mockery::mock( 'wpdb' );
 		$wpdb->postmeta = 'wp_postmeta';

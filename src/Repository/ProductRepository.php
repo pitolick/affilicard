@@ -148,6 +148,19 @@ final class ProductRepository {
 			return 0;
 		}
 
+		$this->saveMeta( $post_id, $data );
+
+		return $post_id;
+	}
+
+	/**
+	 * 投稿 ID とデータ配列からメタフィールドのみを保存する。
+	 *
+	 * `save()` の内部でも呼ばれるが、`save_post` ハンドラから直接呼ぶことも想定している。
+	 *
+	 * @param array<string, mixed> $data
+	 */
+	public function saveMeta( int $postId, array $data ): void {
 		$product_type = isset( $data['product_type'] ) && '' !== (string) $data['product_type']
 			? (string) $data['product_type']
 			: 'generic';
@@ -157,15 +170,13 @@ final class ProductRepository {
 		$extras       = isset( $data['extras'] ) && is_array( $data['extras'] ) ? $data['extras'] : array();
 		$listings     = isset( $data['listings'] ) && is_array( $data['listings'] ) ? $data['listings'] : array();
 
-		update_post_meta( $post_id, ProductPostType::META_PRODUCT_TYPE, $product_type );
-		update_post_meta( $post_id, ProductPostType::META_STOCK_STATUS, $stock_status );
-		update_post_meta( $post_id, ProductPostType::META_EXTRAS, JsonField::encode( $extras ) );
-		update_post_meta( $post_id, ProductPostType::META_LISTINGS, JsonField::encode( $listings ) );
-		update_post_meta( $post_id, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
+		update_post_meta( $postId, ProductPostType::META_PRODUCT_TYPE, $product_type );
+		update_post_meta( $postId, ProductPostType::META_STOCK_STATUS, $stock_status );
+		update_post_meta( $postId, ProductPostType::META_EXTRAS, JsonField::encode( $extras ) );
+		update_post_meta( $postId, ProductPostType::META_LISTINGS, JsonField::encode( $listings ) );
+		update_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
 
-		$this->syncExternalIdMirror( $post_id, $listings );
-
-		return $post_id;
+		$this->syncExternalIdMirror( $postId, $listings );
 	}
 
 	public function delete( int $postId ): bool {

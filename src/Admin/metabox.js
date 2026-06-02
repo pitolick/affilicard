@@ -1,8 +1,8 @@
 import { useEffect, useState, createElement } from '@wordpress/element';
 import { createRoot } from 'react-dom/client';
-import { Button, Notice, SelectControl } from '@wordpress/components';
+import { SelectControl } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
-import { getProduct, updateProduct } from './api/products';
+import { getProduct } from './api/products';
 import { ListingsEditor } from './components/ListingsEditor';
 import { ExtrasEditor } from './components/ExtrasEditor';
 import { StockStatusSelect } from './components/StockStatusSelect';
@@ -14,8 +14,6 @@ const PRODUCT_TYPE_OPTIONS = [
 
 export function MetaboxApp({ postId }) {
 	const [data, setData] = useState(null);
-	const [saving, setSaving] = useState(false);
-	const [notice, setNotice] = useState(null);
 
 	useEffect(() => {
 		if (!postId) {
@@ -42,38 +40,22 @@ export function MetaboxApp({ postId }) {
 
 	const update = (patch) => setData({ ...data, ...patch });
 
-	const onSave = async () => {
-		setSaving(true);
-		setNotice(null);
-		try {
-			const next = await updateProduct(postId, {
-				product_type: data.product_type,
-				stock_status: data.stock_status,
-				extras: data.extras,
-				listings: data.listings,
-			});
-			setData(next);
-			setNotice({
-				type: 'success',
-				message: __('保存しました', 'affilicard'),
-			});
-		} catch {
-			setNotice({
-				type: 'error',
-				message: __('保存に失敗しました', 'affilicard'),
-			});
-		} finally {
-			setSaving(false);
-		}
-	};
+	const hiddenValue = JSON.stringify({
+		product_type: data.product_type,
+		stock_status: data.stock_status,
+		extras: data.extras,
+		listings: data.listings,
+	});
 
 	return (
 		<div className="affilicard-metabox">
-			{notice && (
-				<Notice status={notice.type} onRemove={() => setNotice(null)}>
-					{notice.message}
-				</Notice>
-			)}
+			{/* hidden field: 現在の state を WP 投稿フォームと同期する */}
+			<textarea
+				name="affilicard_data"
+				hidden
+				readOnly
+				value={hiddenValue}
+			/>
 			<SelectControl
 				label={__('商品タイプ', 'affilicard')}
 				value={data.product_type ?? 'generic'}
@@ -93,13 +75,12 @@ export function MetaboxApp({ postId }) {
 				listings={data.listings ?? []}
 				onChange={(listings) => update({ listings })}
 			/>
-			<div className="affilicard-metabox-actions">
-				<Button variant="primary" onClick={onSave} disabled={saving}>
-					{saving
-						? __('保存中…', 'affilicard')
-						: __('Affilicard データを保存', 'affilicard')}
-				</Button>
-			</div>
+			<p className="affilicard-metabox-hint">
+				{__(
+					'『公開』『更新』を押すと商品設定も保存されます',
+					'affilicard'
+				)}
+			</p>
 		</div>
 	);
 }
