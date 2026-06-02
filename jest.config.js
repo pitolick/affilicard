@@ -20,6 +20,8 @@ module.exports = {
 		...( defaultConfig.moduleNameMapper || {} ),
 		'^@wordpress/components$':
 			'<rootDir>/tests/js/__mocks__/wordpress-components.js',
+		'^@wordpress/block-editor$':
+			'<rootDir>/tests/js/__mocks__/wordpress-block-editor.js',
 	},
 	testMatch: [
 		'<rootDir>/tests/js/**/*.test.js',

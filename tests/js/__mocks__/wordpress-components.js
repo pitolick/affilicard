@@ -102,6 +102,46 @@ function TabPanel( { tabs, children, className } ) {
 	);
 }
 
+function ComboboxControl( { label, options, onChange, onFilterValueChange, value } ) {
+	return React.createElement(
+		'label',
+		null,
+		label,
+		React.createElement( 'input', {
+			'aria-label': label,
+			value: value ?? '',
+			onChange: ( e ) => {
+				if ( onFilterValueChange ) {
+					onFilterValueChange( e.target.value );
+				}
+			},
+		} ),
+		React.createElement(
+			'ul',
+			null,
+			( options || [] ).map( ( o ) =>
+				React.createElement(
+					'li',
+					{ key: o.value },
+					React.createElement(
+						'button',
+						{ type: 'button', onClick: () => onChange( o.value ) },
+						o.label
+					)
+				)
+			)
+		)
+	);
+}
+
+function PanelBody( { title, children } ) {
+	return React.createElement( 'section', { 'data-panel': title }, children );
+}
+
+function BaseControl( { label, children } ) {
+	return React.createElement( 'div', null, label, children );
+}
+
 module.exports = {
 	__esModule: true,
 	TextControl,
@@ -110,4 +150,7 @@ module.exports = {
 	Button,
 	Notice,
 	TabPanel,
+	ComboboxControl,
+	PanelBody,
+	BaseControl,
 };
