@@ -136,4 +136,27 @@ final class ProductSchemaTest extends TestCase {
 		$this->assertSame( array(), ProductSchema::sanitizeListings( 'foo' ) );
 		$this->assertSame( array(), ProductSchema::sanitizeListings( null ) );
 	}
+
+	public function test_args_requires_title_for_create(): void {
+		$args = ProductSchema::args();
+		$this->assertTrue( $args['title']['required'] ?? false );
+	}
+
+	public function test_updateArgs_is_partial_no_required_no_defaults(): void {
+		// PATCH（部分更新）用 args は required / default を持たず、
+		// 未指定フィールドが null（未送信）扱いになるようにする。
+		$args = ProductSchema::updateArgs();
+
+		$this->assertArrayHasKey( 'title', $args );
+		$this->assertArrayNotHasKey( 'required', $args['title'] );
+		$this->assertArrayNotHasKey( 'default', $args['content'] );
+		$this->assertArrayNotHasKey( 'default', $args['status'] );
+		$this->assertArrayNotHasKey( 'default', $args['product_type'] );
+		$this->assertArrayNotHasKey( 'default', $args['stock_status'] );
+		$this->assertArrayNotHasKey( 'default', $args['extras'] );
+		$this->assertArrayNotHasKey( 'default', $args['listings'] );
+
+		// sanitize_callback は維持される（送信された値は引き続き sanitize する）。
+		$this->assertArrayHasKey( 'sanitize_callback', $args['listings'] );
+	}
 }
