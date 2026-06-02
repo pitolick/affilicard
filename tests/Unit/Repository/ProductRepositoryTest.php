@@ -317,6 +317,52 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertFalse( $repo->delete( 13 ) );
 	}
 
+	public function test_findBySlug_returns_product_when_post_exists(): void {
+		$repo = new ProductRepository();
+
+		\WP_Mock::userFunction(
+			'get_posts',
+			array(
+				'times'  => 1,
+				'args'   => array(
+					\WP_Mock\Functions::type( 'array' ),
+				),
+				'return' => array( 4242 ),
+			)
+		);
+
+		$post = (object) array(
+			'ID'            => 4242,
+			'post_type'     => 'affilicard_product',
+			'post_title'    => 'Slug Hit',
+			'post_content'  => '',
+			'post_status'   => 'publish',
+			'post_modified' => '2026-06-01 00:00:00',
+		);
+		\WP_Mock::userFunction( 'get_post', array( 'return' => $post ) );
+		\WP_Mock::userFunction( 'get_post_meta', array( 'return' => '' ) );
+
+		$result = $repo->findBySlug( 'slug-hit' );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( 4242, $result['id'] );
+		$this->assertSame( 'Slug Hit', $result['title'] );
+	}
+
+	public function test_findBySlug_returns_null_when_no_match(): void {
+		$repo = new ProductRepository();
+
+		\WP_Mock::userFunction(
+			'get_posts',
+			array(
+				'times'  => 1,
+				'return' => array(),
+			)
+		);
+
+		$this->assertNull( $repo->findBySlug( 'missing' ) );
+	}
+
 	public function test_count_fallback_products_counts_listings_with_empty_affiliate_url(): void {
 		$wpdb           = Mockery::mock( 'wpdb' );
 		$wpdb->postmeta = 'wp_postmeta';

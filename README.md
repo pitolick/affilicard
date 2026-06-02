@@ -12,8 +12,36 @@
 - AES-256-CBC で Provider 認証情報を暗号化保存
 - URL フォールバック (アフィリエイト URL 未設定時は通常 URL) + admin 可視化 (CPT 一覧 + ダッシュボードウィジェット)
 - 自動更新: GitHub Releases から [plugin-update-checker](https://github.com/YahnisElsts/plugin-update-checker) v5.7 で配信
+- **Gutenberg Block** (`affilicard/product-card`): ブロックエディタから商品カードを挿入、サーバサイドレンダリングで常に最新情報を表示
 
-Gutenberg Block (`affilicard/product-card`) と server-side レンダラは Phase 4a-2 で実装予定。
+## Gutenberg Block の使い方
+
+### ブロックの挿入
+
+1. 投稿・固定ページのブロックエディタで「Affilicard 商品カード」ブロックを挿入
+2. 「商品を検索」コンボボックスで登録済み商品を検索・選択（`/products?search=` REST API 経由）
+3. 右サイドバーの「色設定」パネルでボタン・カードの色を調整（テーマパレット連携）
+
+表示はサーバサイドレンダリング（dynamic block）で行われるため、常に最新の商品情報・在庫状態が反映されます。在庫切れ (`out_of_stock`) や販売終了 (`discontinued`) 時は CTA ボタンが非表示になります。
+
+### 色のカスタマイズ
+
+ブロック属性（InspectorControls）で設定した色は CSS カスタムプロパティとしてブロック要素に付与されます。テーマやカスタム CSS からも以下のプロパティで上書き可能です。
+
+| CSS カスタムプロパティ | 説明 |
+| --- | --- |
+| `--affilicard-card-bg` | カード背景色 |
+| `--affilicard-card-border` | カード枠線色 |
+| `--affilicard-cta-bg` | CTA ボタン背景色 |
+| `--affilicard-cta-text` | CTA ボタンテキスト色 |
+
+```css
+/* テーマの style.css やカスタム CSS で上書きする例 */
+.wp-block-affilicard-product-card {
+  --affilicard-cta-bg: #e60033;
+  --affilicard-cta-text: #ffffff;
+}
+```
 
 ## 動作要件
 

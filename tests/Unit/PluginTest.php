@@ -114,4 +114,20 @@ final class PluginTest extends TestCase {
 
 		$this->assertConditionsMet();
 	}
+
+	public function test_boot_registers_block_init_hook(): void {
+		WP_Mock::userFunction( 'is_admin', array( 'return' => false ) );
+		WP_Mock::userFunction( 'register_activation_hook', array( 'return' => true ) );
+
+		// WP_Mock::add_action は userFunction でオーバーライドできないため、
+		// WP_Mock ネイティブの expectActionAdded + AnyInstance マッチャーを使用する。
+		WP_Mock::expectActionAdded(
+			'init',
+			array( new \WP_Mock\Matcher\AnyInstance( \Affilicard\Block\Block::class ), 'register' )
+		);
+
+		Plugin::boot();
+
+		$this->assertConditionsMet();
+	}
 }
