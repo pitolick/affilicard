@@ -5,13 +5,13 @@ export function CronHelpBox() {
 	return (
 		<div className="affilicard-cron-help notice notice-info inline">
 			<p>
-				{__(
+				{ __(
 					'自動更新が有効です。WP-Cron が動作しない環境では、以下のコマンドを定期実行してください:',
 					'affilicard'
-				)}
+				) }
 			</p>
 			<pre>
-				<code>{cmd}</code>
+				<code>{ cmd }</code>
 			</pre>
 		</div>
 	);
