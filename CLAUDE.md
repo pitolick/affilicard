@@ -171,6 +171,15 @@ docker run --rm -v "$(pwd):/app" -w /app php:8.2-cli php vendor/bin/phpunit
 
 ---
 
+## 動作確認とレビューの分担
+
+- **機械的に検証できる「動くか」の確認は自動テスト/E2E で行い、人間に手動クリックさせない**。UI を持つ実装（Gutenberg ブロック・管理画面・React metabox 等）は Playwright による E2E で検証する。E2E が未整備の途中 PR では、CI 通過を確認した上で **Claude Code が Playwright（MCP）を呼び出して動作確認する**。
+- **実装が一通り終わった後の E2E テストは必須**。途中の PR でも、その PR 用の E2E テストコードを用意するか、上記の Claude-Playwright 確認を行う。
+- **人間のレビューは人間にしか判断できない観点に限定する**：実装が要件・意図通りか、UX/デザインの妥当性、ほかに追加すべき要望がないか等。
+- ローカル Mac は PHP/Node 非導入（Docker 専用）のため、E2E は CI（GitHub Actions）または Docker 上の WP（wp-env / @wp-playground/cli）で実行する。
+
+---
+
 ## 計画書の場所
 
 設計の全体像は利用側プロジェクト（`pitolick/e-comi`）の `docs/superpowers/plans/2026-05-28-phase4a-affilicard-mvp.md` (v4) を参照する。
