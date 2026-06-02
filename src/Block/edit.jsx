@@ -51,9 +51,13 @@ export function Edit({ attributes, setAttributes }) {
 			setSelectedTitle('');
 			return;
 		}
+		let active = true;
 		getProduct(productId)
-			.then((p) => setSelectedTitle(p?.title ?? ''))
-			.catch(() => setSelectedTitle(''));
+			.then((p) => active && setSelectedTitle(p?.title ?? ''))
+			.catch(() => active && setSelectedTitle(''));
+		return () => {
+			active = false;
+		};
 	}, [productId]);
 
 	const inspector = (
