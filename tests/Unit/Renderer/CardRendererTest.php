@@ -328,12 +328,12 @@ final class CardRendererTest extends TestCase {
 					array(
 						'key'   => 'author',
 						'label' => '著者',
-						'value' => '手塚治虫',
+						'value' => '架空 太郎',
 					),
 					array(
 						'key'   => 'publisher',
 						'label' => '出版社',
-						'value' => '虫プロ',
+						'value' => 'サンプル出版社',
 					),
 					array(
 						'key'   => 'isbn',
@@ -345,7 +345,7 @@ final class CardRendererTest extends TestCase {
 		);
 		$html    = ( new CardRenderer() )->render( $product, array( $this->dmmBooks() ) );
 		$this->assertStringContainsString( '著者', $html );
-		$this->assertStringContainsString( '手塚治虫', $html );
+		$this->assertStringContainsString( '架空 太郎', $html );
 		$this->assertStringContainsString( '出版社', $html );
 		$this->assertStringContainsString( 'ISBN', $html );
 	}

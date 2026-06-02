@@ -10,11 +10,11 @@ jest.mock( '../../../src/Admin/api/products' );
 describe( 'Edit', () => {
 	beforeEach( () => {
 		productsApi.searchProducts.mockResolvedValue( [
-			{ id: 7, title: '進撃の巨人 1巻', status: 'publish' },
+			{ id: 7, title: 'サンプル漫画 1巻', status: 'publish' },
 		] );
 		productsApi.getProduct.mockResolvedValue( {
 			id: 7,
-			title: '進撃の巨人 1巻',
+			title: 'サンプル漫画 1巻',
 		} );
 	} );
 
@@ -37,11 +37,11 @@ describe( 'Edit', () => {
 		setup();
 		fireEvent.change(
 			screen.getByLabelText( '商品を検索', { selector: 'input' } ),
-			{ target: { value: '進撃' } }
+			{ target: { value: 'サンプル' } }
 		);
 		await waitFor( () =>
 			expect( productsApi.searchProducts ).toHaveBeenCalledWith(
-				expect.objectContaining( { search: '進撃' } )
+				expect.objectContaining( { search: 'サンプル' } )
 			)
 		);
 	} );
@@ -50,29 +50,29 @@ describe( 'Edit', () => {
 		const { setAttributes } = setup();
 		fireEvent.change(
 			screen.getByLabelText( '商品を検索', { selector: 'input' } ),
-			{ target: { value: '進撃' } }
+			{ target: { value: 'サンプル' } }
 		);
-		const option = await screen.findByText( /進撃の巨人 1巻/ );
+		const option = await screen.findByText( /サンプル漫画 1巻/ );
 		fireEvent.click( option );
 		expect( setAttributes ).toHaveBeenCalledWith( { productId: 7 } );
 	} );
 
 	test( 'shows selected product title when productId set', async () => {
 		setup( { productId: 7 } );
-		expect( await screen.findByText( /進撃の巨人 1巻/ ) ).toBeInTheDocument();
+		expect( await screen.findByText( /サンプル漫画 1巻/ ) ).toBeInTheDocument();
 	} );
 
 	test( 'renders color palette controls in inspector', async () => {
 		setup( { productId: 7 } );
 		// Await getProduct resolution to avoid act() warnings.
-		await screen.findByText( /進撃の巨人 1巻/ );
+		await screen.findByText( /サンプル漫画 1巻/ );
 		expect( screen.getAllByText( /色/ ).length ).toBeGreaterThan( 0 );
 	} );
 
 	test( 'updates ctaBgColor via color palette', async () => {
 		const { setAttributes } = setup( { productId: 7 } );
 		// Await getProduct resolution to avoid act() warnings.
-		await screen.findByText( /進撃の巨人 1巻/ );
+		await screen.findByText( /サンプル漫画 1巻/ );
 		const palettes = document.querySelectorAll( '[data-color-palette]' );
 		fireEvent.change( palettes[ 0 ], { target: { value: '#ff0000' } } );
 		expect( setAttributes ).toHaveBeenCalledWith(
