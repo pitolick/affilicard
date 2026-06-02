@@ -53,6 +53,24 @@ final class BlockTest extends TestCase {
 		$this->assertStringContainsString( '解決された商品', $html );
 	}
 
+	public function test_render_returns_empty_for_non_published_product(): void {
+		// 下書き/非公開商品は公開フロントに描画しない。
+		$post = (object) array(
+			'ID'            => 7,
+			'post_type'     => 'affilicard_product',
+			'post_title'    => '下書き商品',
+			'post_content'  => '',
+			'post_status'   => 'draft',
+			'post_modified' => '2026-06-01 00:00:00',
+		);
+		WP_Mock::userFunction( 'get_post', array( 'return' => $post ) );
+		WP_Mock::userFunction( 'get_post_meta', array( 'return' => '' ) );
+
+		$block = new Block( new ProductRepository() );
+
+		$this->assertSame( '', $block->render( array( 'productId' => 7 ) ) );
+	}
+
 	public function test_render_resolves_by_slug_when_no_id(): void {
 		WP_Mock::userFunction( 'get_posts', array( 'return' => array( 7 ) ) );
 		$this->mockFoundPost( 7, '解決された商品' );

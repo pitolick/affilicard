@@ -77,6 +77,13 @@ final class Block {
 			return '';
 		}
 
+		// 公開フロントでは published 商品のみ描画する（Repository は admin/REST 向けに
+		// post_status='any' で検索するため、下書き/非公開/ゴミ箱の漏洩をここで防ぐ）。
+		$status = isset( $product['status'] ) ? (string) $product['status'] : '';
+		if ( 'publish' !== $status ) {
+			return '';
+		}
+
 		$platforms = PlatformConfig::all();
 		$platforms = array_values(
 			array_filter(

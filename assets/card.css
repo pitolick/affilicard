@@ -3,6 +3,7 @@
 .affilicard-card {
 	--affilicard-card-bg: #ffffff;
 	--affilicard-card-border: #e5e7eb;
+
 	display: flex;
 	gap: 16px;
 	padding: 16px;

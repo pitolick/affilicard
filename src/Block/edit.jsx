@@ -28,21 +28,25 @@ export function Edit({ attributes, setAttributes }) {
 			return;
 		}
 		let active = true;
-		searchProducts({ search: filter, perPage: 10 })
-			.then((items) => {
-				if (!active) {
-					return;
-				}
-				setOptions(
-					(items || []).map((p) => ({
-						value: p.id,
-						label: `${p.title} (#${p.id})`,
-					}))
-				);
-			})
-			.catch(() => active && setOptions([]));
+		// 入力毎の REST 発火を避けるため簡易デバウンス（300ms）。
+		const timer = setTimeout(() => {
+			searchProducts({ search: filter, perPage: 10 })
+				.then((items) => {
+					if (!active) {
+						return;
+					}
+					setOptions(
+						(items || []).map((p) => ({
+							value: p.id,
+							label: `${p.title} (#${p.id})`,
+						}))
+					);
+				})
+				.catch(() => active && setOptions([]));
+		}, 300);
 		return () => {
 			active = false;
+			clearTimeout(timer);
 		};
 	}, [filter]);
 
