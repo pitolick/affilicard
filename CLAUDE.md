@@ -40,13 +40,15 @@
 | `Affilicard\Settings\GeneralSettings` | `affilicard_general` option ハンドリング |
 | `Affilicard\Settings\PlatformsSettings` | `PlatformConfig` の REST wrapper |
 | `Affilicard\Settings\DashboardWidget` | WP ダッシュボードに Fallback 件数表示 |
+| `Affilicard\Block\Block` | Gutenberg block `affilicard/product-card` の登録 + サーバサイド render（商品解決 → 色 CSS 変数注入 → CardRenderer 委譲） |
+| `Affilicard\Renderer\CardRenderer` | 商品データ + PlatformDefinition から商品カード HTML を生成する純粋レンダラ（type 非依存・色は sanitize_hex_color 経由） |
 | `Affilicard\Stock\StockStatus` | `available` / `out_of_stock` / `discontinued` |
 | `Affilicard\Schema\SchemaVersion` | schema migration トリガ用バージョン番号 (現在 `'1'`) |
 | `Affilicard\Util\Crypto` | AES-256-CBC ラッパ |
 | `Affilicard\Util\JsonField` | 防御的 JSON encode/decode |
 | `Affilicard\Uninstall` | 全 `affilicard_*` option + CPT 削除 (uninstall.php から呼出) |
 | `src/Admin/` (React) | Settings + Metabox の React UI (`@wordpress/scripts`) |
-| `src/Block/` | Gutenberg Block `affilicard/product-card` (Phase 4a-2 で本格実装) |
+| `src/Block/` (React) | `affilicard/product-card` block 登録 + サーバ render（`index.js` / `edit.jsx` / `block.json`） |
 
 ---
 
@@ -71,7 +73,13 @@ affilicard/
 │   │   ├── metabox.js         # 商品編集 metabox の React エントリ
 │   │   ├── api/               # @wordpress/api-fetch ラッパ
 │   │   └── components/        # React コンポーネント
-│   ├── Block/index.js         # Phase 4a-2 で実装
+│   ├── Block/                 # affilicard/product-card block 登録 + サーバ render（index.js / edit.jsx / block.json）
+│   │   ├── index.js           # block 登録エントリ
+│   │   ├── edit.jsx           # エディタ UI（ComboboxControl + InspectorControls）
+│   │   ├── block.json         # block メタデータ・属性定義
+│   │   └── Block.php          # PHP: block 登録 + render_callback
+│   ├── Renderer/
+│   │   └── CardRenderer.php   # 商品カード HTML 生成（type 非依存・純粋レンダラ）
 │   ├── PostType/
 │   ├── Platform/
 │   ├── Provider/
@@ -83,6 +91,9 @@ affilicard/
 │   ├── Schema/
 │   ├── Util/
 │   └── Uninstall.php
+├── assets/
+│   ├── card.css               # フロント + 共有 CSS 変数（--affilicard-* カスタムプロパティ）
+│   └── block-editor.css       # エディタプレビュー用スタイル
 ├── tests/
 │   ├── bootstrap.php          # WP_Mock + WP_Error/WP_REST_* stub
 │   ├── Unit/                  # PHPUnit (WP_Mock)
