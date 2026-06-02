@@ -12,6 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: タグからバージョンを affilicard.php に注入
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Injecting version: ${VERSION}"
+          sed -i -E "s/^( \* Version:[[:space:]]*).*/\1${VERSION}/" affilicard.php
+          sed -i -E "s/(define\( 'AFFILICARD_VERSION', ')[^']*(' \);)/\1${VERSION}\2/" affilicard.php
+          grep -nE "Version:|AFFILICARD_VERSION" affilicard.php
       - name: PHP セットアップ
         uses: shivammathur/setup-php@v2
         with:
