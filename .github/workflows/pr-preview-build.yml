@@ -1,0 +1,39 @@
+name: PR Preview - Build
+
+# PR のコードをビルドして「ビルド済みプラグイン zip」を生成する。
+# 読み取り権限のみで動くため fork PR でも安全（公開は pr-preview-publish.yml が担当）。
+# git:directory 方式と違い build/ + vendor/ を含むため、React/Block も Playground で動作確認できる。
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  build:
+    uses: WordPress/action-wp-playground-pr-preview/.github/workflows/preview-build.yml@43fc435558bc6cee69f5b214d6b8ca4f9f80c31d # v3
+    with:
+      artifacts: affilicard=dist/affilicard.zip
+      node-version: '20'
+      php-version: '8.2'
+      build-command: |
+        composer install --no-dev --optimize-autoloader --no-progress --no-interaction
+        npm ci
+        npm run build
+        mkdir -p dist/affilicard
+        rsync -a \
+          --exclude='node_modules' \
+          --exclude='.git' \
+          --exclude='.github' \
+          --exclude='src/Admin/components' \
+          --exclude='src/Admin/api' \
+          --exclude='tests' \
+          --exclude='dist' \
+          --exclude='composer.lock' \
+          --exclude='package-lock.json' \
+          --exclude='phpcs.xml.dist' \
+          --exclude='phpunit.xml.dist' \
+          --exclude='.php-cs-fixer.dist.php' \
+          --exclude='.php-cs-fixer.cache' \
+          --exclude='.phpunit.cache' \
+          ./ dist/affilicard/
+        cd dist && zip -r affilicard.zip affilicard

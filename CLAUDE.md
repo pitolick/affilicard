@@ -64,8 +64,7 @@ affilicard/
 ├── phpunit.xml.dist
 ├── .php-cs-fixer.dist.php
 ├── .github/
-│   └── workflows/             # ci / playground / release
-├── blueprints/dev.json        # WP Playground PR preview 用 blueprint
+│   └── workflows/             # ci / pr-preview-build / pr-preview-publish / release
 ├── src/
 │   ├── Plugin.php
 │   ├── Admin/
@@ -168,7 +167,7 @@ docker run --rm -v "$(pwd):/app" -w /app php:8.2-cli php vendor/bin/phpunit
 
 ### vendor/ なし環境のフォールバック
 
-`affilicard.php` は `vendor/autoload.php` 不在時に `spl_autoload_register` で簡易 PSR-4 autoloader を登録する（WP Playground の `git:directory` 展開向け α 案）。自動更新機能 (plugin-update-checker) のみ無効化される。
+`affilicard.php` は `vendor/autoload.php` 不在時に `spl_autoload_register` で簡易 PSR-4 autoloader を登録する（vendor/ を持たないソース直置き環境向けの保険）。自動更新機能 (plugin-update-checker) のみ無効化される。なお PR の Playground プレビューは `composer install` + `npm run build` 済みの zip を使うため、プレビューではこのフォールバックには依存しない。
 
 ---
 

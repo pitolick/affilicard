@@ -153,7 +153,7 @@ npm run lint:js
 npm run build
 ```
 
-WP Playground でのプレビューは PR ごとに自動で URL が払い出されます (`.github/workflows/playground.yml`)。
+WP Playground でのプレビューは PR ごとに自動で払い出されます。PR で `composer install` + `npm run build` を実行してビルド済みプラグイン zip を生成し (`.github/workflows/pr-preview-build.yml`)、その zip を Playground にインストールする Preview ボタンを PR に投稿します (`.github/workflows/pr-preview-publish.yml`)。これにより React/Block を含むビルド成果物も Playground 上で動作確認できます（`build/` は git 管理せず CI でビルド）。
 
 ## ライセンス
 

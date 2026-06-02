@@ -1,0 +1,23 @@
+name: PR Preview - Publish
+
+# PR Preview - Build の成功後に動き、ビルド済み zip を ci-artifacts プレリリースへ
+# アップロード（公開 URL 化）し、PR に Playground Preview ボタンを投稿する。
+# workflow_run はデフォルトブランチ（main）の定義で実行されるため write 権限を安全に行使できる。
+
+on:
+  workflow_run:
+    workflows: ['PR Preview - Build']
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  publish:
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: WordPress/action-wp-playground-pr-preview/.github/workflows/preview-publish.yml@43fc435558bc6cee69f5b214d6b8ca4f9f80c31d # v3
+    with:
+      kind: plugin
