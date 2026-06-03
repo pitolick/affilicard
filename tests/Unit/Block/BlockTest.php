@@ -3,8 +3,13 @@ declare(strict_types=1);
 
 namespace Affilicard\Tests\Unit\Block;
 
+use Affilicard\AutoCreate\ProductAutoCreator;
 use Affilicard\Block\Block;
+use Affilicard\Provider\ProviderInterface;
+use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Repository\ProductRepository;
+use Affilicard\Repository\ProductRepositoryInterface;
+use Mockery;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
 
@@ -47,7 +52,7 @@ final class BlockTest extends TestCase {
 		WP_Mock::userFunction( 'get_option', array( 'return' => array() ) );
 		WP_Mock::userFunction( 'get_post_thumbnail_id', array( 'return' => 0 ) );
 
-		$block = new Block( new ProductRepository() );
+		$block = new Block( new ProductRepository(), new ProductAutoCreator( new ProviderRegistry(), new ProductRepository() ) );
 		$html  = $block->render( array( 'productId' => 7 ) );
 
 		$this->assertStringContainsString( '解決された商品', $html );
@@ -66,7 +71,7 @@ final class BlockTest extends TestCase {
 		WP_Mock::userFunction( 'get_post', array( 'return' => $post ) );
 		WP_Mock::userFunction( 'get_post_meta', array( 'return' => '' ) );
 
-		$block = new Block( new ProductRepository() );
+		$block = new Block( new ProductRepository(), new ProductAutoCreator( new ProviderRegistry(), new ProductRepository() ) );
 
 		$this->assertSame( '', $block->render( array( 'productId' => 7 ) ) );
 	}
@@ -77,7 +82,7 @@ final class BlockTest extends TestCase {
 		WP_Mock::userFunction( 'get_option', array( 'return' => array() ) );
 		WP_Mock::userFunction( 'get_post_thumbnail_id', array( 'return' => 0 ) );
 
-		$block = new Block( new ProductRepository() );
+		$block = new Block( new ProductRepository(), new ProductAutoCreator( new ProviderRegistry(), new ProductRepository() ) );
 		$html  = $block->render( array( 'slug' => 'my-slug' ) );
 
 		$this->assertStringContainsString( '解決された商品', $html );
@@ -89,7 +94,7 @@ final class BlockTest extends TestCase {
 		WP_Mock::userFunction( 'get_option', array( 'return' => array() ) );
 		WP_Mock::userFunction( 'get_post_thumbnail_id', array( 'return' => 0 ) );
 
-		$block = new Block( new ProductRepository() );
+		$block = new Block( new ProductRepository(), new ProductAutoCreator( new ProviderRegistry(), new ProductRepository() ) );
 		$html  = $block->render(
 			array(
 				'externalId' => '56869',
@@ -101,14 +106,14 @@ final class BlockTest extends TestCase {
 	}
 
 	public function test_render_returns_empty_when_unresolved(): void {
-		$block = new Block( new ProductRepository() );
+		$block = new Block( new ProductRepository(), new ProductAutoCreator( new ProviderRegistry(), new ProductRepository() ) );
 		$this->assertSame( '', $block->render( array() ) );
 	}
 
 	public function test_render_returns_empty_when_product_not_found(): void {
 		WP_Mock::userFunction( 'get_post', array( 'return' => null ) );
 
-		$block = new Block( new ProductRepository() );
+		$block = new Block( new ProductRepository(), new ProductAutoCreator( new ProviderRegistry(), new ProductRepository() ) );
 		$this->assertSame( '', $block->render( array( 'productId' => 999 ) ) );
 	}
 
@@ -117,7 +122,7 @@ final class BlockTest extends TestCase {
 		WP_Mock::userFunction( 'get_option', array( 'return' => array() ) );
 		WP_Mock::userFunction( 'get_post_thumbnail_id', array( 'return' => 0 ) );
 
-		$block = new Block( new ProductRepository() );
+		$block = new Block( new ProductRepository(), new ProductAutoCreator( new ProviderRegistry(), new ProductRepository() ) );
 		$html  = $block->render(
 			array(
 				'productId'  => 7,
@@ -134,9 +139,96 @@ final class BlockTest extends TestCase {
 		WP_Mock::userFunction( 'wp_set_script_translations', array( 'return' => true ) );
 		WP_Mock::userFunction( 'register_block_type', array( 'times' => 1 ) );
 
-		$block = new Block( new ProductRepository() );
+		$block = new Block( new ProductRepository(), new ProductAutoCreator( new ProviderRegistry(), new ProductRepository() ) );
 		$block->register();
 
 		$this->assertConditionsMet();
+	}
+
+	public function test_render_auto_creates_when_not_found_then_renders(): void {
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'findByExternalId' )->with( 'dmm-books', 'ext-9' )->andReturn( null );
+		$repo->shouldReceive( 'save' )->once()->andReturn( 555 );
+		$repo->shouldReceive( 'find' )->with( 555 )->andReturn(
+			array(
+				'id'             => 555,
+				'title'          => '架空作品',
+				'status'         => 'publish',
+				'listings'       => array(),
+				'extras'         => array(),
+				'product_type'   => 'generic',
+				'stock_status'   => 'available',
+				'content'        => '',
+				'schema_version' => '1',
+				'modified'       => '',
+			)
+		);
+
+		WP_Mock::userFunction( 'get_option' )->andReturn(
+			array(
+				array(
+					'code'             => 'dmm-books',
+					'name'             => 'DMM',
+					'provider'         => 'dmm-ebook',
+					'displayOrder'     => 1,
+					'enabled'          => true,
+					'applicableTypes'  => array( 'ebook' ),
+					'buttonLabel'      => '',
+					'brandColor'       => '',
+					'buttonTextColor'  => '',
+					'autoRefresh'      => true,
+					'refreshFrequency' => 'weekly',
+				),
+			)
+		);
+
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'dmm-ebook' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$provider->shouldReceive( 'fetch' )->andReturn(
+			array(
+				'title'           => '架空作品',
+				'price'           => '600',
+				'list_price'      => '1000',
+				'badge'           => '',
+				'image_url'       => '',
+				'regular_url'     => '',
+				'affiliate_url'   => '',
+				'platform_extras' => array(),
+			)
+		);
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+
+		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
+		WP_Mock::userFunction( 'set_transient' )->andReturn( true );
+		WP_Mock::userFunction( 'get_post_thumbnail_id' )->andReturn( 0 );
+
+		$block = new Block( $repo, new ProductAutoCreator( $registry, $repo ) );
+		$html  = $block->render(
+			array(
+				'externalId' => 'ext-9',
+				'platform'   => 'dmm-books',
+			)
+		);
+		$this->assertStringContainsString( '架空作品', $html );
+	}
+
+	public function test_render_skips_autocreate_when_locked(): void {
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'findByExternalId' )->andReturn( null );
+		$repo->shouldNotReceive( 'save' );
+		WP_Mock::userFunction( 'get_transient' )->andReturn( true );
+
+		$block = new Block( $repo, new ProductAutoCreator( new ProviderRegistry(), $repo ) );
+		$this->assertSame(
+			'',
+			$block->render(
+				array(
+					'externalId' => 'ext-9',
+					'platform'   => 'dmm-books',
+				)
+			)
+		);
 	}
 }

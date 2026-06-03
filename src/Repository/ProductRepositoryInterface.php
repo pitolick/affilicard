@@ -14,4 +14,14 @@ interface ProductRepositoryInterface {
 	 * @param array<string, mixed> $data
 	 */
 	public function save( array $data ): int;
+
+	/**
+	 * @return array<string, mixed>|null
+	 */
+	public function find( int $postId ): ?array;
+
+	/**
+	 * @return array<string, mixed>|null
+	 */
+	public function findByExternalId( string $platformCode, string $externalId ): ?array;
 }
