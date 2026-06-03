@@ -8,21 +8,34 @@
 jest.mock( '../../../src/Admin/api/settings' );
 jest.mock( '../../../src/Admin/api/platforms' );
 jest.mock( '../../../src/Admin/api/credentials' );
+jest.mock( '../../../src/Admin/api/refresh', () => ( {
+	triggerRefresh: jest.fn( () =>
+		Promise.resolve( { ok: true, scope: 'all', force: false } )
+	),
+} ) );
 
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SettingsApp } from '../../../src/Admin/settings';
 import { fetchSettings } from '../../../src/Admin/api/settings';
 import { fetchPlatforms } from '../../../src/Admin/api/platforms';
+import { fetchCredentials } from '../../../src/Admin/api/credentials';
+import { triggerRefresh } from '../../../src/Admin/api/refresh';
+import { PlatformEditor } from '../../../src/Admin/components/PlatformEditor';
+import { GeneralPanel } from '../../../src/Admin/components/GeneralPanel';
 
 beforeEach( () => {
 	fetchSettings.mockReset();
 	fetchPlatforms.mockReset();
+	fetchCredentials.mockReset();
+	triggerRefresh.mockReset();
 	fetchSettings.mockResolvedValue( {
 		cache_ttl_seconds: 86400,
 		default_product_type: 'generic',
 		cron_enabled: false,
 	} );
 	fetchPlatforms.mockResolvedValue( [] );
+	fetchCredentials.mockResolvedValue( {} );
+	triggerRefresh.mockResolvedValue( { ok: true, scope: 'all', force: false } );
 } );
 
 describe( 'SettingsApp', () => {
@@ -58,5 +71,57 @@ describe( 'SettingsApp', () => {
 		await waitFor( () =>
 			expect( fetchPlatforms ).toHaveBeenCalled()
 		);
+	} );
+} );
+
+describe( 'PlatformEditor', () => {
+	test( 'autoRefresh ON で頻度 select と更新ボタンが出る', async () => {
+		const platform = {
+			code: 'dmm-books',
+			name: 'DMM',
+			provider: 'dmm-ebook',
+			autoRefresh: true,
+			refreshFrequency: 'weekly',
+		};
+		render( <PlatformEditor platform={ platform } onChange={ () => {} } /> );
+		// CredentialEditor の fetchCredentials が解決するまで待つ
+		await waitFor( () =>
+			expect( fetchCredentials ).toHaveBeenCalled()
+		);
+		expect(
+			screen.getByText( '今すぐこのプラットフォームを更新' )
+		).toBeInTheDocument();
+		expect( screen.getByText( '更新頻度' ) ).toBeInTheDocument();
+	} );
+
+	test( 'autoRefresh OFF で頻度 select は非表示', async () => {
+		const platform = {
+			code: 'dmm-books',
+			name: 'DMM',
+			provider: 'dmm-ebook',
+			autoRefresh: false,
+		};
+		render( <PlatformEditor platform={ platform } onChange={ () => {} } /> );
+		// CredentialEditor の fetchCredentials が解決するまで待つ
+		await waitFor( () =>
+			expect( fetchCredentials ).toHaveBeenCalled()
+		);
+		expect( screen.queryByText( '更新頻度' ) ).not.toBeInTheDocument();
+	} );
+} );
+
+describe( 'GeneralPanel refresh buttons', () => {
+	test( '一括更新ボタンが triggerRefresh(null,false)、強制一括更新が triggerRefresh(null,true) を呼ぶ', async () => {
+		render( <GeneralPanel /> );
+		await waitFor( () => expect( fetchSettings ).toHaveBeenCalled() );
+
+		const bulkBtn = screen.getByText( '一括更新' );
+		const forceBtn = screen.getByText( '強制一括更新（取扱終了も含む）' );
+
+		fireEvent.click( bulkBtn );
+		expect( triggerRefresh ).toHaveBeenCalledWith( null, false );
+
+		fireEvent.click( forceBtn );
+		expect( triggerRefresh ).toHaveBeenCalledWith( null, true );
 	} );
 } );

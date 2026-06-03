@@ -8,6 +8,7 @@ import {
 } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import { fetchSettings, updateSettings } from '../api/settings';
+import { triggerRefresh } from '../api/refresh';
 import { CronHelpBox } from './CronHelpBox';
 
 export function GeneralPanel() {
@@ -82,6 +83,20 @@ export function GeneralPanel() {
 			/>
 
 			{settings.cron_enabled && <CronHelpBox />}
+
+			<Button
+				variant="secondary"
+				onClick={() => triggerRefresh(null, false)}
+			>
+				{__('一括更新', 'affilicard')}
+			</Button>
+			<Button
+				variant="secondary"
+				isDestructive
+				onClick={() => triggerRefresh(null, true)}
+			>
+				{__('強制一括更新（取扱終了も含む）', 'affilicard')}
+			</Button>
 
 			<Button variant="primary" onClick={onSave} disabled={saving}>
 				{saving
