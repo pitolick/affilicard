@@ -12,6 +12,7 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # wp-env requires Docker — ubuntu-latest has Docker pre-installed.
     steps:
       - uses: actions/checkout@v4
@@ -62,16 +63,15 @@ jobs:
       - name: Run E2E tests
         run: npm run test:e2e
         env:
-          # @wordpress/e2e-test-utils-playwright のデフォルト認証情報に合わせる
           # wp-env のデフォルト管理者: admin / password
           WP_BASE_URL: http://localhost:8889
           WP_USERNAME: admin
           WP_PASSWORD: password
 
-      # 失敗時のデバッグ情報
+      # 失敗時のデバッグ情報（--watch=false で非 follow、timeout 60s で打ち切り）
       - name: Show wp-env logs
         if: failure()
-        run: npm run env:logs || true
+        run: timeout 60 npm run env:logs || true
 
       # テスト成果物（スクリーンショット・トレース等）をアップロード
       - name: Upload test results

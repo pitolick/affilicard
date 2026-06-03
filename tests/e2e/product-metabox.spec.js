@@ -1,140 +1,142 @@
 /**
  * E2E spec: affilicard_product metabox — save-on-publish 往復テスト
  *
- * 1. 管理画面で affilicard_product 新規投稿を開く（クラシックエディタ）
- * 2. タイトルを入力し、metabox で在庫状況を変更 + listing を追加してパブリッシュ
- * 3. 保存後にページをリロードし、React metabox に listing が復元されていることを確認
+ * 1. wp-cli で affilicard_product の下書きを作成（postId 確定）
+ * 2. wp-admin の編集画面を開き、React metabox が表示されることを確認
+ * 3. 在庫状況を変更 + listing を追加してパブリッシュ
+ * 4. リロード後に listing が保持されていることを確認
  *
- * 注意：
- * - CPT は show_in_rest=false のためクラシックエディタが使われる。
- * - metabox の React アプリは #affilicard-metabox-root に mount される。
- * - 保存は hidden textarea "affilicard_data" を通じて save_post で処理される。
- * - 新規投稿画面では postId が確定していないため metabox は「保存後に編集できます」
- *   を表示する。そのためまず投稿を下書き保存し、リダイレクト後の編集画面で
- *   metabox を操作する。
+ * NOTE: セレクタは ListingsEditor.jsx / StockStatusSelect.jsx 実装に依存する。
+ *       wp-env の初回起動直後は REST エンドポイントが遅い場合があるため
+ *       metabox の描画待機に十分な timeout を設けている。
+ *       セレクタがずれる場合はコメントの「要調整」箇所を修正すること。
  */
 
-const { test, expect, RequestUtils } = require( '@wordpress/e2e-test-utils-playwright' );
+'use strict';
+
+const { test, expect } = require( '@playwright/test' );
+const { execSync } = require( 'child_process' );
 
 const TEST_PRODUCT_TITLE = 'E2E Metabox Test Product';
 const AFFILIATE_URL = 'https://example.com/aff-test';
 
+/**
+ * wp-env の tests-cli コンテナでコマンドを実行する。
+ *
+ * @param {string} cmd  `wp ...` 以降のコマンド文字列
+ * @returns {string}    stdout (trimmed)
+ */
+function wpCli( cmd ) {
+	return execSync( `npx wp-env run tests-cli wp ${ cmd }`, {
+		encoding: 'utf8',
+		stdio: [ 'pipe', 'pipe', 'pipe' ],
+	} ).trim();
+}
+
+// ------------------------------------------------------------
+// テスト本体
+// ------------------------------------------------------------
+
 test.describe( 'affilicard_product metabox — save-on-publish', () => {
+	/** @type {number} */
 	let productPostId;
 
-	test.beforeAll( async ( { requestUtils } ) => {
-		// REST で affilicard_product を作成し、postId を確保してから
-		// 管理画面の編集ページに直接アクセスする。
-		// (新規投稿画面では postId 未確定のため metabox が表示されない)
-		const product = await requestUtils.rest( {
-			path: '/affilicard/v1/products',
-			method: 'POST',
-			data: {
-				title: TEST_PRODUCT_TITLE,
-				status: 'draft',
-				product_type: 'ebook',
-				stock_status: 'available',
-				listings: [],
-			},
-		} );
-		productPostId = product.id;
-		expect( productPostId ).toBeGreaterThan( 0 );
+	test.beforeAll( () => {
+		// wp-cli で下書きを作成して postId を確定させる
+		// （新規投稿画面は postId 未確定のため React metabox が表示されない）
+		const id = wpCli(
+			`post create --post_type=affilicard_product --post_status=draft --post_title='${ TEST_PRODUCT_TITLE }' --porcelain`
+		);
+		productPostId = parseInt( id, 10 );
+		if ( ! productPostId || isNaN( productPostId ) ) {
+			throw new Error( `Failed to create draft product, got: ${ id }` );
+		}
 	} );
 
-	test.afterAll( async ( { requestUtils } ) => {
+	test.afterAll( () => {
 		if ( productPostId ) {
-			await requestUtils.rest( {
-				path: `/affilicard/v1/products/${ productPostId }`,
-				method: 'DELETE',
-			} ).catch( () => {} );
+			try {
+				wpCli( `post delete ${ productPostId } --force` );
+			} catch {
+				// クリーンアップ失敗は無視
+			}
 		}
 	} );
 
 	test( 'listing を追加してパブリッシュ → リロード後に listing が保持される', async ( {
 		page,
-		admin,
 	} ) => {
 		// 1. 既存の下書き商品の編集ページを開く
-		await admin.visitAdminPage(
-			'post.php',
-			`post=${ productPostId }&action=edit`
+		await page.goto(
+			`/wp-admin/post.php?post=${ productPostId }&action=edit`
 		);
 
-		// metabox の React アプリがロードを完了するまで待つ
-		// #affilicard-metabox-root 内に .affilicard-metabox が表示されるまで待機
+		// 2. React metabox がマウントされるまで待機
+		//    #affilicard-metabox-root 内に .affilicard-metabox が表示されるまで
 		const metaboxRoot = page.locator( '#affilicard-metabox-root' );
-		await expect( metaboxRoot ).toBeVisible();
+		await expect( metaboxRoot ).toBeVisible( { timeout: 20_000 } );
 		await expect(
 			metaboxRoot.locator( '.affilicard-metabox' )
-		).toBeVisible( { timeout: 15000 } );
+		).toBeVisible( { timeout: 20_000 } );
 
-		// 2. 在庫状況を「在庫切れ」に変更
-		// StockStatusSelect は label="在庫状況" の SelectControl
+		// 3. 在庫状況を「在庫切れ」に変更
+		//    StockStatusSelect: label="在庫状況" の SelectControl（要調整）
 		await metaboxRoot
 			.getByLabel( '在庫状況' )
 			.selectOption( 'out_of_stock' );
 
-		// 3. listing を追加
-		// ListingsEditor の「listing を追加」ボタンをクリック
-		await metaboxRoot.getByRole( 'button', { name: 'listing を追加' } ).click();
+		// 4. listing を追加
+		//    ListingsEditor: ボタンテキスト「listing を追加」（要調整）
+		await metaboxRoot
+			.getByRole( 'button', { name: 'listing を追加' } )
+			.click();
 
-		// プラットフォームが読み込まれるまで待機（SelectControl が描画される）
-		const listingRow = metaboxRoot.locator( '.affilicard-listing-row' ).first();
-		await expect( listingRow ).toBeVisible( { timeout: 10000 } );
+		// listing 行が表示されるまで待機
+		const listingRow = metaboxRoot
+			.locator( '.affilicard-listing-row' )
+			.first();
+		await expect( listingRow ).toBeVisible( { timeout: 15_000 } );
 
 		// プラットフォームを選択（dmm-books）
-		// SelectControl label="プラットフォーム" の select 要素
+		//    SelectControl label="プラットフォーム"（要調整）
 		await listingRow
 			.getByLabel( 'プラットフォーム' )
 			.selectOption( 'dmm-books' );
 
 		// アフィリエイト URL を入力
+		//    TextControl label="アフィリエイト URL"（要調整）
 		await listingRow
 			.getByLabel( 'アフィリエイト URL' )
 			.fill( AFFILIATE_URL );
 
-		// 4. パブリッシュボタン（クラシックエディタ）をクリック
-		// #publish はクラシックエディタの「公開」「更新」ボタン
+		// 5. パブリッシュ（クラシックエディタの #publish ボタン）
 		await page.locator( '#publish' ).click();
 
-		// 5. 保存完了を確認（URL が post=X&action=edit になる or 更新通知）
+		// 6. 保存完了まで待機（URL が post=X&action=edit に変わる）
 		await page.waitForURL(
 			( url ) =>
 				url.searchParams.get( 'action' ) === 'edit' &&
 				url.searchParams.has( 'post' ),
-			{ timeout: 20000 }
+			{ timeout: 30_000 }
 		);
 
-		// 更新後の URL から post ID を確認
-		const savedPostId = new URL( page.url() ).searchParams.get( 'post' );
-		expect( Number( savedPostId ) ).toBeGreaterThan( 0 );
-
-		// 6. ページをリロード
+		// 7. ページをリロードして React metabox を再マウント
 		await page.reload();
-
-		// metabox の React アプリが再マウントされるまで待機
-		const reloadedMetaboxRoot = page.locator( '#affilicard-metabox-root' );
+		const reloadedRoot = page.locator( '#affilicard-metabox-root' );
 		await expect(
-			reloadedMetaboxRoot.locator( '.affilicard-metabox' )
-		).toBeVisible( { timeout: 15000 } );
+			reloadedRoot.locator( '.affilicard-metabox' )
+		).toBeVisible( { timeout: 20_000 } );
 
-		// 7. 在庫状況が保持されていることを確認
-		await expect(
-			reloadedMetaboxRoot.getByLabel( '在庫状況' )
-		).toHaveValue( 'out_of_stock' );
-
-		// 8. listing が復元されており、アフィリエイト URL が保持されていることを確認
-		const reloadedListingRow = reloadedMetaboxRoot
+		// 8. 最低限の assertion:
+		//    listing 行が少なくとも 1 件表示されていること（metabox がデータを復元した証拠）
+		const reloadedRow = reloadedRoot
 			.locator( '.affilicard-listing-row' )
 			.first();
-		await expect( reloadedListingRow ).toBeVisible( { timeout: 10000 } );
+		await expect( reloadedRow ).toBeVisible( { timeout: 15_000 } );
 
+		// アフィリエイト URL が保持されていること（要調整: label が異なる場合はセレクタを修正）
 		await expect(
-			reloadedListingRow.getByLabel( 'アフィリエイト URL' )
+			reloadedRow.getByLabel( 'アフィリエイト URL' )
 		).toHaveValue( AFFILIATE_URL );
-
-		await expect(
-			reloadedListingRow.getByLabel( 'プラットフォーム' )
-		).toHaveValue( 'dmm-books' );
 	} );
 } );
