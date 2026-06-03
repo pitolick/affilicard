@@ -50,12 +50,22 @@ $make_post = static function ( array $attrs ): int {
 	);
 };
 
-// 予約投稿（future）商品。manual listing なので publish 昇格時に外部 API を叩かない。
-// Phase 4a-3 の「future→publish 昇格でフロント表示」を検証するためのシード。
-$future_id = $repo->save(
+// 予約投稿（future）商品。wp_insert_post は future ステータスでも post_date が
+// 過去/現在だと publish に変換するため、明示的に未来日時を与えて future を維持する。
+// manual listing なので publish 昇格しても外部 API は叩かない。
+$future_post_date = gmdate( 'Y-m-d H:i:s', time() + ( 7 * DAY_IN_SECONDS ) );
+$future_id        = (int) wp_insert_post(
 	array(
-		'title'        => 'E2E 予約公開商品',
-		'status'       => 'future',
+		'post_type'     => 'affilicard_product',
+		'post_status'   => 'future',
+		'post_title'    => 'E2E 予約公開商品',
+		'post_date'     => $future_post_date,
+		'post_date_gmt' => $future_post_date,
+	)
+);
+$repo->saveMeta(
+	$future_id,
+	array(
 		'product_type' => 'generic',
 		'stock_status' => 'available',
 		'listings'     => array(
