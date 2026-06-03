@@ -24,4 +24,9 @@ interface ProductRepositoryInterface {
 	 * @return array<string, mixed>|null
 	 */
 	public function findByExternalId( string $platformCode, string $externalId ): ?array;
+
+	/**
+	 * @return array<string, mixed>|null
+	 */
+	public function findBySlug( string $slug ): ?array;
 }
