@@ -50,13 +50,38 @@ $make_post = static function ( array $attrs ): int {
 	);
 };
 
+// 予約投稿（future）商品。manual listing なので publish 昇格時に外部 API を叩かない。
+// Phase 4a-3 の「future→publish 昇格でフロント表示」を検証するためのシード。
+$future_id = $repo->save(
+	array(
+		'title'        => 'E2E 予約公開商品',
+		'status'       => 'future',
+		'product_type' => 'generic',
+		'stock_status' => 'available',
+		'listings'     => array(
+			array(
+				'platform'      => 'dmm-books',
+				'enabled'       => true,
+				'update_mode'   => 'manual',
+				'auto_update'   => false,
+				'affiliate_url' => 'https://example.com/aff-future',
+				'regular_url'   => '',
+				'price'         => '700',
+			),
+		),
+	)
+);
+
 $available_post = $make_post( array( 'productId' => $available_id, 'ctaBgColor' => '#123456' ) );
 $out_post       = $make_post( array( 'productId' => $out_id ) );
+$future_post    = $make_post( array( 'productId' => $future_id ) );
 
 echo 'SEED_JSON:' . wp_json_encode(
 	array(
 		'availablePostId'    => $available_post,
 		'outOfStockPostId'   => $out_post,
 		'availableProductId' => $available_id,
+		'futurePostId'       => $future_post,
+		'futureProductId'    => $future_id,
 	)
 ) . "\n";
