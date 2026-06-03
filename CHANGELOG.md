@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-03
+
+### Added
+
+- Block で `externalId + platform` 指定時、CPT 不在なら Provider 経由で商品を auto-create（`affilicard_autocreate_*` transient で連打抑止、生成は publish）
+- プラットフォーム単位の API 価格自動更新設定（PlatformDefinition の `autoRefresh` / `refreshFrequency`=daily/weekly）と、それに応じた WP-Cron `affilicard_refresh_platform`（platform ごとに hook 引数で登録。グローバル `cron_enabled` がマスタースイッチ）
+- 価格更新の手動トリガー REST `POST /affilicard/v1/refresh`（全体 / `platform` 別、`force` で取扱終了 listing も更新）と、General 設定の「一括更新」「強制一括更新」ボタン・各 Platform の「今すぐ更新」ボタン
+- 予約投稿（future）→ publish 昇格時に listing を最新価格へ refresh（`transition_post_status`）
+- `Provider::fetch()` 戻り値に `title`（auto-create 用）／ `GeneralSettings::isCronEnabled()` ／ `ProductRepositoryInterface`
+
+### Notes
+
+- 価格更新（自動 Cron・予約投稿昇格・通常の手動更新）の対象は公開中（publish）商品の `update_mode=auto && auto_update && enabled` listing のみ（非公開はスキップ、`auto_update=false` は更新しない）。「強制一括更新」のみ `auto_update=false` も対象。
+- `cron_enabled` の ON/OFF・platform の `autoRefresh`/頻度に応じて WP-Cron を reconcile し、無効化時・プラグイン無効化時に解除
+
 ## [0.2.0] - 2026-06-03
 
 ### Added
