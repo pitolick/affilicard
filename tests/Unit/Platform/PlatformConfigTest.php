@@ -173,4 +173,10 @@ final class PlatformConfigTest extends TestCase {
 		$this->assertSame( 1, $defaults[0]->displayOrder );
 		$this->assertSame( 4, $defaults[3]->displayOrder );
 	}
+
+	public function test_defaults_dmm_books_has_auto_refresh_on(): void {
+		$defaults = PlatformConfig::defaults();
+		$dmm      = array_values( array_filter( $defaults, static fn( $d ) => 'dmm-books' === $d->code ) )[0];
+		$this->assertTrue( $dmm->autoRefresh );
+	}
 }

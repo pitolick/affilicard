@@ -3,9 +3,11 @@ declare(strict_types=1);
 
 namespace Affilicard\Block;
 
+use Affilicard\AutoCreate\ProductAutoCreator;
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\Renderer\CardRenderer;
 use Affilicard\Repository\ProductRepository;
+use Affilicard\Repository\ProductRepositoryInterface;
 
 /**
  * Gutenberg block `affilicard/product-card` の登録とサーバサイド render。
@@ -19,10 +21,17 @@ final class Block {
 	private const STYLE_HANDLE        = 'affilicard-card';
 	private const EDITOR_STYLE_HANDLE = 'affilicard-block-editor';
 
-	public function __construct( private ProductRepository $repository ) {}
+	public function __construct(
+		private ProductRepositoryInterface $repository,
+		private ProductAutoCreator $autoCreator
+	) {}
 
 	public static function register_hook(): void {
-		$instance = new self( new ProductRepository() );
+		$repository = new ProductRepository();
+		$instance   = new self(
+			$repository,
+			new ProductAutoCreator( \Affilicard\Plugin::buildProviderRegistry(), $repository )
+		);
 		add_action( 'init', array( $instance, 'register' ) );
 	}
 
@@ -131,10 +140,28 @@ final class Block {
 		$external_id = isset( $attributes['externalId'] ) ? trim( (string) $attributes['externalId'] ) : '';
 		$platform    = isset( $attributes['platform'] ) ? trim( (string) $attributes['platform'] ) : '';
 		if ( '' !== $external_id && '' !== $platform ) {
-			return $this->repository->findByExternalId( $platform, $external_id );
+			$found = $this->repository->findByExternalId( $platform, $external_id );
+			if ( null !== $found ) {
+				return $found;
+			}
+			return $this->autoCreate( $platform, $external_id );
 		}
 
 		return null;
+	}
+
+	private function autoCreate( string $platform, string $externalId ): ?array {
+		$lock_key = 'affilicard_autocreate_' . $platform . '_' . $externalId;
+		if ( false !== get_transient( $lock_key ) ) {
+			return null;
+		}
+		set_transient( $lock_key, 1, 5 * MINUTE_IN_SECONDS );
+
+		$post_id = $this->autoCreator->create( $platform, $externalId );
+		if ( null === $post_id ) {
+			return null;
+		}
+		return $this->repository->find( $post_id );
 	}
 
 	private function featuredImageUrl( int $postId ): string {

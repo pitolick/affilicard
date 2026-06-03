@@ -17,7 +17,8 @@ final class RestController {
 		private ProductsController $products,
 		private SettingsController $settings,
 		private PlatformsController $platforms,
-		private CredentialsController $credentials
+		private CredentialsController $credentials,
+		private RefreshController $refresh
 	) {}
 
 	public function register(): void {
@@ -29,5 +30,6 @@ final class RestController {
 		$this->settings->registerRoutes( self::NAMESPACE );
 		$this->platforms->registerRoutes( self::NAMESPACE );
 		$this->credentials->registerRoutes( self::NAMESPACE );
+		$this->refresh->registerRoutes( self::NAMESPACE );
 	}
 }

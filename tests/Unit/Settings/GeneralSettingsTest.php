@@ -118,4 +118,14 @@ final class GeneralSettingsTest extends TestCase {
 		$result = GeneralSettings::update( array( 'default_product_type' => 'ebook' ) );
 		$this->assertSame( 'ebook', $result['default_product_type'] );
 	}
+
+	public function test_is_cron_enabled_reflects_option(): void {
+		WP_Mock::userFunction( 'get_option' )->with( GeneralSettings::OPTION_KEY, array() )->andReturn( array( 'cron_enabled' => true ) );
+		$this->assertTrue( GeneralSettings::isCronEnabled() );
+	}
+
+	public function test_is_cron_enabled_defaults_false(): void {
+		WP_Mock::userFunction( 'get_option' )->with( GeneralSettings::OPTION_KEY, array() )->andReturn( array() );
+		$this->assertFalse( GeneralSettings::isCronEnabled() );
+	}
 }

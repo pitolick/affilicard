@@ -95,4 +95,45 @@ final class PlatformDefinitionTest extends TestCase {
 			'#ffffff'
 		);
 	}
+
+	public function test_from_array_defaults_auto_refresh_off_weekly(): void {
+		$d = PlatformDefinition::fromArray( array( 'code' => 'x' ) );
+		$this->assertFalse( $d->autoRefresh );
+		$this->assertSame( 'weekly', $d->refreshFrequency );
+	}
+
+	public function test_from_array_reads_auto_refresh_and_frequency(): void {
+		$d = PlatformDefinition::fromArray(
+			array(
+				'code'             => 'x',
+				'autoRefresh'      => true,
+				'refreshFrequency' => 'daily',
+			)
+		);
+		$this->assertTrue( $d->autoRefresh );
+		$this->assertSame( 'daily', $d->refreshFrequency );
+	}
+
+	public function test_from_array_rejects_invalid_frequency(): void {
+		$d = PlatformDefinition::fromArray(
+			array(
+				'code'             => 'x',
+				'refreshFrequency' => 'hourly',
+			)
+		);
+		$this->assertSame( 'weekly', $d->refreshFrequency );
+	}
+
+	public function test_to_array_includes_new_fields(): void {
+		$d   = PlatformDefinition::fromArray(
+			array(
+				'code'             => 'x',
+				'autoRefresh'      => true,
+				'refreshFrequency' => 'daily',
+			)
+		);
+		$arr = $d->toArray();
+		$this->assertTrue( $arr['autoRefresh'] );
+		$this->assertSame( 'daily', $arr['refreshFrequency'] );
+	}
 }

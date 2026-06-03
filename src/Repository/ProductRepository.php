@@ -13,7 +13,7 @@ use Affilicard\Util\JsonField;
  *
  * 値の入出力はすべて配列で行い、メタの JSON シリアライズは JsonField に委譲する。
  */
-final class ProductRepository {
+final class ProductRepository implements ProductRepositoryInterface {
 
 	/**
 	 * 投稿 ID から商品データを取得する。

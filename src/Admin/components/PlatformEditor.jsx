@@ -2,9 +2,11 @@ import {
 	TextControl,
 	ToggleControl,
 	SelectControl,
+	Button,
 } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import { CredentialEditor } from './CredentialEditor';
+import { triggerRefresh } from '../api/refresh';
 
 const PROVIDER_OPTIONS = [
 	{ label: '手動入力', value: 'manual' },
@@ -75,6 +77,29 @@ export function PlatformEditor({ platform, onChange }) {
 				value={platform.buttonTextColor ?? '#ffffff'}
 				onChange={(v) => update({ buttonTextColor: v })}
 			/>
+
+			<ToggleControl
+				label={__('API自動更新', 'affilicard')}
+				checked={Boolean(platform.autoRefresh)}
+				onChange={(v) => update({ autoRefresh: v })}
+			/>
+			{platform.autoRefresh && (
+				<SelectControl
+					label={__('更新頻度', 'affilicard')}
+					value={platform.refreshFrequency ?? 'weekly'}
+					options={[
+						{ label: __('毎日', 'affilicard'), value: 'daily' },
+						{ label: __('毎週', 'affilicard'), value: 'weekly' },
+					]}
+					onChange={(v) => update({ refreshFrequency: v })}
+				/>
+			)}
+			<Button
+				variant="secondary"
+				onClick={() => triggerRefresh(platform.code)}
+			>
+				{__('今すぐこのプラットフォームを更新', 'affilicard')}
+			</Button>
 
 			<CredentialEditor
 				platformCode={platform.code}

@@ -118,6 +118,7 @@ final class PluginTest extends TestCase {
 	public function test_boot_registers_block_init_hook(): void {
 		WP_Mock::userFunction( 'is_admin', array( 'return' => false ) );
 		WP_Mock::userFunction( 'register_activation_hook', array( 'return' => true ) );
+		WP_Mock::userFunction( 'register_deactivation_hook', array( 'return' => true ) );
 
 		// WP_Mock::add_action は userFunction でオーバーライドできないため、
 		// WP_Mock ネイティブの expectActionAdded + AnyInstance マッチャーを使用する。
@@ -126,8 +127,45 @@ final class PluginTest extends TestCase {
 			array( new \WP_Mock\Matcher\AnyInstance( \Affilicard\Block\Block::class ), 'register' )
 		);
 
+		// Cron: platform 単位イベントのハンドラ登録
+		WP_Mock::expectActionAdded( \Affilicard\Cron\RefreshScheduler::HOOK, \WP_Mock\Functions::type( 'callable' ) );
+
+		// Cron: init 時の reconcile
+		WP_Mock::expectActionAdded( 'init', array( \Affilicard\Cron\RefreshScheduler::class, 'reconcile' ) );
+
+		// 予約投稿昇格時の refresh
+		WP_Mock::expectActionAdded( 'transition_post_status', array( Plugin::class, 'onTransitionPostStatus' ), 10, 3 );
+
 		Plugin::boot();
 
+		$this->assertConditionsMet();
+	}
+
+	public function test_on_transition_refreshes_on_future_to_publish(): void {
+		$post = (object) array(
+			'ID'        => 77,
+			'post_type' => 'affilicard_product',
+		);
+		WP_Mock::userFunction( 'get_post' )->with( 77 )->andReturn( null ); // find→null → save 不発
+		\Affilicard\Plugin::onTransitionPostStatus( 'publish', 'future', $post );
+		$this->assertConditionsMet();
+	}
+
+	public function test_on_transition_ignores_non_product(): void {
+		$post = (object) array(
+			'ID'        => 78,
+			'post_type' => 'post',
+		);
+		\Affilicard\Plugin::onTransitionPostStatus( 'publish', 'future', $post );
+		$this->assertConditionsMet();
+	}
+
+	public function test_on_transition_ignores_non_future_origin(): void {
+		$post = (object) array(
+			'ID'        => 79,
+			'post_type' => 'affilicard_product',
+		);
+		\Affilicard\Plugin::onTransitionPostStatus( 'publish', 'draft', $post ); // draft→publish は対象外
 		$this->assertConditionsMet();
 	}
 }
