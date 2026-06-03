@@ -101,7 +101,9 @@ final class PlatformConfig {
 				array( 'ebook' ),
 				__( 'この値段で読む →', 'affilicard' ),
 				'#d72d65',
-				'#ffffff'
+				'#ffffff',
+				true,
+				'weekly'
 			),
 			new PlatformDefinition(
 				'amazon-kindle',

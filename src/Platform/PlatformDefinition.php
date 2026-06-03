@@ -10,6 +10,8 @@ use InvalidArgumentException;
  */
 final class PlatformDefinition {
 
+	private const ALLOWED_FREQUENCIES = array( 'daily', 'weekly' );
+
 	/**
 	 * @param list<string> $applicableTypes 適用可能な商品タイプコード（例: ['ebook'], ['generic', 'ebook']）
 	 */
@@ -22,7 +24,9 @@ final class PlatformDefinition {
 		public readonly array $applicableTypes,
 		public readonly string $buttonLabel,
 		public readonly string $brandColor,
-		public readonly string $buttonTextColor
+		public readonly string $buttonTextColor,
+		public readonly bool $autoRefresh = false,
+		public readonly string $refreshFrequency = 'weekly'
 	) {
 		if ( '' === $this->code ) {
 			throw new InvalidArgumentException( 'PlatformDefinition: code must not be empty.' );
@@ -34,15 +38,17 @@ final class PlatformDefinition {
 	 */
 	public function toArray(): array {
 		return array(
-			'code'            => $this->code,
-			'name'            => $this->name,
-			'provider'        => $this->provider,
-			'displayOrder'    => $this->displayOrder,
-			'enabled'         => $this->enabled,
-			'applicableTypes' => $this->applicableTypes,
-			'buttonLabel'     => $this->buttonLabel,
-			'brandColor'      => $this->brandColor,
-			'buttonTextColor' => $this->buttonTextColor,
+			'code'             => $this->code,
+			'name'             => $this->name,
+			'provider'         => $this->provider,
+			'displayOrder'     => $this->displayOrder,
+			'enabled'          => $this->enabled,
+			'applicableTypes'  => $this->applicableTypes,
+			'buttonLabel'      => $this->buttonLabel,
+			'brandColor'       => $this->brandColor,
+			'buttonTextColor'  => $this->buttonTextColor,
+			'autoRefresh'      => $this->autoRefresh,
+			'refreshFrequency' => $this->refreshFrequency,
 		);
 	}
 
@@ -69,6 +75,11 @@ final class PlatformDefinition {
 			$applicable_types = array( 'generic' );
 		}
 
+		$frequency = isset( $data['refreshFrequency'] ) ? (string) $data['refreshFrequency'] : 'weekly';
+		if ( ! in_array( $frequency, self::ALLOWED_FREQUENCIES, true ) ) {
+			$frequency = 'weekly';
+		}
+
 		return new self(
 			$code,
 			isset( $data['name'] ) ? (string) $data['name'] : $code,
@@ -78,7 +89,9 @@ final class PlatformDefinition {
 			$applicable_types,
 			isset( $data['buttonLabel'] ) && '' !== (string) $data['buttonLabel'] ? (string) $data['buttonLabel'] : '購入する',
 			isset( $data['brandColor'] ) && '' !== (string) $data['brandColor'] ? (string) $data['brandColor'] : '#444444',
-			isset( $data['buttonTextColor'] ) && '' !== (string) $data['buttonTextColor'] ? (string) $data['buttonTextColor'] : '#ffffff'
+			isset( $data['buttonTextColor'] ) && '' !== (string) $data['buttonTextColor'] ? (string) $data['buttonTextColor'] : '#ffffff',
+			isset( $data['autoRefresh'] ) ? (bool) $data['autoRefresh'] : false,
+			$frequency
 		);
 	}
 }
