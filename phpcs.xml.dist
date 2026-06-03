@@ -11,6 +11,8 @@
     <exclude-pattern>node_modules/</exclude-pattern>
     <exclude-pattern>build/</exclude-pattern>
     <exclude-pattern>dist/</exclude-pattern>
+    <!-- E2E ツール用 PHP（wp eval-file で実行するシードスクリプト）は WPCS 対象外 -->
+    <exclude-pattern>tests/e2e/</exclude-pattern>
 
     <arg name="extensions" value="php"/>
     <arg name="colors"/>

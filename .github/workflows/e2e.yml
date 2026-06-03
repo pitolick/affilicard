@@ -16,6 +16,9 @@ jobs:
     # wp-env requires Docker — ubuntu-latest has Docker pre-installed.
     steps:
       - uses: actions/checkout@v4
+        with:
+          # E2E は push しないため資格情報を .git/config に残さない（漏えい面を縮小）
+          persist-credentials: false
 
       # PHP + Composer（affilicard.php は vendor/ が必要）
       - uses: shivammathur/setup-php@v2
