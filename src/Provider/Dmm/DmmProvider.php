@@ -219,6 +219,7 @@ final class DmmProvider implements ProviderInterface {
 		$affiliate_url = isset( $item['affiliateURL'] ) ? (string) $item['affiliateURL'] : '';
 
 		return array(
+			'title'           => isset( $item['title'] ) ? (string) $item['title'] : '',
 			'price'           => $price,
 			'list_price'      => $list_price,
 			'badge'           => $badge,

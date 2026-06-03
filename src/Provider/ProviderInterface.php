@@ -29,7 +29,7 @@ interface ProviderInterface {
 	 * 取得不可・credentials 未設定の場合は null を返す。
 	 *
 	 * @param array<string, mixed> $platformConfig 対象 platform の追加設定
-	 * @return array<string, mixed>|null
+	 * @return array{title?: string, price?: string, list_price?: string, badge?: string, image_url?: string, regular_url?: string, affiliate_url?: string, platform_extras?: array<string, mixed>, raw?: array<string, mixed>}|null
 	 */
 	public function fetch( string $externalId, array $platformConfig ): ?array;
 
