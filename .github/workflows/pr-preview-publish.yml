@@ -20,4 +20,4 @@ jobs:
       pull-requests: write
     uses: WordPress/action-wp-playground-pr-preview/.github/workflows/preview-publish.yml@43fc435558bc6cee69f5b214d6b8ca4f9f80c31d # v3
     with:
-      kind: plugin
+      blueprint-from-artifact: true
