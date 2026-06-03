@@ -40,3 +40,11 @@ Thumbs.db
 # WordPress local
 wp-config.php
 /wp-content/uploads/
+
+# wp-env runtime（Docker ボリューム・設定キャッシュ）
+.wp-env/
+
+# Playwright / E2E
+test-results/
+playwright-report/
+artifacts/

@@ -15,13 +15,19 @@
 		"start": "wp-scripts start src/Block/index.js src/Admin/settings.js src/Admin/metabox.js --output-path=build",
 		"lint:js": "wp-scripts lint-js src",
 		"test:js": "wp-scripts test-unit-js --passWithNoTests",
-		"format:js": "wp-scripts format src"
+		"format:js": "wp-scripts format src",
+		"env:start": "wp-env start",
+		"env:stop": "wp-env stop",
+		"env:logs": "wp-env logs --watch=false",
+		"test:e2e": "playwright test --config=playwright.config.js"
 	},
 	"devDependencies": {
+		"@playwright/test": "^1.60.0",
 		"@testing-library/dom": "^10.4.1",
 		"@testing-library/jest-dom": "^6.9.1",
 		"@testing-library/react": "^16.3.2",
 		"@testing-library/user-event": "^14.6.1",
+		"@wordpress/env": "^11.7.0",
 		"@wordpress/scripts": "^32.3.0",
 		"eslint": "^10.4.0",
 		"prettier": "^3.8.3"

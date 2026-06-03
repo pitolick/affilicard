@@ -1,0 +1,88 @@
+name: E2E
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # wp-env requires Docker — ubuntu-latest has Docker pre-installed.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # E2E は push しないため資格情報を .git/config に残さない（漏えい面を縮小）
+          persist-credentials: false
+
+      # PHP + Composer（affilicard.php は vendor/ が必要）
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+          coverage: none
+
+      # Node + npm
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # Composer の本番依存のみインストール
+      # （vendor/ を build より先に用意するため最初に実行）
+      - name: Composer install (no-dev)
+        run: composer install --no-dev --optimize-autoloader --no-progress --no-interaction
+
+      # npm 依存インストール（@wordpress/env / @playwright/test 等を含む）
+      - name: npm ci
+        run: npm ci
+
+      # JS ビルド（build/ を生成する）
+      - name: Build
+        run: npm run build
+
+      # Playwright ブラウザをインストール（Chromium のみ）
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      # wp-env 起動（Docker-in-Docker）
+      # wp-env は内部で Docker を使用する。ubuntu-latest には Docker が入っている。
+      - name: Start wp-env
+        run: npm run env:start
+
+      # wp-env が完全に起動するまで待機
+      - name: Wait for WordPress
+        run: |
+          echo "Waiting for WordPress test instance (port 8889)…"
+          timeout 120 bash -c 'until curl -fsS http://localhost:8889/ > /dev/null 2>&1; do sleep 3; done'
+          echo "WordPress is ready."
+
+      # E2E テスト実行
+      - name: Run E2E tests
+        run: npm run test:e2e
+        env:
+          # wp-env のデフォルト管理者: admin / password
+          WP_BASE_URL: http://localhost:8889
+          WP_USERNAME: admin
+          WP_PASSWORD: password
+
+      # 失敗時のデバッグ情報（--watch=false で非 follow、timeout 60s で打ち切り）
+      - name: Show wp-env logs
+        if: failure()
+        run: timeout 60 npm run env:logs || true
+
+      # テスト成果物（スクリーンショット・トレース等）をアップロード
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
