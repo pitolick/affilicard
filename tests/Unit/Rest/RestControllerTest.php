@@ -3,13 +3,16 @@ declare(strict_types=1);
 
 namespace Affilicard\Tests\Unit\Rest;
 
+use Affilicard\Cron\ListingRefresher;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Rest\CredentialsController;
 use Affilicard\Rest\PlatformsController;
 use Affilicard\Rest\ProductsController;
+use Affilicard\Rest\RefreshController;
 use Affilicard\Rest\RestController;
 use Affilicard\Rest\SettingsController;
+use Mockery;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
 
@@ -22,15 +25,18 @@ final class RestControllerTest extends TestCase {
 
 	public function tearDown(): void {
 		WP_Mock::tearDown();
+		Mockery::close();
 		parent::tearDown();
 	}
 
 	public function test_register_hooks_rest_api_init_and_register_routes_dispatches_to_each_sub_controller(): void {
+		$refresher  = Mockery::mock( ListingRefresher::class );
 		$controller = new RestController(
 			new ProductsController( new ProductRepository() ),
 			new SettingsController(),
 			new PlatformsController(),
-			new CredentialsController( new ProviderRegistry() )
+			new CredentialsController( new ProviderRegistry() ),
+			new RefreshController( $refresher )
 		);
 
 		WP_Mock::expectActionAdded( 'rest_api_init', array( $controller, 'registerRoutes' ) );
@@ -42,9 +48,10 @@ final class RestControllerTest extends TestCase {
 		// settings は 1 ルート
 		// platforms は 1 ルート
 		// credentials は 2 ルート（credentials, test-connection）
+		// refresh は 1 ルート
 		$call_count = 0;
 		WP_Mock::userFunction( 'register_rest_route' )
-			->times( 6 )
+			->times( 7 )
 			->andReturnUsing(
 				function ( $namespace, $route ) use ( &$call_count ) {
 					$call_count++;
@@ -56,7 +63,7 @@ final class RestControllerTest extends TestCase {
 
 		$controller->registerRoutes();
 
-		$this->assertSame( 6, $call_count );
+		$this->assertSame( 7, $call_count );
 		$this->assertConditionsMet();
 	}
 }

@@ -14,7 +14,7 @@ use Affilicard\Repository\ProductRepositoryInterface;
  * 対象 listing は update_mode='auto' && auto_update=true && enabled
  * （force=true のときは auto_update を無視）。post_status が publish 以外はスキップ。
  */
-final class ListingRefresher {
+class ListingRefresher {
 
 	public function __construct(
 		private ProviderRegistry $registry,

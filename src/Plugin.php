@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard;
 
 use Affilicard\Block\Block;
+use Affilicard\Cron\ListingRefresher;
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductListColumns;
 use Affilicard\PostType\ProductMetaBox;
@@ -15,6 +16,7 @@ use Affilicard\Repository\ProductRepository;
 use Affilicard\Rest\CredentialsController;
 use Affilicard\Rest\PlatformsController;
 use Affilicard\Rest\ProductsController;
+use Affilicard\Rest\RefreshController;
 use Affilicard\Rest\RestController;
 use Affilicard\Rest\SettingsController;
 use Affilicard\Settings\DashboardWidget;
@@ -64,7 +66,8 @@ final class Plugin {
 			new ProductsController( new ProductRepository() ),
 			new SettingsController(),
 			new PlatformsController(),
-			new CredentialsController( $providers )
+			new CredentialsController( $providers ),
+			new RefreshController( new ListingRefresher( $providers, new ProductRepository() ) )
 		);
 		$rest->register();
 
