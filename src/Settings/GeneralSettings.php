@@ -34,6 +34,11 @@ final class GeneralSettings {
 		return self::merge( $stored );
 	}
 
+	public static function isCronEnabled(): bool {
+		$settings = self::get();
+		return ! empty( $settings['cron_enabled'] );
+	}
+
 	/**
 	 * 部分更新する。値ごとに sanitize した上で current と merge し、update_option で保存する。
 	 *
