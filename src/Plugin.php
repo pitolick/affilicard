@@ -5,6 +5,7 @@ namespace Affilicard;
 
 use Affilicard\Block\Block;
 use Affilicard\Cron\ListingRefresher;
+use Affilicard\Cron\RefreshScheduler;
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductListColumns;
 use Affilicard\PostType\ProductMetaBox;
@@ -71,8 +72,21 @@ final class Plugin {
 		);
 		$rest->register();
 
+		// 価格更新 Cron: platform 単位イベントのハンドラ登録 + 設定との差分調整
+		RefreshScheduler::register(
+			static function ( $platformCode ): void {
+				( new ListingRefresher( self::buildProviderRegistry(), new ProductRepository() ) )->runForPlatform( (string) $platformCode );
+			}
+		);
+		add_action( 'init', array( RefreshScheduler::class, 'reconcile' ) );
+
+		// 予約投稿（future）→ publish 昇格時に最新価格へ refresh
+		add_action( 'transition_post_status', array( self::class, 'onTransitionPostStatus' ), 10, 3 );
+
 		// 有効化フック: デフォルト platform を idempotent に seed
 		register_activation_hook( AFFILICARD_PLUGIN_FILE, array( self::class, 'onActivate' ) );
+		// 無効化フック: WP-Cron スケジュールをすべて解除
+		register_deactivation_hook( AFFILICARD_PLUGIN_FILE, array( RefreshScheduler::class, 'clear' ) );
 	}
 
 	public static function buildProviderRegistry(): ProviderRegistry {
@@ -111,6 +125,21 @@ final class Plugin {
 	public static function renderSettingsPage(): void {
 		echo '<div class="wrap"><h1>' . esc_html__( 'Affilicard 設定', 'affilicard' ) . '</h1>';
 		echo '<div id="affilicard-settings-root"></div></div>';
+	}
+
+	/**
+	 * 予約投稿（future）が publish に昇格した瞬間に listing を最新価格へ refresh する。
+	 *
+	 * @param object $post
+	 */
+	public static function onTransitionPostStatus( string $newStatus, string $oldStatus, $post ): void {
+		if ( 'publish' !== $newStatus || 'future' !== $oldStatus ) {
+			return;
+		}
+		if ( ! is_object( $post ) || ! isset( $post->post_type ) || ProductPostType::POST_TYPE !== $post->post_type ) {
+			return;
+		}
+		( new ListingRefresher( self::buildProviderRegistry(), new ProductRepository() ) )->refreshProduct( (int) $post->ID );
 	}
 
 	public static function enqueueSettingsAssets( string $hook ): void {
