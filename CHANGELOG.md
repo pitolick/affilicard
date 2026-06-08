@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-08
+
+### Fixed
+
+- extras の日本語が `著...` のように壊れて保存・表示される不具合を修正（`JsonField::encode` に `JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES` を付与。`update_post_meta` の `wp_unslash` がバックスラッシュを除去して壊す根本原因に対処）
+
+### Changed
+
+- 商品カードを電子書籍向け本番デザインに刷新：書影 2 カラム（左 160px / SP 全幅）・著者/出版社の書誌ヘッダ・あらすじ・「店名 ｜ ¥価格（税込）＋割引バッジ ｜ CTA」の店舗行（`<ul>/<li>`）・価格時点フッタ（listing の最新 `last_fetched_at` 由来）。CTA はプラットフォーム別ブランド色を維持し、`--affilicard-*` CSS 変数によるテーマ色連携も維持
+
 ## [0.3.0] - 2026-06-03
 
 ### Added
