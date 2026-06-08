@@ -326,6 +326,7 @@ final class CardRendererTest extends TestCase {
 	}
 
 	public function test_author_publisher_excluded_from_extras_dl(): void {
+		// CardRenderer 単体（options 未指定）の挙動。Block 経由では EbookType::cardHiddenKeys()=['isbn'] が渡り ISBN は非表示になる。
 		$product = $this->product(
 			array(
 				'product_type' => 'ebook',
@@ -363,6 +364,70 @@ final class CardRendererTest extends TestCase {
 		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
 		$this->assertStringNotContainsString( 'affilicard-card__meta', $html );
 		$this->assertStringContainsString( 'カラー', $html );
+	}
+
+	public function test_hidden_keys_option_removes_extra_from_dl(): void {
+		$product = $this->product(
+			array(
+				'product_type' => 'ebook',
+				'extras'       => array(
+					array(
+						'key'   => 'isbn',
+						'label' => 'ISBN',
+						'value' => '978-4-00-000000-0',
+					),
+					array(
+						'key'   => 'series',
+						'label' => 'シリーズ',
+						'value' => 'サンプルシリーズ',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render(
+			$product,
+			array( $this->store() ),
+			array( 'hidden_keys' => array( 'isbn' ) )
+		);
+		$this->assertStringNotContainsString( '978-4-00-000000-0', $html );
+		$this->assertStringContainsString( 'シリーズ', $html );
+	}
+
+	public function test_media_label_option_used_for_placeholder(): void {
+		// image_url 未指定 → プレースホルダに media_label が出る。
+		$html = ( new CardRenderer() )->render(
+			$this->product(),
+			array( $this->store() ),
+			array( 'media_label' => '商品画像' )
+		);
+		$this->assertStringContainsString( 'affilicard-card__media-placeholder', $html );
+		$this->assertStringContainsString( '商品画像', $html );
+	}
+
+	public function test_default_placeholder_label_when_no_option(): void {
+		$html = ( new CardRenderer() )->render( $this->product(), array( $this->store() ) );
+		$this->assertStringContainsString( '商品画像', $html );
+	}
+
+	public function test_custom_header_keys_option_promotes_to_meta(): void {
+		$product = $this->product(
+			array(
+				'extras' => array(
+					array(
+						'key'   => 'brand',
+						'label' => 'ブランド',
+						'value' => 'サンプルブランド',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render(
+			$product,
+			array( $this->store() ),
+			array( 'header_keys' => array( 'brand' ) )
+		);
+		$this->assertStringContainsString( 'affilicard-card__meta', $html );
+		$this->assertStringContainsString( 'サンプルブランド', $html );
 	}
 
 	private function dmmBooks(): PlatformDefinition {

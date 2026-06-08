@@ -29,6 +29,7 @@ $available_id = $repo->save(
 		'extras'       => array(
 			array( 'key' => 'author', 'label' => '著者', 'value' => '架空 太郎' ),
 			array( 'key' => 'publisher', 'label' => '出版社', 'value' => 'サンプル出版社' ),
+			array( 'key' => 'isbn', 'label' => 'ISBN', 'value' => '978-4-00-000000-0' ),
 		),
 		'listings'     => array(
 			array(

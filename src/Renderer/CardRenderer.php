@@ -27,9 +27,12 @@ final class CardRenderer {
 			}
 		}
 
-		$hide      = isset( $options['hide_platforms'] ) && is_array( $options['hide_platforms'] ) ? array_map( 'strval', $options['hide_platforms'] ) : array();
-		$image_url = isset( $options['image_url'] ) ? (string) $options['image_url'] : '';
-		$colors    = isset( $options['colors'] ) && is_array( $options['colors'] ) ? $options['colors'] : array();
+		$hide        = isset( $options['hide_platforms'] ) && is_array( $options['hide_platforms'] ) ? array_map( 'strval', $options['hide_platforms'] ) : array();
+		$image_url   = isset( $options['image_url'] ) ? (string) $options['image_url'] : '';
+		$colors      = isset( $options['colors'] ) && is_array( $options['colors'] ) ? $options['colors'] : array();
+		$header_keys = isset( $options['header_keys'] ) && is_array( $options['header_keys'] ) ? array_map( 'strval', $options['header_keys'] ) : array( 'author', 'publisher' );
+		$hidden_keys = isset( $options['hidden_keys'] ) && is_array( $options['hidden_keys'] ) ? array_map( 'strval', $options['hidden_keys'] ) : array();
+		$media_label = isset( $options['media_label'] ) ? (string) $options['media_label'] : (string) __( '商品画像', 'affilicard' );
 
 		$stock        = StockStatus::normalize( isset( $product['stock_status'] ) ? (string) $product['stock_status'] : null );
 		$is_available = StockStatus::AVAILABLE === $stock;
@@ -46,13 +49,13 @@ final class CardRenderer {
 		if ( '' !== $image_url ) {
 			$html .= '<img src="' . esc_url( $image_url ) . '" alt="' . esc_attr( (string) ( $product['title'] ?? '' ) ) . '" loading="lazy" />';
 		} else {
-			$html .= '<div class="affilicard-card__media-placeholder">' . esc_html__( '書影', 'affilicard' ) . '</div>';
+			$html .= '<div class="affilicard-card__media-placeholder">' . esc_html( $media_label ) . '</div>';
 		}
 		$html .= '</div>';
 
 		// 本文カラム。
 		$html .= '<div class="affilicard-card__body">';
-		$html .= $this->renderMetaHeader( $extras );
+		$html .= $this->renderMetaHeader( $extras, $header_keys );
 		$html .= '<h3 class="affilicard-card__title">' . esc_html( (string) ( $product['title'] ?? '' ) ) . '</h3>';
 
 		if ( ! $is_available ) {
@@ -64,7 +67,7 @@ final class CardRenderer {
 			$html .= '<div class="affilicard-card__desc">' . wp_kses_post( $content ) . '</div>';
 		}
 
-		$html .= $this->renderExtras( $extras );
+		$html .= $this->renderExtras( $extras, $header_keys, $hidden_keys );
 
 		if ( $is_available ) {
 			$html .= $this->renderListings(
@@ -114,17 +117,19 @@ final class CardRenderer {
 
 	/**
 	 * @param list<array<string, mixed>> $extras
+	 * @param list<string>               $header_keys
+	 * @param list<string>               $hidden_keys
 	 */
-	private function renderExtras( array $extras ): string {
-		$header_keys = array( 'author', 'publisher' );
-		$rows        = '';
+	private function renderExtras( array $extras, array $header_keys, array $hidden_keys ): string {
+		$excluded = array_merge( $header_keys, $hidden_keys );
+		$rows     = '';
 		foreach ( $extras as $extra ) {
 			if ( ! is_array( $extra ) ) {
 				continue;
 			}
 			$key = isset( $extra['key'] ) ? (string) $extra['key'] : '';
-			if ( '' !== $key && in_array( $key, $header_keys, true ) ) {
-				continue; // meta ヘッダに昇格済み。
+			if ( '' !== $key && in_array( $key, $excluded, true ) ) {
+				continue;
 			}
 			$label = isset( $extra['label'] ) ? trim( (string) $extra['label'] ) : '';
 			$value = isset( $extra['value'] ) ? trim( (string) $extra['value'] ) : '';
@@ -137,20 +142,21 @@ final class CardRenderer {
 	}
 
 	/**
-	 * 著者/出版社を「<author> 著 ／ <publisher>」の書誌ヘッダ行にまとめる。
+	 * header_keys に昇格した extras を書誌ヘッダ行にまとめる。
+	 * author キーのみ「著」を付す（書誌表記）。
 	 *
 	 * @param list<array<string, mixed>> $extras
+	 * @param list<string>               $header_keys
 	 */
-	private function renderMetaHeader( array $extras ): string {
-		$author    = $this->extraValueByKey( $extras, 'author' );
-		$publisher = $this->extraValueByKey( $extras, 'publisher' );
-
+	private function renderMetaHeader( array $extras, array $header_keys ): string {
 		$parts = array();
-		if ( '' !== $author ) {
-			$parts[] = esc_html( $author ) . esc_html__( ' 著', 'affilicard' );
-		}
-		if ( '' !== $publisher ) {
-			$parts[] = esc_html( $publisher );
+		foreach ( $header_keys as $key ) {
+			$value = $this->extraValueByKey( $extras, $key );
+			if ( '' === $value ) {
+				continue;
+			}
+			// 著者キーのみ「著」を付す（書誌表記）。
+			$parts[] = 'author' === $key ? esc_html( $value ) . esc_html__( ' 著', 'affilicard' ) : esc_html( $value );
 		}
 		if ( array() === $parts ) {
 			return '';

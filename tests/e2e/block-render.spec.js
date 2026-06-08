@@ -34,6 +34,11 @@ test('在庫ありの商品ブロックは CTA と色が描画される', async 
 	await expect(
 		page.locator('.affilicard-card__timestamp').first()
 	).toContainText('時点の価格');
+
+	// 専門型（ebook）では ISBN はカード非表示
+	await expect(page.locator('.affilicard-card').first()).not.toContainText(
+		'978-4-00-000000-0'
+	);
 });
 
 test('在庫切れの商品ブロックは CTA 非表示でバッジが出る', async ({ page }) => {
