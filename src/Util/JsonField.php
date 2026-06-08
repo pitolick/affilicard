@@ -12,7 +12,7 @@ final class JsonField {
 	 * @param array<string, mixed>|array<int, mixed> $value
 	 */
 	public static function encode( array $value ): string {
-		$json = wp_json_encode( $value );
+		$json = wp_json_encode( $value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
 		if ( ! is_string( $json ) ) {
 			$json = json_encode( $value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
 		}
