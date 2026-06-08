@@ -52,4 +52,41 @@ abstract class AbstractProductType implements ProductTypeInterface {
 
 		return $clean;
 	}
+
+	/**
+	 * @return list<string>
+	 */
+	public function cardHeaderKeys(): array {
+		return $this->cardKeysByDisplay( 'header' );
+	}
+
+	/**
+	 * @return list<string>
+	 */
+	public function cardHiddenKeys(): array {
+		return $this->cardKeysByDisplay( 'hidden' );
+	}
+
+	public function cardMediaLabel(): string {
+		return __( '商品画像', 'affilicard' );
+	}
+
+	/**
+	 * extrasSchema の card 区分に一致するキー一覧を返す（既定 'detail'）。
+	 *
+	 * @return list<string>
+	 */
+	private function cardKeysByDisplay( string $display ): array {
+		$keys = array();
+		foreach ( $this->extrasSchema() as $field ) {
+			if ( ! isset( $field['key'] ) ) {
+				continue;
+			}
+			$card = isset( $field['card'] ) ? (string) $field['card'] : 'detail';
+			if ( $card === $display ) {
+				$keys[] = (string) $field['key'];
+			}
+		}
+		return $keys;
+	}
 }

@@ -33,6 +33,15 @@ final class GenericTypeTest extends TestCase {
 		$this->assertSame( array(), $type->extrasSchema() );
 	}
 
+	public function test_card_header_and_hidden_keys_are_empty(): void {
+		$this->assertSame( array(), ( new GenericType() )->cardHeaderKeys() );
+		$this->assertSame( array(), ( new GenericType() )->cardHiddenKeys() );
+	}
+
+	public function test_card_media_label_default(): void {
+		$this->assertSame( '商品画像', ( new GenericType() )->cardMediaLabel() );
+	}
+
 	public function test_extract_extras_from_provider_returns_empty(): void {
 		$type = new GenericType();
 

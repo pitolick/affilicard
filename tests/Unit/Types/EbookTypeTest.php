@@ -117,6 +117,18 @@ final class EbookTypeTest extends TestCase {
 		);
 	}
 
+	public function test_card_header_keys_are_author_and_publisher(): void {
+		$this->assertSame( array( 'author', 'publisher' ), ( new EbookType() )->cardHeaderKeys() );
+	}
+
+	public function test_card_hidden_keys_contain_isbn(): void {
+		$this->assertSame( array( 'isbn' ), ( new EbookType() )->cardHiddenKeys() );
+	}
+
+	public function test_card_media_label_is_shoei(): void {
+		$this->assertSame( '書影', ( new EbookType() )->cardMediaLabel() );
+	}
+
 	public function test_validate_extras_keeps_known_keys_and_strips_unknown(): void {
 		$type = new EbookType();
 

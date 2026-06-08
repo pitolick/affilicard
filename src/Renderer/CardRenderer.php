@@ -27,21 +27,35 @@ final class CardRenderer {
 			}
 		}
 
-		$hide      = isset( $options['hide_platforms'] ) && is_array( $options['hide_platforms'] ) ? array_map( 'strval', $options['hide_platforms'] ) : array();
-		$image_url = isset( $options['image_url'] ) ? (string) $options['image_url'] : '';
-		$colors    = isset( $options['colors'] ) && is_array( $options['colors'] ) ? $options['colors'] : array();
+		$hide        = isset( $options['hide_platforms'] ) && is_array( $options['hide_platforms'] ) ? array_map( 'strval', $options['hide_platforms'] ) : array();
+		$image_url   = isset( $options['image_url'] ) ? (string) $options['image_url'] : '';
+		$colors      = isset( $options['colors'] ) && is_array( $options['colors'] ) ? $options['colors'] : array();
+		$header_keys = isset( $options['header_keys'] ) && is_array( $options['header_keys'] ) ? array_map( 'strval', $options['header_keys'] ) : array( 'author', 'publisher' );
+		$hidden_keys = isset( $options['hidden_keys'] ) && is_array( $options['hidden_keys'] ) ? array_map( 'strval', $options['hidden_keys'] ) : array();
+		$media_label = isset( $options['media_label'] ) ? (string) $options['media_label'] : (string) __( '商品画像', 'affilicard' );
 
 		$stock        = StockStatus::normalize( isset( $product['stock_status'] ) ? (string) $product['stock_status'] : null );
 		$is_available = StockStatus::AVAILABLE === $stock;
 
+		$extras = isset( $product['extras'] ) && is_array( $product['extras'] ) ? $product['extras'] : array();
+
 		$style = $this->rootStyle( $colors );
 		$html  = '<div class="affilicard-card"' . ( '' !== $style ? ' style="' . esc_attr( $style ) . '"' : '' ) . '>';
 
-		if ( '' !== $image_url ) {
-			$html .= '<div class="affilicard-card__media"><img src="' . esc_url( $image_url ) . '" alt="' . esc_attr( (string) ( $product['title'] ?? '' ) ) . '" loading="lazy" /></div>';
-		}
+		$html .= '<div class="affilicard-card__inner">';
 
+		// 書影カラム（画像が無ければプレースホルダ）。
+		$html .= '<div class="affilicard-card__media">';
+		if ( '' !== $image_url ) {
+			$html .= '<img src="' . esc_url( $image_url ) . '" alt="' . esc_attr( (string) ( $product['title'] ?? '' ) ) . '" loading="lazy" />';
+		} else {
+			$html .= '<div class="affilicard-card__media-placeholder">' . esc_html( $media_label ) . '</div>';
+		}
+		$html .= '</div>';
+
+		// 本文カラム。
 		$html .= '<div class="affilicard-card__body">';
+		$html .= $this->renderMetaHeader( $extras, $header_keys );
 		$html .= '<h3 class="affilicard-card__title">' . esc_html( (string) ( $product['title'] ?? '' ) ) . '</h3>';
 
 		if ( ! $is_available ) {
@@ -53,7 +67,7 @@ final class CardRenderer {
 			$html .= '<div class="affilicard-card__desc">' . wp_kses_post( $content ) . '</div>';
 		}
 
-		$html .= $this->renderExtras( isset( $product['extras'] ) && is_array( $product['extras'] ) ? $product['extras'] : array() );
+		$html .= $this->renderExtras( $extras, $header_keys, $hidden_keys );
 
 		if ( $is_available ) {
 			$html .= $this->renderListings(
@@ -63,7 +77,16 @@ final class CardRenderer {
 			);
 		}
 
-		$html .= '</div></div>';
+		$html .= '</div>'; // __body
+		$html .= '</div>'; // __inner
+
+		if ( $is_available ) {
+			$html .= $this->renderTimestamp(
+				isset( $product['listings'] ) && is_array( $product['listings'] ) ? $product['listings'] : array()
+			);
+		}
+
+		$html .= '</div>'; // __card
 		return $html;
 	}
 
@@ -94,11 +117,18 @@ final class CardRenderer {
 
 	/**
 	 * @param list<array<string, mixed>> $extras
+	 * @param list<string>               $header_keys
+	 * @param list<string>               $hidden_keys
 	 */
-	private function renderExtras( array $extras ): string {
-		$rows = '';
+	private function renderExtras( array $extras, array $header_keys, array $hidden_keys ): string {
+		$excluded = array_merge( $header_keys, $hidden_keys );
+		$rows     = '';
 		foreach ( $extras as $extra ) {
 			if ( ! is_array( $extra ) ) {
+				continue;
+			}
+			$key = isset( $extra['key'] ) ? (string) $extra['key'] : '';
+			if ( '' !== $key && in_array( $key, $excluded, true ) ) {
 				continue;
 			}
 			$label = isset( $extra['label'] ) ? trim( (string) $extra['label'] ) : '';
@@ -112,12 +142,88 @@ final class CardRenderer {
 	}
 
 	/**
+	 * header_keys に昇格した extras を書誌ヘッダ行にまとめる。
+	 * author キーのみ「著」を付す（書誌表記）。
+	 *
+	 * @param list<array<string, mixed>> $extras
+	 * @param list<string>               $header_keys
+	 */
+	private function renderMetaHeader( array $extras, array $header_keys ): string {
+		$parts = array();
+		foreach ( $header_keys as $key ) {
+			$value = $this->extraValueByKey( $extras, $key );
+			if ( '' === $value ) {
+				continue;
+			}
+			// 著者キーのみ「著」を付す（書誌表記）。
+			$parts[] = 'author' === $key ? esc_html( $value ) . esc_html__( ' 著', 'affilicard' ) : esc_html( $value );
+		}
+		if ( array() === $parts ) {
+			return '';
+		}
+		return '<div class="affilicard-card__meta">' . implode( ' ／ ', $parts ) . '</div>';
+	}
+
+	/**
+	 * @param list<array<string, mixed>> $extras
+	 */
+	private function extraValueByKey( array $extras, string $key ): string {
+		// 同じ key が複数あれば最初のマッチを返す。
+		foreach ( $extras as $extra ) {
+			if ( ! is_array( $extra ) ) {
+				continue;
+			}
+			$k = isset( $extra['key'] ) ? (string) $extra['key'] : '';
+			if ( $k === $key ) {
+				return isset( $extra['value'] ) ? trim( (string) $extra['value'] ) : '';
+			}
+		}
+		return '';
+	}
+
+	/**
+	 * listing 群の最新 last_fetched_at（ISO8601）から「※ YYYY年M月D日時点の価格です。…」を生成する。
+	 *
+	 * @param list<array<string, mixed>> $listings
+	 */
+	private function renderTimestamp( array $listings ): string {
+		$latest = '';
+		foreach ( $listings as $listing ) {
+			if ( ! is_array( $listing ) ) {
+				continue;
+			}
+			$at = isset( $listing['last_fetched_at'] ) ? trim( (string) $listing['last_fetched_at'] ) : '';
+			// last_fetched_at は Cron が current_time('c') で書き込む同一 TZ 値が前提。
+			// 日付プレフィックスを持つ値のみ比較対象とし、不正文字列が最新として選ばれるのを防ぐ。
+			if ( 1 === preg_match( '/^\d{4}-\d{2}-\d{2}/', $at ) && $at > $latest ) {
+				$latest = $at;
+			}
+		}
+		if ( '' === $latest || 1 !== preg_match( '/^(\d{4})-(\d{2})-(\d{2})/', $latest, $m ) ) {
+			return '';
+		}
+		$date = sprintf(
+			/* translators: 1: year, 2: month, 3: day */
+			(string) __( '%1$d年%2$d月%3$d日', 'affilicard' ),
+			(int) $m[1],
+			(int) $m[2],
+			(int) $m[3]
+		);
+		$note = sprintf(
+			/* translators: %s: formatted date */
+			(string) __( '※ %s時点の価格です。最新価格は各販売サイトでご確認ください。', 'affilicard' ),
+			$date
+		);
+		return '<div class="affilicard-card__timestamp">' . esc_html( $note ) . '</div>';
+	}
+
+	/**
 	 * @param list<array<string, mixed>>        $listings
 	 * @param array<string, PlatformDefinition> $by_code
 	 * @param list<string>                      $hide
 	 */
 	private function renderListings( array $listings, array $by_code, array $hide ): string {
-		$items = '';
+		$rows = '';
 		foreach ( $listings as $listing ) {
 			if ( ! is_array( $listing ) ) {
 				continue;
@@ -144,6 +250,7 @@ final class CardRenderer {
 			$override = isset( $listing['button_label_override'] ) ? trim( (string) $listing['button_label_override'] ) : '';
 			$label    = '' !== $override ? $override : $platform->buttonLabel;
 
+			// CTA はプラットフォーム別ブランド色を維持（block 注入の --affilicard-cta-* で上書き可能）。
 			$brand = (string) sanitize_hex_color( $platform->brandColor );
 			if ( '' === $brand ) {
 				$brand = '#444444';
@@ -154,17 +261,26 @@ final class CardRenderer {
 			}
 			$btn_style = 'background:var(--affilicard-cta-bg,' . $brand . ');color:var(--affilicard-cta-text,' . $text . ');';
 
-			$price_html = '';
-			$price      = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
+			// 価格エリア（¥価格 + （税込） + 割引バッジ）。
+			$pricing = '';
+			$price   = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
 			if ( '' !== $price ) {
-				$price_html = '<span class="affilicard-card__price">' . esc_html( $price ) . '</span>';
+				// 先頭の半角¥(U+00A5)/全角￥(U+FFE5)/空白のみを安全に除去（ltrim のバイト単位破壊を回避）。
+				$price_no_yen = (string) preg_replace( '/^[\x{00A5}\x{FFE5}\s]+/u', '', $price );
+				$pricing     .= '<span class="affilicard-card__price">¥' . esc_html( $price_no_yen ) . '</span>';
+				$pricing     .= '<span class="affilicard-card__tax">' . esc_html__( '（税込）', 'affilicard' ) . '</span>';
+			}
+			$badge = isset( $listing['badge'] ) ? trim( (string) $listing['badge'] ) : '';
+			if ( '' !== $badge ) {
+				$pricing .= '<span class="affilicard-card__discount">' . esc_html( $badge ) . '</span>';
 			}
 
-			$items .= '<li class="affilicard-card__listing">'
-				. '<a class="affilicard-card__cta" href="' . esc_url( $url ) . '" target="_blank" rel="nofollow sponsored noopener" style="' . esc_attr( $btn_style ) . '">'
-				. esc_html( $label ) . $price_html
-				. '</a></li>';
+			$rows .= '<li class="affilicard-card__row">'
+				. '<div class="affilicard-card__platform">' . esc_html( $platform->name ) . '</div>'
+				. '<div class="affilicard-card__pricing">' . $pricing . '</div>'
+				. '<a class="affilicard-card__cta" href="' . esc_url( $url ) . '" target="_blank" rel="nofollow sponsored noopener" style="' . esc_attr( $btn_style ) . '">' . esc_html( $label ) . '</a>'
+				. '</li>';
 		}
-		return '' === $items ? '' : '<ul class="affilicard-card__listings">' . $items . '</ul>';
+		return '' === $rows ? '' : '<ul class="affilicard-card__listings">' . $rows . '</ul>';
 	}
 }

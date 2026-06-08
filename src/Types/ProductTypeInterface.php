@@ -21,9 +21,28 @@ interface ProductTypeInterface {
 	/**
 	 * extras（追加情報）の推奨フィールドのスキーマ。
 	 *
-	 * @return list<array{key: string, label: string}>
+	 * @return list<array{key: string, label: string, card?: string}>
 	 */
 	public function extrasSchema(): array;
+
+	/**
+	 * 書誌ヘッダに昇格する extras キー（extrasSchema の card='header'）。
+	 *
+	 * @return list<string>
+	 */
+	public function cardHeaderKeys(): array;
+
+	/**
+	 * カード非表示にする extras キー（extrasSchema の card='hidden'）。
+	 *
+	 * @return list<string>
+	 */
+	public function cardHiddenKeys(): array;
+
+	/**
+	 * 画像が無い場合のサムネイルプレースホルダ文言。
+	 */
+	public function cardMediaLabel(): string;
 
 	/**
 	 * provider から取得した raw を extras 行（Hybrid 形式）に変換する。

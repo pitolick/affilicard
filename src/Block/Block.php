@@ -5,9 +5,11 @@ namespace Affilicard\Block;
 
 use Affilicard\AutoCreate\ProductAutoCreator;
 use Affilicard\Platform\PlatformConfig;
+use Affilicard\Plugin;
 use Affilicard\Renderer\CardRenderer;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Repository\ProductRepositoryInterface;
+use Affilicard\Types\ProductTypeRegistry;
 
 /**
  * Gutenberg block `affilicard/product-card` の登録とサーバサイド render。
@@ -20,6 +22,9 @@ final class Block {
 	private const SCRIPT_HANDLE       = 'affilicard-block';
 	private const STYLE_HANDLE        = 'affilicard-card';
 	private const EDITOR_STYLE_HANDLE = 'affilicard-block-editor';
+
+	/** @var ProductTypeRegistry|null */
+	private static ?ProductTypeRegistry $typeRegistry = null;
 
 	public function __construct(
 		private ProductRepositoryInterface $repository,
@@ -106,7 +111,13 @@ final class Block {
 		$hide_platforms = isset( $attributes['hidePlatforms'] ) && is_array( $attributes['hidePlatforms'] )
 			? $attributes['hidePlatforms']
 			: array();
-		$options        = array(
+
+		$type        = self::productTypeRegistry()->get( isset( $product['product_type'] ) ? (string) $product['product_type'] : '' );
+		$header_keys = null !== $type ? $type->cardHeaderKeys() : array( 'author', 'publisher' );
+		$hidden_keys = null !== $type ? $type->cardHiddenKeys() : array();
+		$media_label = null !== $type ? $type->cardMediaLabel() : (string) __( '商品画像', 'affilicard' );
+
+		$options = array(
 			'hide_platforms' => $hide_platforms,
 			'image_url'      => $this->featuredImageUrl( (int) ( $product['id'] ?? 0 ) ),
 			'colors'         => array(
@@ -115,6 +126,9 @@ final class Block {
 				'cta_bg'      => isset( $attributes['ctaBgColor'] ) ? (string) $attributes['ctaBgColor'] : '',
 				'cta_text'    => isset( $attributes['ctaTextColor'] ) ? (string) $attributes['ctaTextColor'] : '',
 			),
+			'header_keys'    => $header_keys,
+			'hidden_keys'    => $hidden_keys,
+			'media_label'    => $media_label,
 		);
 
 		wp_enqueue_style( self::STYLE_HANDLE );
@@ -162,6 +176,17 @@ final class Block {
 			return null;
 		}
 		return $this->repository->find( $post_id );
+	}
+
+	/**
+	 * ProductTypeRegistry を static にメモ化して返す。
+	 * 型クラスはコンストラクタで副作用を持たないため static 共有で問題ない。
+	 */
+	private static function productTypeRegistry(): ProductTypeRegistry {
+		if ( null === self::$typeRegistry ) {
+			self::$typeRegistry = Plugin::buildProductTypeRegistry();
+		}
+		return self::$typeRegistry;
 	}
 
 	private function featuredImageUrl( int $postId ): string {

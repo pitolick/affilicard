@@ -23,9 +23,25 @@ $available_id = $repo->save(
 	array(
 		'title'        => 'E2E 在庫あり商品',
 		'status'       => 'publish',
-		'product_type' => 'generic',
+		'product_type' => 'ebook',
 		'stock_status' => 'available',
-		'listings'     => $listing( 'https://example.com/aff-a' ),
+		'content'      => 'E2E 表示確認用のあらすじダミーテキスト。',
+		'extras'       => array(
+			array( 'key' => 'author', 'label' => '著者', 'value' => '架空 太郎' ),
+			array( 'key' => 'publisher', 'label' => '出版社', 'value' => 'サンプル出版社' ),
+			array( 'key' => 'isbn', 'label' => 'ISBN', 'value' => '978-4-00-000000-0' ),
+		),
+		'listings'     => array(
+			array(
+				'platform'        => 'dmm-books',
+				'enabled'         => true,
+				'affiliate_url'   => 'https://example.com/aff-a',
+				'regular_url'     => '',
+				'price'           => '600',
+				'badge'           => '40%OFF',
+				'last_fetched_at' => '2026-04-20T10:30:00+09:00',
+			),
+		),
 	)
 );
 

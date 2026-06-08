@@ -214,6 +214,56 @@ final class BlockTest extends TestCase {
 		$this->assertStringContainsString( '架空作品', $html );
 	}
 
+	public function test_render_ebook_isbn_not_visible(): void {
+		// product_type='ebook' の商品を Block::render したとき、
+		// EbookType::cardHiddenKeys()=['isbn'] が hidden_keys に渡り ISBN がカードに出ないことを検証する。
+		$post = (object) array(
+			'ID'            => 42,
+			'post_type'     => 'affilicard_product',
+			'post_title'    => '架空の電子書籍',
+			'post_content'  => '',
+			'post_status'   => 'publish',
+			'post_modified' => '2026-06-01 00:00:00',
+		);
+		WP_Mock::userFunction( 'get_post', array( 'return' => $post ) );
+
+		$isbn_json = json_encode(
+			array(
+				array(
+					'key'   => 'isbn',
+					'label' => 'ISBN',
+					'value' => '978-4-00-000000-0',
+				),
+			)
+		);
+
+		WP_Mock::userFunction(
+			'get_post_meta',
+			array(
+				'return_callback' => static function ( $id, $key, $single ) use ( $isbn_json ) {
+					if ( \Affilicard\PostType\ProductPostType::META_PRODUCT_TYPE === $key ) {
+						return 'ebook';
+					}
+					if ( \Affilicard\PostType\ProductPostType::META_EXTRAS === $key ) {
+						return $isbn_json;
+					}
+					return '';
+				},
+			)
+		);
+
+		WP_Mock::userFunction( 'get_option', array( 'return' => array() ) );
+		WP_Mock::userFunction( 'get_post_thumbnail_id', array( 'return' => 0 ) );
+
+		$block = new Block( new ProductRepository(), new ProductAutoCreator( new ProviderRegistry(), new ProductRepository() ) );
+		$html  = $block->render( array( 'productId' => 42 ) );
+
+		// ISBN 値がカード本体に出力されないこと。
+		$this->assertStringNotContainsString( '978-4-00-000000-0', $html );
+		// ISBN ラベルがメタヘッダにも出ないこと（ヘッダは author/publisher のみ）。
+		$this->assertStringNotContainsString( '>ISBN<', $html );
+	}
+
 	public function test_render_skips_autocreate_when_locked(): void {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'findByExternalId' )->andReturn( null );

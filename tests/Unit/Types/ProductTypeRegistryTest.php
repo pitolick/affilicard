@@ -70,6 +70,18 @@ final class ProductTypeRegistryTest extends TestCase {
 			public function validateExtras( $extras ): array {
 				return array();
 			}
+
+			public function cardHeaderKeys(): array {
+				return array();
+			}
+
+			public function cardHiddenKeys(): array {
+				return array();
+			}
+
+			public function cardMediaLabel(): string {
+				return '';
+			}
 		};
 	}
 }

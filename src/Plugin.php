@@ -58,7 +58,7 @@ final class Plugin {
 			add_action( 'admin_enqueue_scripts', array( self::class, 'enqueueSettingsAssets' ) );
 		}
 
-		// Provider / ProductType レジストリ (ProductTypeRegistry は将来 Block/Render で参照予定)
+		// ProductType レジストリ（Block の type 解決でも buildProductTypeRegistry() を参照）
 		$providers = self::buildProviderRegistry();
 		self::buildProductTypeRegistry();
 
