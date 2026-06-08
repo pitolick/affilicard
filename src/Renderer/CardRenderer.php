@@ -34,14 +34,25 @@ final class CardRenderer {
 		$stock        = StockStatus::normalize( isset( $product['stock_status'] ) ? (string) $product['stock_status'] : null );
 		$is_available = StockStatus::AVAILABLE === $stock;
 
+		$extras = isset( $product['extras'] ) && is_array( $product['extras'] ) ? $product['extras'] : array();
+
 		$style = $this->rootStyle( $colors );
 		$html  = '<div class="affilicard-card"' . ( '' !== $style ? ' style="' . esc_attr( $style ) . '"' : '' ) . '>';
 
-		if ( '' !== $image_url ) {
-			$html .= '<div class="affilicard-card__media"><img src="' . esc_url( $image_url ) . '" alt="' . esc_attr( (string) ( $product['title'] ?? '' ) ) . '" loading="lazy" /></div>';
-		}
+		$html .= '<div class="affilicard-card__inner">';
 
+		// 書影カラム（画像が無ければプレースホルダ）。
+		$html .= '<div class="affilicard-card__media">';
+		if ( '' !== $image_url ) {
+			$html .= '<img src="' . esc_url( $image_url ) . '" alt="' . esc_attr( (string) ( $product['title'] ?? '' ) ) . '" loading="lazy" />';
+		} else {
+			$html .= '<div class="affilicard-card__media-placeholder">' . esc_html__( '書影', 'affilicard' ) . '</div>';
+		}
+		$html .= '</div>';
+
+		// 本文カラム。
 		$html .= '<div class="affilicard-card__body">';
+		$html .= $this->renderMetaHeader( $extras );
 		$html .= '<h3 class="affilicard-card__title">' . esc_html( (string) ( $product['title'] ?? '' ) ) . '</h3>';
 
 		if ( ! $is_available ) {
@@ -53,7 +64,7 @@ final class CardRenderer {
 			$html .= '<div class="affilicard-card__desc">' . wp_kses_post( $content ) . '</div>';
 		}
 
-		$html .= $this->renderExtras( isset( $product['extras'] ) && is_array( $product['extras'] ) ? $product['extras'] : array() );
+		$html .= $this->renderExtras( $extras );
 
 		if ( $is_available ) {
 			$html .= $this->renderListings(
@@ -63,7 +74,16 @@ final class CardRenderer {
 			);
 		}
 
-		$html .= '</div></div>';
+		$html .= '</div>'; // __body
+		$html .= '</div>'; // __inner
+
+		if ( $is_available ) {
+			$html .= $this->renderTimestamp(
+				isset( $product['listings'] ) && is_array( $product['listings'] ) ? $product['listings'] : array()
+			);
+		}
+
+		$html .= '</div>'; // __card
 		return $html;
 	}
 
@@ -96,10 +116,15 @@ final class CardRenderer {
 	 * @param list<array<string, mixed>> $extras
 	 */
 	private function renderExtras( array $extras ): string {
-		$rows = '';
+		$header_keys = array( 'author', 'publisher' );
+		$rows        = '';
 		foreach ( $extras as $extra ) {
 			if ( ! is_array( $extra ) ) {
 				continue;
+			}
+			$key = isset( $extra['key'] ) ? (string) $extra['key'] : '';
+			if ( '' !== $key && in_array( $key, $header_keys, true ) ) {
+				continue; // meta ヘッダに昇格済み。
 			}
 			$label = isset( $extra['label'] ) ? trim( (string) $extra['label'] ) : '';
 			$value = isset( $extra['value'] ) ? trim( (string) $extra['value'] ) : '';
@@ -109,6 +134,52 @@ final class CardRenderer {
 			$rows .= '<div class="affilicard-card__extra"><dt>' . esc_html( $label ) . '</dt><dd>' . esc_html( $value ) . '</dd></div>';
 		}
 		return '' === $rows ? '' : '<dl class="affilicard-card__extras">' . $rows . '</dl>';
+	}
+
+	/**
+	 * 著者/出版社を「<author> 著 ／ <publisher>」の書誌ヘッダ行にまとめる。
+	 *
+	 * @param list<array<string, mixed>> $extras
+	 */
+	private function renderMetaHeader( array $extras ): string {
+		$author    = $this->extraValueByKey( $extras, 'author' );
+		$publisher = $this->extraValueByKey( $extras, 'publisher' );
+
+		$parts = array();
+		if ( '' !== $author ) {
+			$parts[] = esc_html( $author ) . esc_html__( ' 著', 'affilicard' );
+		}
+		if ( '' !== $publisher ) {
+			$parts[] = esc_html( $publisher );
+		}
+		if ( array() === $parts ) {
+			return '';
+		}
+		return '<div class="affilicard-card__meta">' . implode( ' ／ ', $parts ) . '</div>';
+	}
+
+	/**
+	 * @param list<array<string, mixed>> $extras
+	 */
+	private function extraValueByKey( array $extras, string $key ): string {
+		// 同じ key が複数あれば最初のマッチを返す。
+		foreach ( $extras as $extra ) {
+			if ( ! is_array( $extra ) ) {
+				continue;
+			}
+			$k = isset( $extra['key'] ) ? (string) $extra['key'] : '';
+			if ( $k === $key ) {
+				return isset( $extra['value'] ) ? trim( (string) $extra['value'] ) : '';
+			}
+		}
+		return '';
+	}
+
+	/**
+	 * @param list<array<string, mixed>> $listings
+	 */
+	private function renderTimestamp( array $listings ): string {
+		return '';
 	}
 
 	/**

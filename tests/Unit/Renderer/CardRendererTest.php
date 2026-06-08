@@ -296,6 +296,75 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( 'L', $html );
 	}
 
+	public function test_renders_inner_grid_wrapper(): void {
+		$html = ( new CardRenderer() )->render( $this->product(), array( $this->store() ) );
+		$this->assertStringContainsString( 'affilicard-card__inner', $html );
+	}
+
+	public function test_renders_author_publisher_meta_header_for_ebook(): void {
+		$product = $this->product(
+			array(
+				'product_type' => 'ebook',
+				'extras'       => array(
+					array(
+						'key'   => 'author',
+						'label' => '著者',
+						'value' => '架空 太郎',
+					),
+					array(
+						'key'   => 'publisher',
+						'label' => '出版社',
+						'value' => 'サンプル出版社',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringContainsString( 'affilicard-card__meta', $html );
+		$this->assertStringContainsString( '架空 太郎 著', $html );
+		$this->assertStringContainsString( 'サンプル出版社', $html );
+	}
+
+	public function test_author_publisher_excluded_from_extras_dl(): void {
+		$product = $this->product(
+			array(
+				'product_type' => 'ebook',
+				'extras'       => array(
+					array(
+						'key'   => 'author',
+						'label' => '著者',
+						'value' => '架空 太郎',
+					),
+					array(
+						'key'   => 'isbn',
+						'label' => 'ISBN',
+						'value' => '978-4-00-000000-0',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringContainsString( 'affilicard-card__extras', $html );
+		$this->assertStringContainsString( 'ISBN', $html );
+		$this->assertStringNotContainsString( '<dt>著者</dt>', $html );
+	}
+
+	public function test_no_meta_header_when_no_author_publisher(): void {
+		$product = $this->product(
+			array(
+				'extras' => array(
+					array(
+						'label' => 'カラー',
+						'value' => 'レッド',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__meta', $html );
+		$this->assertStringContainsString( 'カラー', $html );
+	}
+
 	private function dmmBooks(): PlatformDefinition {
 		return new PlatformDefinition( 'dmm-books', 'DMMブックス', 'dmm-ebook', 1, true, array( 'ebook' ), 'この値段で読む →', '#d72d65', '#ffffff' );
 	}
@@ -344,9 +413,9 @@ final class CardRendererTest extends TestCase {
 			)
 		);
 		$html    = ( new CardRenderer() )->render( $product, array( $this->dmmBooks() ) );
-		$this->assertStringContainsString( '著者', $html );
-		$this->assertStringContainsString( '架空 太郎', $html );
-		$this->assertStringContainsString( '出版社', $html );
+		$this->assertStringContainsString( 'affilicard-card__meta', $html );
+		$this->assertStringContainsString( '架空 太郎 著', $html );
+		$this->assertStringContainsString( 'サンプル出版社', $html );
 		$this->assertStringContainsString( 'ISBN', $html );
 	}
 }
