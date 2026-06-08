@@ -418,4 +418,179 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( 'サンプル出版社', $html );
 		$this->assertStringContainsString( 'ISBN', $html );
 	}
+
+	public function test_renders_store_row_with_platform_name_price_tax(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'      => 'example-store',
+						'enabled'       => true,
+						'affiliate_url' => 'https://x',
+						'price'         => '600',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringContainsString( 'affilicard-card__row', $html );
+		$this->assertStringContainsString( 'affilicard-card__platform', $html );
+		$this->assertStringContainsString( 'サンプルストア', $html );
+		$this->assertStringContainsString( '¥600', $html );
+		$this->assertStringContainsString( 'affilicard-card__tax', $html );
+		$this->assertStringContainsString( '（税込）', $html );
+	}
+
+	public function test_price_yen_not_doubled_when_already_prefixed(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'      => 'example-store',
+						'enabled'       => true,
+						'affiliate_url' => 'https://x',
+						'price'         => '¥1,200',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringContainsString( '¥1,200', $html );
+		$this->assertStringNotContainsString( '¥¥', $html );
+	}
+
+	public function test_renders_discount_badge_from_listing(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'      => 'example-store',
+						'enabled'       => true,
+						'affiliate_url' => 'https://x',
+						'price'         => '600',
+						'badge'         => '40%OFF',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringContainsString( 'affilicard-card__discount', $html );
+		$this->assertStringContainsString( '40%OFF', $html );
+	}
+
+	public function test_no_tax_note_when_price_empty(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'      => 'example-store',
+						'enabled'       => true,
+						'affiliate_url' => 'https://x',
+						'price'         => '',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__tax', $html );
+		$this->assertStringContainsString( 'affilicard-card__cta', $html );
+	}
+
+	public function test_renders_price_timestamp_footer_from_last_fetched_at(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'        => 'example-store',
+						'enabled'         => true,
+						'affiliate_url'   => 'https://x',
+						'price'           => '600',
+						'last_fetched_at' => '2026-04-20T10:30:00+09:00',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringContainsString( 'affilicard-card__timestamp', $html );
+		$this->assertStringContainsString( '2026年4月20日時点の価格', $html );
+	}
+
+	public function test_uses_latest_last_fetched_at_across_listings(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'        => 'example-store',
+						'enabled'         => true,
+						'affiliate_url'   => 'https://a',
+						'price'           => '600',
+						'last_fetched_at' => '2026-04-18T09:00:00+09:00',
+					),
+					array(
+						'platform'        => 'example-store',
+						'enabled'         => true,
+						'affiliate_url'   => 'https://b',
+						'price'           => '660',
+						'last_fetched_at' => '2026-04-20T09:00:00+09:00',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringContainsString( '2026年4月20日時点の価格', $html );
+	}
+
+	public function test_no_timestamp_footer_when_no_last_fetched_at(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'      => 'example-store',
+						'enabled'       => true,
+						'affiliate_url' => 'https://x',
+						'price'         => '600',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__timestamp', $html );
+	}
+
+	public function test_renders_badge_without_price(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'      => 'example-store',
+						'enabled'       => true,
+						'affiliate_url' => 'https://x',
+						'badge'         => 'NEW',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringContainsString( 'affilicard-card__discount', $html );
+		$this->assertStringContainsString( 'NEW', $html );
+		$this->assertStringNotContainsString( 'affilicard-card__tax', $html );
+	}
+
+	public function test_ignores_non_date_last_fetched_at(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'        => 'example-store',
+						'enabled'         => true,
+						'affiliate_url'   => 'https://x',
+						'price'           => '600',
+						'last_fetched_at' => 'not-a-date',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__timestamp', $html );
+	}
 }

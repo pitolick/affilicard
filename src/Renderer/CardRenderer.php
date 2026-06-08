@@ -176,10 +176,39 @@ final class CardRenderer {
 	}
 
 	/**
+	 * listing 群の最新 last_fetched_at（ISO8601）から「※ YYYY年M月D日時点の価格です。…」を生成する。
+	 *
 	 * @param list<array<string, mixed>> $listings
 	 */
 	private function renderTimestamp( array $listings ): string {
-		return '';
+		$latest = '';
+		foreach ( $listings as $listing ) {
+			if ( ! is_array( $listing ) ) {
+				continue;
+			}
+			$at = isset( $listing['last_fetched_at'] ) ? trim( (string) $listing['last_fetched_at'] ) : '';
+			// last_fetched_at は Cron が current_time('c') で書き込む同一 TZ 値が前提。
+			// 日付プレフィックスを持つ値のみ比較対象とし、不正文字列が最新として選ばれるのを防ぐ。
+			if ( 1 === preg_match( '/^\d{4}-\d{2}-\d{2}/', $at ) && $at > $latest ) {
+				$latest = $at;
+			}
+		}
+		if ( '' === $latest || 1 !== preg_match( '/^(\d{4})-(\d{2})-(\d{2})/', $latest, $m ) ) {
+			return '';
+		}
+		$date = sprintf(
+			/* translators: 1: year, 2: month, 3: day */
+			(string) __( '%1$d年%2$d月%3$d日', 'affilicard' ),
+			(int) $m[1],
+			(int) $m[2],
+			(int) $m[3]
+		);
+		$note = sprintf(
+			/* translators: %s: formatted date */
+			(string) __( '※ %s時点の価格です。最新価格は各販売サイトでご確認ください。', 'affilicard' ),
+			$date
+		);
+		return '<div class="affilicard-card__timestamp">' . esc_html( $note ) . '</div>';
 	}
 
 	/**
@@ -188,7 +217,7 @@ final class CardRenderer {
 	 * @param list<string>                      $hide
 	 */
 	private function renderListings( array $listings, array $by_code, array $hide ): string {
-		$items = '';
+		$rows = '';
 		foreach ( $listings as $listing ) {
 			if ( ! is_array( $listing ) ) {
 				continue;
@@ -215,6 +244,7 @@ final class CardRenderer {
 			$override = isset( $listing['button_label_override'] ) ? trim( (string) $listing['button_label_override'] ) : '';
 			$label    = '' !== $override ? $override : $platform->buttonLabel;
 
+			// CTA はプラットフォーム別ブランド色を維持（block 注入の --affilicard-cta-* で上書き可能）。
 			$brand = (string) sanitize_hex_color( $platform->brandColor );
 			if ( '' === $brand ) {
 				$brand = '#444444';
@@ -225,17 +255,26 @@ final class CardRenderer {
 			}
 			$btn_style = 'background:var(--affilicard-cta-bg,' . $brand . ');color:var(--affilicard-cta-text,' . $text . ');';
 
-			$price_html = '';
-			$price      = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
+			// 価格エリア（¥価格 + （税込） + 割引バッジ）。
+			$pricing = '';
+			$price   = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
 			if ( '' !== $price ) {
-				$price_html = '<span class="affilicard-card__price">' . esc_html( $price ) . '</span>';
+				// 先頭の半角¥(U+00A5)/全角￥(U+FFE5)/空白のみを安全に除去（ltrim のバイト単位破壊を回避）。
+				$price_no_yen = (string) preg_replace( '/^[\x{00A5}\x{FFE5}\s]+/u', '', $price );
+				$pricing     .= '<span class="affilicard-card__price">¥' . esc_html( $price_no_yen ) . '</span>';
+				$pricing     .= '<span class="affilicard-card__tax">' . esc_html__( '（税込）', 'affilicard' ) . '</span>';
+			}
+			$badge = isset( $listing['badge'] ) ? trim( (string) $listing['badge'] ) : '';
+			if ( '' !== $badge ) {
+				$pricing .= '<span class="affilicard-card__discount">' . esc_html( $badge ) . '</span>';
 			}
 
-			$items .= '<li class="affilicard-card__listing">'
-				. '<a class="affilicard-card__cta" href="' . esc_url( $url ) . '" target="_blank" rel="nofollow sponsored noopener" style="' . esc_attr( $btn_style ) . '">'
-				. esc_html( $label ) . $price_html
-				. '</a></li>';
+			$rows .= '<li class="affilicard-card__row">'
+				. '<div class="affilicard-card__platform">' . esc_html( $platform->name ) . '</div>'
+				. '<div class="affilicard-card__pricing">' . $pricing . '</div>'
+				. '<a class="affilicard-card__cta" href="' . esc_url( $url ) . '" target="_blank" rel="nofollow sponsored noopener" style="' . esc_attr( $btn_style ) . '">' . esc_html( $label ) . '</a>'
+				. '</li>';
 		}
-		return '' === $items ? '' : '<ul class="affilicard-card__listings">' . $items . '</ul>';
+		return '' === $rows ? '' : '<ul class="affilicard-card__listings">' . $rows . '</ul>';
 	}
 }
