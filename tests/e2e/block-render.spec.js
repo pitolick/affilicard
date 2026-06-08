@@ -20,6 +20,14 @@ test( '在庫ありの商品ブロックは CTA と色が描画される', async
 	await expect( cta ).toHaveAttribute( 'href', 'https://example.com/aff-a' );
 	await expect( cta ).toHaveAttribute( 'rel', 'nofollow sponsored noopener' );
 	await expect( card ).toHaveAttribute( 'style', /--affilicard-cta-bg:#123456/ );
+
+	// 新カードデザイン構造の検証
+	await expect( page.locator( '.affilicard-card__inner' ).first() ).toBeVisible();
+	await expect( page.locator( '.affilicard-card__meta' ).first() ).toBeVisible();
+	await expect( page.locator( 'li.affilicard-card__row' ).first() ).toBeVisible();
+	await expect( page.locator( '.affilicard-card__tax' ).first() ).toContainText( '税込' );
+	await expect( page.locator( '.affilicard-card__discount' ).first() ).toContainText( '40%OFF' );
+	await expect( page.locator( '.affilicard-card__timestamp' ).first() ).toContainText( '時点の価格' );
 } );
 
 test( '在庫切れの商品ブロックは CTA 非表示でバッジが出る', async ( { page } ) => {
