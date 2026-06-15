@@ -5,6 +5,7 @@ namespace Affilicard\Tests\Unit\Types;
 
 use Affilicard\Types\ProductTypeInterface;
 use Affilicard\Types\ProductTypeRegistry;
+use Affilicard\Types\VodType;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
 
@@ -32,6 +33,20 @@ final class ProductTypeRegistryTest extends TestCase {
 	public function test_get_returns_null_for_unknown_code(): void {
 		$registry = new ProductTypeRegistry();
 		$this->assertNull( $registry->get( 'nonexistent' ) );
+	}
+
+	public function test_vod_is_registered(): void {
+		WP_Mock::userFunction( '__' )
+			->andReturnUsing(
+				static function ( $text ) {
+					return $text;
+				}
+			);
+
+		$registry = new ProductTypeRegistry();
+		$registry->register( new VodType() );
+		$this->assertContains( 'vod', $registry->codes() );
+		$this->assertInstanceOf( VodType::class, $registry->get( 'vod' ) );
 	}
 
 	public function test_all_returns_registered_types_and_codes(): void {
