@@ -68,7 +68,7 @@ jobs:
     steps:
       - name: メタデータ取得
         id: metadata
-        uses: dependabot/fetch-metadata@v2
+        uses: dependabot/fetch-metadata@v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: patch / dev minor / GitHub Actions minor を自動マージ
