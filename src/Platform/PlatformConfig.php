@@ -86,7 +86,7 @@ final class PlatformConfig {
 	}
 
 	/**
-	 * デフォルトのプラットフォーム定義（4 件）。Plugin::onActivate で seed する想定。
+	 * デフォルトのプラットフォーム定義（9 件: ebook 4 + vod 5）。Plugin::onActivate で seed する想定。
 	 *
 	 * @return list<PlatformDefinition>
 	 */
@@ -136,6 +136,61 @@ final class PlatformConfig {
 				array( 'ebook' ),
 				__( 'BookWalkerで読む', 'affilicard' ),
 				'#1a9bd7',
+				'#ffffff'
+			),
+			new PlatformDefinition(
+				'u-next',
+				__( 'U-NEXT', 'affilicard' ),
+				'manual',
+				5,
+				true,
+				array( 'vod' ),
+				__( 'U-NEXTで見る', 'affilicard' ),
+				'#000000',
+				'#ffffff'
+			),
+			new PlatformDefinition(
+				'netflix',
+				__( 'Netflix', 'affilicard' ),
+				'manual',
+				6,
+				true,
+				array( 'vod' ),
+				__( 'Netflixで見る', 'affilicard' ),
+				'#e50914',
+				'#ffffff'
+			),
+			new PlatformDefinition(
+				'hulu',
+				__( 'Hulu', 'affilicard' ),
+				'manual',
+				7,
+				true,
+				array( 'vod' ),
+				__( 'Huluで見る', 'affilicard' ),
+				'#1ce783',
+				'#000000'
+			),
+			new PlatformDefinition(
+				'prime-video',
+				__( 'Prime Video', 'affilicard' ),
+				'manual',
+				8,
+				true,
+				array( 'vod' ),
+				__( 'Prime Videoで見る', 'affilicard' ),
+				'#00a8e1',
+				'#ffffff'
+			),
+			new PlatformDefinition(
+				'danime',
+				__( 'dアニメストア', 'affilicard' ),
+				'manual',
+				9,
+				true,
+				array( 'vod' ),
+				__( 'dアニメストアで見る', 'affilicard' ),
+				'#ff6600',
 				'#ffffff'
 			),
 		);
