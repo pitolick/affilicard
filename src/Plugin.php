@@ -24,6 +24,7 @@ use Affilicard\Settings\DashboardWidget;
 use Affilicard\Types\EbookType;
 use Affilicard\Types\GenericType;
 use Affilicard\Types\ProductTypeRegistry;
+use Affilicard\Types\VodType;
 
 /**
  * プラグインのブートストラップ。
@@ -100,6 +101,7 @@ final class Plugin {
 		$registry = new ProductTypeRegistry();
 		$registry->register( new GenericType() );
 		$registry->register( new EbookType() );
+		$registry->register( new VodType() );
 		return $registry;
 	}
 
