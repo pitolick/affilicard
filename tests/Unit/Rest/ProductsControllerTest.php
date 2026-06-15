@@ -279,6 +279,72 @@ final class ProductsControllerTest extends TestCase {
 		$this->assertSame( 200, $response->get_status() );
 	}
 
+	public function test_bulk_create_returns_207_with_per_item_results_partial_success(): void {
+		WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing( static fn( $v ) => is_string( $v ) ? trim( $v ) : $v );
+		WP_Mock::userFunction( 'wp_kses_post' )->andReturnUsing( static fn( $v ) => $v );
+		WP_Mock::userFunction( 'sanitize_key' )->andReturnUsing( static fn( $v ) => strtolower( (string) $v ) );
+		WP_Mock::userFunction( 'esc_url_raw' )->andReturnUsing( static fn( $v ) => $v );
+		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
+
+		$ids  = array( 101, 0 ); // 1st save → 101, 2nd save → 0 (failure)
+		$call = 0;
+		WP_Mock::userFunction( 'wp_insert_post' )->andReturnUsing(
+			static function ( $args, $wp_error ) use ( $ids, &$call ) {
+				return $ids[ $call++ ] ?? 0;
+			}
+		);
+
+		$controller = new ProductsController( new ProductRepository() );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products/bulk' );
+		$request->set_param(
+			'products',
+			array(
+				array(
+					'title'        => '商品A',
+					'product_type' => 'vod',
+				), // → save → 101 (created)
+				array( 'title' => '' ),                               // → skipped (error, no save)
+				array( 'title' => '商品C' ),                          // → save → 0 (error)
+			)
+		);
+
+		$response = $controller->bulkCreate( $request );
+		$data     = $response->get_data();
+
+		$this->assertSame( 207, $response->get_status() );
+		$this->assertCount( 3, $data['results'] );
+		$this->assertSame( 'created', $data['results'][0]['status'] );
+		$this->assertSame( 101, $data['results'][0]['id'] );
+		$this->assertSame( 'error', $data['results'][1]['status'] );
+		$this->assertSame( 'error', $data['results'][2]['status'] );
+		$this->assertSame( 1, $data['created'] );
+		$this->assertSame( 2, $data['failed'] );
+	}
+
+	public function test_bulk_create_rejects_non_array_products(): void {
+		$controller = new ProductsController( new ProductRepository() );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products/bulk' );
+		$request->set_param( 'products', 'not-an-array' );
+
+		$response = $controller->bulkCreate( $request );
+		$this->assertSame( 400, $response->get_status() );
+	}
+
+	public function test_bulk_create_rejects_too_many_items(): void {
+		$products = array();
+		for ( $i = 0; $i < 101; $i++ ) {
+			$products[] = array( 'title' => 'item' );
+		}
+		$controller = new ProductsController( new ProductRepository() );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products/bulk' );
+		$request->set_param( 'products', $products );
+
+		$response = $controller->bulkCreate( $request );
+		$data     = $response->get_data();
+		$this->assertSame( 400, $response->get_status() );
+		$this->assertSame( 'affilicard_bulk_too_many', $data['code'] );
+	}
+
 	public function test_permission_callbacks_check_current_user_can(): void {
 		WP_Mock::userFunction( 'current_user_can' )
 			->with( 'edit_posts' )

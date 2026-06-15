@@ -142,6 +142,48 @@ final class ProductSchemaTest extends TestCase {
 		$this->assertTrue( $args['title']['required'] ?? false );
 	}
 
+	public function test_sanitize_item_normalizes_fields_and_reuses_sanitizers(): void {
+		$item = array(
+			'title'        => '  サンプル商品 <b>x</b> ',
+			'content'      => '<p>本文</p><script>alert(1)</script>',
+			'status'       => 'invalid-status',
+			'product_type' => 'VOD',
+			'stock_status' => 'bogus',
+			'extras'       => array(
+				array(
+					'key'   => 'director',
+					'label' => '監督',
+					'value' => 'A',
+				),
+				array(
+					'label' => '',
+					'value' => '',
+				),
+			),
+			'listings'     => array(
+				array(
+					'platform'      => 'u-next',
+					'affiliate_url' => 'https://example.com/x',
+				),
+				array( 'no_platform' => true ),
+			),
+		);
+
+		$clean = ProductSchema::sanitizeItem( $item );
+
+		// wp_kses_post モックは値をそのまま返すため content はそのまま保持される。
+		$this->assertSame( '<p>本文</p><script>alert(1)</script>', $clean['content'] );
+		// sanitize_text_field モックは trim のみなので title はタグを含んだまま trim される。
+		$this->assertSame( 'サンプル商品 <b>x</b>', $clean['title'] );
+		$this->assertSame( 'publish', $clean['status'] );       // invalid enum → default
+		$this->assertSame( 'vod', $clean['product_type'] );     // sanitize_key lowercases
+		$this->assertSame( 'available', $clean['stock_status'] ); // invalid → default
+		$this->assertCount( 1, $clean['extras'] );              // empty row removed
+		$this->assertSame( 'director', $clean['extras'][0]['key'] );
+		$this->assertCount( 1, $clean['listings'] );            // no-platform row removed
+		$this->assertSame( 'u-next', $clean['listings'][0]['platform'] );
+	}
+
 	public function test_updateArgs_is_partial_no_required_no_defaults(): void {
 		// PATCH（部分更新）用 args は required / default を持たず、
 		// 未指定フィールドが null（未送信）扱いになるようにする。
