@@ -15,6 +15,11 @@ use WP_REST_Response;
  */
 final class ProductsController {
 
+	/**
+	 * bulk endpoint の 1 リクエストあたり最大商品件数。
+	 */
+	private const MAX_BULK_ITEMS = 100;
+
 	public function __construct( private ProductRepository $repository ) {}
 
 	public function registerRoutes( string $namespace ): void {
@@ -50,6 +55,27 @@ final class ProductsController {
 					'callback'            => array( $this, 'create' ),
 					'permission_callback' => array( $this, 'canEditPosts' ),
 					'args'                => ProductSchema::args(),
+				),
+			)
+		);
+
+		register_rest_route(
+			$namespace,
+			'/products/bulk',
+			array(
+				array(
+					'methods'             => 'POST',
+					'callback'            => array( $this, 'bulkCreate' ),
+					'permission_callback' => array( $this, 'canEditPosts' ),
+					'args'                => array(
+						'products' => array(
+							'type'     => 'array',
+							'required' => true,
+							'items'    => array(
+								'type' => 'object',
+							),
+						),
+					),
 				),
 			)
 		);
@@ -94,6 +120,87 @@ final class ProductsController {
 	public function canDeletePostFromRequest( WP_REST_Request $request ): bool {
 		$id = (int) $request->get_param( 'id' );
 		return (bool) current_user_can( 'delete_post', $id );
+	}
+
+	public function bulkCreate( WP_REST_Request $request ): WP_REST_Response {
+		$products = $request->get_param( 'products' );
+		if ( ! is_array( $products ) || array() === $products ) {
+			return new WP_REST_Response(
+				array(
+					'code'    => 'affilicard_invalid_bulk',
+					'message' => __( 'products は 1 件以上の配列で指定してください。', 'affilicard' ),
+				),
+				400
+			);
+		}
+
+		if ( count( $products ) > self::MAX_BULK_ITEMS ) {
+			return new WP_REST_Response(
+				array(
+					'code'    => 'affilicard_bulk_too_many',
+					'message' => sprintf(
+						/* translators: %d: 1 リクエストあたりの最大件数 */
+						__( '一括作成は最大 %d 件までです。', 'affilicard' ),
+						self::MAX_BULK_ITEMS
+					),
+				),
+				400
+			);
+		}
+
+		$results = array();
+		$created = 0;
+		$failed  = 0;
+
+		foreach ( array_values( $products ) as $index => $raw ) {
+			if ( ! is_array( $raw ) ) {
+				++$failed;
+				$results[] = array(
+					'index'   => $index,
+					'status'  => 'error',
+					'message' => __( 'アイテムは配列である必要があります。', 'affilicard' ),
+				);
+				continue;
+			}
+
+			$data = ProductSchema::sanitizeItem( $raw );
+			if ( '' === $data['title'] ) {
+				++$failed;
+				$results[] = array(
+					'index'   => $index,
+					'status'  => 'error',
+					'message' => __( 'title は必須です。', 'affilicard' ),
+				);
+				continue;
+			}
+
+			$id = $this->repository->save( $data );
+			if ( $id <= 0 ) {
+				++$failed;
+				$results[] = array(
+					'index'   => $index,
+					'status'  => 'error',
+					'message' => __( '保存に失敗しました。', 'affilicard' ),
+				);
+				continue;
+			}
+
+			++$created;
+			$results[] = array(
+				'index'  => $index,
+				'status' => 'created',
+				'id'     => $id,
+			);
+		}
+
+		return new WP_REST_Response(
+			array(
+				'results' => $results,
+				'created' => $created,
+				'failed'  => $failed,
+			),
+			207
+		);
 	}
 
 	public function list( WP_REST_Request $request ): WP_REST_Response {

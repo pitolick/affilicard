@@ -77,6 +77,41 @@ final class ProductSchema {
 	}
 
 	/**
+	 * bulk 用に 1 商品アイテムをサニタイズする。
+	 *
+	 * register_rest_route の per-arg sanitize_callback を通らない bulk 入力に対し、
+	 * 単品 create と同等のサニタイズを適用する。extras/listings は既存 sanitizer を再利用。
+	 *
+	 * @param array<string, mixed> $item
+	 * @return array{title: string, content: string, status: string, product_type: string, stock_status: string, extras: list<array<string, string>>, listings: list<array<string, mixed>>}
+	 */
+	public static function sanitizeItem( array $item ): array {
+		$status = isset( $item['status'] ) ? (string) $item['status'] : 'publish';
+		if ( ! in_array( $status, array( 'publish', 'draft', 'pending', 'future' ), true ) ) {
+			$status = 'publish';
+		}
+
+		$product_type = isset( $item['product_type'] ) && '' !== (string) $item['product_type']
+			? (string) sanitize_key( (string) $item['product_type'] )
+			: 'generic';
+
+		$stock_status = isset( $item['stock_status'] ) ? (string) $item['stock_status'] : StockStatus::AVAILABLE;
+		if ( ! in_array( $stock_status, StockStatus::all(), true ) ) {
+			$stock_status = StockStatus::AVAILABLE;
+		}
+
+		return array(
+			'title'        => isset( $item['title'] ) ? (string) sanitize_text_field( (string) $item['title'] ) : '',
+			'content'      => isset( $item['content'] ) ? (string) wp_kses_post( (string) $item['content'] ) : '',
+			'status'       => $status,
+			'product_type' => $product_type,
+			'stock_status' => $stock_status,
+			'extras'       => self::sanitizeExtras( $item['extras'] ?? array() ),
+			'listings'     => self::sanitizeListings( $item['listings'] ?? array() ),
+		);
+	}
+
+	/**
 	 * Hybrid extras を sanitize する。
 	 *
 	 * - 各エントリは ['label' => string, 'value' => string, 'key' => string?] を期待
