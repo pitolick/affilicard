@@ -154,10 +154,10 @@ final class PlatformConfigTest extends TestCase {
 		PlatformConfig::save( array( $first, $other, $second ) );
 	}
 
-	public function test_defaults_returns_four_entries_with_expected_codes(): void {
+	public function test_defaults_returns_nine_entries_with_expected_codes(): void {
 		$defaults = PlatformConfig::defaults();
 
-		$this->assertCount( 4, $defaults );
+		$this->assertCount( 9, $defaults );
 		$codes = array_map(
 			static function ( PlatformDefinition $d ): string {
 				return $d->code;
@@ -165,13 +165,42 @@ final class PlatformConfigTest extends TestCase {
 			$defaults
 		);
 		$this->assertSame(
-			array( 'dmm-books', 'amazon-kindle', 'rakuten-kobo', 'bookwalker' ),
+			array( 'dmm-books', 'amazon-kindle', 'rakuten-kobo', 'bookwalker', 'u-next', 'netflix', 'hulu', 'prime-video', 'danime' ),
 			$codes
 		);
 		$this->assertSame( 'dmm-ebook', $defaults[0]->provider );
 		$this->assertSame( 'manual', $defaults[1]->provider );
 		$this->assertSame( 1, $defaults[0]->displayOrder );
 		$this->assertSame( 4, $defaults[3]->displayOrder );
+	}
+
+	public function test_defaults_include_vod_platforms(): void {
+		$defaults = PlatformConfig::defaults();
+		$this->assertCount( 9, $defaults );
+
+		$by_code = array();
+		foreach ( $defaults as $def ) {
+			$by_code[ $def->code ] = $def;
+		}
+
+		foreach ( array( 'u-next', 'netflix', 'hulu', 'prime-video', 'danime' ) as $code ) {
+			$this->assertArrayHasKey( $code, $by_code, "VOD platform {$code} が defaults に存在する" );
+			$this->assertSame( 'manual', $by_code[ $code ]->provider );
+			$this->assertSame( array( 'vod' ), $by_code[ $code ]->applicableTypes );
+			$this->assertTrue( $by_code[ $code ]->enabled );
+		}
+
+		// ebook (1-4) に続いて displayOrder が 5-9 で連続していることを確認する。
+		$expected_orders = array(
+			'u-next'      => 5,
+			'netflix'     => 6,
+			'hulu'        => 7,
+			'prime-video' => 8,
+			'danime'      => 9,
+		);
+		foreach ( $expected_orders as $code => $order ) {
+			$this->assertSame( $order, $by_code[ $code ]->displayOrder, "{$code} の displayOrder" );
+		}
 	}
 
 	public function test_defaults_dmm_books_has_auto_refresh_on(): void {
