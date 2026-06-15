@@ -2,7 +2,7 @@
 
 汎用アフィリエイト商品カードの WordPress プラグイン。電子書籍 / VOD / 家電など複数の商品ジャンルに対応する拡張可能設計。
 
-## 主な機能 (v0.1.0)
+## 主な機能 (v1.0.0)
 
 - カスタム投稿タイプ `affilicard_product` で 1 商品 = N プラットフォーム listing を管理
 - 商品タイプ拡張 (`Affilicard\Types\ProductTypeInterface`): 汎用 / 電子書籍 / VOD (4a-4)
@@ -28,18 +28,18 @@
 
 ブロック属性（InspectorControls）で設定した色は CSS カスタムプロパティとしてブロック要素に付与されます。テーマやカスタム CSS からも以下のプロパティで上書き可能です。
 
-| CSS カスタムプロパティ | 説明 |
-| --- | --- |
-| `--affilicard-card-bg` | カード背景色 |
-| `--affilicard-card-border` | カード枠線色 |
-| `--affilicard-cta-bg` | CTA ボタン背景色 |
-| `--affilicard-cta-text` | CTA ボタンテキスト色 |
+| CSS カスタムプロパティ     | 説明                 |
+| -------------------------- | -------------------- |
+| `--affilicard-card-bg`     | カード背景色         |
+| `--affilicard-card-border` | カード枠線色         |
+| `--affilicard-cta-bg`      | CTA ボタン背景色     |
+| `--affilicard-cta-text`    | CTA ボタンテキスト色 |
 
 ```css
 /* テーマの style.css やカスタム CSS で上書きする例 */
 .wp-block-affilicard-product-card {
-  --affilicard-cta-bg: #e60033;
-  --affilicard-cta-text: #ffffff;
+	--affilicard-cta-bg: #e60033;
+	--affilicard-cta-text: #ffffff;
 }
 ```
 
@@ -59,20 +59,21 @@
 
 すべてのエンドポイントは `https://example.com/wp-json/affilicard/v1/` 配下。
 
-| メソッド | パス | 必要権限 | 説明 |
-| --- | --- | --- | --- |
-| POST | `/products` | `edit_posts` | 商品作成 (upsert) |
-| GET | `/products?search=&per_page=&page=` | `edit_posts` | 商品検索 |
-| GET | `/products/{id}` | `edit_post` (id) | 商品取得 |
-| PATCH | `/products/{id}` | `edit_post` (id) | 商品更新 |
-| DELETE | `/products/{id}` | `delete_post` (id) | 商品削除 |
-| GET | `/settings` | `manage_options` | 一般設定取得 |
-| PUT | `/settings` | `manage_options` | 一般設定更新 |
-| GET | `/platforms` | `manage_options` | プラットフォーム一覧取得 |
-| PUT | `/platforms` | `manage_options` | プラットフォーム一括更新 |
-| GET | `/platforms/{code}/credentials` | `manage_options` | 認証情報取得 (マスク) |
-| PUT | `/platforms/{code}/credentials` | `manage_options` | 認証情報部分更新 |
-| POST | `/platforms/{code}/test-connection` | `manage_options` | 接続テスト |
+| メソッド | パス                                | 必要権限           | 説明                                                                    |
+| -------- | ----------------------------------- | ------------------ | ----------------------------------------------------------------------- |
+| POST     | `/products`                         | `edit_posts`       | 商品作成 (upsert)                                                       |
+| POST     | `/products/bulk`                    | `edit_posts`       | 複数商品を一括作成（最大 100 件・部分成功・per-item 結果を 207 で返す） |
+| GET      | `/products?search=&per_page=&page=` | `edit_posts`       | 商品検索                                                                |
+| GET      | `/products/{id}`                    | `edit_post` (id)   | 商品取得                                                                |
+| PATCH    | `/products/{id}`                    | `edit_post` (id)   | 商品更新                                                                |
+| DELETE   | `/products/{id}`                    | `delete_post` (id) | 商品削除                                                                |
+| GET      | `/settings`                         | `manage_options`   | 一般設定取得                                                            |
+| PUT      | `/settings`                         | `manage_options`   | 一般設定更新                                                            |
+| GET      | `/platforms`                        | `manage_options`   | プラットフォーム一覧取得                                                |
+| PUT      | `/platforms`                        | `manage_options`   | プラットフォーム一括更新                                                |
+| GET      | `/platforms/{code}/credentials`     | `manage_options`   | 認証情報取得 (マスク)                                                   |
+| PUT      | `/platforms/{code}/credentials`     | `manage_options`   | 認証情報部分更新                                                        |
+| POST     | `/platforms/{code}/test-connection` | `manage_options`   | 接続テスト                                                              |
 
 ### 認証
 
@@ -106,13 +107,46 @@ curl -u 'username:xxxx xxxx xxxx xxxx xxxx xxxx' \
      }'
 ```
 
+### 一括作成（bulk）
+
+複数商品を 1 リクエストで投入する（**1 リクエスト最大 100 件**）。1 件の検証エラーは全体を止めず、各アイテムの結果を返す（部分成功）。上限超過時は何も保存せず `400`（`affilicard_bulk_too_many`）を返す。
+
+```bash
+curl -u 'username:xxxx xxxx xxxx xxxx xxxx xxxx' \
+     -X POST https://example.com/wp-json/affilicard/v1/products/bulk \
+     -H 'Content-Type: application/json' \
+     -d '{
+       "products": [
+         { "title": "作品A", "product_type": "vod",
+           "extras": [{ "key": "director", "label": "監督", "value": "山田太郎" }],
+           "listings": [{ "platform": "u-next", "affiliate_url": "https://example.com/a" }] },
+         { "title": "作品B", "product_type": "ebook" }
+       ]
+     }'
+```
+
+レスポンス（HTTP 207 Multi-Status）:
+
+```json
+{
+	"results": [
+		{ "index": 0, "status": "created", "id": 123 },
+		{ "index": 1, "status": "created", "id": 124 }
+	],
+	"created": 2,
+	"failed": 0
+}
+```
+
+失敗したアイテムは `{ "index": N, "status": "error", "message": "..." }` を返す。
+
 ### Hybrid extras 形式
 
 ```json
 [
-  { "key": "author",    "label": "著者",   "value": "..." },
-  { "key": "publisher", "label": "出版社", "value": "..." },
-  { "label": "ラベル",  "value": "値" }
+	{ "key": "author", "label": "著者", "value": "..." },
+	{ "key": "publisher", "label": "出版社", "value": "..." },
+	{ "label": "ラベル", "value": "値" }
 ]
 ```
 
@@ -125,8 +159,16 @@ curl -u 'username:xxxx xxxx xxxx xxxx xxxx xxxx' \
 ### 新しい ProductType を追加
 
 1. `src/Types/MyType.php` で `Affilicard\Types\AbstractProductType` を継承
-2. `code()` / `label()` / `extrasSchema()` / `extractExtrasFromProvider()` を実装
-3. `Plugin::buildProductTypeRegistry()` に `$registry->register(new MyType())` を追加
+2. `code()` / `label()` / `extrasSchema()` を実装（最低限この 3 つ）
+3. `extrasSchema()` の各フィールドに `card` 区分を付与してカード表示を制御:
+    - `'card' => 'header'`: 書誌ヘッダ（タイトル下）に昇格
+    - `'card' => 'detail'`（既定）: カード詳細部に表示
+    - `'card' => 'hidden'`: カード非表示（メタ情報のみ）
+4. 画像プレースホルダ文言を変えるなら `cardMediaLabel()` を override
+5. 外部 API 連携があれば `extractExtrasFromProvider()` を実装（手動入力のみなら `return array();`）
+6. `Plugin::buildProductTypeRegistry()` に `$registry->register(new MyType())` を追加
+
+実装例は `src/Types/EbookType.php`（API provider 連携あり）と `src/Types/VodType.php`（手動入力のみ・監督/出演を header に昇格）を参照。VOD のように provider 連携が無い場合は `extractExtrasFromProvider()` を空配列で返すだけでよい。新しいプラットフォームを使う場合は `PlatformConfig::defaults()` に `applicableTypes` を新タイプの code にした `PlatformDefinition` を追加する（`src/Platform/PlatformConfig.php` の VOD platform 群を参照）。
 
 ### 新しい Provider を追加
 
