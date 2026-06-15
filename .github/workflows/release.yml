@@ -59,7 +59,7 @@ jobs:
           cd dist
           zip -r ../affilicard-${{ github.ref_name }}.zip affilicard
       - name: GitHub Release 作成
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: affilicard-${{ github.ref_name }}.zip
           generate_release_notes: true
