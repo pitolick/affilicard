@@ -141,4 +141,20 @@ describe( 'GeneralPanel', () => {
 			screen.getByLabelText( /キャッシュ TTL/ )
 		).toBeInTheDocument();
 	} );
+
+	test( 'wraps controls in a section and buttons in an actions row', async () => {
+		fetchSettings.mockResolvedValue( {} );
+		const { container } = render( <GeneralPanel /> );
+		await waitFor( () =>
+			expect(
+				screen.getByLabelText( 'キャッシュ TTL (秒)' )
+			).toBeInTheDocument()
+		);
+		expect(
+			container.querySelector( '.affilicard-general-panel__section' )
+		).toBeInTheDocument();
+		expect(
+			container.querySelector( '.affilicard-general-panel__actions' )
+		).toBeInTheDocument();
+	} );
 } );

@@ -38,3 +38,34 @@
 #affilicard-settings-root .affilicard-credential-editor {
 	margin-top: 12px;
 }
+
+/* 一般設定タブの余白規律 */
+#affilicard-settings-root .affilicard-general-panel {
+	max-width: 720px;
+}
+
+#affilicard-settings-root .affilicard-general-panel__section {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	margin-bottom: 16px;
+}
+
+#affilicard-settings-root .affilicard-general-panel__section .components-base-control {
+	margin-bottom: 0;
+}
+
+#affilicard-settings-root .affilicard-general-panel__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	padding-top: 12px;
+	border-top: 1px solid #e0e0e0;
+}
+
+/* API 認証パネル */
+#affilicard-settings-root .affilicard-api-credentials-panel__provider {
+	padding: 8px 0 12px;
+	border-bottom: 1px solid #f0f0f0;
+}
