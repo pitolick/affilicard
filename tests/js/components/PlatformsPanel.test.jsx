@@ -117,4 +117,32 @@ describe( 'PlatformsPanel', () => {
 		expect( panels[ 0 ] ).toHaveAttribute( 'data-initial-open', 'true' );
 		expect( panels[ 1 ] ).toHaveAttribute( 'data-initial-open', 'false' );
 	} );
+
+	test( 'renders product-type sub-tabs and an API auth tab', async () => {
+		const withVod = [
+			...platforms,
+			{
+				code: 'u-next',
+				name: 'U-NEXT',
+				provider: 'manual',
+				enabled: true,
+				displayOrder: 5,
+				applicableTypes: [ 'vod' ],
+				buttonLabel: 'U-NEXTで見る',
+				brandColor: '#000',
+				buttonTextColor: '#fff',
+			},
+		];
+		fetchPlatforms.mockResolvedValue( withVod );
+		render( <PlatformsPanel /> );
+		expect(
+			await screen.findByRole( 'tab', { name: '電子書籍' } )
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole( 'tab', { name: 'VOD' } )
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole( 'tab', { name: 'API 認証' } )
+		).toBeInTheDocument();
+	} );
 } );
