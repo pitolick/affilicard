@@ -117,4 +117,18 @@ describe( 'PlatformEditor', () => {
 		).toBeInTheDocument();
 		expect( screen.getByLabelText( 'Provider' ) ).toBeInTheDocument();
 	} );
+
+	test( 'keeps the refresh button inside the API section', () => {
+		const onChange = jest.fn();
+		const { container } = render(
+			<PlatformEditor platform={ basePlatform } onChange={ onChange } />
+		);
+		const apiSection = container.querySelector(
+			'.affilicard-platform-editor__section--api'
+		);
+		expect( apiSection ).toBeInTheDocument();
+		expect( apiSection ).toHaveTextContent(
+			'今すぐこのプラットフォームを更新'
+		);
+	} );
 } );
