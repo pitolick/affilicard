@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-16
+
+### Added
+
+- 設定画面のプラットフォーム設定を商品タイプ（電子書籍 / VOD …）別のサブタブに分割し、各タイプのプラットフォームを `PanelBody` の折りたたみで表示
+- 「API 認証」サブタブを新設し、認証情報を **Provider 単位で 1 回だけ**編集できる `ApiCredentialsPanel` を追加（同一 API を複数プラットフォームで重複入力させない）
+- 認証情報の provider 単位 REST ルート `/affilicard/v1/providers/{code}/credentials`（GET/PUT）・`/providers/{code}/test-connection`（POST）
+- 設定画面の余白規律 CSS（`assets/admin-settings.css`、`#affilicard-settings-root` スコープ）
+
+### Changed
+
+- 各プラットフォーム編集を `PanelBody` の折りたたみに変更し、API 連携（自動取得）系フィールドをサブセクションへ整理（手動運用を前面に）
+- `CredentialEditor` を platform 単位から provider 単位（`providerCode`）に変更し、Provider 定数を `src/Admin/providers.js` に集約
+- 一般設定タブのフィールド／ボタン配置に余白規律を適用
+
 ## [0.3.2] - 2026-06-15
 
 ### Fixed
