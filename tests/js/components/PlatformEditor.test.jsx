@@ -2,19 +2,8 @@
  * Tests for src/Admin/components/PlatformEditor.jsx
  */
 
-jest.mock( '../../../src/Admin/api/credentials' );
-
 import { render, screen, fireEvent } from '@testing-library/react';
-import {
-	PlatformEditor,
-	CRED_SCHEMAS,
-} from '../../../src/Admin/components/PlatformEditor';
-import { fetchCredentials } from '../../../src/Admin/api/credentials';
-
-beforeEach( () => {
-	fetchCredentials.mockReset();
-	fetchCredentials.mockResolvedValue( {} );
-} );
+import { PlatformEditor } from '../../../src/Admin/components/PlatformEditor';
 
 const basePlatform = {
 	code: 'dmm',
@@ -60,34 +49,14 @@ describe( 'PlatformEditor', () => {
 		);
 	} );
 
-	test( 'renders no credential fields for manual provider', () => {
-		const onChange = jest.fn();
-		render(
-			<PlatformEditor platform={ basePlatform } onChange={ onChange } />
-		);
-		expect(
-			screen.getByText( 'この Provider は認証情報を必要としません。' )
-		).toBeInTheDocument();
-	} );
-
-	test( 'renders DMM credential fields when provider is dmm-ebook', async () => {
+	test( 'does not render the credential editor inline', () => {
 		const onChange = jest.fn();
 		const platform = { ...basePlatform, provider: 'dmm-ebook' };
 		render(
 			<PlatformEditor platform={ platform } onChange={ onChange } />
 		);
-		expect(
-			await screen.findByLabelText( 'API ID' )
-		).toBeInTheDocument();
-		expect(
-			screen.getByLabelText( 'アフィリエイト ID' )
-		).toBeInTheDocument();
-	} );
-
-	test( 'CRED_SCHEMAS exports DMM and manual entries', () => {
-		expect( CRED_SCHEMAS.manual ).toEqual( [] );
-		expect( CRED_SCHEMAS[ 'dmm-ebook' ] ).toHaveLength( 2 );
-		expect( CRED_SCHEMAS[ 'dmm-ebook' ][ 0 ].key ).toBe( 'api_id' );
+		expect( screen.queryByText( '認証情報' ) ).not.toBeInTheDocument();
+		expect( screen.queryByLabelText( 'API ID' ) ).not.toBeInTheDocument();
 	} );
 
 	test( 'renders platform name and code as panel title', () => {

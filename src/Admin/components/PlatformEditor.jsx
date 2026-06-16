@@ -6,11 +6,8 @@ import {
 	PanelBody,
 } from '@wordpress/components';
 import { __, sprintf } from '@wordpress/i18n';
-import { CredentialEditor } from './CredentialEditor';
 import { triggerRefresh } from '../api/refresh';
-import { CRED_SCHEMAS, PROVIDER_OPTIONS } from '../providers';
-
-export { CRED_SCHEMAS };
+import { PROVIDER_OPTIONS } from '../providers';
 
 export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 	const update = (patch) => onChange({ ...platform, ...patch });
@@ -106,11 +103,6 @@ export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 				>
 					{__('今すぐこのプラットフォームを更新', 'affilicard')}
 				</Button>
-
-				<CredentialEditor
-					providerCode={platform.provider}
-					schema={CRED_SCHEMAS[platform.provider] ?? []}
-				/>
 			</div>
 		</PanelBody>
 	);

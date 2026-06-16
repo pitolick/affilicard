@@ -75,7 +75,7 @@ describe( 'SettingsApp', () => {
 } );
 
 describe( 'PlatformEditor', () => {
-	test( 'autoRefresh ON で頻度 select と更新ボタンが出る', async () => {
+	test( 'autoRefresh ON で頻度 select と更新ボタンが出る', () => {
 		const platform = {
 			code: 'dmm-books',
 			name: 'DMM',
@@ -84,17 +84,13 @@ describe( 'PlatformEditor', () => {
 			refreshFrequency: 'weekly',
 		};
 		render( <PlatformEditor platform={ platform } onChange={ () => {} } /> );
-		// CredentialEditor の fetchCredentials が解決するまで待つ
-		await waitFor( () =>
-			expect( fetchCredentials ).toHaveBeenCalled()
-		);
 		expect(
 			screen.getByText( '今すぐこのプラットフォームを更新' )
 		).toBeInTheDocument();
 		expect( screen.getByText( '更新頻度' ) ).toBeInTheDocument();
 	} );
 
-	test( 'autoRefresh OFF で頻度 select は非表示', async () => {
+	test( 'autoRefresh OFF で頻度 select は非表示', () => {
 		const platform = {
 			code: 'dmm-books',
 			name: 'DMM',
@@ -102,10 +98,6 @@ describe( 'PlatformEditor', () => {
 			autoRefresh: false,
 		};
 		render( <PlatformEditor platform={ platform } onChange={ () => {} } /> );
-		// CredentialEditor の fetchCredentials が解決するまで待つ
-		await waitFor( () =>
-			expect( fetchCredentials ).toHaveBeenCalled()
-		);
 		expect( screen.queryByText( '更新頻度' ) ).not.toBeInTheDocument();
 	} );
 } );
