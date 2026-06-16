@@ -17,10 +17,10 @@ beforeEach( () => {
 } );
 
 describe( 'api/credentials', () => {
-	test( 'fetchCredentials calls GET with encoded platform code', async () => {
+	test( 'fetchCredentials calls GET with encoded provider code', async () => {
 		await fetchCredentials( 'dmm-ebook' );
 		expect( apiFetch ).toHaveBeenCalledWith( {
-			path: '/affilicard/v1/platforms/dmm-ebook/credentials',
+			path: '/affilicard/v1/providers/dmm-ebook/credentials',
 		} );
 	} );
 
@@ -28,7 +28,7 @@ describe( 'api/credentials', () => {
 		const values = { api_id: 'abc', affiliate_id: 'def' };
 		await updateCredentials( 'dmm-ebook', values );
 		expect( apiFetch ).toHaveBeenCalledWith( {
-			path: '/affilicard/v1/platforms/dmm-ebook/credentials',
+			path: '/affilicard/v1/providers/dmm-ebook/credentials',
 			method: 'PUT',
 			data: values,
 		} );
@@ -39,17 +39,17 @@ describe( 'api/credentials', () => {
 		apiFetch.mockResolvedValueOnce( { ok: true, message: 'OK' } );
 		const result = await testConnection( 'dmm-ebook', values );
 		expect( apiFetch ).toHaveBeenCalledWith( {
-			path: '/affilicard/v1/platforms/dmm-ebook/test-connection',
+			path: '/affilicard/v1/providers/dmm-ebook/test-connection',
 			method: 'POST',
 			data: values,
 		} );
 		expect( result ).toEqual( { ok: true, message: 'OK' } );
 	} );
 
-	test( 'fetchCredentials encodes special characters in platform code', async () => {
+	test( 'fetchCredentials encodes special characters in provider code', async () => {
 		await fetchCredentials( 'my/code' );
 		expect( apiFetch ).toHaveBeenCalledWith( {
-			path: '/affilicard/v1/platforms/my%2Fcode/credentials',
+			path: '/affilicard/v1/providers/my%2Fcode/credentials',
 		} );
 	} );
 } );

@@ -108,7 +108,7 @@ export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 				</Button>
 
 				<CredentialEditor
-					platformCode={platform.code}
+					providerCode={platform.provider}
 					schema={CRED_SCHEMAS[platform.provider] ?? []}
 				/>
 			</div>

@@ -31,7 +31,7 @@ beforeEach( () => {
 
 describe( 'CredentialEditor', () => {
 	test( 'renders empty-state message when schema is empty', () => {
-		render( <CredentialEditor platformCode="manual" schema={ [] } /> );
+		render( <CredentialEditor providerCode="manual" schema={ [] } /> );
 		expect(
 			screen.getByText(
 				'この Provider は認証情報を必要としません。'
@@ -42,7 +42,7 @@ describe( 'CredentialEditor', () => {
 
 	test( 'renders a field per schema entry', async () => {
 		render(
-			<CredentialEditor platformCode="dmm" schema={ dmmSchema } />
+			<CredentialEditor providerCode="dmm" schema={ dmmSchema } />
 		);
 		await waitFor( () =>
 			expect( fetchCredentials ).toHaveBeenCalledWith( 'dmm' )
@@ -55,7 +55,7 @@ describe( 'CredentialEditor', () => {
 
 	test( 'updates field state on input', async () => {
 		render(
-			<CredentialEditor platformCode="dmm" schema={ dmmSchema } />
+			<CredentialEditor providerCode="dmm" schema={ dmmSchema } />
 		);
 		const input = await screen.findByLabelText( 'API ID' );
 		fireEvent.change( input, { target: { value: 'my-api-id' } } );
@@ -68,7 +68,7 @@ describe( 'CredentialEditor', () => {
 			affiliate_id: '***',
 		} );
 		render(
-			<CredentialEditor platformCode="dmm" schema={ dmmSchema } />
+			<CredentialEditor providerCode="dmm" schema={ dmmSchema } />
 		);
 		await waitFor( () =>
 			expect( fetchCredentials ).toHaveBeenCalled()
@@ -94,7 +94,7 @@ describe( 'CredentialEditor', () => {
 			message: 'OK!',
 		} );
 		render(
-			<CredentialEditor platformCode="dmm" schema={ dmmSchema } />
+			<CredentialEditor providerCode="dmm" schema={ dmmSchema } />
 		);
 		await waitFor( () =>
 			expect( fetchCredentials ).toHaveBeenCalled()
@@ -115,7 +115,7 @@ describe( 'CredentialEditor', () => {
 	test( 'shows error notice when testConnection rejects', async () => {
 		testConnection.mockRejectedValue( new Error( 'boom' ) );
 		render(
-			<CredentialEditor platformCode="dmm" schema={ dmmSchema } />
+			<CredentialEditor providerCode="dmm" schema={ dmmSchema } />
 		);
 		await waitFor( () =>
 			expect( fetchCredentials ).toHaveBeenCalled()
