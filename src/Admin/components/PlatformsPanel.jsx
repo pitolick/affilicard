@@ -114,15 +114,17 @@ export function PlatformsPanel() {
 									/>
 								))}
 							</Panel>
-							<Button
-								variant="primary"
-								onClick={onSave}
-								disabled={saving}
-							>
-								{saving
-									? __('保存中…', 'affilicard')
-									: __('保存', 'affilicard')}
-							</Button>
+							<div className="affilicard-platforms-panel__save">
+								<Button
+									variant="primary"
+									onClick={onSave}
+									disabled={saving}
+								>
+									{saving
+										? __('保存中…', 'affilicard')
+										: __('保存', 'affilicard')}
+								</Button>
+							</div>
 						</>
 					);
 				}}

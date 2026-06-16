@@ -3,10 +3,8 @@
 	max-width: 720px;
 }
 
-/* 各プラットフォームパネル間の余白 */
-#affilicard-settings-root .components-panel__body {
-	margin-bottom: 8px;
-}
+/* パネル間は WP ネイティブの境界線で区切る（margin を足すと Panel 内に
+   白い隙間が出るため付与しない）。アコーディオン群を 1 枚のカードに見せる。 */
 
 /* フィールドを縦に等間隔で並べる（ラベル・入力の詰まりを解消） */
 #affilicard-settings-root .affilicard-platform-editor__section {
@@ -26,6 +24,11 @@
 	margin-top: 12px;
 	padding-top: 12px;
 	border-top: 1px solid #e0e0e0;
+}
+
+/* flex column 内でボタンが全幅に伸びるのを防ぎ、内容幅・左寄せにする */
+#affilicard-settings-root .affilicard-platform-editor__section--api .components-button {
+	align-self: flex-start;
 }
 
 #affilicard-settings-root .affilicard-platform-editor__subhead {
@@ -64,8 +67,41 @@
 	border-top: 1px solid #e0e0e0;
 }
 
+/* 型タブ内の保存ボタンをアコーディオンから離す */
+#affilicard-settings-root .affilicard-platforms-panel__save {
+	margin-top: 16px;
+}
+
 /* API 認証パネル */
+#affilicard-settings-root .affilicard-api-credentials-panel {
+	max-width: 720px;
+}
+
+#affilicard-settings-root .affilicard-api-credentials-panel > .description {
+	margin: 0 0 16px;
+}
+
 #affilicard-settings-root .affilicard-api-credentials-panel__provider {
-	padding: 8px 0 12px;
+	padding: 16px 0;
 	border-bottom: 1px solid #f0f0f0;
+}
+
+#affilicard-settings-root .affilicard-api-credentials-panel__provider h3 {
+	margin: 0 0 8px;
+}
+
+/* 認証情報フォーム（CredentialEditor）の余白規律 */
+#affilicard-settings-root .affilicard-credential-editor h4 {
+	margin: 0 0 8px;
+}
+
+#affilicard-settings-root .affilicard-credential-editor .components-base-control {
+	margin-bottom: 12px;
+}
+
+#affilicard-settings-root .affilicard-credential-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-top: 8px;
 }
