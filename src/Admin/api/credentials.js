@@ -1,7 +1,7 @@
 import apiFetch from '@wordpress/api-fetch';
 
 const base = (code) =>
-	`/affilicard/v1/platforms/${encodeURIComponent(code)}/credentials`;
+	`/affilicard/v1/providers/${encodeURIComponent(code)}/credentials`;
 
 export function fetchCredentials(code) {
 	return apiFetch({ path: base(code) });
@@ -13,7 +13,9 @@ export function updateCredentials(code, values) {
 
 export function testConnection(code, values) {
 	return apiFetch({
-		path: `/affilicard/v1/platforms/${encodeURIComponent(code)}/test-connection`,
+		path: `/affilicard/v1/providers/${encodeURIComponent(
+			code
+		)}/test-connection`,
 		method: 'POST',
 		data: values,
 	});

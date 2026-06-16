@@ -168,4 +168,32 @@ final class PluginTest extends TestCase {
 		\Affilicard\Plugin::onTransitionPostStatus( 'publish', 'draft', $post ); // draft→publish は対象外
 		$this->assertConditionsMet();
 	}
+
+	public function test_enqueueSettingsAssets_skips_when_hook_not_settings(): void {
+		// 別画面ではアセットを enqueue しない（wp_enqueue_* が一切呼ばれない）。
+		Plugin::enqueueSettingsAssets( 'edit.php' );
+		$this->assertConditionsMet();
+	}
+
+	public function test_enqueueSettingsAssets_enqueues_styles_on_settings_hook(): void {
+		WP_Mock::userFunction( 'wp_enqueue_script' )->once();
+		WP_Mock::userFunction( 'wp_set_script_translations' )->once();
+
+		// wp-components スタイルと専用 admin CSS を enqueue する。
+		WP_Mock::userFunction( 'wp_enqueue_style' )
+			->once()
+			->with( 'wp-components' );
+		WP_Mock::userFunction( 'wp_enqueue_style' )
+			->once()
+			->with(
+				'affilicard-admin-settings',
+				AFFILICARD_PLUGIN_URL . 'assets/admin-settings.css',
+				array( 'wp-components' ),
+				AFFILICARD_VERSION
+			);
+
+		Plugin::enqueueSettingsAssets( 'affilicard_product_page_affilicard-settings' );
+
+		$this->assertConditionsMet();
+	}
 }

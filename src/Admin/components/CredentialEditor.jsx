@@ -7,7 +7,7 @@ import {
 	testConnection,
 } from '../api/credentials';
 
-export function CredentialEditor({ platformCode, schema }) {
+export function CredentialEditor({ providerCode, schema }) {
 	// schema: list of { key, label, type, required }
 	const [values, setValues] = useState({});
 	const [testing, setTesting] = useState(false);
@@ -18,10 +18,10 @@ export function CredentialEditor({ platformCode, schema }) {
 		if (!schema?.length) {
 			return;
 		}
-		fetchCredentials(platformCode)
+		fetchCredentials(providerCode)
 			.then(setValues)
 			.catch(() => setValues({}));
-	}, [platformCode, schema]);
+	}, [providerCode, schema]);
 
 	if (!schema?.length) {
 		return (
@@ -37,7 +37,7 @@ export function CredentialEditor({ platformCode, schema }) {
 		setSaving(true);
 		setResult(null);
 		try {
-			const next = await updateCredentials(platformCode, values);
+			const next = await updateCredentials(providerCode, values);
 			setValues(next);
 			setResult({
 				ok: true,
@@ -57,7 +57,7 @@ export function CredentialEditor({ platformCode, schema }) {
 		setTesting(true);
 		setResult(null);
 		try {
-			const r = await testConnection(platformCode, values);
+			const r = await testConnection(providerCode, values);
 			setResult(r);
 		} catch {
 			setResult({

@@ -10,10 +10,14 @@ use WP_REST_Request;
 use WP_REST_Response;
 
 /**
- * `/affilicard/v1/platforms/{code}/credentials` および
- * `/affilicard/v1/platforms/{code}/test-connection` の実装。
+ * 認証情報 REST の実装。2 系統のルートを提供する:
  *
- * URL の {code} は platform code（dmm-books 等）。内部で platform → provider に解決する。
+ * - provider 単位（推奨）: `/affilicard/v1/providers/{code}/credentials`
+ *   ・`/providers/{code}/test-connection`。{code} は provider code（dmm-ebook 等）。
+ *   認証情報は provider 単位で保存されるため、UI はこちらで 1 回だけ編集する。
+ * - platform 単位（後方互換）: `/affilicard/v1/platforms/{code}/credentials`
+ *   ・`/platforms/{code}/test-connection`。{code} は platform code（dmm-books 等）で、
+ *   内部で platform → provider に解決する。新規 UI は provider 系へ移行済み。
  */
 final class CredentialsController {
 
@@ -44,6 +48,35 @@ final class CredentialsController {
 				array(
 					'methods'             => 'POST',
 					'callback'            => array( $this, 'testConnection' ),
+					'permission_callback' => array( $this, 'canManageOptions' ),
+				),
+			)
+		);
+
+		register_rest_route(
+			$namespace,
+			'/providers/(?P<code>[a-z0-9-]+)/credentials',
+			array(
+				array(
+					'methods'             => 'GET',
+					'callback'            => array( $this, 'getProvider' ),
+					'permission_callback' => array( $this, 'canManageOptions' ),
+				),
+				array(
+					'methods'             => 'PUT',
+					'callback'            => array( $this, 'updateProvider' ),
+					'permission_callback' => array( $this, 'canManageOptions' ),
+				),
+			)
+		);
+
+		register_rest_route(
+			$namespace,
+			'/providers/(?P<code>[a-z0-9-]+)/test-connection',
+			array(
+				array(
+					'methods'             => 'POST',
+					'callback'            => array( $this, 'testConnectionProvider' ),
 					'permission_callback' => array( $this, 'canManageOptions' ),
 				),
 			)
@@ -124,6 +157,68 @@ final class CredentialsController {
 				'message' => (string) ( $result['message'] ?? '' ),
 			),
 			200
+		);
+	}
+
+	public function getProvider( WP_REST_Request $request ): WP_REST_Response {
+		$provider_code = (string) $request->get_param( 'code' );
+		if ( null === $this->providers->get( $provider_code ) ) {
+			return $this->providerNotFound();
+		}
+		return new WP_REST_Response( ProviderCredentials::getMasked( $provider_code ), 200 );
+	}
+
+	public function updateProvider( WP_REST_Request $request ): WP_REST_Response {
+		$provider_code = (string) $request->get_param( 'code' );
+		if ( null === $this->providers->get( $provider_code ) ) {
+			return $this->providerNotFound();
+		}
+
+		$params = $request->get_params();
+		if ( ! is_array( $params ) ) {
+			$params = array();
+		}
+		unset( $params['code'] );
+
+		$values = array();
+		foreach ( $params as $key => $value ) {
+			if ( ! is_string( $key ) ) {
+				continue;
+			}
+			$values[ $key ] = null === $value ? null : (string) $value;
+		}
+
+		ProviderCredentials::patch( $provider_code, $values );
+
+		return new WP_REST_Response( ProviderCredentials::getMasked( $provider_code ), 200 );
+	}
+
+	public function testConnectionProvider( WP_REST_Request $request ): WP_REST_Response {
+		$provider_code = (string) $request->get_param( 'code' );
+		$provider      = $this->providers->get( $provider_code );
+		if ( null === $provider ) {
+			return $this->providerNotFound();
+		}
+
+		$credentials = ProviderCredentials::get( $provider_code );
+		$result      = $provider->testConnection( $credentials );
+
+		return new WP_REST_Response(
+			array(
+				'ok'      => (bool) ( $result['ok'] ?? false ),
+				'message' => (string) ( $result['message'] ?? '' ),
+			),
+			200
+		);
+	}
+
+	private function providerNotFound(): WP_REST_Response {
+		return new WP_REST_Response(
+			array(
+				'code'    => 'affilicard_provider_not_found',
+				'message' => __( '指定された Provider が見つかりません。', 'affilicard' ),
+			),
+			404
 		);
 	}
 

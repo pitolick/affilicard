@@ -2,19 +2,8 @@
  * Tests for src/Admin/components/PlatformEditor.jsx
  */
 
-jest.mock( '../../../src/Admin/api/credentials' );
-
 import { render, screen, fireEvent } from '@testing-library/react';
-import {
-	PlatformEditor,
-	CRED_SCHEMAS,
-} from '../../../src/Admin/components/PlatformEditor';
-import { fetchCredentials } from '../../../src/Admin/api/credentials';
-
-beforeEach( () => {
-	fetchCredentials.mockReset();
-	fetchCredentials.mockResolvedValue( {} );
-} );
+import { PlatformEditor } from '../../../src/Admin/components/PlatformEditor';
 
 const basePlatform = {
 	code: 'dmm',
@@ -60,33 +49,57 @@ describe( 'PlatformEditor', () => {
 		);
 	} );
 
-	test( 'renders no credential fields for manual provider', () => {
-		const onChange = jest.fn();
-		render(
-			<PlatformEditor platform={ basePlatform } onChange={ onChange } />
-		);
-		expect(
-			screen.getByText( 'この Provider は認証情報を必要としません。' )
-		).toBeInTheDocument();
-	} );
-
-	test( 'renders DMM credential fields when provider is dmm-ebook', async () => {
+	test( 'does not render the credential editor inline', () => {
 		const onChange = jest.fn();
 		const platform = { ...basePlatform, provider: 'dmm-ebook' };
 		render(
 			<PlatformEditor platform={ platform } onChange={ onChange } />
 		);
-		expect(
-			await screen.findByLabelText( 'API ID' )
-		).toBeInTheDocument();
-		expect(
-			screen.getByLabelText( 'アフィリエイト ID' )
-		).toBeInTheDocument();
+		expect( screen.queryByText( '認証情報' ) ).not.toBeInTheDocument();
+		expect( screen.queryByLabelText( 'API ID' ) ).not.toBeInTheDocument();
 	} );
 
-	test( 'CRED_SCHEMAS exports DMM and manual entries', () => {
-		expect( CRED_SCHEMAS.manual ).toEqual( [] );
-		expect( CRED_SCHEMAS[ 'dmm-ebook' ] ).toHaveLength( 2 );
-		expect( CRED_SCHEMAS[ 'dmm-ebook' ][ 0 ].key ).toBe( 'api_id' );
+	test( 'renders platform name and code as panel title', () => {
+		const onChange = jest.fn();
+		render(
+			<PlatformEditor platform={ basePlatform } onChange={ onChange } />
+		);
+		expect( screen.getByText( 'DMM (dmm)' ) ).toBeInTheDocument();
+	} );
+
+	test( 'shows 無効 suffix in title when platform disabled', () => {
+		const onChange = jest.fn();
+		const disabled = { ...basePlatform, enabled: false };
+		render(
+			<PlatformEditor platform={ disabled } onChange={ onChange } />
+		);
+		expect( screen.getByText( 'DMM (dmm) — 無効' ) ).toBeInTheDocument();
+	} );
+
+	test( 'groups auto-fetch fields under an API section heading', () => {
+		const onChange = jest.fn();
+		render(
+			<PlatformEditor platform={ basePlatform } onChange={ onChange } />
+		);
+		expect(
+			screen.getByText( 'API 連携（自動取得・後回し）' )
+		).toBeInTheDocument();
+		expect( screen.getByLabelText( 'Provider' ) ).toBeInTheDocument();
+	} );
+
+	test( 'keeps the refresh button inside the API section', () => {
+		const onChange = jest.fn();
+		const { container } = render(
+			<PlatformEditor platform={ basePlatform } onChange={ onChange } />
+		);
+		const apiSection = container.querySelector(
+			'.affilicard-platform-editor__section--api'
+		);
+		expect( apiSection ).toBeInTheDocument();
+		const refreshButton = apiSection?.querySelector( 'button' );
+		expect( refreshButton ).toBeInTheDocument();
+		expect( refreshButton ).toHaveTextContent(
+			'今すぐこのプラットフォームを更新'
+		);
 	} );
 } );

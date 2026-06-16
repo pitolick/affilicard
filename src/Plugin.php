@@ -165,5 +165,12 @@ final class Plugin {
 			true
 		);
 		wp_set_script_translations( 'affilicard-settings', 'affilicard' );
+		wp_enqueue_style( 'wp-components' );
+		wp_enqueue_style(
+			'affilicard-admin-settings',
+			AFFILICARD_PLUGIN_URL . 'assets/admin-settings.css',
+			array( 'wp-components' ),
+			AFFILICARD_VERSION
+		);
 	}
 }

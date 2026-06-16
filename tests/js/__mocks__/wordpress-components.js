@@ -134,8 +134,19 @@ function ComboboxControl( { label, options, onChange, onFilterValueChange, value
 	);
 }
 
-function PanelBody( { title, children } ) {
-	return React.createElement( 'section', { 'data-panel': title }, children );
+function PanelBody( { title, children, initialOpen } ) {
+	// テストでは折りたたみ挙動を再現せず子を常に描画する（折りたたみは WP 実装で E2E 検証）。
+	// タイトルは getByText で検出できるよう可視テキストとして出す。
+	return React.createElement(
+		'section',
+		{ 'data-panel': title, 'data-initial-open': initialOpen ? 'true' : 'false' },
+		React.createElement( 'h3', { className: 'components-panel__body-title' }, title ),
+		children
+	);
+}
+
+function Panel( { children, className } ) {
+	return React.createElement( 'div', { className, 'data-panel-container': 'true' }, children );
 }
 
 function BaseControl( { label, children } ) {
@@ -152,5 +163,6 @@ module.exports = {
 	TabPanel,
 	ComboboxControl,
 	PanelBody,
+	Panel,
 	BaseControl,
 };
