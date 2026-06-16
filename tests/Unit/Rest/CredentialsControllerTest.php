@@ -310,6 +310,39 @@ final class CredentialsControllerTest extends TestCase {
 		$this->assertSame( 'affilicard_provider_not_found', $data['code'] );
 	}
 
+	public function test_testConnectionProvider_returns_ok_for_known_provider(): void {
+		$values    = array( 'api_id' => 'KEY' );
+		$encrypted = Crypto::encrypt( JsonField::encode( $values ) );
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( ProviderCredentials::optionKey( 'dmm-ebook' ), '' )
+			->andReturn( $encrypted );
+
+		$registry   = $this->makeRegistryWithProvider( 'dmm-ebook' );
+		$controller = new CredentialsController( $registry );
+		$request    = new WP_REST_Request( 'POST', '/' );
+		$request->set_param( 'code', 'dmm-ebook' );
+
+		$response = $controller->testConnectionProvider( $request );
+
+		$this->assertSame( 200, $response->get_status() );
+		$data = $response->get_data();
+		$this->assertTrue( $data['ok'] );
+		$this->assertSame( '疎通 OK', $data['message'] );
+	}
+
+	public function test_testConnectionProvider_returns_404_for_unknown_provider(): void {
+		$controller = new CredentialsController( new ProviderRegistry() );
+		$request    = new WP_REST_Request( 'POST', '/' );
+		$request->set_param( 'code', 'no-such-provider' );
+
+		$response = $controller->testConnectionProvider( $request );
+
+		$this->assertSame( 404, $response->get_status() );
+		$data = $response->get_data();
+		$this->assertSame( 'affilicard_provider_not_found', $data['code'] );
+	}
+
 	public function test_updateProvider_patches_and_returns_new_masked(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( ProviderCredentials::optionKey( 'dmm-ebook' ), '' )
