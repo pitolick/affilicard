@@ -231,4 +231,122 @@ final class CredentialsControllerTest extends TestCase {
 		$data = $response->get_data();
 		$this->assertFalse( $data['ok'] );
 	}
+
+	// ─── Provider 単位ルート ───────────────────────────────────────────────
+
+	/**
+	 * ProviderRegistry に provider を登録するヘルパ。
+	 */
+	private function makeRegistryWithProvider( string $providerCode ): ProviderRegistry {
+		$provider = new class( $providerCode ) implements ProviderInterface {
+			public function __construct( private string $code ) {}
+
+			public function code(): string {
+				return $this->code;
+			}
+
+			public function label(): string {
+				return $this->code;
+			}
+
+			public function isAutomatic(): bool {
+				return true;
+			}
+
+			public function fetch( string $externalId, array $platformConfig ): ?array {
+				return null;
+			}
+
+			public function credentialsSchema(): array {
+				return array();
+			}
+
+			public function testConnection( array $credentials ): array {
+				return array(
+					'ok'      => true,
+					'message' => '疎通 OK',
+				);
+			}
+		};
+
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+		return $registry;
+	}
+
+	public function test_getProvider_returns_masked_credentials_for_known_provider(): void {
+		$values    = array(
+			'api_id'       => 'apikey-abc',
+			'affiliate_id' => 'aff-xyz',
+		);
+		$encrypted = Crypto::encrypt( JsonField::encode( $values ) );
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( ProviderCredentials::optionKey( 'dmm-ebook' ), '' )
+			->andReturn( $encrypted );
+
+		$registry   = $this->makeRegistryWithProvider( 'dmm-ebook' );
+		$controller = new CredentialsController( $registry );
+		$request    = new WP_REST_Request( 'GET', '/' );
+		$request->set_param( 'code', 'dmm-ebook' );
+
+		$response = $controller->getProvider( $request );
+
+		$this->assertSame( 200, $response->get_status() );
+		$data = $response->get_data();
+		$this->assertSame( '********bc', $data['api_id'] );
+		$this->assertSame( '*****yz', $data['affiliate_id'] );
+	}
+
+	public function test_getProvider_returns_404_for_unknown_provider(): void {
+		$controller = new CredentialsController( new ProviderRegistry() );
+		$request    = new WP_REST_Request( 'GET', '/' );
+		$request->set_param( 'code', 'unknown-provider' );
+
+		$response = $controller->getProvider( $request );
+
+		$this->assertSame( 404, $response->get_status() );
+		$data = $response->get_data();
+		$this->assertSame( 'affilicard_provider_not_found', $data['code'] );
+	}
+
+	public function test_updateProvider_patches_and_returns_new_masked(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( ProviderCredentials::optionKey( 'dmm-ebook' ), '' )
+			->andReturnUsing(
+				static function ( $key, $default ) {
+					static $first = true;
+					if ( $first ) {
+						$first = false;
+						return '';
+					}
+					return Crypto::encrypt( JsonField::encode( array( 'api_id' => 'new-api-key' ) ) );
+				}
+			);
+
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->andReturnUsing(
+				function ( $key, $value, $autoload ) {
+					$this->assertSame( ProviderCredentials::optionKey( 'dmm-ebook' ), $key );
+					$decrypted = Crypto::decrypt( $value );
+					$decoded   = JsonField::decode( $decrypted );
+					$this->assertSame( 'new-api-key', $decoded['api_id'] );
+					return true;
+				}
+			);
+
+		$registry   = $this->makeRegistryWithProvider( 'dmm-ebook' );
+		$controller = new CredentialsController( $registry );
+		$request    = new WP_REST_Request( 'PUT', '/' );
+		$request->set_param( 'code', 'dmm-ebook' );
+		$request->set_param( 'api_id', 'new-api-key' );
+
+		$response = $controller->updateProvider( $request );
+
+		$this->assertSame( 200, $response->get_status() );
+		$data = $response->get_data();
+		$this->assertArrayHasKey( 'api_id', $data );
+		$this->assertSame( '*********ey', $data['api_id'] );
+	}
 }

@@ -47,11 +47,11 @@ final class RestControllerTest extends TestCase {
 		// products は 3 ルート（list/create, bulk, get/update/delete）
 		// settings は 1 ルート
 		// platforms は 1 ルート
-		// credentials は 2 ルート（credentials, test-connection）
+		// credentials は 4 ルート（platform credentials, platform test-connection, provider credentials, provider test-connection）
 		// refresh は 1 ルート
 		$call_count = 0;
 		WP_Mock::userFunction( 'register_rest_route' )
-			->times( 8 )
+			->times( 10 )
 			->andReturnUsing(
 				function ( $namespace, $route ) use ( &$call_count ) {
 					$call_count++;
@@ -63,7 +63,7 @@ final class RestControllerTest extends TestCase {
 
 		$controller->registerRoutes();
 
-		$this->assertSame( 8, $call_count );
+		$this->assertSame( 10, $call_count );
 		$this->assertConditionsMet();
 	}
 }
