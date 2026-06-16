@@ -8,30 +8,9 @@ import {
 import { __, sprintf } from '@wordpress/i18n';
 import { CredentialEditor } from './CredentialEditor';
 import { triggerRefresh } from '../api/refresh';
+import { CRED_SCHEMAS, PROVIDER_OPTIONS } from '../providers';
 
-const PROVIDER_OPTIONS = [
-	{ label: '手動入力', value: 'manual' },
-	{ label: 'DMM ebook API', value: 'dmm-ebook' },
-];
-
-// Built-in schemas for each provider (avoid round-trip to PHP for schema).
-export const CRED_SCHEMAS = {
-	manual: [],
-	'dmm-ebook': [
-		{
-			key: 'api_id',
-			label: 'API ID',
-			type: 'password',
-			required: true,
-		},
-		{
-			key: 'affiliate_id',
-			label: 'アフィリエイト ID',
-			type: 'password',
-			required: true,
-		},
-	],
-};
+export { CRED_SCHEMAS };
 
 export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 	const update = (patch) => onChange({ ...platform, ...patch });
