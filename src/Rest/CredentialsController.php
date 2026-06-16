@@ -10,10 +10,14 @@ use WP_REST_Request;
 use WP_REST_Response;
 
 /**
- * `/affilicard/v1/platforms/{code}/credentials` および
- * `/affilicard/v1/platforms/{code}/test-connection` の実装。
+ * 認証情報 REST の実装。2 系統のルートを提供する:
  *
- * URL の {code} は platform code（dmm-books 等）。内部で platform → provider に解決する。
+ * - provider 単位（推奨）: `/affilicard/v1/providers/{code}/credentials`
+ *   ・`/providers/{code}/test-connection`。{code} は provider code（dmm-ebook 等）。
+ *   認証情報は provider 単位で保存されるため、UI はこちらで 1 回だけ編集する。
+ * - platform 単位（後方互換）: `/affilicard/v1/platforms/{code}/credentials`
+ *   ・`/platforms/{code}/test-connection`。{code} は platform code（dmm-books 等）で、
+ *   内部で platform → provider に解決する。新規 UI は provider 系へ移行済み。
  */
 final class CredentialsController {
 

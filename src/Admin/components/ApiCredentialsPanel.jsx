@@ -6,7 +6,8 @@ const providerLabel = (code) =>
 	PROVIDER_OPTIONS.find((o) => o.value === code)?.label ?? code;
 
 export function ApiCredentialsPanel() {
-	const providers = Object.keys(CRED_SCHEMAS).filter(
+	// 表示順は PROVIDER_OPTIONS の並び（決定的）。認証スキーマを持つ provider のみ。
+	const providers = PROVIDER_OPTIONS.map((o) => o.value).filter(
 		(code) => (CRED_SCHEMAS[code] ?? []).length > 0
 	);
 

@@ -14,6 +14,8 @@ const TYPE_LABELS = {
 const API_TAB = '__api__';
 
 // platforms の applicableTypes から、1 件以上存在する型を出現順に抽出する。
+// 注: applicableTypes が空/未設定の platform はどの型タブにも現れない
+// （保存対象には含まれる）。シードは全 platform に applicableTypes を持つ前提。
 function usedTypes(platforms) {
 	const seen = [];
 	for (const p of platforms) {
