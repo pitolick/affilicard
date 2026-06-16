@@ -96,7 +96,9 @@ describe( 'PlatformEditor', () => {
 			'.affilicard-platform-editor__section--api'
 		);
 		expect( apiSection ).toBeInTheDocument();
-		expect( apiSection ).toHaveTextContent(
+		const refreshButton = apiSection?.querySelector( 'button' );
+		expect( refreshButton ).toBeInTheDocument();
+		expect( refreshButton ).toHaveTextContent(
 			'今すぐこのプラットフォームを更新'
 		);
 	} );
