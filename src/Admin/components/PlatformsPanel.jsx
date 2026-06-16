@@ -1,5 +1,5 @@
 import { useEffect, useState } from '@wordpress/element';
-import { Button, Notice } from '@wordpress/components';
+import { Button, Notice, Panel } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import { fetchPlatforms, updatePlatforms } from '../api/platforms';
 import { PlatformEditor } from './PlatformEditor';
@@ -56,13 +56,16 @@ export function PlatformsPanel() {
 					{notice.message}
 				</Notice>
 			)}
-			{platforms.map((p, i) => (
-				<PlatformEditor
-					key={p.code}
-					platform={p}
-					onChange={onChange(i)}
-				/>
-			))}
+			<Panel>
+				{platforms.map((p, i) => (
+					<PlatformEditor
+						key={p.code}
+						platform={p}
+						onChange={onChange(i)}
+						initialOpen={i === 0}
+					/>
+				))}
+			</Panel>
 			<Button variant="primary" onClick={onSave} disabled={saving}>
 				{saving
 					? __('保存中…', 'affilicard')

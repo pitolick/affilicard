@@ -95,4 +95,26 @@ describe( 'PlatformsPanel', () => {
 			).toBeInTheDocument()
 		);
 	} );
+
+	test( 'wraps platform editors in a panel container', async () => {
+		fetchPlatforms.mockResolvedValue( platforms );
+		const { container } = render( <PlatformsPanel /> );
+		await waitFor( () =>
+			expect( screen.getByText( /DMM \(dmm\)/ ) ).toBeInTheDocument()
+		);
+		expect(
+			container.querySelector( '[data-panel-container="true"]' )
+		).toBeInTheDocument();
+	} );
+
+	test( 'opens the first platform by default', async () => {
+		fetchPlatforms.mockResolvedValue( platforms );
+		const { container } = render( <PlatformsPanel /> );
+		await waitFor( () =>
+			expect( screen.getByText( /DMM \(dmm\)/ ) ).toBeInTheDocument()
+		);
+		const panels = container.querySelectorAll( '[data-panel]' );
+		expect( panels[ 0 ] ).toHaveAttribute( 'data-initial-open', 'true' );
+		expect( panels[ 1 ] ).toHaveAttribute( 'data-initial-open', 'false' );
+	} );
 } );
