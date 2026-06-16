@@ -89,4 +89,32 @@ describe( 'PlatformEditor', () => {
 		expect( CRED_SCHEMAS[ 'dmm-ebook' ] ).toHaveLength( 2 );
 		expect( CRED_SCHEMAS[ 'dmm-ebook' ][ 0 ].key ).toBe( 'api_id' );
 	} );
+
+	test( 'renders platform name and code as panel title', () => {
+		const onChange = jest.fn();
+		render(
+			<PlatformEditor platform={ basePlatform } onChange={ onChange } />
+		);
+		expect( screen.getByText( 'DMM (dmm)' ) ).toBeInTheDocument();
+	} );
+
+	test( 'shows 無効 suffix in title when platform disabled', () => {
+		const onChange = jest.fn();
+		const disabled = { ...basePlatform, enabled: false };
+		render(
+			<PlatformEditor platform={ disabled } onChange={ onChange } />
+		);
+		expect( screen.getByText( 'DMM (dmm) — 無効' ) ).toBeInTheDocument();
+	} );
+
+	test( 'groups auto-fetch fields under an API section heading', () => {
+		const onChange = jest.fn();
+		render(
+			<PlatformEditor platform={ basePlatform } onChange={ onChange } />
+		);
+		expect(
+			screen.getByText( 'API 連携（自動取得・後回し）' )
+		).toBeInTheDocument();
+		expect( screen.getByLabelText( 'Provider' ) ).toBeInTheDocument();
+	} );
 } );
