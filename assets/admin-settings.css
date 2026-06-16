@@ -1,0 +1,40 @@
+/* affilicard 設定画面の余白規律 */
+#affilicard-settings-root .affilicard-platforms-panel {
+	max-width: 720px;
+}
+
+/* 各プラットフォームパネル間の余白 */
+#affilicard-settings-root .components-panel__body {
+	margin-bottom: 8px;
+}
+
+/* フィールドを縦に等間隔で並べる（ラベル・入力の詰まりを解消） */
+#affilicard-settings-root .affilicard-platform-editor__section {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 4px 0 8px;
+}
+
+/* WP コントロール既定の下マージン崩れを打ち消し、gap に寄せる */
+#affilicard-settings-root .affilicard-platform-editor__section .components-base-control {
+	margin-bottom: 0;
+}
+
+/* API 連携グループを区切り線で分離 */
+#affilicard-settings-root .affilicard-platform-editor__section--api {
+	margin-top: 12px;
+	padding-top: 12px;
+	border-top: 1px solid #e0e0e0;
+}
+
+#affilicard-settings-root .affilicard-platform-editor__subhead {
+	margin: 0 0 4px;
+	font-size: 13px;
+	font-weight: 600;
+	color: #1e1e1e;
+}
+
+#affilicard-settings-root .affilicard-credential-editor {
+	margin-top: 12px;
+}
