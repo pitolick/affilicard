@@ -123,5 +123,12 @@ final class ProductMetaBox {
 			true
 		);
 		wp_set_script_translations( 'affilicard-metabox', 'affilicard' );
+		wp_enqueue_style( 'wp-components' );
+		wp_enqueue_style(
+			'affilicard-admin-metabox',
+			AFFILICARD_PLUGIN_URL . 'assets/admin-metabox.css',
+			array( 'wp-components' ),
+			AFFILICARD_VERSION
+		);
 	}
 }
