@@ -71,9 +71,6 @@ final class ProductRepositoryTest extends TestCase {
 			),
 		);
 
-		$listings_json = json_encode( $listings, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
-		$extras_json   = json_encode( $extras, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
-
 		$post = (object) array(
 			'ID'            => 101,
 			'post_type'     => ProductPostType::POST_TYPE,
@@ -89,10 +86,10 @@ final class ProductRepositoryTest extends TestCase {
 
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 101, ProductPostType::META_EXTRAS, true )
-			->andReturn( $extras_json );
+			->andReturn( $extras );
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 101, ProductPostType::META_LISTINGS, true )
-			->andReturn( $listings_json );
+			->andReturn( $listings );
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 101, ProductPostType::META_PRODUCT_TYPE, true )
 			->andReturn( 'ebook' );
@@ -181,7 +178,6 @@ final class ProductRepositoryTest extends TestCase {
 				}
 			);
 
-		WP_Mock::userFunction( 'wp_json_encode' )->andReturnUsing( static fn( $v, $flags ) => json_encode( $v, $flags ) );
 		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
 
 		$repo = new ProductRepository();
@@ -209,7 +205,6 @@ final class ProductRepositoryTest extends TestCase {
 				}
 			);
 
-		WP_Mock::userFunction( 'wp_json_encode' )->andReturnUsing( static fn( $v, $flags ) => json_encode( $v, $flags ) );
 		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
 
 		$repo = new ProductRepository();
@@ -226,7 +221,6 @@ final class ProductRepositoryTest extends TestCase {
 
 	public function test_save_writes_schema_version_meta(): void {
 		WP_Mock::userFunction( 'wp_insert_post' )->andReturn( 800 );
-		WP_Mock::userFunction( 'wp_json_encode' )->andReturnUsing( static fn( $v, $flags ) => json_encode( $v, $flags ) );
 
 		$saw_schema_version = false;
 		WP_Mock::userFunction( 'update_post_meta' )
@@ -252,7 +246,6 @@ final class ProductRepositoryTest extends TestCase {
 
 	public function test_save_mirrors_external_ids_for_each_listing(): void {
 		WP_Mock::userFunction( 'wp_insert_post' )->andReturn( 700 );
-		WP_Mock::userFunction( 'wp_json_encode' )->andReturnUsing( static fn( $v, $flags ) => json_encode( $v, $flags ) );
 
 		$mirror_calls = array();
 		WP_Mock::userFunction( 'update_post_meta' )
@@ -367,7 +360,6 @@ final class ProductRepositoryTest extends TestCase {
 		// wp_update_post / wp_insert_post should never be called.
 		WP_Mock::userFunction( 'wp_update_post' )->never();
 		WP_Mock::userFunction( 'wp_insert_post' )->never();
-		WP_Mock::userFunction( 'wp_json_encode' )->andReturnUsing( static fn( $v, $flags ) => json_encode( $v, $flags ) );
 
 		$extras   = array(
 			array(
@@ -385,12 +377,11 @@ final class ProductRepositoryTest extends TestCase {
 		$called_keys = array();
 		WP_Mock::userFunction( 'update_post_meta' )
 			->andReturnUsing(
-				function ( $post_id, $key, $value ) use ( &$called_keys, $extras, $listings ) {
+				function ( $post_id, $key, $value ) use ( &$called_keys ) {
 					$this->assertSame( 5, $post_id );
 					$called_keys[] = $key;
 					if ( ProductPostType::META_EXTRAS === $key || ProductPostType::META_LISTINGS === $key ) {
-						$this->assertIsString( $value );
-						$this->assertIsArray( json_decode( $value, true ) );
+						$this->assertIsArray( $value );
 					}
 					return true;
 				}
@@ -417,7 +408,6 @@ final class ProductRepositoryTest extends TestCase {
 	public function test_saveMeta_uses_generic_when_product_type_empty(): void {
 		WP_Mock::userFunction( 'wp_update_post' )->never();
 		WP_Mock::userFunction( 'wp_insert_post' )->never();
-		WP_Mock::userFunction( 'wp_json_encode' )->andReturnUsing( static fn( $v, $flags ) => json_encode( $v, $flags ) );
 
 		$seen_type = null;
 		WP_Mock::userFunction( 'update_post_meta' )
@@ -444,40 +434,34 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 1, ProductPostType::META_LISTINGS, true )
 			->andReturn(
-				json_encode(
+				array(
 					array(
-						array(
-							'platform'      => 'a',
-							'affiliate_url' => '',
-							'regular_url'   => 'https://example.com/r',
-						),
-					)
+						'platform'      => 'a',
+						'affiliate_url' => '',
+						'regular_url'   => 'https://example.com/r',
+					),
 				)
 			);
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 2, ProductPostType::META_LISTINGS, true )
 			->andReturn(
-				json_encode(
+				array(
 					array(
-						array(
-							'platform'      => 'b',
-							'affiliate_url' => 'https://example.com/a',
-							'regular_url'   => 'https://example.com/r',
-						),
-					)
+						'platform'      => 'b',
+						'affiliate_url' => 'https://example.com/a',
+						'regular_url'   => 'https://example.com/r',
+					),
 				)
 			);
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 3, ProductPostType::META_LISTINGS, true )
 			->andReturn(
-				json_encode(
+				array(
 					array(
-						array(
-							'platform'      => 'c',
-							'affiliate_url' => '',
-							'regular_url'   => 'https://example.com/r3',
-						),
-					)
+						'platform'      => 'c',
+						'affiliate_url' => '',
+						'regular_url'   => 'https://example.com/r3',
+					),
 				)
 			);
 
@@ -490,13 +474,11 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 42, ProductPostType::META_LISTINGS, true )
 			->andReturn(
-				json_encode(
+				array(
 					array(
-						array(
-							'platform'    => 'dmm-books',
-							'external_id' => 'X1',
-						),
-					)
+						'platform'    => 'dmm-books',
+						'external_id' => 'X1',
+					),
 				)
 			);
 		WP_Mock::userFunction( 'update_post_meta' )

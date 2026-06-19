@@ -176,8 +176,8 @@ final class ProductRepository implements ProductRepositoryInterface {
 
 		update_post_meta( $postId, ProductPostType::META_PRODUCT_TYPE, $product_type );
 		update_post_meta( $postId, ProductPostType::META_STOCK_STATUS, $stock_status );
-		update_post_meta( $postId, ProductPostType::META_EXTRAS, JsonField::encode( $extras ) );
-		update_post_meta( $postId, ProductPostType::META_LISTINGS, JsonField::encode( $listings ) );
+		update_post_meta( $postId, ProductPostType::META_EXTRAS, $extras );
+		update_post_meta( $postId, ProductPostType::META_LISTINGS, $listings );
 		update_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
 
 		$this->syncExternalIdMirror( $postId, $listings );

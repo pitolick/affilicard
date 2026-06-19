@@ -10,17 +10,7 @@ const PRODUCT_TYPE_OPTIONS = [
 	{ value: 'ebook', label: __('電子書籍', 'affilicard') },
 ];
 
-const parseJsonArray = (v) => {
-	if (typeof v !== 'string' || v === '') {
-		return [];
-	}
-	try {
-		const parsed = JSON.parse(v);
-		return Array.isArray(parsed) ? parsed : [];
-	} catch (e) {
-		return [];
-	}
-};
+const asArray = (v) => (Array.isArray(v) ? v : []);
 
 export function ProductSettingsPanel() {
 	const [meta, setMeta] = useEntityProp(
@@ -32,8 +22,8 @@ export function ProductSettingsPanel() {
 
 	const productType = m.affilicard_product_type || 'generic';
 	const stockStatus = m.affilicard_stock_status || 'available';
-	const listings = parseJsonArray(m.affilicard_listings);
-	const extras = parseJsonArray(m.affilicard_extras);
+	const listings = asArray(m.affilicard_listings);
+	const extras = asArray(m.affilicard_extras);
 
 	// useEntityProp の setter は React の setState と異なり更新関数を受け付けない
 	// （editEntityRecord に値をそのまま渡す）。毎レンダーで fresh な m を読み、
@@ -58,9 +48,7 @@ export function ProductSettingsPanel() {
 				<ExtrasEditor
 					productType={productType}
 					extras={extras}
-					onChange={(next) =>
-						patch({ affilicard_extras: JSON.stringify(next) })
-					}
+					onChange={(next) => patch({ affilicard_extras: next })}
 				/>
 			</PanelBody>
 			<PanelBody
@@ -69,9 +57,7 @@ export function ProductSettingsPanel() {
 			>
 				<ListingsEditor
 					listings={listings}
-					onChange={(next) =>
-						patch({ affilicard_listings: JSON.stringify(next) })
-					}
+					onChange={(next) => patch({ affilicard_listings: next })}
 				/>
 			</PanelBody>
 		</div>

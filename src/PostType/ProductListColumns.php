@@ -41,7 +41,7 @@ final class ProductListColumns {
 		}
 
 		$listings_raw = get_post_meta( $post_id, ProductPostType::META_LISTINGS, true );
-		$listings     = is_string( $listings_raw ) ? JsonField::decode( $listings_raw, array() ) : array();
+		$listings     = is_array( $listings_raw ) ? $listings_raw : ( is_string( $listings_raw ) ? JsonField::decode( $listings_raw, array() ) : array() );
 
 		$has_fallback = false;
 		foreach ( $listings as $listing ) {

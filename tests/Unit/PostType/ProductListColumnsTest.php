@@ -60,14 +60,12 @@ final class ProductListColumnsTest extends TestCase {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 123, ProductPostType::META_LISTINGS, true )
 			->andReturn(
-				json_encode(
+				array(
 					array(
-						array(
-							'platform'      => 'dmm-books',
-							'affiliate_url' => '',
-							'regular_url'   => 'https://example.com/product',
-						),
-					)
+						'platform'      => 'dmm-books',
+						'affiliate_url' => '',
+						'regular_url'   => 'https://example.com/product',
+					),
 				)
 			);
 
@@ -83,14 +81,12 @@ final class ProductListColumnsTest extends TestCase {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 456, ProductPostType::META_LISTINGS, true )
 			->andReturn(
-				json_encode(
+				array(
 					array(
-						array(
-							'platform'      => 'dmm-books',
-							'affiliate_url' => 'https://aff.example.com/abc',
-							'regular_url'   => 'https://example.com/product',
-						),
-					)
+						'platform'      => 'dmm-books',
+						'affiliate_url' => 'https://aff.example.com/abc',
+						'regular_url'   => 'https://example.com/product',
+					),
 				)
 			);
 

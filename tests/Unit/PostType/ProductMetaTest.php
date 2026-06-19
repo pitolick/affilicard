@@ -35,17 +35,22 @@ final class ProductMetaTest extends TestCase {
 		return $registered;
 	}
 
-	public function test_registers_listings_and_extras_as_string_meta_with_rest_true(): void {
+	public function test_registers_listings_and_extras_as_array_meta_with_schema(): void {
 		$reg = $this->captureRegistrations();
 
 		foreach ( array( ProductPostType::META_LISTINGS, ProductPostType::META_EXTRAS ) as $key ) {
 			$this->assertArrayHasKey( $key, $reg );
 			[ $post_type, $args ] = $reg[ $key ];
 			$this->assertSame( ProductPostType::POST_TYPE, $post_type );
-			$this->assertSame( 'string', $args['type'] );
+			$this->assertSame( 'array', $args['type'] );
 			$this->assertTrue( $args['single'] );
-			$this->assertTrue( $args['show_in_rest'] );
-			$this->assertSame( '', $args['default'] );
+			$this->assertSame( array(), $args['default'] );
+			// show_in_rest は schema 付き配列
+			$this->assertIsArray( $args['show_in_rest'] );
+			$this->assertArrayHasKey( 'schema', $args['show_in_rest'] );
+			$this->assertSame( 'array', $args['show_in_rest']['schema']['type'] );
+			$this->assertSame( 'object', $args['show_in_rest']['schema']['items']['type'] );
+			$this->assertTrue( $args['show_in_rest']['schema']['items']['additionalProperties'] );
 			$this->assertIsCallable( $args['auth_callback'] );
 			$this->assertIsCallable( $args['sanitize_callback'] );
 		}
@@ -67,53 +72,43 @@ final class ProductMetaTest extends TestCase {
 		WP_Mock::userFunction( 'sanitize_key' )->andReturnUsing( static fn( $v ) => $v );
 		WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing( static fn( $v ) => $v );
 		WP_Mock::userFunction( 'esc_url_raw' )->andReturnUsing( static fn( $v ) => $v );
-		WP_Mock::userFunction( 'wp_json_encode' )->andReturnUsing( static fn( $v, $flags ) => json_encode( $v, $flags ) );
 
 		$reg = $this->captureRegistrations();
 		$cb  = $reg[ ProductPostType::META_LISTINGS ][1]['sanitize_callback'];
 
-		$in  = json_encode(
+		$in  = array(
 			array(
-				array(
-					'platform'      => 'dmm-books',
-					'affiliate_url' => 'https://a',
-					'enabled'       => true,
-				),
+				'platform'      => 'dmm-books',
+				'affiliate_url' => 'https://a',
+				'enabled'       => true,
 			),
-			JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
 		);
 		$out = $cb( $in );
-		$this->assertIsString( $out );
-		$decoded = json_decode( $out, true );
-		$this->assertIsArray( $decoded );
-		$this->assertSame( 'dmm-books', $decoded[0]['platform'] );
+		$this->assertIsArray( $out );
+		$this->assertSame( 'dmm-books', $out[0]['platform'] );
 
 		// platform 空のエントリは除外される
-		$out2 = $cb( json_encode( array( array( 'platform' => '' ) ) ) );
-		$this->assertIsString( $out2 );
-		$this->assertSame( array(), json_decode( $out2, true ) );
+		$out2 = $cb( array( array( 'platform' => '' ) ) );
+		$this->assertIsArray( $out2 );
+		$this->assertSame( array(), $out2 );
 	}
 
 	public function test_listings_sanitize_excludes_unknown_fields_and_is_idempotent(): void {
 		WP_Mock::userFunction( 'sanitize_key' )->andReturnUsing( static fn( $v ) => $v );
 		WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing( static fn( $v ) => $v );
 		WP_Mock::userFunction( 'esc_url_raw' )->andReturnUsing( static fn( $v ) => $v );
-		WP_Mock::userFunction( 'wp_json_encode' )->andReturnUsing( static fn( $v, $flags ) => json_encode( $v, $flags ) );
 
 		$reg = $this->captureRegistrations();
 		$cb  = $reg[ ProductPostType::META_LISTINGS ][1]['sanitize_callback'];
 
-		$in      = json_encode(
+		$in   = array(
 			array(
-				array(
-					'platform'      => 'dmm-books',
-					'unknown_field' => '<script>x</script>',
-				),
-			)
+				'platform'      => 'dmm-books',
+				'unknown_field' => '<script>x</script>',
+			),
 		);
-		$once    = $cb( $in );
-		$decoded = json_decode( $once, true );
-		$this->assertArrayNotHasKey( 'unknown_field', $decoded[0] );
+		$once = $cb( $in );
+		$this->assertArrayNotHasKey( 'unknown_field', $once[0] );
 
 		// 二重適用で結果が変わらない（冪等）
 		$twice = $cb( $once );
@@ -123,24 +118,20 @@ final class ProductMetaTest extends TestCase {
 	public function test_extras_sanitize_excludes_unknown_fields_and_is_idempotent(): void {
 		WP_Mock::userFunction( 'sanitize_key' )->andReturnUsing( static fn( $v ) => $v );
 		WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing( static fn( $v ) => $v );
-		WP_Mock::userFunction( 'wp_json_encode' )->andReturnUsing( static fn( $v, $flags ) => json_encode( $v, $flags ) );
 
 		$reg = $this->captureRegistrations();
 		$cb  = $reg[ ProductPostType::META_EXTRAS ][1]['sanitize_callback'];
 
-		$in      = json_encode(
+		$in   = array(
 			array(
-				array(
-					'label'         => '著者',
-					'value'         => '架空 太郎',
-					'unknown_field' => '<script>x</script>',
-				),
-			)
+				'label'         => '著者',
+				'value'         => '架空 太郎',
+				'unknown_field' => '<script>x</script>',
+			),
 		);
-		$once    = $cb( $in );
-		$decoded = json_decode( $once, true );
-		$this->assertArrayNotHasKey( 'unknown_field', $decoded[0] );
-		$this->assertSame( '著者', $decoded[0]['label'] );
+		$once = $cb( $in );
+		$this->assertArrayNotHasKey( 'unknown_field', $once[0] );
+		$this->assertSame( '著者', $once[0]['label'] );
 
 		// 二重適用で結果が変わらない（冪等）
 		$twice = $cb( $once );
