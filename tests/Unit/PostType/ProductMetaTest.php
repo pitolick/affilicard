@@ -73,7 +73,13 @@ final class ProductMetaTest extends TestCase {
 		$reg = $this->captureRegistrations();
 		$cb  = $reg[ ProductPostType::META_LISTINGS ][1]['sanitize_callback'];
 
-		$in  = array( array( 'platform' => 'dmm-books', 'affiliate_url' => 'https://a', 'enabled' => true ) );
+		$in  = array(
+			array(
+				'platform'      => 'dmm-books',
+				'affiliate_url' => 'https://a',
+				'enabled'       => true,
+			),
+		);
 		$out = $cb( $in, ProductPostType::META_LISTINGS, 'post' );
 		$this->assertIsArray( $out );
 		$this->assertSame( 'dmm-books', $out[0]['platform'] );
@@ -91,7 +97,12 @@ final class ProductMetaTest extends TestCase {
 		$cb  = $reg[ ProductPostType::META_LISTINGS ][1]['sanitize_callback'];
 
 		// additionalProperties=true でも sanitize が未知キーをホワイトリスト除外する
-		$in   = array( array( 'platform' => 'dmm-books', 'unknown_field' => '<script>x</script>' ) );
+		$in   = array(
+			array(
+				'platform'      => 'dmm-books',
+				'unknown_field' => '<script>x</script>',
+			),
+		);
 		$once = $cb( $in, ProductPostType::META_LISTINGS, 'post' );
 		$this->assertArrayNotHasKey( 'unknown_field', $once[0] );
 		// 二重適用で結果が変わらない（冪等）
@@ -106,7 +117,13 @@ final class ProductMetaTest extends TestCase {
 		$reg = $this->captureRegistrations();
 		$cb  = $reg[ ProductPostType::META_EXTRAS ][1]['sanitize_callback'];
 
-		$in   = array( array( 'label' => '著者', 'value' => '架空 太郎', 'unknown_field' => '<script>x</script>' ) );
+		$in   = array(
+			array(
+				'label'         => '著者',
+				'value'         => '架空 太郎',
+				'unknown_field' => '<script>x</script>',
+			),
+		);
 		$once = $cb( $in, ProductPostType::META_EXTRAS, 'post' );
 		$this->assertArrayNotHasKey( 'unknown_field', $once[0] );
 		$this->assertSame( '著者', $once[0]['label'] );
