@@ -63,6 +63,7 @@ final class ProductPostTypeTest extends TestCase {
 					$this->assertTrue( $args['map_meta_cap'] );
 					$this->assertTrue( $args['show_ui'] );
 					$this->assertFalse( $args['public'] );
+					$this->assertTrue( $args['show_in_rest'], 'Gutenberg 有効化に show_in_rest=true が必要' );
 					$this->assertContains( 'title', $args['supports'] );
 					$this->assertContains( 'thumbnail', $args['supports'] );
 					$this->assertContains( 'author', $args['supports'] );

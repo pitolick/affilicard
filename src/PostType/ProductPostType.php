@@ -44,7 +44,13 @@ final class ProductPostType {
 				'public'          => false,
 				'show_ui'         => true,
 				'show_in_menu'    => true,
-				'show_in_rest'    => false,
+				// Gutenberg（ブロックエディタ）有効化に show_in_rest=true が必須。
+				// セキュリティ: public=false（非 viewable）+ capability_type='post' により、
+				// WP コアは未認証の wp/v2/affilicard_product read を既定で拒否する。
+				// listings/extras/stock は register_post_meta(show_in_rest) で露出していない
+				// ため、コア REST にアフィリエイト情報は出ない（露出は本タイトル/本文/状態等のみ）。
+				// 未認証 read が実際に拒否されることは E2E（rest-read-hardening.spec.js）で固定する。
+				'show_in_rest'    => true,
 				'capability_type' => 'post',
 				'map_meta_cap'    => true,
 				'supports'        => array( 'title', 'editor', 'thumbnail', 'author' ),
