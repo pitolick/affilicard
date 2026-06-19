@@ -42,13 +42,17 @@ test.describe( 'affilicard_product metabox — Gutenberg save-on-publish', () =>
 				.set( 'core/edit-post', 'welcomeGuide', false );
 		} );
 
+		// Gutenberg 6.x はエディタキャンバスを iframe 化する。タイトル・本文は
+		// iframe 内にあるため frameLocator 経由で操作する（metabox・公開は top frame）。
+		const canvas = page.frameLocator( 'iframe[name="editor-canvas"]' );
+
 		// 2. タイトル入力
-		await page
+		await canvas
 			.getByRole( 'textbox', { name: 'Add title' } )
 			.fill( 'E2E スパイク商品' );
 
 		// 3. 本文（段落ブロック）入力
-		await page
+		await canvas
 			.getByRole( 'button', { name: 'Add default block' } )
 			.click();
 		await page.keyboard.type( bodyText );
@@ -100,7 +104,7 @@ test.describe( 'affilicard_product metabox — Gutenberg save-on-publish', () =>
 		).toHaveValue( affUrl );
 		// 本文も保持
 		await expect(
-			page.locator( '.block-editor-block-list__layout' )
+			canvas.locator( '.block-editor-block-list__layout' )
 		).toContainText( bodyText );
 	} );
 } );
