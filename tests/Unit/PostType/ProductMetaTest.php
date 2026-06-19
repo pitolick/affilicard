@@ -61,6 +61,7 @@ final class ProductMetaTest extends TestCase {
 			$this->assertSame( 'string', $args['type'] );
 			$this->assertTrue( $args['show_in_rest'] );
 			$this->assertIsCallable( $args['auth_callback'] );
+			$this->assertIsCallable( $args['sanitize_callback'] );
 		}
 	}
 
@@ -95,6 +96,21 @@ final class ProductMetaTest extends TestCase {
 		$this->assertArrayNotHasKey( 'unknown_field', $once[0] );
 		// 二重適用で結果が変わらない（冪等）
 		$twice = $cb( $once, ProductPostType::META_LISTINGS, 'post' );
+		$this->assertSame( $once, $twice );
+	}
+
+	public function test_extras_sanitize_excludes_unknown_fields_and_is_idempotent(): void {
+		WP_Mock::userFunction( 'sanitize_key' )->andReturnUsing( static fn( $v ) => $v );
+		WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing( static fn( $v ) => $v );
+
+		$reg = $this->captureRegistrations();
+		$cb  = $reg[ ProductPostType::META_EXTRAS ][1]['sanitize_callback'];
+
+		$in   = array( array( 'label' => '著者', 'value' => '架空 太郎', 'unknown_field' => '<script>x</script>' ) );
+		$once = $cb( $in, ProductPostType::META_EXTRAS, 'post' );
+		$this->assertArrayNotHasKey( 'unknown_field', $once[0] );
+		$this->assertSame( '著者', $once[0]['label'] );
+		$twice = $cb( $once, ProductPostType::META_EXTRAS, 'post' );
 		$this->assertSame( $once, $twice );
 	}
 }
