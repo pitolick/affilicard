@@ -11,7 +11,8 @@ use Affilicard\Util\JsonField;
 /**
  * `affilicard_product` CPT に対する CRUD ラッパ。
  *
- * 値の入出力はすべて配列で行う。listings/extras メタは JSON 文字列として保存し、JsonField で decode/encode する。
+ * 値の入出力はすべて配列で行う。listings/extras メタはネイティブ配列メタとして保存する
+ * （register_post_meta type=array）。読み出し時は後方互換で旧 JSON 文字列も JsonField で decode する。
  */
 final class ProductRepository implements ProductRepositoryInterface {
 
