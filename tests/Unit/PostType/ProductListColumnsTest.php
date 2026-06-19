@@ -57,17 +57,19 @@ final class ProductListColumnsTest extends TestCase {
 	}
 
 	public function test_renderColumn_echoes_warning_icon_when_listings_have_fallback(): void {
-		$listings = array(
-			array(
-				'platform'      => 'dmm-books',
-				'affiliate_url' => '',
-				'regular_url'   => 'https://example.com/product',
-			),
-		);
-
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 123, ProductPostType::META_LISTINGS, true )
-			->andReturn( $listings );
+			->andReturn(
+				json_encode(
+					array(
+						array(
+							'platform'      => 'dmm-books',
+							'affiliate_url' => '',
+							'regular_url'   => 'https://example.com/product',
+						),
+					)
+				)
+			);
 
 		ob_start();
 		ProductListColumns::renderColumn( ProductListColumns::COLUMN_KEY, 123 );
@@ -78,17 +80,19 @@ final class ProductListColumnsTest extends TestCase {
 	}
 
 	public function test_renderColumn_echoes_em_dash_when_no_fallback(): void {
-		$listings = array(
-			array(
-				'platform'      => 'dmm-books',
-				'affiliate_url' => 'https://aff.example.com/abc',
-				'regular_url'   => 'https://example.com/product',
-			),
-		);
-
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 456, ProductPostType::META_LISTINGS, true )
-			->andReturn( $listings );
+			->andReturn(
+				json_encode(
+					array(
+						array(
+							'platform'      => 'dmm-books',
+							'affiliate_url' => 'https://aff.example.com/abc',
+							'regular_url'   => 'https://example.com/product',
+						),
+					)
+				)
+			);
 
 		ob_start();
 		ProductListColumns::renderColumn( ProductListColumns::COLUMN_KEY, 456 );

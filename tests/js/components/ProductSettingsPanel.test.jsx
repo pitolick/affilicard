@@ -11,12 +11,12 @@ beforeEach( () => {
 } );
 
 describe( 'ProductSettingsPanel', () => {
-	test( '配列メタの listing をそのまま描画する', async () => {
+	test( 'JSON 文字列メタの listing をそのまま描画する', async () => {
 		setEntityMeta( {
 			affilicard_product_type: 'ebook',
 			affilicard_stock_status: 'available',
-			affilicard_listings: [ { platform: 'dmm-books', enabled: true, affiliate_url: 'https://a' } ],
-			affilicard_extras: [],
+			affilicard_listings: JSON.stringify( [ { platform: 'dmm-books', enabled: true, affiliate_url: 'https://a' } ] ),
+			affilicard_extras: JSON.stringify( [] ),
 		} );
 		render( <ProductSettingsPanel /> );
 		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
@@ -35,7 +35,7 @@ describe( 'ProductSettingsPanel', () => {
 	// 以前 setMeta を更新関数形式にしたところ useEntityProp が関数を解釈せず
 	// listing 追加が反映されない不具合があった（E2E で発覚）。
 	test( '「listing を追加」で listing 行が追加される', async () => {
-		setEntityMeta( { affilicard_listings: [], affilicard_extras: [] } );
+		setEntityMeta( { affilicard_listings: JSON.stringify( [] ), affilicard_extras: JSON.stringify( [] ) } );
 		render( <ProductSettingsPanel /> );
 		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
 		expect( screen.getByText( 'listing がありません' ) ).toBeInTheDocument();

@@ -4,13 +4,15 @@ declare(strict_types=1);
 namespace Affilicard\PostType;
 
 use Affilicard\Rest\ProductSchema;
+use Affilicard\Util\JsonField;
 
 /**
  * 商品 CPT の post meta を REST（Gutenberg core-data）に露出させる登録。
  *
- * listings/extras はネイティブ配列メタ（type=array）として保存し、Gutenberg の
- * useEntityProp が実配列で読み書きできるようにする。フィールド形状の権威は
- * ProductSchema::sanitize* に置き、show_in_rest スキーマは item=object の柔軟型とする。
+ * listings/extras は JSON 文字列として保存する（type=string）。
+ * useEntityProp のオブジェクト配列メタが保存時に空配列化される既知制限（#55283）を回避するため、
+ * JS 側で JSON.stringify/parse し、PHP 側で JsonField で decode/encode する。
+ * フィールド形状の権威は ProductSchema::sanitize* に置く。
  * 未認証/低権限への露出は auth_callback(edit_posts)＋ProductRestController で防ぐ。
  */
 final class ProductMeta {
@@ -50,27 +52,17 @@ final class ProductMeta {
 			)
 		);
 
-		$object_array_schema = array(
-			'schema' => array(
-				'type'  => 'array',
-				'items' => array(
-					'type'                 => 'object',
-					'additionalProperties' => true,
-				),
-			),
-		);
-
 		register_post_meta(
 			ProductPostType::POST_TYPE,
 			ProductPostType::META_LISTINGS,
 			array(
-				'type'              => 'array',
+				'type'              => 'string',
 				'single'            => true,
-				'default'           => array(),
-				'show_in_rest'      => $object_array_schema,
+				'default'           => '',
+				'show_in_rest'      => true,
 				'auth_callback'     => $auth,
 				'sanitize_callback' => static function ( $value ) {
-					return ProductSchema::sanitizeListings( $value );
+					return JsonField::encode( ProductSchema::sanitizeListings( JsonField::decode( (string) $value, array() ) ) );
 				},
 			)
 		);
@@ -79,13 +71,13 @@ final class ProductMeta {
 			ProductPostType::POST_TYPE,
 			ProductPostType::META_EXTRAS,
 			array(
-				'type'              => 'array',
+				'type'              => 'string',
 				'single'            => true,
-				'default'           => array(),
-				'show_in_rest'      => $object_array_schema,
+				'default'           => '',
+				'show_in_rest'      => true,
 				'auth_callback'     => $auth,
 				'sanitize_callback' => static function ( $value ) {
-					return ProductSchema::sanitizeExtras( $value );
+					return JsonField::encode( ProductSchema::sanitizeExtras( JsonField::decode( (string) $value, array() ) ) );
 				},
 			)
 		);

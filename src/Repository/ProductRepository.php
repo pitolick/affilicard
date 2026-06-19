@@ -6,11 +6,12 @@ namespace Affilicard\Repository;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Schema\SchemaVersion;
 use Affilicard\Stock\StockStatus;
+use Affilicard\Util\JsonField;
 
 /**
  * `affilicard_product` CPT に対する CRUD ラッパ。
  *
- * 値の入出力はすべて配列で行う。listings/extras メタはネイティブ配列として保存・取得する。
+ * 値の入出力はすべて配列で行う。listings/extras メタは JSON 文字列として保存し、JsonField で decode/encode する。
  */
 final class ProductRepository implements ProductRepositoryInterface {
 
@@ -42,8 +43,8 @@ final class ProductRepository implements ProductRepositoryInterface {
 		$extras_raw   = get_post_meta( $postId, ProductPostType::META_EXTRAS, true );
 		$listings_raw = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
 
-		$extras   = is_array( $extras_raw ) ? $extras_raw : array();
-		$listings = is_array( $listings_raw ) ? $listings_raw : array();
+		$extras   = is_string( $extras_raw ) ? JsonField::decode( $extras_raw, array() ) : array();
+		$listings = is_string( $listings_raw ) ? JsonField::decode( $listings_raw, array() ) : array();
 
 		return array(
 			'id'             => (int) $post->ID,
@@ -171,8 +172,8 @@ final class ProductRepository implements ProductRepositoryInterface {
 
 		update_post_meta( $postId, ProductPostType::META_PRODUCT_TYPE, $product_type );
 		update_post_meta( $postId, ProductPostType::META_STOCK_STATUS, $stock_status );
-		update_post_meta( $postId, ProductPostType::META_EXTRAS, $extras );
-		update_post_meta( $postId, ProductPostType::META_LISTINGS, $listings );
+		update_post_meta( $postId, ProductPostType::META_EXTRAS, JsonField::encode( $extras ) );
+		update_post_meta( $postId, ProductPostType::META_LISTINGS, JsonField::encode( $listings ) );
 		update_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
 
 		$this->syncExternalIdMirror( $postId, $listings );
@@ -204,8 +205,9 @@ final class ProductRepository implements ProductRepositoryInterface {
 
 		$count = 0;
 		foreach ( $ids as $id ) {
-			$listings = get_post_meta( (int) $id, ProductPostType::META_LISTINGS, true );
-			if ( is_array( $listings ) && self::hasFallbackListing( $listings ) ) {
+			$listings     = get_post_meta( (int) $id, ProductPostType::META_LISTINGS, true );
+			$listings_arr = is_string( $listings ) ? JsonField::decode( $listings, array() ) : ( is_array( $listings ) ? $listings : array() );
+			if ( self::hasFallbackListing( $listings_arr ) ) {
 				++$count;
 			}
 		}
@@ -218,7 +220,9 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 */
 	public function syncDerivedMeta( int $postId ): void {
 		$listings = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
-		if ( ! is_array( $listings ) ) {
+		if ( is_string( $listings ) ) {
+			$listings = JsonField::decode( $listings, array() );
+		} elseif ( ! is_array( $listings ) ) {
 			$listings = array();
 		}
 		$this->syncExternalIdMirror( $postId, $listings );
