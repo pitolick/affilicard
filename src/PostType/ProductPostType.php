@@ -53,7 +53,11 @@ final class ProductPostType {
 				'rest_controller_class' => \Affilicard\Rest\ProductRestController::class,
 				'capability_type'       => 'post',
 				'map_meta_cap'          => true,
-				'supports'              => array( 'title', 'editor', 'thumbnail', 'author' ),
+				// 'custom-fields' は register_post_meta(show_in_rest) を REST 応答の
+				// `meta` フィールドとして露出させるために必須。これが無いと Gutenberg の
+				// useEntityProp が meta を保存/読込できない（生の Custom Fields パネルは
+				// エディタ設定でオプトイン時のみ表示され、既定では非表示）。
+				'supports'              => array( 'title', 'editor', 'thumbnail', 'author', 'custom-fields' ),
 				'has_archive'           => false,
 				'rewrite'               => false,
 				'menu_icon'             => 'dashicons-products',

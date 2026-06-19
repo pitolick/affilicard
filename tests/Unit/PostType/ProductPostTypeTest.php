@@ -71,6 +71,7 @@ final class ProductPostTypeTest extends TestCase {
 					$this->assertContains( 'title', $args['supports'] );
 					$this->assertContains( 'thumbnail', $args['supports'] );
 					$this->assertContains( 'author', $args['supports'] );
+					$this->assertContains( 'custom-fields', $args['supports'] );
 				}
 			);
 
