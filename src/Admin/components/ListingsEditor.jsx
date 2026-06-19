@@ -133,41 +133,58 @@ export function ListingsEditor({ listings, onChange }) {
 						<TextControl
 							label={__('外部 ID', 'affilicard')}
 							value={row.external_id}
+							placeholder={__('ストアの商品 ID', 'affilicard')}
 							onChange={(v) => updateRow(i, { external_id: v })}
 						/>
 						<TextControl
 							label={__('通常 URL', 'affilicard')}
 							value={row.regular_url}
+							placeholder={__(
+								'https://example.com/item/123',
+								'affilicard'
+							)}
 							onChange={(v) => updateRow(i, { regular_url: v })}
 						/>
 						<TextControl
 							label={__('アフィリエイト URL', 'affilicard')}
 							value={row.affiliate_url}
+							placeholder={__(
+								'https://al.example.com/item/123',
+								'affilicard'
+							)}
 							onChange={(v) => updateRow(i, { affiliate_url: v })}
 						/>
 						<TextControl
 							label={__('価格', 'affilicard')}
 							value={row.price}
+							placeholder={__('例: 660', 'affilicard')}
 							onChange={(v) => updateRow(i, { price: v })}
 						/>
 						<TextControl
 							label={__('参考価格', 'affilicard')}
 							value={row.list_price}
+							placeholder={__('例: 880', 'affilicard')}
 							onChange={(v) => updateRow(i, { list_price: v })}
 						/>
 						<TextControl
 							label={__('バッジ', 'affilicard')}
 							value={row.badge}
+							placeholder={__('例: 40%OFF', 'affilicard')}
 							onChange={(v) => updateRow(i, { badge: v })}
 						/>
 						<TextControl
 							label={__('画像 URL', 'affilicard')}
 							value={row.image_url}
+							placeholder={__(
+								'https://example.com/cover.jpg',
+								'affilicard'
+							)}
 							onChange={(v) => updateRow(i, { image_url: v })}
 						/>
 						<TextControl
 							label={__('ボタンラベル上書き', 'affilicard')}
 							value={row.button_label_override}
+							placeholder={__('例: ○○で読む', 'affilicard')}
 							onChange={(v) =>
 								updateRow(i, { button_label_override: v })
 							}
