@@ -28,17 +28,16 @@ test.describe( 'affilicard_product サイドバー設定 — core-data save', ()
 			.getByRole( 'textbox', { name: 'Add title' } )
 			.fill( 'E2E サイドバー商品' );
 
-		const openPanel = async () => {
-			const toggle = page.getByRole( 'button', { name: 'Affilicard 商品設定' } );
-			if ( await toggle.count() ) {
-				const expanded = await toggle.getAttribute( 'aria-expanded' );
-				if ( expanded === 'false' ) {
-					await toggle.click();
-				}
+		const expandSection = async ( name ) => {
+			const btn = page.getByRole( 'button', { name } );
+			await expect( btn ).toBeVisible( { timeout: 15_000 } );
+			if ( ( await btn.getAttribute( 'aria-expanded' ) ) === 'false' ) {
+				await btn.click();
 			}
 		};
-		await openPanel();
 
+		await expandSection( 'Affilicard 商品設定' );
+		await expandSection( 'プラットフォーム listing' );
 		await page.getByRole( 'button', { name: 'listing を追加' } ).click();
 		await page.getByLabel( 'プラットフォーム' ).last().selectOption( 'dmm-books' );
 		await page.getByLabel( 'アフィリエイト URL' ).last().fill( affUrl );
@@ -59,7 +58,11 @@ test.describe( 'affilicard_product サイドバー設定 — core-data save', ()
 		} );
 
 		await page.reload();
-		await openPanel();
+		await page.waitForFunction(
+			() => window.wp?.data?.select( 'core/editor' )?.getCurrentPostId()
+		);
+		await expandSection( 'Affilicard 商品設定' );
+		await expandSection( 'プラットフォーム listing' );
 		await expect(
 			page.getByLabel( 'アフィリエイト URL' ).last()
 		).toHaveValue( affUrl );
