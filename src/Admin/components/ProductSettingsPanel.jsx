@@ -25,7 +25,7 @@ export function ProductSettingsPanel() {
 	const listings = asArray( m.affilicard_listings );
 	const extras = asArray( m.affilicard_extras );
 
-	const patch = ( next ) => setMeta( { ...m, ...next } );
+	const patch = ( next ) => setMeta( ( prev ) => ( { ...( prev || {} ), ...next } ) );
 
 	return (
 		<div className="affilicard-product-settings">

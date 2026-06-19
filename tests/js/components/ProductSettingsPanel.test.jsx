@@ -21,6 +21,7 @@ describe( 'ProductSettingsPanel', () => {
 		render( <ProductSettingsPanel /> );
 		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
 		expect( screen.getByDisplayValue( 'https://a' ) ).toBeInTheDocument();
+		expect( screen.getByDisplayValue( '電子書籍' ) ).toBeInTheDocument();
 	} );
 
 	test( 'meta が未定義/非配列でも空配列で安全に描画する', async () => {
