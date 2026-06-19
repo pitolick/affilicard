@@ -42,6 +42,15 @@ test.describe( 'affilicard_product サイドバー設定 — core-data save', ()
 		await page.getByLabel( 'プラットフォーム' ).last().selectOption( 'dmm-books' );
 		await page.getByLabel( 'アフィリエイト URL' ).last().fill( affUrl );
 
+		// 診断1: 入力後、エディタの編集中 meta に listing が入っているか
+		const editedMeta = await page.evaluate( () =>
+			window.wp.data
+				.select( 'core/editor' )
+				.getEditedPostAttribute( 'meta' )
+		);
+		// eslint-disable-next-line no-console
+		console.log( 'DIAG_EDITED_META:', JSON.stringify( editedMeta ) );
+
 		await page.getByRole( 'button', { name: 'Publish', exact: true } ).click();
 		await page
 			.locator( '.editor-post-publish-panel' )
@@ -56,6 +65,21 @@ test.describe( 'affilicard_product サイドバー設定 — core-data save', ()
 				editor.getCurrentPostAttribute( 'status' ) === 'publish'
 			);
 		} );
+
+		// 診断2: 公開後、サーバ側 REST に meta が保存されたか
+		const postId = await page.evaluate( () =>
+			window.wp.data.select( 'core/editor' ).getCurrentPostId()
+		);
+		const restRes = await page.request.get(
+			`/wp-json/wp/v2/affilicard_product/${ postId }?context=edit`
+		);
+		// eslint-disable-next-line no-console
+		console.log( 'DIAG_REST_STATUS:', restRes.status() );
+		// eslint-disable-next-line no-console
+		console.log(
+			'DIAG_REST_META:',
+			JSON.stringify( ( await restRes.json() ).meta )
+		);
 
 		await page.reload();
 		await page.waitForFunction(
