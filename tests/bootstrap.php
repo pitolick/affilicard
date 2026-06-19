@@ -85,6 +85,34 @@ if ( ! class_exists( 'WP_REST_Request' ) ) {
 	}
 }
 
+if ( ! class_exists( 'WP_REST_Posts_Controller' ) ) {
+	/**
+	 * Minimal WP_REST_Posts_Controller stub for unit tests.
+	 *
+	 * @phpstan-ignore-next-line
+	 */
+	class WP_REST_Posts_Controller {
+
+		public function __construct( string $post_type = '' ) {}
+
+		/**
+		 * @param mixed $request
+		 * @return bool
+		 */
+		public function get_items_permissions_check( $request ) {
+			return true;
+		}
+
+		/**
+		 * @param mixed $request
+		 * @return bool
+		 */
+		public function get_item_permissions_check( $request ) {
+			return true;
+		}
+	}
+}
+
 if ( ! class_exists( 'WP_REST_Response' ) ) {
 	/**
 	 * Minimal WP_REST_Response stub for unit tests.

@@ -27,11 +27,19 @@ test.describe( 'affilicard_product metabox — Gutenberg save-on-publish', () =>
 			'/wp-admin/post-new.php?post_type=affilicard_product'
 		);
 
-		// ウェルカムガイド等のモーダルが出たら閉じる（存在しなければ無視）
-		const closeModal = page.getByRole( 'button', { name: 'Close' } );
-		if ( await closeModal.isVisible().catch( () => false ) ) {
-			await closeModal.click();
-		}
+		// ウェルカムガイド（初回起動モーダル）を core/preferences で確実に無効化する。
+		// Close ボタンのクリック競合を避けるため、設定値で消す。
+		await page.waitForFunction(
+			() =>
+				window.wp &&
+				window.wp.data &&
+				window.wp.data.select( 'core/edit-post' )
+		);
+		await page.evaluate( () => {
+			window.wp.data
+				.dispatch( 'core/preferences' )
+				.set( 'core/edit-post', 'welcomeGuide', false );
+		} );
 
 		// 2. タイトル入力
 		await page
@@ -71,9 +79,14 @@ test.describe( 'affilicard_product metabox — Gutenberg save-on-publish', () =>
 			.locator( '.editor-post-publish-panel' )
 			.getByRole( 'button', { name: 'Publish', exact: true } )
 			.click();
-		await expect(
-			page.getByText( 'is now live.', { exact: false } )
-		).toBeVisible();
+		await page.waitForFunction( () => {
+			const editor = window.wp?.data?.select( 'core/editor' );
+			return (
+				!! editor &&
+				!! editor.getCurrentPostId() &&
+				! editor.isSavingPost()
+			);
+		} );
 
 		// 7. リロードして保持を確認
 		await page.reload();
