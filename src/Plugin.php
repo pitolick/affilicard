@@ -44,6 +44,7 @@ final class Plugin {
 	private function bootInstance(): void {
 		// CPT 登録
 		add_action( 'init', array( ProductPostType::class, 'register' ) );
+		add_action( 'init', array( \Affilicard\PostType\ProductMeta::class, 'register' ) );
 
 		// Gutenberg Block 登録（フロント/エディタ両方で init 時に必要）
 		Block::register_hook();
