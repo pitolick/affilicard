@@ -42,6 +42,7 @@ test.describe( 'wp/v2/affilicard_product read hardening', () => {
 		expect( [ 401, 403, 404 ] ).toContain( res.status() );
 		const text = await res.text();
 		expect( text ).not.toContain( 'example.com/aff-draft' );
+		expect( text ).not.toContain( 'affiliate_url' );
 		await anon.dispose();
 	} );
 
