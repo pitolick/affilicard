@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-20
+
+### Added
+
+- 商品 CPT 登録画面の編集 UI を Gutenberg 右文書サイドバー（`PluginDocumentSettingPanel`）へ移行。商品タイプ・在庫・追加情報・プラットフォーム listing をサイドパネルで編集
+- listings/extras をネイティブ配列メタ（`register_post_meta` `type=array` + `show_in_rest` スキーマ）として保存し、Gutenberg core-data（`useEntityProp`）で保存・読み込み
+- CPT に `custom-fields` support を追加（`register_post_meta(show_in_rest)` を REST 応答の `meta` として露出させ Gutenberg で保存可能にするため必須）
+- 未認証 REST read を拒否する `ProductRestController`（read 系 permission を `edit_posts` 必須に上書き）
+- 商品 CPT を `show_in_rest=true` 化（Gutenberg 本文編集を有効化）。本文は `post_content`
+- プラットフォーム listing のアコーディオン表示（`Panel`/`PanelBody`）とサイドパネルの余白規律 CSS
+- 商品設定の各入力欄にプレースホルダを追加
+
+### Changed
+
+- 商品説明をクラシックエディタから Gutenberg ブロックエディタ（本文）へ
+- 派生 meta（external_id ミラー・schema_version）を `rest_after_insert` フックで保存後に同期（autosave/revision はスキップ）
+
+### Removed
+
+- クラシックメタボックス（hidden textarea + `$_POST` 保存）を撤去し、core-data 保存へ全面移行
+
 ## [1.1.0] - 2026-06-16
 
 ### Added
