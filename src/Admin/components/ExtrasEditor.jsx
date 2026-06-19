@@ -5,9 +5,21 @@ import { __ } from '@wordpress/i18n';
 const SCHEMAS = {
 	generic: [],
 	ebook: [
-		{ key: 'author', label: __('著者', 'affilicard') },
-		{ key: 'publisher', label: __('出版社', 'affilicard') },
-		{ key: 'isbn', label: __('ISBN', 'affilicard') },
+		{
+			key: 'author',
+			label: __('著者', 'affilicard'),
+			placeholder: __('著者名', 'affilicard'),
+		},
+		{
+			key: 'publisher',
+			label: __('出版社', 'affilicard'),
+			placeholder: __('出版社名', 'affilicard'),
+		},
+		{
+			key: 'isbn',
+			label: __('ISBN', 'affilicard'),
+			placeholder: __('例: 978-4-XX-XXXXXX-X', 'affilicard'),
+		},
 	],
 };
 
@@ -51,6 +63,7 @@ export function ExtrasEditor({ productType, extras, onChange }) {
 					<TextControl
 						key={s.key}
 						label={s.label}
+						placeholder={s.placeholder}
 						value={current?.value ?? ''}
 						onChange={(v) => replaceSchemaValue(s.key, v)}
 					/>
@@ -63,11 +76,13 @@ export function ExtrasEditor({ productType, extras, onChange }) {
 				>
 					<TextControl
 						label={__('項目名', 'affilicard')}
+						placeholder={__('例: シリーズ', 'affilicard')}
 						value={row.label ?? ''}
 						onChange={(v) => replaceCustomRow(i, { label: v })}
 					/>
 					<TextControl
 						label={__('値', 'affilicard')}
+						placeholder={__('入力値', 'affilicard')}
 						value={row.value ?? ''}
 						onChange={(v) => replaceCustomRow(i, { value: v })}
 					/>

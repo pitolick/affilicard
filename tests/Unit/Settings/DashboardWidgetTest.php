@@ -42,37 +42,8 @@ final class DashboardWidgetTest extends TestCase {
 
 	public function tearDown(): void {
 		WP_Mock::tearDown();
-		if ( isset( $GLOBALS['wpdb'] ) ) {
-			unset( $GLOBALS['wpdb'] );
-		}
 		Mockery::close();
 		parent::tearDown();
-	}
-
-	/**
-	 * countFallbackProducts() を指定値に固定するため、$wpdb スタブを設置する。
-	 *
-	 * @param list<int> $post_ids 返却したい post_id 配列
-	 */
-	private function stubWpdbWithPostIds( array $post_ids ): void {
-		$wpdb           = new \stdClass();
-		$wpdb->postmeta = 'wp_postmeta';
-		$wpdb->prepare  = static function ( string $sql ) {
-			return $sql;
-		};
-		$wpdb->get_col  = static function () use ( $post_ids ) {
-			return $post_ids;
-		};
-		// stdClass にメソッドはバインドできないため Mockery で wpdb 風オブジェクトを構築する。
-		$mock           = Mockery::mock( 'wpdb' );
-		$mock->postmeta = 'wp_postmeta';
-		$mock->shouldReceive( 'prepare' )->andReturnUsing(
-			static function ( string $sql ) {
-				return $sql;
-			}
-		);
-		$mock->shouldReceive( 'get_col' )->andReturn( $post_ids );
-		$GLOBALS['wpdb'] = $mock;
 	}
 
 	public function test_register_hooks_wp_dashboard_setup(): void {
@@ -123,7 +94,9 @@ final class DashboardWidgetTest extends TestCase {
 	}
 
 	public function test_render_outputs_zero_message_when_count_is_zero(): void {
-		$this->stubWpdbWithPostIds( array() );
+		WP_Mock::userFunction( 'get_posts' )
+			->once()
+			->andReturn( array() );
 
 		$widget = new DashboardWidget( new ProductRepository() );
 
@@ -136,33 +109,31 @@ final class DashboardWidgetTest extends TestCase {
 	}
 
 	public function test_render_outputs_count_message_and_link_when_count_positive(): void {
-		$this->stubWpdbWithPostIds( array( 1, 2 ) );
+		WP_Mock::userFunction( 'get_posts' )
+			->once()
+			->andReturn( array( 1, 2 ) );
 
 		// 両 post_id とも fallback 状態 (affiliate_url='', regular_url 非空)
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 1, \Affilicard\PostType\ProductPostType::META_LISTINGS, true )
 			->andReturn(
-				json_encode(
+				array(
 					array(
-						array(
-							'platform'      => 'a',
-							'affiliate_url' => '',
-							'regular_url'   => 'https://example.com/1',
-						),
-					)
+						'platform'      => 'a',
+						'affiliate_url' => '',
+						'regular_url'   => 'https://example.com/1',
+					),
 				)
 			);
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 2, \Affilicard\PostType\ProductPostType::META_LISTINGS, true )
 			->andReturn(
-				json_encode(
+				array(
 					array(
-						array(
-							'platform'      => 'b',
-							'affiliate_url' => '',
-							'regular_url'   => 'https://example.com/2',
-						),
-					)
+						'platform'      => 'b',
+						'affiliate_url' => '',
+						'regular_url'   => 'https://example.com/2',
+					),
 				)
 			);
 

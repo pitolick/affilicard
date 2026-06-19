@@ -1,0 +1,12 @@
+/* 文書サイドバーの Affilicard 商品設定パネル */
+.affilicard-product-settings .components-panel__body .components-base-control {
+	margin-bottom: 16px;
+}
+
+.affilicard-product-settings .affilicard-listings-editor .components-panel__body {
+	margin-bottom: 8px;
+}
+
+.affilicard-product-settings .components-base-control:last-child {
+	margin-bottom: 0;
+}

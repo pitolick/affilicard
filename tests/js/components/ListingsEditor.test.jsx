@@ -13,6 +13,21 @@ const platforms = [
 	{ code: 'amazon', name: 'Amazon' },
 ];
 
+const EMPTY_LISTING_FIXTURE = {
+	platform: '',
+	enabled: true,
+	update_mode: 'manual',
+	auto_update: false,
+	external_id: '',
+	regular_url: '',
+	affiliate_url: '',
+	price: '',
+	list_price: '',
+	badge: '',
+	image_url: '',
+	button_label_override: '',
+};
+
 beforeEach( () => {
 	fetchPlatforms.mockReset();
 } );
@@ -223,5 +238,71 @@ describe( 'ListingsEditor', () => {
 				screen.getByText( 'listing がありません' )
 			).toBeInTheDocument()
 		);
+	} );
+
+	test( 'renders each listing inside a PanelBody titled by platform name', async () => {
+		fetchPlatforms.mockResolvedValue( platforms );
+		const listings = [
+			{
+				platform: 'dmm-books',
+				enabled: true,
+				update_mode: 'manual',
+				auto_update: false,
+				external_id: '111',
+				regular_url: '',
+				affiliate_url: 'https://a-aff',
+				price: '500',
+				list_price: '',
+				badge: '',
+				image_url: '',
+				button_label_override: '',
+			},
+			{ ...EMPTY_LISTING_FIXTURE },
+		];
+		const { container } = render(
+			<ListingsEditor listings={ listings } onChange={ () => {} } />
+		);
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+		// listing ごとに 1 つの PanelBody
+		expect( container.querySelectorAll( '[data-panel]' ) ).toHaveLength( 2 );
+		// 選択済み行はプラットフォーム名がヘッダに出る
+		expect(
+			container.querySelector( '[data-panel="DMM Books"]' )
+		).toBeTruthy();
+		// 未選択行はフォールバック見出し
+		expect(
+			container.querySelector( '[data-panel="（プラットフォーム未選択）"]' )
+		).toBeTruthy();
+		// 先頭行は初期展開
+		expect(
+			container.querySelector( '[data-panel="DMM Books"]' ).getAttribute(
+				'data-initial-open'
+			)
+		).toBe( 'true' );
+	} );
+
+	test( 'fallback listing gets a ⚠ prefix in its panel title', async () => {
+		fetchPlatforms.mockResolvedValue( platforms );
+		const listings = [
+			{
+				platform: 'dmm-books',
+				enabled: true,
+				update_mode: 'manual',
+				auto_update: false,
+				external_id: '111',
+				regular_url: 'https://a',
+				affiliate_url: '',
+				price: '500',
+				list_price: '',
+				badge: '',
+				image_url: '',
+				button_label_override: '',
+			},
+		];
+		const { container } = render(
+			<ListingsEditor listings={ listings } onChange={ () => {} } />
+		);
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+		expect( container.querySelector( '[data-panel^="⚠"]' ) ).toBeTruthy();
 	} );
 } );

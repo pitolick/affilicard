@@ -5,6 +5,8 @@ import {
 	SelectControl,
 	Button,
 	Notice,
+	Panel,
+	PanelBody,
 } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import { fetchPlatforms } from '../api/platforms';
@@ -37,6 +39,17 @@ function isFallback(listing) {
 		(listing.affiliate_url ?? '') === '' &&
 		(listing.regular_url ?? '') !== ''
 	);
+}
+
+function platformName(platforms, code) {
+	const p = (platforms || []).find((x) => x.code === code);
+	return p ? p.name : '';
+}
+
+function rowTitle(platforms, row) {
+	const name = platformName(platforms, row.platform);
+	const base = name || __('（プラットフォーム未選択）', 'affilicard');
+	return isFallback(row) ? `⚠ ${base}` : base;
 }
 
 export function ListingsEditor({ listings, onChange }) {
@@ -76,91 +89,116 @@ export function ListingsEditor({ listings, onChange }) {
 					{__('listing がありません', 'affilicard')}
 				</p>
 			)}
-			{rows.map((row, i) => (
-				<div key={i} className="affilicard-listing-row">
-					{isFallback(row) && (
-						<Notice status="warning" isDismissible={false}>
-							{__(
-								'⚠ アフィリエイト URL 未設定、通常 URL にフォールバック中',
+			<Panel className="affilicard-listings-panel">
+				{rows.map((row, i) => (
+					<PanelBody
+						key={i}
+						title={rowTitle(platforms, row)}
+						initialOpen={i === 0}
+					>
+						{isFallback(row) && (
+							<Notice status="warning" isDismissible={false}>
+								{__(
+									'⚠ アフィリエイト URL 未設定、通常 URL にフォールバック中',
+									'affilicard'
+								)}
+							</Notice>
+						)}
+						<SelectControl
+							label={__('プラットフォーム', 'affilicard')}
+							value={row.platform}
+							options={platformOptions}
+							onChange={(v) => updateRow(i, { platform: v })}
+						/>
+						<ToggleControl
+							label={__('有効', 'affilicard')}
+							checked={Boolean(row.enabled)}
+							onChange={(v) => updateRow(i, { enabled: v })}
+						/>
+						<SelectControl
+							label={__('更新モード', 'affilicard')}
+							value={row.update_mode}
+							options={UPDATE_MODE_OPTIONS}
+							onChange={(v) => updateRow(i, { update_mode: v })}
+						/>
+						{row.update_mode === 'api' && (
+							<ToggleControl
+								label={__('自動更新', 'affilicard')}
+								checked={Boolean(row.auto_update)}
+								onChange={(v) =>
+									updateRow(i, { auto_update: v })
+								}
+							/>
+						)}
+						<TextControl
+							label={__('外部 ID', 'affilicard')}
+							value={row.external_id}
+							placeholder={__('ストアの商品 ID', 'affilicard')}
+							onChange={(v) => updateRow(i, { external_id: v })}
+						/>
+						<TextControl
+							label={__('通常 URL', 'affilicard')}
+							value={row.regular_url}
+							placeholder={__(
+								'https://example.com/item/123',
 								'affilicard'
 							)}
-						</Notice>
-					)}
-					<SelectControl
-						label={__('プラットフォーム', 'affilicard')}
-						value={row.platform}
-						options={platformOptions}
-						onChange={(v) => updateRow(i, { platform: v })}
-					/>
-					<ToggleControl
-						label={__('有効', 'affilicard')}
-						checked={Boolean(row.enabled)}
-						onChange={(v) => updateRow(i, { enabled: v })}
-					/>
-					<SelectControl
-						label={__('更新モード', 'affilicard')}
-						value={row.update_mode}
-						options={UPDATE_MODE_OPTIONS}
-						onChange={(v) => updateRow(i, { update_mode: v })}
-					/>
-					{row.update_mode === 'api' && (
-						<ToggleControl
-							label={__('自動更新', 'affilicard')}
-							checked={Boolean(row.auto_update)}
-							onChange={(v) => updateRow(i, { auto_update: v })}
+							onChange={(v) => updateRow(i, { regular_url: v })}
 						/>
-					)}
-					<TextControl
-						label={__('外部 ID', 'affilicard')}
-						value={row.external_id}
-						onChange={(v) => updateRow(i, { external_id: v })}
-					/>
-					<TextControl
-						label={__('通常 URL', 'affilicard')}
-						value={row.regular_url}
-						onChange={(v) => updateRow(i, { regular_url: v })}
-					/>
-					<TextControl
-						label={__('アフィリエイト URL', 'affilicard')}
-						value={row.affiliate_url}
-						onChange={(v) => updateRow(i, { affiliate_url: v })}
-					/>
-					<TextControl
-						label={__('価格', 'affilicard')}
-						value={row.price}
-						onChange={(v) => updateRow(i, { price: v })}
-					/>
-					<TextControl
-						label={__('参考価格', 'affilicard')}
-						value={row.list_price}
-						onChange={(v) => updateRow(i, { list_price: v })}
-					/>
-					<TextControl
-						label={__('バッジ', 'affilicard')}
-						value={row.badge}
-						onChange={(v) => updateRow(i, { badge: v })}
-					/>
-					<TextControl
-						label={__('画像 URL', 'affilicard')}
-						value={row.image_url}
-						onChange={(v) => updateRow(i, { image_url: v })}
-					/>
-					<TextControl
-						label={__('ボタンラベル上書き', 'affilicard')}
-						value={row.button_label_override}
-						onChange={(v) =>
-							updateRow(i, { button_label_override: v })
-						}
-					/>
-					<Button
-						variant="link"
-						isDestructive
-						onClick={() => removeRow(i)}
-					>
-						{__('listing を削除', 'affilicard')}
-					</Button>
-				</div>
-			))}
+						<TextControl
+							label={__('アフィリエイト URL', 'affilicard')}
+							value={row.affiliate_url}
+							placeholder={__(
+								'https://al.example.com/item/123',
+								'affilicard'
+							)}
+							onChange={(v) => updateRow(i, { affiliate_url: v })}
+						/>
+						<TextControl
+							label={__('価格', 'affilicard')}
+							value={row.price}
+							placeholder={__('例: 660', 'affilicard')}
+							onChange={(v) => updateRow(i, { price: v })}
+						/>
+						<TextControl
+							label={__('参考価格', 'affilicard')}
+							value={row.list_price}
+							placeholder={__('例: 880', 'affilicard')}
+							onChange={(v) => updateRow(i, { list_price: v })}
+						/>
+						<TextControl
+							label={__('バッジ', 'affilicard')}
+							value={row.badge}
+							placeholder={__('例: 40%OFF', 'affilicard')}
+							onChange={(v) => updateRow(i, { badge: v })}
+						/>
+						<TextControl
+							label={__('画像 URL', 'affilicard')}
+							value={row.image_url}
+							placeholder={__(
+								'https://example.com/cover.jpg',
+								'affilicard'
+							)}
+							onChange={(v) => updateRow(i, { image_url: v })}
+						/>
+						<TextControl
+							label={__('ボタンラベル上書き', 'affilicard')}
+							value={row.button_label_override}
+							placeholder={__('例: ○○で読む', 'affilicard')}
+							onChange={(v) =>
+								updateRow(i, { button_label_override: v })
+							}
+						/>
+						<Button
+							variant="link"
+							isDestructive
+							onClick={() => removeRow(i)}
+						>
+							{__('listing を削除', 'affilicard')}
+						</Button>
+					</PanelBody>
+				))}
+			</Panel>
 			<Button variant="secondary" onClick={addRow}>
 				{__('listing を追加', 'affilicard')}
 			</Button>

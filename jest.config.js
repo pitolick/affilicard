@@ -22,6 +22,12 @@ module.exports = {
 			'<rootDir>/tests/js/__mocks__/wordpress-components.js',
 		'^@wordpress/block-editor$':
 			'<rootDir>/tests/js/__mocks__/wordpress-block-editor.js',
+		'^@wordpress/core-data$':
+			'<rootDir>/tests/js/__mocks__/@wordpress/coreData.js',
+		'^@wordpress/editor$':
+			'<rootDir>/tests/js/__mocks__/@wordpress/editor.js',
+		'^@wordpress/plugins$':
+			'<rootDir>/tests/js/__mocks__/@wordpress/plugins.js',
 	},
 	testMatch: [
 		'<rootDir>/tests/js/**/*.test.js',

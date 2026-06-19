@@ -55,6 +55,16 @@ $out_id = $repo->save(
 	)
 );
 
+$draft_id = $repo->save(
+	array(
+		'title'        => 'E2E 下書き商品',
+		'status'       => 'draft',
+		'product_type' => 'generic',
+		'stock_status' => 'available',
+		'listings'     => $listing( 'https://example.com/aff-draft' ),
+	)
+);
+
 $make_post = static function ( array $attrs ): int {
 	return (int) wp_insert_post(
 		array(
@@ -109,5 +119,6 @@ echo 'SEED_JSON:' . wp_json_encode(
 		'availableProductId' => $available_id,
 		'futurePostId'       => $future_post,
 		'futureProductId'    => $future_id,
+		'draftProductId'     => $draft_id,
 	)
 ) . "\n";

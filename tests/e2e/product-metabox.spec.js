@@ -1,34 +1,70 @@
-/**
- * E2E spec: affilicard_product metabox — save-on-publish 往復テスト
- *
- * NOTE: セレクタは ListingsEditor.jsx / StockStatusSelect.jsx 実装に依存する。
- *       save-on-publish ロジックは PHPUnit + 手動確認済みのため、
- *       E2E セレクタ調整が完了するまで test.skip で保留する。
- *
- * 実装予定ステップ（セレクタ確定後に test.skip を外すこと）:
- *   1. wp-cli で affilicard_product の下書きを作成（postId 確定）
- *   2. /wp-admin/post.php?post=<id>&action=edit を開く
- *   3. #affilicard-metabox-root 内に .affilicard-metabox が表示されるまで待機
- *   4. 在庫状況を「在庫切れ」に変更 (getByLabel('在庫状況').selectOption('out_of_stock'))
- *   5. listing を追加 (getByRole('button', { name: 'listing を追加' }).click())
- *   6. .affilicard-listing-row が表示されるまで待機
- *   7. プラットフォームを選択 (getByLabel('プラットフォーム').selectOption('dmm-books'))
- *   8. アフィリエイト URL を入力 (getByLabel('アフィリエイト URL').fill(...))
- *   9. #publish をクリックして保存完了を待機
- *  10. リロード後に listing 行と URL が保持されていることを確認
- */
-
 'use strict';
 
-const { test } = require( '@playwright/test' );
+const { test, expect } = require( '@playwright/test' );
 
-test.describe( 'affilicard_product metabox — save-on-publish', () => {
-	test.skip(
-		true,
-		'metabox UI E2E は別途セレクタ調整が必要。save-on-publish は PHPUnit + 手動確認済み。'
-	);
+test.describe( 'affilicard_product サイドバー設定 — core-data save', () => {
+	test( 'サイドバーで listing を入力して公開 → リロード後も保持される', async ( {
+		page,
+	} ) => {
+		const affUrl = 'https://example.com/aff-sidebar';
 
-	test( 'listing を追加してパブリッシュ → リロード後に listing が保持される', async () => {
-		// セレクタ調整後に上記ステップを実装する
+		await page.goto( '/wp-admin/post-new.php?post_type=affilicard_product' );
+
+		await page.waitForFunction(
+			() =>
+				window.wp &&
+				window.wp.data &&
+				window.wp.data.select( 'core/edit-post' ) &&
+				window.wp.data.dispatch( 'core/preferences' )
+		);
+		await page.evaluate( () => {
+			window.wp.data
+				.dispatch( 'core/preferences' )
+				.set( 'core/edit-post', 'welcomeGuide', false );
+		} );
+
+		const canvas = page.frameLocator( 'iframe[name="editor-canvas"]' );
+		await canvas
+			.getByRole( 'textbox', { name: 'Add title' } )
+			.fill( 'E2E サイドバー商品' );
+
+		const expandSection = async ( name ) => {
+			const btn = page.getByRole( 'button', { name } );
+			await expect( btn ).toBeVisible( { timeout: 15_000 } );
+			if ( ( await btn.getAttribute( 'aria-expanded' ) ) === 'false' ) {
+				await btn.click();
+			}
+		};
+
+		await expandSection( 'Affilicard 商品設定' );
+		await expandSection( 'プラットフォーム listing' );
+		await page.getByRole( 'button', { name: 'listing を追加' } ).click();
+		await page.getByLabel( 'プラットフォーム' ).last().selectOption( 'dmm-books' );
+		await page.getByLabel( 'アフィリエイト URL' ).last().fill( affUrl );
+
+		await page.getByRole( 'button', { name: 'Publish', exact: true } ).click();
+		await page
+			.locator( '.editor-post-publish-panel' )
+			.getByRole( 'button', { name: 'Publish', exact: true } )
+			.click();
+		await page.waitForFunction( () => {
+			const editor = window.wp?.data?.select( 'core/editor' );
+			return (
+				!! editor &&
+				!! editor.getCurrentPostId() &&
+				! editor.isSavingPost() &&
+				editor.getCurrentPostAttribute( 'status' ) === 'publish'
+			);
+		} );
+
+		await page.reload();
+		await page.waitForFunction(
+			() => window.wp?.data?.select( 'core/editor' )?.getCurrentPostId()
+		);
+		await expandSection( 'Affilicard 商品設定' );
+		await expandSection( 'プラットフォーム listing' );
+		await expect(
+			page.getByLabel( 'アフィリエイト URL' ).last()
+		).toHaveValue( affUrl );
 	} );
 } );
