@@ -42,16 +42,28 @@ $p_ebook = $repo->save(
 		'status'       => 'publish',
 		'product_type' => 'ebook',
 		'stock_status' => 'available',
-		'content'      => '架空のダンジョンを舞台にした冒険グルメ漫画のサンプル紹介文です。書影・著者・あらすじ・複数ストアの価格行・税込表記・価格時点フッタの表示確認用ダミーデータ。',
+		'content'      => "<!-- wp:paragraph -->\n<p>架空のダンジョンを舞台にした冒険グルメ漫画のサンプル紹介文です。書影・著者・あらすじ・複数ストアの価格行・税込表記・価格時点フッタの表示確認用ダミーデータ。</p>\n<!-- /wp:paragraph -->",
 		'listings'     => array(
 			$listing( 'dmm-books', 'https://example.com/dmm', '600', '40%OFF' ),
 			$listing( 'amazon-kindle', 'https://example.com/amz', '660', '50%ポイント還元' ),
 			$listing( 'rakuten-kobo', 'https://example.com/kobo', '640' ),
 		),
 		'extras'       => array(
-			array( 'key' => 'author', 'label' => '著者', 'value' => '架空 太郎' ),
-			array( 'key' => 'publisher', 'label' => '出版社', 'value' => 'サンプル出版社' ),
-			array( 'key' => 'isbn', 'label' => 'ISBN', 'value' => '978-4-00-000000-0' ),
+			array(
+				'key'   => 'author',
+				'label' => '著者',
+				'value' => '架空 太郎',
+			),
+			array(
+				'key'   => 'publisher',
+				'label' => '出版社',
+				'value' => 'サンプル出版社',
+			),
+			array(
+				'key'   => 'isbn',
+				'label' => 'ISBN',
+				'value' => '978-4-00-000000-0',
+			),
 		),
 	)
 );
@@ -85,8 +97,20 @@ $content = implode(
 	"\n\n",
 	array(
 		'<!-- wp:heading --><h2>Affilicard デモ（ダミーデータ）</h2><!-- /wp:heading -->',
-		$block( $p_ebook, array( 'ctaBgColor' => '#d72d65', 'ctaTextColor' => '#ffffff' ) ),
-		$block( $p_generic, array( 'cardBgColor' => '#f6f7f7', 'cardBorderColor' => '#c3c4c7' ) ),
+		$block(
+			$p_ebook,
+			array(
+				'ctaBgColor'   => '#d72d65',
+				'ctaTextColor' => '#ffffff',
+			)
+		),
+		$block(
+			$p_generic,
+			array(
+				'cardBgColor'     => '#f6f7f7',
+				'cardBorderColor' => '#c3c4c7',
+			)
+		),
 		$block( $p_out ),
 		$block( $p_disc ),
 	)

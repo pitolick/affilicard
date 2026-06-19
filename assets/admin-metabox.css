@@ -1,26 +1,12 @@
-/* affilicard 商品 metabox の余白規律（.affilicard-metabox スコープ） */
-.affilicard-metabox .affilicard-listings-panel {
-	margin: 8px 0 12px;
+/* 文書サイドバーの Affilicard 商品設定パネル */
+.affilicard-product-settings .components-panel__body .components-base-control {
+	margin-bottom: 16px;
 }
 
-.affilicard-metabox .affilicard-listings-panel .components-panel__body {
-	border-top: 1px solid #e0e0e0;
+.affilicard-product-settings .affilicard-listings-editor .components-panel__body {
+	margin-bottom: 8px;
 }
 
-.affilicard-metabox
-	.affilicard-listings-panel
-	.components-panel__body.is-opened {
-	padding-bottom: 16px;
-}
-
-/* 展開時のフィールド間余白 */
-.affilicard-metabox
-	.affilicard-listings-panel
-	.components-panel__body.is-opened
-	> .components-base-control {
-	margin-bottom: 12px;
-}
-
-.affilicard-metabox .affilicard-listings-editor > h3 {
-	margin-bottom: 4px;
+.affilicard-product-settings .components-base-control:last-child {
+	margin-bottom: 0;
 }
