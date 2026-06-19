@@ -33,7 +33,8 @@ test.describe( 'affilicard_product metabox — Gutenberg save-on-publish', () =>
 			() =>
 				window.wp &&
 				window.wp.data &&
-				window.wp.data.select( 'core/edit-post' )
+				window.wp.data.select( 'core/edit-post' ) &&
+				window.wp.data.dispatch( 'core/preferences' )
 		);
 		await page.evaluate( () => {
 			window.wp.data
@@ -84,7 +85,8 @@ test.describe( 'affilicard_product metabox — Gutenberg save-on-publish', () =>
 			return (
 				!! editor &&
 				!! editor.getCurrentPostId() &&
-				! editor.isSavingPost()
+				! editor.isSavingPost() &&
+				editor.getCurrentPostAttribute( 'status' ) === 'publish'
 			);
 		} );
 

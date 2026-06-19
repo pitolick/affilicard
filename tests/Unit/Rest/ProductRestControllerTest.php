@@ -46,4 +46,11 @@ final class ProductRestControllerTest extends TestCase {
 		$result     = $controller->get_item_permissions_check( new WP_REST_Request() );
 		$this->assertTrue( $result );
 	}
+
+	public function test_get_items_permissions_check_allows_editor(): void {
+		WP_Mock::userFunction( 'current_user_can' )->with( 'edit_posts' )->andReturn( true );
+		$controller = new ProductRestController( 'affilicard_product' );
+		$result     = $controller->get_items_permissions_check( new WP_REST_Request() );
+		$this->assertTrue( $result );
+	}
 }
