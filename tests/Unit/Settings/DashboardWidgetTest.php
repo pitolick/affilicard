@@ -42,37 +42,8 @@ final class DashboardWidgetTest extends TestCase {
 
 	public function tearDown(): void {
 		WP_Mock::tearDown();
-		if ( isset( $GLOBALS['wpdb'] ) ) {
-			unset( $GLOBALS['wpdb'] );
-		}
 		Mockery::close();
 		parent::tearDown();
-	}
-
-	/**
-	 * countFallbackProducts() を指定値に固定するため、$wpdb スタブを設置する。
-	 *
-	 * @param list<int> $post_ids 返却したい post_id 配列
-	 */
-	private function stubWpdbWithPostIds( array $post_ids ): void {
-		$wpdb           = new \stdClass();
-		$wpdb->postmeta = 'wp_postmeta';
-		$wpdb->prepare  = static function ( string $sql ) {
-			return $sql;
-		};
-		$wpdb->get_col  = static function () use ( $post_ids ) {
-			return $post_ids;
-		};
-		// stdClass にメソッドはバインドできないため Mockery で wpdb 風オブジェクトを構築する。
-		$mock           = Mockery::mock( 'wpdb' );
-		$mock->postmeta = 'wp_postmeta';
-		$mock->shouldReceive( 'prepare' )->andReturnUsing(
-			static function ( string $sql ) {
-				return $sql;
-			}
-		);
-		$mock->shouldReceive( 'get_col' )->andReturn( $post_ids );
-		$GLOBALS['wpdb'] = $mock;
 	}
 
 	public function test_register_hooks_wp_dashboard_setup(): void {
