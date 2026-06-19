@@ -123,7 +123,9 @@ final class DashboardWidgetTest extends TestCase {
 	}
 
 	public function test_render_outputs_zero_message_when_count_is_zero(): void {
-		$this->stubWpdbWithPostIds( array() );
+		WP_Mock::userFunction( 'get_posts' )
+			->once()
+			->andReturn( array() );
 
 		$widget = new DashboardWidget( new ProductRepository() );
 
@@ -136,33 +138,31 @@ final class DashboardWidgetTest extends TestCase {
 	}
 
 	public function test_render_outputs_count_message_and_link_when_count_positive(): void {
-		$this->stubWpdbWithPostIds( array( 1, 2 ) );
+		WP_Mock::userFunction( 'get_posts' )
+			->once()
+			->andReturn( array( 1, 2 ) );
 
 		// 両 post_id とも fallback 状態 (affiliate_url='', regular_url 非空)
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 1, \Affilicard\PostType\ProductPostType::META_LISTINGS, true )
 			->andReturn(
-				json_encode(
+				array(
 					array(
-						array(
-							'platform'      => 'a',
-							'affiliate_url' => '',
-							'regular_url'   => 'https://example.com/1',
-						),
-					)
+						'platform'      => 'a',
+						'affiliate_url' => '',
+						'regular_url'   => 'https://example.com/1',
+					),
 				)
 			);
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 2, \Affilicard\PostType\ProductPostType::META_LISTINGS, true )
 			->andReturn(
-				json_encode(
+				array(
 					array(
-						array(
-							'platform'      => 'b',
-							'affiliate_url' => '',
-							'regular_url'   => 'https://example.com/2',
-						),
-					)
+						'platform'      => 'b',
+						'affiliate_url' => '',
+						'regular_url'   => 'https://example.com/2',
+					),
 				)
 			);
 

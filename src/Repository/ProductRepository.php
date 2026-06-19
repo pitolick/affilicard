@@ -6,12 +6,11 @@ namespace Affilicard\Repository;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Schema\SchemaVersion;
 use Affilicard\Stock\StockStatus;
-use Affilicard\Util\JsonField;
 
 /**
  * `affilicard_product` CPT に対する CRUD ラッパ。
  *
- * 値の入出力はすべて配列で行い、メタの JSON シリアライズは JsonField に委譲する。
+ * 値の入出力はすべて配列で行う。listings/extras メタはネイティブ配列として保存・取得する。
  */
 final class ProductRepository implements ProductRepositoryInterface {
 
@@ -43,8 +42,8 @@ final class ProductRepository implements ProductRepositoryInterface {
 		$extras_raw   = get_post_meta( $postId, ProductPostType::META_EXTRAS, true );
 		$listings_raw = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
 
-		$extras   = is_string( $extras_raw ) ? JsonField::decode( $extras_raw, array() ) : array();
-		$listings = is_string( $listings_raw ) ? JsonField::decode( $listings_raw, array() ) : array();
+		$extras   = is_array( $extras_raw ) ? $extras_raw : array();
+		$listings = is_array( $listings_raw ) ? $listings_raw : array();
 
 		return array(
 			'id'             => (int) $post->ID,
@@ -172,8 +171,8 @@ final class ProductRepository implements ProductRepositoryInterface {
 
 		update_post_meta( $postId, ProductPostType::META_PRODUCT_TYPE, $product_type );
 		update_post_meta( $postId, ProductPostType::META_STOCK_STATUS, $stock_status );
-		update_post_meta( $postId, ProductPostType::META_EXTRAS, JsonField::encode( $extras ) );
-		update_post_meta( $postId, ProductPostType::META_LISTINGS, JsonField::encode( $listings ) );
+		update_post_meta( $postId, ProductPostType::META_EXTRAS, $extras );
+		update_post_meta( $postId, ProductPostType::META_LISTINGS, $listings );
 		update_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
 
 		$this->syncExternalIdMirror( $postId, $listings );
@@ -187,39 +186,43 @@ final class ProductRepository implements ProductRepositoryInterface {
 	/**
 	 * 「affiliate_url が空のまま regular_url のみ持つ」商品の件数を返す（フォールバック表示中の件数）。
 	 *
-	 * 厳密な計数は post_meta の JSON を PHP 側で再パースして実施する。
+	 * 全商品の listings メタを走査して計数する。
 	 */
 	public function countFallbackProducts(): int {
-		global $wpdb;
-		if ( ! isset( $wpdb ) ) {
-			return 0;
-		}
-
-		$sql = $wpdb->prepare(
-			'SELECT post_id FROM ' . $wpdb->postmeta . ' WHERE meta_key = %s AND meta_value LIKE %s',
-			ProductPostType::META_LISTINGS,
-			'%"affiliate_url":""%'
+		$ids = get_posts(
+			array(
+				'post_type'      => ProductPostType::POST_TYPE,
+				'post_status'    => 'any',
+				'posts_per_page' => -1,
+				'no_found_rows'  => true,
+				'fields'         => 'ids',
+			)
 		);
-
-		$post_ids = $wpdb->get_col( $sql );
-		if ( ! is_array( $post_ids ) || array() === $post_ids ) {
+		if ( ! is_array( $ids ) ) {
 			return 0;
 		}
 
 		$count = 0;
-		foreach ( $post_ids as $post_id ) {
-			$id  = (int) $post_id;
-			$raw = get_post_meta( $id, ProductPostType::META_LISTINGS, true );
-			if ( ! is_string( $raw ) || '' === $raw ) {
-				continue;
-			}
-			$listings = JsonField::decode( $raw, array() );
-			if ( self::hasFallbackListing( $listings ) ) {
+		foreach ( $ids as $id ) {
+			$listings = get_post_meta( (int) $id, ProductPostType::META_LISTINGS, true );
+			if ( is_array( $listings ) && self::hasFallbackListing( $listings ) ) {
 				++$count;
 			}
 		}
-
 		return $count;
+	}
+
+	/**
+	 * REST（core-data）保存後に呼ぶ派生 meta 同期。
+	 * listings 配列メタから external_id ミラーと schema_version を再構築する。
+	 */
+	public function syncDerivedMeta( int $postId ): void {
+		$listings = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
+		if ( ! is_array( $listings ) ) {
+			$listings = array();
+		}
+		$this->syncExternalIdMirror( $postId, $listings );
+		update_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
 	}
 
 	/**

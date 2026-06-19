@@ -6,7 +6,6 @@ namespace Affilicard\Tests\Unit\Repository;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Schema\SchemaVersion;
-use Affilicard\Util\JsonField;
 use Mockery;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
@@ -20,12 +19,6 @@ final class ProductRepositoryTest extends TestCase {
 			->andReturnUsing(
 				static function ( $text ) {
 					return $text;
-				}
-			);
-		WP_Mock::userFunction( 'wp_json_encode' )
-			->andReturnUsing(
-				static function ( $value ) {
-					return json_encode( $value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
 				}
 			);
 	}
@@ -93,10 +86,10 @@ final class ProductRepositoryTest extends TestCase {
 
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 101, ProductPostType::META_EXTRAS, true )
-			->andReturn( JsonField::encode( $extras ) );
+			->andReturn( $extras );
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 101, ProductPostType::META_LISTINGS, true )
-			->andReturn( JsonField::encode( $listings ) );
+			->andReturn( $listings );
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 101, ProductPostType::META_PRODUCT_TYPE, true )
 			->andReturn( 'ebook' );
@@ -431,66 +424,65 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	public function test_count_fallback_products_counts_listings_with_empty_affiliate_url(): void {
-		$wpdb           = Mockery::mock( 'wpdb' );
-		$wpdb->postmeta = 'wp_postmeta';
-		$wpdb->shouldReceive( 'prepare' )
-			->andReturnUsing(
-				static function ( ...$args ) {
-					$query     = (string) $args[0];
-					$variables = array_slice( $args, 1 );
-					$quoted    = array_map(
-						static function ( $v ) {
-							return "'" . $v . "'";
-						},
-						$variables
-					);
-					return vsprintf( str_replace( '%s', '%s', $query ), $quoted );
-				}
-			);
-		$wpdb->shouldReceive( 'get_col' )->andReturn( array( 1, 2, 3 ) );
-		$GLOBALS['wpdb'] = $wpdb;
+		WP_Mock::userFunction( 'get_posts' )
+			->once()
+			->andReturn( array( 1, 2, 3 ) );
 
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 1, ProductPostType::META_LISTINGS, true )
 			->andReturn(
-				JsonField::encode(
+				array(
 					array(
-						array(
-							'platform'      => 'a',
-							'affiliate_url' => '',
-							'regular_url'   => 'https://example.com/r',
-						),
-					)
+						'platform'      => 'a',
+						'affiliate_url' => '',
+						'regular_url'   => 'https://example.com/r',
+					),
 				)
 			);
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 2, ProductPostType::META_LISTINGS, true )
 			->andReturn(
-				JsonField::encode(
+				array(
 					array(
-						array(
-							'platform'      => 'b',
-							'affiliate_url' => 'https://example.com/a',
-							'regular_url'   => 'https://example.com/r',
-						),
-					)
+						'platform'      => 'b',
+						'affiliate_url' => 'https://example.com/a',
+						'regular_url'   => 'https://example.com/r',
+					),
 				)
 			);
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 3, ProductPostType::META_LISTINGS, true )
 			->andReturn(
-				JsonField::encode(
+				array(
 					array(
-						array(
-							'platform'      => 'c',
-							'affiliate_url' => '',
-							'regular_url'   => 'https://example.com/r3',
-						),
-					)
+						'platform'      => 'c',
+						'affiliate_url' => '',
+						'regular_url'   => 'https://example.com/r3',
+					),
 				)
 			);
 
 		$repo = new ProductRepository();
 		$this->assertSame( 2, $repo->countFallbackProducts() );
+	}
+
+	public function test_syncDerivedMeta_mirrors_external_ids_and_sets_schema_version(): void {
+		$repo = new ProductRepository();
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform'    => 'dmm-books',
+						'external_id' => 'X1',
+					),
+				)
+			);
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()->with( 42, 'affilicard_extid_dmm-books', 'X1' )->andReturn( true );
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()->with( 42, ProductPostType::META_SCHEMA_VERSION, \Affilicard\Schema\SchemaVersion::CURRENT )->andReturn( true );
+		$repo->syncDerivedMeta( 42 );
+		$this->assertConditionsMet();
 	}
 }

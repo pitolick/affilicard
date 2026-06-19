@@ -67,7 +67,7 @@ final class ProductListColumnsTest extends TestCase {
 
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 123, ProductPostType::META_LISTINGS, true )
-			->andReturn( json_encode( $listings ) );
+			->andReturn( $listings );
 
 		ob_start();
 		ProductListColumns::renderColumn( ProductListColumns::COLUMN_KEY, 123 );
@@ -88,7 +88,7 @@ final class ProductListColumnsTest extends TestCase {
 
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 456, ProductPostType::META_LISTINGS, true )
-			->andReturn( json_encode( $listings ) );
+			->andReturn( $listings );
 
 		ob_start();
 		ProductListColumns::renderColumn( ProductListColumns::COLUMN_KEY, 456 );

@@ -74,6 +74,23 @@ final class Plugin {
 		);
 		$rest->register();
 
+		add_action(
+			'rest_after_insert_' . ProductPostType::POST_TYPE,
+			static function ( $post ) {
+				if ( ! is_object( $post ) || ! isset( $post->ID ) ) {
+					return;
+				}
+				$post_id = (int) $post->ID;
+				// autosave/revision では派生 meta を再構築しない。
+				if ( wp_is_post_autosave( $post_id ) || wp_is_post_revision( $post_id ) ) {
+					return;
+				}
+				( new \Affilicard\Repository\ProductRepository() )->syncDerivedMeta( $post_id );
+			},
+			10,
+			1
+		);
+
 		// 価格更新 Cron: platform 単位イベントのハンドラ登録 + 設定との差分調整
 		RefreshScheduler::register(
 			static function ( $platformCode ): void {

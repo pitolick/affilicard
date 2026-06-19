@@ -3,8 +3,6 @@ declare(strict_types=1);
 
 namespace Affilicard\PostType;
 
-use Affilicard\Util\JsonField;
-
 /**
  * CPT 一覧画面に「Fallback」カラムを追加する。
  *
@@ -40,8 +38,10 @@ final class ProductListColumns {
 			return;
 		}
 
-		$raw      = (string) get_post_meta( $post_id, ProductPostType::META_LISTINGS, true );
-		$listings = '' === $raw ? array() : JsonField::decode( $raw );
+		$listings = get_post_meta( $post_id, ProductPostType::META_LISTINGS, true );
+		if ( ! is_array( $listings ) ) {
+			$listings = array();
+		}
 
 		$has_fallback = false;
 		foreach ( $listings as $listing ) {
