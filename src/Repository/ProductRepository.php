@@ -43,8 +43,12 @@ final class ProductRepository implements ProductRepositoryInterface {
 		$extras_raw   = get_post_meta( $postId, ProductPostType::META_EXTRAS, true );
 		$listings_raw = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
 
-		$extras   = is_string( $extras_raw ) ? JsonField::decode( $extras_raw, array() ) : array();
-		$listings = is_string( $listings_raw ) ? JsonField::decode( $listings_raw, array() ) : array();
+		$extras   = is_string( $extras_raw )
+			? JsonField::decode( $extras_raw, array() )
+			: ( is_array( $extras_raw ) ? $extras_raw : array() );
+		$listings = is_string( $listings_raw )
+			? JsonField::decode( $listings_raw, array() )
+			: ( is_array( $listings_raw ) ? $listings_raw : array() );
 
 		return array(
 			'id'             => (int) $post->ID,
