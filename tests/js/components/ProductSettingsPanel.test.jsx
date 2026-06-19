@@ -1,6 +1,6 @@
 jest.mock( '../../../src/Admin/api/platforms' );
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { setEntityMeta, _reset } from '@wordpress/core-data';
 import { fetchPlatforms } from '../../../src/Admin/api/platforms';
 import { ProductSettingsPanel } from '../../../src/Admin/components/ProductSettingsPanel';
@@ -29,5 +29,25 @@ describe( 'ProductSettingsPanel', () => {
 		render( <ProductSettingsPanel /> );
 		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
 		expect( screen.getByText( 'listing がありません' ) ).toBeInTheDocument();
+	} );
+
+	// 回帰防止: setMeta(object) で meta が更新され再レンダーされること。
+	// 以前 setMeta を更新関数形式にしたところ useEntityProp が関数を解釈せず
+	// listing 追加が反映されない不具合があった（E2E で発覚）。
+	test( '「listing を追加」で listing 行が追加される', async () => {
+		setEntityMeta( { affilicard_listings: [], affilicard_extras: [] } );
+		render( <ProductSettingsPanel /> );
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+		expect( screen.getByText( 'listing がありません' ) ).toBeInTheDocument();
+		fireEvent.click(
+			screen.getByRole( 'button', { name: 'listing を追加' } )
+		);
+		// 行が追加され、プラットフォーム選択が描画される
+		expect(
+			await screen.findByLabelText( 'プラットフォーム' )
+		).toBeInTheDocument();
+		expect(
+			screen.queryByText( 'listing がありません' )
+		).not.toBeInTheDocument();
 	} );
 } );

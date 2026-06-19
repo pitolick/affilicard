@@ -25,7 +25,10 @@ export function ProductSettingsPanel() {
 	const listings = asArray(m.affilicard_listings);
 	const extras = asArray(m.affilicard_extras);
 
-	const patch = (next) => setMeta((prev) => ({ ...(prev || {}), ...next }));
+	// useEntityProp の setter は React の setState と異なり更新関数を受け付けない
+	// （editEntityRecord に値をそのまま渡す）。毎レンダーで fresh な m を読み、
+	// 各 editor は常に全要素を渡すため object 形式マージで安全。
+	const patch = (next) => setMeta({ ...m, ...next });
 
 	return (
 		<div className="affilicard-product-settings">
