@@ -70,16 +70,18 @@ test.describe( 'affilicard_product サイドバー設定 — core-data save', ()
 		const postId = await page.evaluate( () =>
 			window.wp.data.select( 'core/editor' ).getCurrentPostId()
 		);
-		const restRes = await page.request.get(
-			`/wp-json/wp/v2/affilicard_product/${ postId }?context=edit`
-		);
+		const savedMeta = await page.evaluate( async ( id ) => {
+			try {
+				const rec = await window.wp.apiFetch( {
+					path: `/wp/v2/affilicard_product/${ id }?context=edit`,
+				} );
+				return rec.meta;
+			} catch ( e ) {
+				return { error: String( e && e.message ) };
+			}
+		}, postId );
 		// eslint-disable-next-line no-console
-		console.log( 'DIAG_REST_STATUS:', restRes.status() );
-		// eslint-disable-next-line no-console
-		console.log(
-			'DIAG_REST_META:',
-			JSON.stringify( ( await restRes.json() ).meta )
-		);
+		console.log( 'DIAG_SAVED_META:', JSON.stringify( savedMeta ) );
 
 		await page.reload();
 		await page.waitForFunction(
