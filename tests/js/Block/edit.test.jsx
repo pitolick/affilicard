@@ -2,7 +2,7 @@
  * Tests for src/Block/edit.jsx
  */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { Edit } from '../../../src/Block/edit';
+import { Edit, renderComboboxItem } from '../../../src/Block/edit';
 import * as productsApi from '../../../src/Admin/api/products';
 
 jest.mock( '../../../src/Admin/api/products' );
@@ -262,24 +262,20 @@ describe( 'Edit', () => {
 			expect( priceText ).toBeInTheDocument();
 		} );
 
-		test( 'item.item が無い場合は label をフォールバック表示する', async () => {
-			// item.item なしの option（label のみ）をセットする仮のシナリオ:
-			// searchProducts が thumbnail/platform/price を含まないアイテムを返す場合は
-			// label テキスト "サンプル漫画 1巻 (#7)" が表示される
-			productsApi.searchProducts.mockResolvedValue( [
-				{ id: 7, title: 'サンプル漫画 1巻', status: 'publish' },
-			] );
+		test( 'item.item あり（raw データ付き）の場合はリッチ表示でタイトルが出る', async () => {
+			// searchProducts が thumbnail/platform/price を含むアイテムを返す場合は
+			// __experimentalRenderItem によってリッチ表示（item.item.title）が使われる。
+			// フォールバック（<span>{label}</span>）には到達しない。
 			setup();
 			await waitFor( () =>
 				expect( productsApi.searchProducts ).toHaveBeenCalled()
 			);
-			// __experimentalRenderItem が呼ばれ、data.platform が undefined なのでフォールバック title が使われる
-			// label テキストが表示される（item.item.title が使われる）
+			// リッチ表示: item.item.title がレンダリングされる
 			const titleText = await screen.findByText( 'サンプル漫画 1巻' );
 			expect( titleText ).toBeInTheDocument();
 		} );
 
-		test( 'perPage が 20 で searchProducts が呼ばれる', async () => {
+		test( 'perPage が 20 で searchProducts が呼ばれる（統合）', async () => {
 			setup();
 			await waitFor( () =>
 				expect( productsApi.searchProducts ).toHaveBeenCalledWith(
@@ -298,5 +294,39 @@ describe( 'Edit', () => {
 			fireEvent.click( button.closest( 'button' ) );
 			expect( setAttributes ).toHaveBeenCalledWith( { productId: 7 } );
 		} );
+	} );
+} );
+
+// renderComboboxItem 純粋関数の直接テスト（I-1 対応: フォールバック分岐の直接検証）
+describe( 'renderComboboxItem', () => {
+	test( 'option.item あり: title / platform / price が描画される（リッチ表示）', () => {
+		const option = {
+			value: 7,
+			label: 'サンプル漫画 1巻 (#7)',
+			item: {
+				id: 7,
+				title: 'サンプル漫画 1巻',
+				platform: 'dmm-books',
+				price: '500',
+				thumbnail: '',
+			},
+		};
+		render( renderComboboxItem( option ) );
+		expect( screen.getByText( 'サンプル漫画 1巻' ) ).toBeInTheDocument();
+		expect( screen.getByText( 'dmm-books' ) ).toBeInTheDocument();
+		expect( screen.getByText( '¥500' ) ).toBeInTheDocument();
+	} );
+
+	test( 'option.item 無し: label のフォールバック表示になり platform/price は出ない', () => {
+		const option = {
+			value: 99,
+			label: 'フォールバックタイトル (#99)',
+			// item プロパティなし
+		};
+		render( renderComboboxItem( option ) );
+		expect( screen.getByText( 'フォールバックタイトル (#99)' ) ).toBeInTheDocument();
+		// platform・price 等のリッチ要素は出ない
+		expect( screen.queryByText( 'dmm-books' ) ).not.toBeInTheDocument();
+		expect( screen.queryByText( /¥/ ) ).not.toBeInTheDocument();
 	} );
 } );

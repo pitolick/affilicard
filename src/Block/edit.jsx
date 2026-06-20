@@ -12,6 +12,38 @@ import {
 import { InspectorControls, ColorPalette, BlockControls } from '@wordpress/block-editor';
 import { searchProducts, getProduct, getCardPreview } from '../Admin/api/products';
 
+/**
+ * コンボボックスのアイテム描画純粋関数。
+ * option.item（raw データ）があればサムネ＋title＋platform＋price のリッチ div を返し、
+ * 無ければ <span>{option.label}</span> を返す。
+ *
+ * @param {{ value: number, label: string, item?: object }} option
+ * @return {JSX.Element}
+ */
+export function renderComboboxItem( option ) {
+	const data = option?.item;
+	if ( ! data ) {
+		return <span>{ option?.label }</span>;
+	}
+	return (
+		<div className="affilicard-combobox-item">
+			{ data.thumbnail ? (
+				<img src={ data.thumbnail } alt="" width="32" height="32" />
+			) : null }
+			<span className="affilicard-combobox-item__title">{ data.title }</span>
+			{ data.platform ? (
+				<span className="affilicard-combobox-item__platform">{ data.platform }</span>
+			) : null }
+			{ data.price ? (
+				<span className="affilicard-combobox-item__price">
+					{ '¥' }
+					{ data.price }
+				</span>
+			) : null }
+		</div>
+	);
+}
+
 const COLOR_FIELDS = [
 	{ attr: 'ctaBgColor', label: __('ボタン背景色', 'affilicard') },
 	{ attr: 'ctaTextColor', label: __('ボタン文字色', 'affilicard') },
@@ -204,31 +236,11 @@ export function Edit({ attributes, setAttributes }) {
 		);
 	}
 
+	// ComboboxControl が関数として存在する場合のみ __experimentalRenderItem を使用する。
+	// renderComboboxItem を呼ぶアダプタ: ComboboxControl が渡す引数は { item } の形（item = option object）。
 	const renderItem =
 		typeof ComboboxControl === 'function'
-			? ({ item }) => {
-					const data = item?.item;
-					if (!data) {
-						return <span>{item?.label}</span>;
-					}
-					return (
-						<div className="affilicard-combobox-item">
-							{data.thumbnail ? (
-								<img src={data.thumbnail} alt="" width="32" height="32" />
-							) : null}
-							<span className="affilicard-combobox-item__title">{data.title}</span>
-							{data.platform ? (
-								<span className="affilicard-combobox-item__platform">{data.platform}</span>
-							) : null}
-							{data.price ? (
-								<span className="affilicard-combobox-item__price">
-									{'¥'}
-									{data.price}
-								</span>
-							) : null}
-						</div>
-					);
-			  }
+			? ( { item } ) => renderComboboxItem( item )
 			: undefined;
 
 	return (
