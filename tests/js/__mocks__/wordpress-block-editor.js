@@ -16,8 +16,10 @@ function BlockControls( { children } ) {
 	return React.createElement( 'div', { 'data-slot': 'block-controls' }, children );
 }
 
-function useBlockProps() {
-	return {};
+function useBlockProps( props = {} ) {
+	// 実 WP の useBlockProps はブロック wrapper 用の props（ref/className 等）を返す。
+	// テストでは「ルートに適用されたか」を検証できるよう data 属性を付与して返す。
+	return { ...props, 'data-block-props': 'applied' };
 }
 useBlockProps.save = () => ( {} );
 

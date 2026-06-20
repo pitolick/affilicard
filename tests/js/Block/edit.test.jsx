@@ -295,6 +295,38 @@ describe( 'Edit', () => {
 			expect( setAttributes ).toHaveBeenCalledWith( { productId: 7 } );
 		} );
 	} );
+
+	describe( 'ブロック選択とプレビュー非インタラクティブ化', () => {
+		test( '商品選択時のルートに useBlockProps が適用される', async () => {
+			setup( { productId: 7 } );
+			await screen.findByText( 'プレビュー本文' );
+			const root = document.querySelector(
+				'.affilicard-block-preview'
+			);
+			expect( root ).not.toBeNull();
+			// useBlockProps（mock）が付与する data 属性がルートに spread されている＝選択配線済み
+			expect( root.getAttribute( 'data-block-props' ) ).toBe( 'applied' );
+		} );
+
+		test( '商品未選択時のルートにも useBlockProps が適用される', () => {
+			setup();
+			const root = document.querySelector(
+				'.affilicard-block-placeholder'
+			);
+			expect( root ).not.toBeNull();
+			expect( root.getAttribute( 'data-block-props' ) ).toBe( 'applied' );
+		} );
+
+		test( 'プレビュー描画は pointer-events 無効化用クラスでラップされる', async () => {
+			setup( { productId: 7 } );
+			const rendered = await screen.findByText( 'プレビュー本文' );
+			// プレビュー HTML は .affilicard-block-preview__rendered 配下に挿入される
+			// （block-editor.css で pointer-events: none → クリックはブロック本体へ通る／CTA 誤遷移防止）
+			expect(
+				rendered.closest( '.affilicard-block-preview__rendered' )
+			).not.toBeNull();
+		} );
+	} );
 } );
 
 // renderComboboxItem 純粋関数の直接テスト（I-1 対応: フォールバック分岐の直接検証）

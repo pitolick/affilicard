@@ -9,7 +9,12 @@ import {
 	Spinner,
 	TextControl,
 } from '@wordpress/components';
-import { InspectorControls, ColorPalette, BlockControls } from '@wordpress/block-editor';
+import {
+	InspectorControls,
+	ColorPalette,
+	BlockControls,
+	useBlockProps,
+} from '@wordpress/block-editor';
 import { searchProducts, getProduct, getCardPreview } from '../Admin/api/products';
 
 /**
@@ -63,6 +68,10 @@ export function Edit({ attributes, setAttributes }) {
 	} = attributes;
 	const [options, setOptions] = useState([]);
 	const [filter, setFilter] = useState('');
+
+	// apiVersion 3 ブロックはルートに useBlockProps を適用しないと
+	// 選択・クリック処理が配線されない。両ブランチのルートに spread する。
+	const blockProps = useBlockProps();
 
 	// プレビュー用 state
 	const [previewHtml, setPreviewHtml] = useState('');
@@ -210,7 +219,10 @@ export function Edit({ attributes, setAttributes }) {
 
 	if (productId) {
 		return (
-			<div className="affilicard-block-preview">
+			<div
+				{...blockProps}
+				className={`${blockProps.className ?? ''} affilicard-block-preview`.trim()}
+			>
 				{inspector}
 				<BlockControls>
 					<ToolbarGroup>
@@ -226,8 +238,14 @@ export function Edit({ attributes, setAttributes }) {
 					<p>{__('プレビューを取得できませんでした。', 'affilicard')}</p>
 				)}
 				{previewHtml && (
+					// プレビューはエディタ上で非インタラクティブ（block-editor.css で
+					// pointer-events: none）。クリックはブロック本体に通って選択され、
+					// CTA リンクの誤遷移も防ぐ。エスケープ済みのサーバ生成 HTML を挿入。
 					// eslint-disable-next-line react/no-danger
-					<div dangerouslySetInnerHTML={{ __html: previewHtml }} />
+					<div
+						className="affilicard-block-preview__rendered"
+						dangerouslySetInnerHTML={{ __html: previewHtml }}
+					/>
 				)}
 				{previewState === 'idle' && !previewHtml && (
 					<p>{__('プレビューする内容がありません。', 'affilicard')}</p>
@@ -244,7 +262,10 @@ export function Edit({ attributes, setAttributes }) {
 			: undefined;
 
 	return (
-		<div className="affilicard-block-placeholder">
+		<div
+			{...blockProps}
+			className={`${blockProps.className ?? ''} affilicard-block-placeholder`.trim()}
+		>
 			{inspector}
 			<ComboboxControl
 				label={__('商品を検索', 'affilicard')}
