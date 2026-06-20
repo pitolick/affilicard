@@ -40,14 +40,11 @@ export function Edit({ attributes, setAttributes }) {
 	const [listingPlatforms, setListingPlatforms] = useState([]);
 
 	useEffect(() => {
-		if (!filter) {
-			setOptions([]);
-			return;
-		}
 		let active = true;
 		// 入力毎の REST 発火を避けるため簡易デバウンス（300ms）。
+		// 空フィルタ時も最近商品（modified 降順）を取得する。
 		const timer = setTimeout(() => {
-			searchProducts({ search: filter, perPage: 10 })
+			searchProducts({ search: filter, perPage: 20 })
 				.then((items) => {
 					if (!active) {
 						return;
@@ -56,6 +53,7 @@ export function Edit({ attributes, setAttributes }) {
 						(items || []).map((p) => ({
 							value: p.id,
 							label: `${p.title} (#${p.id})`,
+							item: p,
 						}))
 					);
 				})
@@ -206,6 +204,33 @@ export function Edit({ attributes, setAttributes }) {
 		);
 	}
 
+	const renderItem =
+		typeof ComboboxControl === 'function'
+			? ({ item }) => {
+					const data = item?.item;
+					if (!data) {
+						return <span>{item?.label}</span>;
+					}
+					return (
+						<div className="affilicard-combobox-item">
+							{data.thumbnail ? (
+								<img src={data.thumbnail} alt="" width="32" height="32" />
+							) : null}
+							<span className="affilicard-combobox-item__title">{data.title}</span>
+							{data.platform ? (
+								<span className="affilicard-combobox-item__platform">{data.platform}</span>
+							) : null}
+							{data.price ? (
+								<span className="affilicard-combobox-item__price">
+									{'¥'}
+									{data.price}
+								</span>
+							) : null}
+						</div>
+					);
+			  }
+			: undefined;
+
 	return (
 		<div className="affilicard-block-placeholder">
 			{inspector}
@@ -219,6 +244,7 @@ export function Edit({ attributes, setAttributes }) {
 						productId: parseInt(value, 10) || undefined,
 					})
 				}
+				{...(renderItem ? { __experimentalRenderItem: renderItem } : {})}
 			/>
 		</div>
 	);

@@ -102,7 +102,7 @@ function TabPanel( { tabs, children, className } ) {
 	);
 }
 
-function ComboboxControl( { label, options, onChange, onFilterValueChange, value } ) {
+function ComboboxControl( { label, options, onChange, onFilterValueChange, value, __experimentalRenderItem } ) {
 	return React.createElement(
 		'label',
 		null,
@@ -126,7 +126,9 @@ function ComboboxControl( { label, options, onChange, onFilterValueChange, value
 					React.createElement(
 						'button',
 						{ type: 'button', onClick: () => onChange( o.value ) },
-						o.label
+						typeof __experimentalRenderItem === 'function'
+							? __experimentalRenderItem( { item: o } )
+							: o.label
 					)
 				)
 			)

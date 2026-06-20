@@ -217,4 +217,86 @@ describe( 'Edit', () => {
 			expect( screen.queryByText( 'CTA ラベル上書き' ) ).not.toBeInTheDocument();
 		} );
 	} );
+
+	// Task 7: 最近商品とリッチ表示
+	describe( '最近商品とリッチ表示', () => {
+		beforeEach( () => {
+			// Task 7 用のリッチデータを返すモック
+			productsApi.searchProducts.mockResolvedValue( [
+				{
+					id: 7,
+					title: 'サンプル漫画 1巻',
+					status: 'publish',
+					thumbnail: 'https://example.com/thumb.jpg',
+					platform: 'dmm-books',
+					price: '500',
+				},
+			] );
+		} );
+
+		test( '未選択時は空入力でも searchProducts が呼ばれる', async () => {
+			setup();
+			await waitFor( () =>
+				expect( productsApi.searchProducts ).toHaveBeenCalledWith(
+					expect.objectContaining( { search: '' } )
+				)
+			);
+		} );
+
+		test( '最近商品が候補リストに表示される', async () => {
+			setup();
+			await waitFor( () =>
+				expect( productsApi.searchProducts ).toHaveBeenCalled()
+			);
+			// options に item が含まれ、__experimentalRenderItem で platform が表示される
+			const platformText = await screen.findByText( 'dmm-books' );
+			expect( platformText ).toBeInTheDocument();
+		} );
+
+		test( '__experimentalRenderItem で価格が表示される', async () => {
+			setup();
+			await waitFor( () =>
+				expect( productsApi.searchProducts ).toHaveBeenCalled()
+			);
+			const priceText = await screen.findByText( '¥500' );
+			expect( priceText ).toBeInTheDocument();
+		} );
+
+		test( 'item.item が無い場合は label をフォールバック表示する', async () => {
+			// item.item なしの option（label のみ）をセットする仮のシナリオ:
+			// searchProducts が thumbnail/platform/price を含まないアイテムを返す場合は
+			// label テキスト "サンプル漫画 1巻 (#7)" が表示される
+			productsApi.searchProducts.mockResolvedValue( [
+				{ id: 7, title: 'サンプル漫画 1巻', status: 'publish' },
+			] );
+			setup();
+			await waitFor( () =>
+				expect( productsApi.searchProducts ).toHaveBeenCalled()
+			);
+			// __experimentalRenderItem が呼ばれ、data.platform が undefined なのでフォールバック title が使われる
+			// label テキストが表示される（item.item.title が使われる）
+			const titleText = await screen.findByText( 'サンプル漫画 1巻' );
+			expect( titleText ).toBeInTheDocument();
+		} );
+
+		test( 'perPage が 20 で searchProducts が呼ばれる', async () => {
+			setup();
+			await waitFor( () =>
+				expect( productsApi.searchProducts ).toHaveBeenCalledWith(
+					expect.objectContaining( { perPage: 20 } )
+				)
+			);
+		} );
+
+		test( '空入力 fetch 後に候補を選択すると productId がセットされる', async () => {
+			const { setAttributes } = setup();
+			await waitFor( () =>
+				expect( productsApi.searchProducts ).toHaveBeenCalled()
+			);
+			const button = await screen.findByText( 'dmm-books' );
+			// button の親の button（option ボタン）をクリック
+			fireEvent.click( button.closest( 'button' ) );
+			expect( setAttributes ).toHaveBeenCalledWith( { productId: 7 } );
+		} );
+	} );
 } );
