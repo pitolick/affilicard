@@ -32,7 +32,10 @@ final class CardRenderer {
 		$colors      = isset( $options['colors'] ) && is_array( $options['colors'] ) ? $options['colors'] : array();
 		$header_keys = isset( $options['header_keys'] ) && is_array( $options['header_keys'] ) ? array_map( 'strval', $options['header_keys'] ) : array( 'author', 'publisher' );
 		$hidden_keys = isset( $options['hidden_keys'] ) && is_array( $options['hidden_keys'] ) ? array_map( 'strval', $options['hidden_keys'] ) : array();
-		$media_label = isset( $options['media_label'] ) ? (string) $options['media_label'] : (string) __( '商品画像', 'affilicard' );
+		$media_label   = isset( $options['media_label'] ) ? (string) $options['media_label'] : (string) __( '商品画像', 'affilicard' );
+		$cta_overrides = isset( $options['cta_label_overrides'] ) && is_array( $options['cta_label_overrides'] )
+			? $options['cta_label_overrides']
+			: array();
 
 		$stock        = StockStatus::normalize( isset( $product['stock_status'] ) ? (string) $product['stock_status'] : null );
 		$is_available = StockStatus::AVAILABLE === $stock;
@@ -73,7 +76,8 @@ final class CardRenderer {
 			$html .= $this->renderListings(
 				isset( $product['listings'] ) && is_array( $product['listings'] ) ? $product['listings'] : array(),
 				$by_code,
-				$hide
+				$hide,
+				$cta_overrides
 			);
 		}
 
@@ -221,8 +225,9 @@ final class CardRenderer {
 	 * @param list<array<string, mixed>>        $listings
 	 * @param array<string, PlatformDefinition> $by_code
 	 * @param list<string>                      $hide
+	 * @param array<string, string>             $cta_overrides ブロック属性由来の CTA ラベル上書き（code→label）
 	 */
-	private function renderListings( array $listings, array $by_code, array $hide ): string {
+	private function renderListings( array $listings, array $by_code, array $hide, array $cta_overrides = array() ): string {
 		$rows = '';
 		foreach ( $listings as $listing ) {
 			if ( ! is_array( $listing ) ) {
@@ -247,8 +252,15 @@ final class CardRenderer {
 				continue;
 			}
 
-			$override = isset( $listing['button_label_override'] ) ? trim( (string) $listing['button_label_override'] ) : '';
-			$label    = '' !== $override ? $override : $platform->buttonLabel;
+			$block_override = isset( $cta_overrides[ $code ] ) ? trim( (string) $cta_overrides[ $code ] ) : '';
+			$override       = isset( $listing['button_label_override'] ) ? trim( (string) $listing['button_label_override'] ) : '';
+			if ( '' !== $block_override ) {
+				$label = $block_override;
+			} elseif ( '' !== $override ) {
+				$label = $override;
+			} else {
+				$label = $platform->buttonLabel;
+			}
 
 			// CTA はプラットフォーム別ブランド色を維持（block 注入の --affilicard-cta-* で上書き可能）。
 			$brand = (string) sanitize_hex_color( $platform->brandColor );

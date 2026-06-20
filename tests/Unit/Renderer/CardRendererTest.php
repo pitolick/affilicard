@@ -434,6 +434,60 @@ final class CardRendererTest extends TestCase {
 		return new PlatformDefinition( 'dmm-books', 'DMMブックス', 'dmm-ebook', 1, true, array( 'ebook' ), 'この値段で読む →', '#d72d65', '#ffffff' );
 	}
 
+	private function makePlatform( string $code, string $name, string $buttonLabel ): PlatformDefinition {
+		return new PlatformDefinition( $code, $name, 'manual', 1, true, array( 'generic' ), $buttonLabel, '#444444', '#ffffff' );
+	}
+
+	public function test_cta_label_override_takes_priority_over_listing_and_platform(): void {
+		$platform = $this->makePlatform( 'dmm-books', 'DMMブックス', 'プラットフォーム既定' );
+		$product  = array(
+			'title'        => 'テスト商品',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'              => 'dmm-books',
+					'affiliate_url'         => 'https://example.test/a',
+					'button_label_override' => 'listing上書き',
+					'enabled'               => true,
+				),
+			),
+		);
+
+		$html = ( new CardRenderer() )->render(
+			$product,
+			array( $platform ),
+			array( 'cta_label_overrides' => array( 'dmm-books' => 'ブロック上書き' ) )
+		);
+
+		$this->assertStringContainsString( 'ブロック上書き', $html );
+		$this->assertStringNotContainsString( 'listing上書き', $html );
+		$this->assertStringNotContainsString( 'プラットフォーム既定', $html );
+	}
+
+	public function test_cta_falls_back_to_listing_override_when_block_override_empty(): void {
+		$platform = $this->makePlatform( 'dmm-books', 'DMMブックス', 'プラットフォーム既定' );
+		$product  = array(
+			'title'        => 'テスト商品',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'              => 'dmm-books',
+					'affiliate_url'         => 'https://example.test/a',
+					'button_label_override' => 'listing上書き',
+					'enabled'               => true,
+				),
+			),
+		);
+
+		$html = ( new CardRenderer() )->render(
+			$product,
+			array( $platform ),
+			array( 'cta_label_overrides' => array( 'dmm-books' => '' ) )
+		);
+
+		$this->assertStringContainsString( 'listing上書き', $html );
+	}
+
 	public function test_ebook_renders_dmm_listing_with_brand_color(): void {
 		$product = $this->product(
 			array(
