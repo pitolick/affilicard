@@ -163,4 +163,58 @@ describe( 'Edit', () => {
 			screen.queryByText( 'プレビューする内容がありません。' )
 		).not.toBeInTheDocument();
 	} );
+
+	// Task 6: CTA ラベル上書きパネル
+	describe( 'CTA ラベル上書きパネル', () => {
+		beforeEach( () => {
+			// 有効な listing を持つ商品を返すよう getProduct を上書き
+			productsApi.getProduct.mockResolvedValue( {
+				id: 7,
+				title: 'サンプル漫画 1巻',
+				listings: [ { platform: 'dmm-books', enabled: true } ],
+			} );
+		} );
+
+		test( 'listing のプラットフォームごとに CTA ラベル上書き欄が出る', async () => {
+			setup( { productId: 7 } );
+			expect( await screen.findByLabelText( 'dmm-books' ) ).toBeInTheDocument();
+		} );
+
+		test( '値入力で setAttributes が ctaLabelOverrides に code を含めて呼ばれる', async () => {
+			const { setAttributes } = setup( { productId: 7 } );
+			const input = await screen.findByLabelText( 'dmm-books' );
+			fireEvent.change( input, { target: { value: '今すぐ読む' } } );
+			expect( setAttributes ).toHaveBeenCalledWith( {
+				ctaLabelOverrides: { 'dmm-books': '今すぐ読む' },
+			} );
+		} );
+
+		test( '空入力で setAttributes が該当 code を含まない object で呼ばれる', async () => {
+			const { setAttributes } = setup( {
+				productId: 7,
+				ctaLabelOverrides: { 'dmm-books': '購入する' },
+			} );
+			const input = await screen.findByLabelText( 'dmm-books' );
+			fireEvent.change( input, { target: { value: '' } } );
+			const calls = setAttributes.mock.calls.filter( ( c ) =>
+				Object.prototype.hasOwnProperty.call( c[ 0 ], 'ctaLabelOverrides' )
+			);
+			expect( calls.length ).toBeGreaterThan( 0 );
+			const lastCall = calls[ calls.length - 1 ];
+			expect( lastCall[ 0 ].ctaLabelOverrides ).not.toHaveProperty( 'dmm-books' );
+		} );
+
+		test( 'listing がない場合は CTA ラベル上書きパネルが表示されない', async () => {
+			productsApi.getProduct.mockResolvedValue( {
+				id: 7,
+				title: 'サンプル漫画 1巻',
+				listings: [],
+			} );
+			setup( { productId: 7 } );
+			await waitFor( () =>
+				expect( productsApi.getCardPreview ).toHaveBeenCalled()
+			);
+			expect( screen.queryByText( 'CTA ラベル上書き' ) ).not.toBeInTheDocument();
+		} );
+	} );
 } );

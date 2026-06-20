@@ -7,9 +7,10 @@ import {
 	ToolbarGroup,
 	ToolbarButton,
 	Spinner,
+	TextControl,
 } from '@wordpress/components';
 import { InspectorControls, ColorPalette, BlockControls } from '@wordpress/block-editor';
-import { searchProducts, getCardPreview } from '../Admin/api/products';
+import { searchProducts, getProduct, getCardPreview } from '../Admin/api/products';
 
 const COLOR_FIELDS = [
 	{ attr: 'ctaBgColor', label: __('ボタン背景色', 'affilicard') },
@@ -34,6 +35,9 @@ export function Edit({ attributes, setAttributes }) {
 	// プレビュー用 state
 	const [previewHtml, setPreviewHtml] = useState('');
 	const [previewState, setPreviewState] = useState('idle'); // idle | loading | error
+
+	// 選択商品の有効 listing プラットフォーム
+	const [listingPlatforms, setListingPlatforms] = useState([]);
 
 	useEffect(() => {
 		if (!filter) {
@@ -62,6 +66,27 @@ export function Edit({ attributes, setAttributes }) {
 			clearTimeout(timer);
 		};
 	}, [filter]);
+
+	// productId 選択時に有効 listing の platform code を取得
+	useEffect(() => {
+		if (!productId) {
+			setListingPlatforms([]);
+			return;
+		}
+		let active = true;
+		getProduct(productId)
+			.then((p) => {
+				if (!active) return;
+				const codes = (p?.listings || [])
+					.filter((l) => l && l.enabled !== false && l.platform)
+					.map((l) => l.platform);
+				setListingPlatforms([...new Set(codes)]);
+			})
+			.catch(() => active && setListingPlatforms([]));
+		return () => {
+			active = false;
+		};
+	}, [productId]);
 
 	// productId 選択時のプレビュー fetch（属性変更デバウンス 300ms）
 	useEffect(() => {
@@ -109,6 +134,16 @@ export function Edit({ attributes, setAttributes }) {
 		cardBorderColor,
 	]);
 
+	const setCtaOverride = (code, value) => {
+		const next = { ...ctaLabelOverrides };
+		if (value && value.trim()) {
+			next[code] = value;
+		} else {
+			delete next[code];
+		}
+		setAttributes({ ctaLabelOverrides: next });
+	};
+
 	const inspector = (
 		<InspectorControls>
 			<PanelBody title={__('色設定', 'affilicard')}>
@@ -123,6 +158,23 @@ export function Edit({ attributes, setAttributes }) {
 					</BaseControl>
 				))}
 			</PanelBody>
+			{listingPlatforms.length > 0 && (
+				<PanelBody
+					title={__('CTA ラベル上書き', 'affilicard')}
+					initialOpen={false}
+				>
+					{listingPlatforms.map((code) => (
+						<TextControl
+							key={code}
+							label={code}
+							value={ctaLabelOverrides[code] || ''}
+							onChange={(value) => setCtaOverride(code, value)}
+							placeholder={__('未設定（プラットフォーム既定）', 'affilicard')}
+							__nextHasNoMarginBottom
+						/>
+					))}
+				</PanelBody>
+			)}
 		</InspectorControls>
 	);
 
