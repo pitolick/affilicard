@@ -290,10 +290,16 @@ final class ProductRepository implements ProductRepositoryInterface {
 			$price    = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
 			$platform = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
 			if ( '' !== $platform ) {
-				return array( 'price' => $price, 'platform' => $platform );
+				return array(
+					'price'    => $price,
+					'platform' => $platform,
+				);
 			}
 		}
-		return array( 'price' => '', 'platform' => '' );
+		return array(
+			'price'    => '',
+			'platform' => '',
+		);
 	}
 
 	/**
@@ -318,7 +324,10 @@ final class ProductRepository implements ProductRepositoryInterface {
 			}
 		}
 
-		return array( 'items' => $items, 'total' => $total );
+		return array(
+			'items' => $items,
+			'total' => $total,
+		);
 	}
 
 	/**

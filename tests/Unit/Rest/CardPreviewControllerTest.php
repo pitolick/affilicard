@@ -105,11 +105,11 @@ final class CardPreviewControllerTest extends TestCase {
 		$controller = new CardPreviewController( $repository );
 		$request    = $this->makeRequest(
 			array(
-				'id'             => 1,
-				'hidePlatforms'  => array( 'dmm-books' ),
-				'ctaBgColor'     => '#ff0000',
-				'ctaTextColor'   => '#ffffff',
-				'cardBgColor'    => '#fafafa',
+				'id'              => 1,
+				'hidePlatforms'   => array( 'dmm-books' ),
+				'ctaBgColor'      => '#ff0000',
+				'ctaTextColor'    => '#ffffff',
+				'cardBgColor'     => '#fafafa',
 				'cardBorderColor' => '#cccccc',
 			)
 		);

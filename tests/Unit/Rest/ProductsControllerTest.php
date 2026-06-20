@@ -176,16 +176,39 @@ final class ProductsControllerTest extends TestCase {
 		$repository = $this->createMock( ProductRepositoryInterface::class );
 		$repository->method( 'search' )->with( 'abc', 20, 1 )->willReturn(
 			array(
-				'items' => array( array( 'id' => 1, 'title' => 'X', 'status' => 'publish' ) ),
+				'items' => array(
+					array(
+						'id'     => 1,
+						'title'  => 'X',
+						'status' => 'publish',
+					),
+				),
 				'total' => 1,
 			)
 		);
 
 		$controller = new ProductsController( $repository );
-		$response   = $controller->list( $this->makeRequest( array( 'search' => 'abc', 'per_page' => 20, 'page' => 1 ) ) );
+		$response   = $controller->list(
+			$this->makeRequest(
+				array(
+					'search'   => 'abc',
+					'per_page' => 20,
+					'page'     => 1,
+				)
+			)
+		);
 
 		$this->assertSame( 200, $response->get_status() );
-		$this->assertSame( array( array( 'id' => 1, 'title' => 'X', 'status' => 'publish' ) ), $response->get_data() );
+		$this->assertSame(
+			array(
+				array(
+					'id'     => 1,
+					'title'  => 'X',
+					'status' => 'publish',
+				),
+			),
+			$response->get_data()
+		);
 		$this->assertSame( '1', $response->get_headers()['X-WP-Total'] );
 	}
 
@@ -193,13 +216,29 @@ final class ProductsControllerTest extends TestCase {
 		$repository = $this->createMock( ProductRepositoryInterface::class );
 		$repository->method( 'search' )->willReturn(
 			array(
-				'items' => array_fill( 0, 5, array( 'id' => 1, 'title' => 'X', 'status' => 'publish' ) ),
+				'items' => array_fill(
+					0,
+					5,
+					array(
+						'id'     => 1,
+						'title'  => 'X',
+						'status' => 'publish',
+					)
+				),
 				'total' => 10,
 			)
 		);
 
 		$controller = new ProductsController( $repository );
-		$response   = $controller->list( $this->makeRequest( array( 'search' => '', 'per_page' => 5, 'page' => 1 ) ) );
+		$response   = $controller->list(
+			$this->makeRequest(
+				array(
+					'search'   => '',
+					'per_page' => 5,
+					'page'     => 1,
+				)
+			)
+		);
 
 		$this->assertSame( '10', $response->get_headers()['X-WP-Total'] );
 		$this->assertSame( '2', $response->get_headers()['X-WP-TotalPages'] );

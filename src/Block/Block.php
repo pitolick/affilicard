@@ -138,5 +138,4 @@ final class Block {
 		}
 		return $this->repository->find( $post_id );
 	}
-
 }

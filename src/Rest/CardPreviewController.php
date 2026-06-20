@@ -30,12 +30,30 @@ final class CardPreviewController {
 					'callback'            => array( $this, 'preview' ),
 					'permission_callback' => array( $this, 'canEditPosts' ),
 					'args'                => array(
-						'hidePlatforms'     => array( 'type' => 'array', 'default' => array() ),
-						'ctaLabelOverrides' => array( 'type' => 'object', 'default' => array() ),
-						'ctaBgColor'        => array( 'type' => 'string', 'default' => '' ),
-						'ctaTextColor'      => array( 'type' => 'string', 'default' => '' ),
-						'cardBgColor'       => array( 'type' => 'string', 'default' => '' ),
-						'cardBorderColor'   => array( 'type' => 'string', 'default' => '' ),
+						'hidePlatforms'     => array(
+							'type'    => 'array',
+							'default' => array(),
+						),
+						'ctaLabelOverrides' => array(
+							'type'    => 'object',
+							'default' => array(),
+						),
+						'ctaBgColor'        => array(
+							'type'    => 'string',
+							'default' => '',
+						),
+						'ctaTextColor'      => array(
+							'type'    => 'string',
+							'default' => '',
+						),
+						'cardBgColor'       => array(
+							'type'    => 'string',
+							'default' => '',
+						),
+						'cardBorderColor'   => array(
+							'type'    => 'string',
+							'default' => '',
+						),
 					),
 				),
 			)
