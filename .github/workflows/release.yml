@@ -12,13 +12,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: タグからバージョンを affilicard.php に注入
+      - name: CHANGELOG にタグ対応セクションがあるか検証
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! grep -qE "^## \[${VERSION}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md に '## [${VERSION}]' セクションがありません。リリース前に追記してください。"
+            exit 1
+          fi
+          echo "CHANGELOG にバージョン ${VERSION} のセクションを確認しました。"
+      - name: タグからバージョンを affilicard.php / package.json に注入
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           echo "Injecting version: ${VERSION}"
           sed -i -E "s/^( \* Version:[[:space:]]*).*/\1${VERSION}/" affilicard.php
           sed -i -E "s/(define\( 'AFFILICARD_VERSION', ')[^']*(' \);)/\1${VERSION}\2/" affilicard.php
+          sed -i -E "s/(\"version\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")/\1${VERSION}\2/" package.json
           grep -nE "Version:|AFFILICARD_VERSION" affilicard.php
+          grep -nE "\"version\"" package.json | head -1
       - name: PHP セットアップ
         uses: shivammathur/setup-php@v2
         with:
