@@ -5,6 +5,7 @@ namespace Affilicard\Tests\Unit\Rest;
 
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Repository\ProductRepository;
+use Affilicard\Repository\ProductRepositoryInterface;
 use Affilicard\Rest\ProductsController;
 use Affilicard\Schema\SchemaVersion;
 use Mockery;
@@ -35,6 +36,19 @@ final class ProductsControllerTest extends TestCase {
 		WP_Mock::tearDown();
 		Mockery::close();
 		parent::tearDown();
+	}
+
+	/**
+	 * WP_REST_Request を生成するヘルパ。
+	 *
+	 * @param array<string, mixed> $params
+	 */
+	private function makeRequest( array $params ): WP_REST_Request {
+		$request = new WP_REST_Request( 'GET', '/affilicard/v1/products' );
+		foreach ( $params as $key => $value ) {
+			$request->set_param( $key, $value );
+		}
+		return $request;
 	}
 
 	/**
@@ -158,57 +172,76 @@ final class ProductsControllerTest extends TestCase {
 		$this->assertSame( 404, $response->get_status() );
 	}
 
-	public function test_list_calls_get_posts_with_search_and_paging_and_returns_serialized_list(): void {
-		WP_Mock::userFunction( 'get_posts' )
-			->once()
-			->andReturnUsing(
-				function ( $args ) {
-					$this->assertSame( ProductPostType::POST_TYPE, $args['post_type'] );
-					$this->assertSame( 'keyword', $args['s'] );
-					$this->assertSame( 5, $args['posts_per_page'] );
-					$this->assertSame( 2, $args['paged'] );
-					return array(
-						(object) array(
-							'ID'            => 10,
-							'post_title'    => 'X',
-							'post_status'   => 'publish',
-							'post_modified' => '2026-05-29 10:00:00',
-						),
-					);
-				}
-			);
+	public function test_list_delegates_to_repository_search_and_sets_total_header(): void {
+		$repository = $this->createMock( ProductRepositoryInterface::class );
+		$repository->method( 'search' )->with( 'abc', 20, 1 )->willReturn(
+			array(
+				'items' => array(
+					array(
+						'id'     => 1,
+						'title'  => 'X',
+						'status' => 'publish',
+					),
+				),
+				'total' => 1,
+			)
+		);
 
-		WP_Mock::userFunction( 'get_post_meta' )
-			->with( 10, ProductPostType::META_PRODUCT_TYPE, true )
-			->andReturn( 'ebook' );
-
-		WP_Mock::userFunction( 'wp_count_posts' )
-			->with( ProductPostType::POST_TYPE )
-			->andReturn(
-				(object) array(
-					'publish' => 8,
-					'draft'   => 2,
+		$controller = new ProductsController( $repository );
+		$response   = $controller->list(
+			$this->makeRequest(
+				array(
+					'search'   => 'abc',
+					'per_page' => 20,
+					'page'     => 1,
 				)
-			);
-
-		$controller = new ProductsController( new ProductRepository() );
-		$request    = new WP_REST_Request( 'GET', '/affilicard/v1/products' );
-		$request->set_param( 'search', 'keyword' );
-		$request->set_param( 'per_page', 5 );
-		$request->set_param( 'page', 2 );
-
-		$response = $controller->list( $request );
+			)
+		);
 
 		$this->assertSame( 200, $response->get_status() );
-		$data = $response->get_data();
-		$this->assertCount( 1, $data );
-		$this->assertSame( 10, $data[0]['id'] );
-		$this->assertSame( 'X', $data[0]['title'] );
-		$this->assertSame( 'ebook', $data[0]['product_type'] );
+		$this->assertSame(
+			array(
+				array(
+					'id'     => 1,
+					'title'  => 'X',
+					'status' => 'publish',
+				),
+			),
+			$response->get_data()
+		);
+		$this->assertSame( '1', $response->get_headers()['X-WP-Total'] );
+	}
 
-		$headers = $response->get_headers();
-		$this->assertSame( '10', $headers['X-WP-Total'] );
-		$this->assertSame( '2', $headers['X-WP-TotalPages'] );
+	public function test_list_sets_total_pages_header_correctly(): void {
+		$repository = $this->createMock( ProductRepositoryInterface::class );
+		$repository->method( 'search' )->willReturn(
+			array(
+				'items' => array_fill(
+					0,
+					5,
+					array(
+						'id'     => 1,
+						'title'  => 'X',
+						'status' => 'publish',
+					)
+				),
+				'total' => 10,
+			)
+		);
+
+		$controller = new ProductsController( $repository );
+		$response   = $controller->list(
+			$this->makeRequest(
+				array(
+					'search'   => '',
+					'per_page' => 5,
+					'page'     => 1,
+				)
+			)
+		);
+
+		$this->assertSame( '10', $response->get_headers()['X-WP-Total'] );
+		$this->assertSame( '2', $response->get_headers()['X-WP-TotalPages'] );
 	}
 
 	public function test_update_returns_404_when_product_not_found(): void {

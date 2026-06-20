@@ -4,12 +4,9 @@ declare(strict_types=1);
 namespace Affilicard\Block;
 
 use Affilicard\AutoCreate\ProductAutoCreator;
-use Affilicard\Platform\PlatformConfig;
-use Affilicard\Plugin;
-use Affilicard\Renderer\CardRenderer;
+use Affilicard\Renderer\CardHtmlBuilder;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Repository\ProductRepositoryInterface;
-use Affilicard\Types\ProductTypeRegistry;
 
 /**
  * Gutenberg block `affilicard/product-card` の登録とサーバサイド render。
@@ -22,9 +19,6 @@ final class Block {
 	private const SCRIPT_HANDLE       = 'affilicard-block';
 	private const STYLE_HANDLE        = 'affilicard-card';
 	private const EDITOR_STYLE_HANDLE = 'affilicard-block-editor';
-
-	/** @var ProductTypeRegistry|null */
-	private static ?ProductTypeRegistry $typeRegistry = null;
 
 	public function __construct(
 		private ProductRepositoryInterface $repository,
@@ -98,42 +92,9 @@ final class Block {
 			return '';
 		}
 
-		$platforms = PlatformConfig::all();
-		$platforms = array_values(
-			array_filter(
-				$platforms,
-				static function ( $platform ): bool {
-					return $platform->enabled;
-				}
-			)
-		);
-
-		$hide_platforms = isset( $attributes['hidePlatforms'] ) && is_array( $attributes['hidePlatforms'] )
-			? $attributes['hidePlatforms']
-			: array();
-
-		$type        = self::productTypeRegistry()->get( isset( $product['product_type'] ) ? (string) $product['product_type'] : '' );
-		$header_keys = null !== $type ? $type->cardHeaderKeys() : array( 'author', 'publisher' );
-		$hidden_keys = null !== $type ? $type->cardHiddenKeys() : array();
-		$media_label = null !== $type ? $type->cardMediaLabel() : (string) __( '商品画像', 'affilicard' );
-
-		$options = array(
-			'hide_platforms' => $hide_platforms,
-			'image_url'      => $this->featuredImageUrl( (int) ( $product['id'] ?? 0 ) ),
-			'colors'         => array(
-				'card_bg'     => isset( $attributes['cardBgColor'] ) ? (string) $attributes['cardBgColor'] : '',
-				'card_border' => isset( $attributes['cardBorderColor'] ) ? (string) $attributes['cardBorderColor'] : '',
-				'cta_bg'      => isset( $attributes['ctaBgColor'] ) ? (string) $attributes['ctaBgColor'] : '',
-				'cta_text'    => isset( $attributes['ctaTextColor'] ) ? (string) $attributes['ctaTextColor'] : '',
-			),
-			'header_keys'    => $header_keys,
-			'hidden_keys'    => $hidden_keys,
-			'media_label'    => $media_label,
-		);
-
 		wp_enqueue_style( self::STYLE_HANDLE );
 
-		return ( new CardRenderer() )->render( $product, $platforms, $options );
+		return ( new CardHtmlBuilder() )->build( $product, $attributes );
 	}
 
 	/**
@@ -176,28 +137,5 @@ final class Block {
 			return null;
 		}
 		return $this->repository->find( $post_id );
-	}
-
-	/**
-	 * ProductTypeRegistry を static にメモ化して返す。
-	 * 型クラスはコンストラクタで副作用を持たないため static 共有で問題ない。
-	 */
-	private static function productTypeRegistry(): ProductTypeRegistry {
-		if ( null === self::$typeRegistry ) {
-			self::$typeRegistry = Plugin::buildProductTypeRegistry();
-		}
-		return self::$typeRegistry;
-	}
-
-	private function featuredImageUrl( int $postId ): string {
-		if ( $postId <= 0 ) {
-			return '';
-		}
-		$thumb_id = (int) get_post_thumbnail_id( $postId );
-		if ( $thumb_id <= 0 ) {
-			return '';
-		}
-		$url = wp_get_attachment_image_url( $thumb_id, 'medium' );
-		return is_string( $url ) ? $url : '';
 	}
 }

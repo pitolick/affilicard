@@ -27,3 +27,24 @@ export function updateProduct(id, data) {
 export function deleteProduct(id) {
 	return apiFetch({ path: `${BASE}/${id}`, method: 'DELETE' });
 }
+
+export function getCardPreview(id, params = {}) {
+	const query = new URLSearchParams();
+	(params.hidePlatforms || []).forEach((code) =>
+		query.append('hidePlatforms[]', code)
+	);
+	Object.entries(params.ctaLabelOverrides || {}).forEach(([code, label]) =>
+		query.set(`ctaLabelOverrides[${code}]`, label)
+	);
+	['ctaBgColor', 'ctaTextColor', 'cardBgColor', 'cardBorderColor'].forEach(
+		(key) => {
+			if (params[key]) {
+				query.set(key, params[key]);
+			}
+		}
+	);
+	const qs = query.toString();
+	return apiFetch({
+		path: `${BASE}/${id}/card-preview${qs ? `?${qs}` : ''}`,
+	});
+}

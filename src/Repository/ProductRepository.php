@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Repository;
 
+use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Schema\SchemaVersion;
 use Affilicard\Stock\StockStatus;
@@ -182,6 +183,174 @@ final class ProductRepository implements ProductRepositoryInterface {
 		update_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
 
 		$this->syncExternalIdMirror( $postId, $listings );
+	}
+
+	/**
+	 * 商品を検索し、各 item に thumbnail/price/platform を付与して返す。
+	 *
+	 * - $term 空: modified 降順の最近商品（ページ処理あり）
+	 * - $term 非空: title/content 全文検索 + external_id ミラー OR meta_query の和集合、一意化・modified 降順
+	 *
+	 * @return array{items: list<array<string, mixed>>, total: int}
+	 */
+	public function search( string $term, int $perPage, int $page ): array {
+		$term = trim( $term );
+
+		if ( '' === $term ) {
+			$posts = get_posts(
+				array(
+					'post_type'      => ProductPostType::POST_TYPE,
+					'post_status'    => 'any',
+					'posts_per_page' => $perPage,
+					'paged'          => $page,
+					'orderby'        => 'modified',
+					'order'          => 'DESC',
+				)
+			);
+			return $this->buildSearchResult( is_array( $posts ) ? $posts : array() );
+		}
+
+		$by_title = get_posts(
+			array(
+				'post_type'      => ProductPostType::POST_TYPE,
+				'post_status'    => 'any',
+				's'              => $term,
+				'posts_per_page' => -1,
+				'orderby'        => 'modified',
+				'order'          => 'DESC',
+			)
+		);
+
+		$enabled_codes = array();
+		foreach ( PlatformConfig::all() as $platform ) {
+			if ( $platform->enabled ) {
+				$enabled_codes[] = (string) $platform->code;
+			}
+		}
+
+		$by_extid = array();
+		if ( array() !== $enabled_codes ) {
+			$meta_query = array( 'relation' => 'OR' );
+			foreach ( $enabled_codes as $code ) {
+				$meta_query[] = array(
+					'key'     => ProductPostType::externalIdMetaKey( $code ),
+					'value'   => $term,
+					'compare' => 'LIKE',
+				);
+			}
+
+			$by_extid = get_posts(
+				array(
+					'post_type'      => ProductPostType::POST_TYPE,
+					'post_status'    => 'any',
+					'meta_query'     => $meta_query,
+					'posts_per_page' => -1,
+					'orderby'        => 'modified',
+					'order'          => 'DESC',
+				)
+			);
+		}
+
+		$merged = array();
+		foreach ( array_merge( is_array( $by_title ) ? $by_title : array(), is_array( $by_extid ) ? $by_extid : array() ) as $post ) {
+			if ( is_object( $post ) && isset( $post->ID ) ) {
+				$merged[ (int) $post->ID ] = $post;
+			}
+		}
+
+		// modified 降順で安定化。
+		uasort(
+			$merged,
+			static fn( $a, $b ) => strcmp( (string) ( $b->post_modified ?? '' ), (string) ( $a->post_modified ?? '' ) )
+		);
+
+		$total = count( $merged );
+		$page  = max( 1, $page );
+		$slice = array_slice( array_values( $merged ), ( $page - 1 ) * $perPage, $perPage );
+
+		return array(
+			'items' => array_map( array( $this, 'mapSearchItem' ), $slice ),
+			'total' => $total,
+		);
+	}
+
+	/**
+	 * 先頭の有効 listing から代表価格と platform 名を返す（無ければ空文字）。
+	 *
+	 * @return array{price: string, platform: string}
+	 */
+	public function listingSummary( int $postId ): array {
+		$raw      = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
+		$listings = is_string( $raw ) ? JsonField::decode( $raw, array() ) : ( is_array( $raw ) ? $raw : array() );
+
+		foreach ( $listings as $listing ) {
+			if ( ! is_array( $listing ) ) {
+				continue;
+			}
+			$price    = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
+			$platform = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
+			if ( '' !== $platform ) {
+				return array(
+					'price'    => $price,
+					'platform' => $platform,
+				);
+			}
+		}
+		return array(
+			'price'    => '',
+			'platform' => '',
+		);
+	}
+
+	/**
+	 * term 空時の検索結果を構築し wp_count_posts で総件数を取得して返す。
+	 *
+	 * @param list<object> $posts
+	 * @return array{items: list<array<string, mixed>>, total: int}
+	 */
+	private function buildSearchResult( array $posts ): array {
+		$items = array();
+		foreach ( $posts as $post ) {
+			if ( is_object( $post ) && isset( $post->ID ) ) {
+				$items[] = $this->mapSearchItem( $post );
+			}
+		}
+
+		$counts = wp_count_posts( ProductPostType::POST_TYPE );
+		$total  = 0;
+		if ( is_object( $counts ) ) {
+			foreach ( get_object_vars( $counts ) as $status_count ) {
+				$total += (int) $status_count;
+			}
+		}
+
+		return array(
+			'items' => $items,
+			'total' => $total,
+		);
+	}
+
+	/**
+	 * WP_Post オブジェクトを検索結果 item 配列にマップする。
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function mapSearchItem( object $post ): array {
+		$post_id      = (int) ( $post->ID ?? 0 );
+		$product_type = get_post_meta( $post_id, ProductPostType::META_PRODUCT_TYPE, true );
+		$summary      = $this->listingSummary( $post_id );
+		$thumb_url    = get_the_post_thumbnail_url( $post_id, 'thumbnail' );
+
+		return array(
+			'id'           => $post_id,
+			'title'        => (string) ( $post->post_title ?? '' ),
+			'status'       => (string) ( $post->post_status ?? '' ),
+			'product_type' => is_string( $product_type ) ? $product_type : '',
+			'modified'     => (string) ( $post->post_modified ?? '' ),
+			'thumbnail'    => is_string( $thumb_url ) ? $thumb_url : '',
+			'price'        => $summary['price'],
+			'platform'     => $summary['platform'],
+		);
 	}
 
 	public function delete( int $postId ): bool {

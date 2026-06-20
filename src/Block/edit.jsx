@@ -4,10 +4,50 @@ import {
 	ComboboxControl,
 	PanelBody,
 	BaseControl,
-	Button,
+	ToolbarGroup,
+	ToolbarButton,
+	Spinner,
+	TextControl,
 } from '@wordpress/components';
-import { InspectorControls, ColorPalette } from '@wordpress/block-editor';
-import { searchProducts, getProduct } from '../Admin/api/products';
+import {
+	InspectorControls,
+	ColorPalette,
+	BlockControls,
+	useBlockProps,
+} from '@wordpress/block-editor';
+import { searchProducts, getProduct, getCardPreview } from '../Admin/api/products';
+
+/**
+ * コンボボックスのアイテム描画純粋関数。
+ * option.item（raw データ）があればサムネ＋title＋platform＋price のリッチ div を返し、
+ * 無ければ <span>{option.label}</span> を返す。
+ *
+ * @param {{ value: number, label: string, item?: object }} option
+ * @return {JSX.Element}
+ */
+export function renderComboboxItem( option ) {
+	const data = option?.item;
+	if ( ! data ) {
+		return <span>{ option?.label }</span>;
+	}
+	return (
+		<div className="affilicard-combobox-item">
+			{ data.thumbnail ? (
+				<img src={ data.thumbnail } alt="" width="32" height="32" />
+			) : null }
+			<span className="affilicard-combobox-item__title">{ data.title }</span>
+			{ data.platform ? (
+				<span className="affilicard-combobox-item__platform">{ data.platform }</span>
+			) : null }
+			{ data.price ? (
+				<span className="affilicard-combobox-item__price">
+					{ '¥' }
+					{ data.price }
+				</span>
+			) : null }
+		</div>
+	);
+}
 
 const COLOR_FIELDS = [
 	{ attr: 'ctaBgColor', label: __('ボタン背景色', 'affilicard') },
@@ -17,20 +57,35 @@ const COLOR_FIELDS = [
 ];
 
 export function Edit({ attributes, setAttributes }) {
-	const { productId } = attributes;
+	const {
+		productId,
+		hidePlatforms = [],
+		ctaLabelOverrides = {},
+		ctaBgColor,
+		ctaTextColor,
+		cardBgColor,
+		cardBorderColor,
+	} = attributes;
 	const [options, setOptions] = useState([]);
 	const [filter, setFilter] = useState('');
-	const [selectedTitle, setSelectedTitle] = useState('');
+
+	// apiVersion 3 ブロックはルートに useBlockProps を適用しないと
+	// 選択・クリック処理が配線されない。両ブランチのルートに spread する。
+	const blockProps = useBlockProps();
+
+	// プレビュー用 state
+	const [previewHtml, setPreviewHtml] = useState('');
+	const [previewState, setPreviewState] = useState('idle'); // idle | loading | error
+
+	// 選択商品の有効 listing プラットフォーム
+	const [listingPlatforms, setListingPlatforms] = useState([]);
 
 	useEffect(() => {
-		if (!filter) {
-			setOptions([]);
-			return;
-		}
 		let active = true;
 		// 入力毎の REST 発火を避けるため簡易デバウンス（300ms）。
+		// 空フィルタ時も最近商品（modified 降順）を取得する。
 		const timer = setTimeout(() => {
-			searchProducts({ search: filter, perPage: 10 })
+			searchProducts({ search: filter, perPage: 20 })
 				.then((items) => {
 					if (!active) {
 						return;
@@ -39,6 +94,7 @@ export function Edit({ attributes, setAttributes }) {
 						(items || []).map((p) => ({
 							value: p.id,
 							label: `${p.title} (#${p.id})`,
+							item: p,
 						}))
 					);
 				})
@@ -50,19 +106,82 @@ export function Edit({ attributes, setAttributes }) {
 		};
 	}, [filter]);
 
+	// productId 選択時に有効 listing の platform code を取得
 	useEffect(() => {
 		if (!productId) {
-			setSelectedTitle('');
+			setListingPlatforms([]);
 			return;
 		}
 		let active = true;
 		getProduct(productId)
-			.then((p) => active && setSelectedTitle(p?.title ?? ''))
-			.catch(() => active && setSelectedTitle(''));
+			.then((p) => {
+				if (!active) return;
+				const codes = (p?.listings || [])
+					.filter((l) => l && l.enabled !== false && l.platform)
+					.map((l) => l.platform);
+				setListingPlatforms([...new Set(codes)]);
+			})
+			.catch(() => active && setListingPlatforms([]));
 		return () => {
 			active = false;
 		};
 	}, [productId]);
+
+	// productId 選択時のプレビュー fetch（属性変更デバウンス 300ms）
+	useEffect(() => {
+		if (!productId) {
+			setPreviewHtml('');
+			setPreviewState('idle');
+			return;
+		}
+		let active = true;
+		setPreviewState('loading');
+		const timer = setTimeout(() => {
+			getCardPreview(productId, {
+				hidePlatforms,
+				ctaLabelOverrides,
+				ctaBgColor,
+				ctaTextColor,
+				cardBgColor,
+				cardBorderColor,
+			})
+				.then((res) => {
+					if (!active) return;
+					setPreviewHtml(res?.html || '');
+					setPreviewState('idle');
+				})
+				.catch(() => {
+					if (!active) return;
+					setPreviewHtml('');
+					setPreviewState('error');
+				});
+		}, 300);
+		return () => {
+			active = false;
+			clearTimeout(timer);
+		};
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [
+		productId,
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		JSON.stringify(hidePlatforms),
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		JSON.stringify(ctaLabelOverrides),
+		ctaBgColor,
+		ctaTextColor,
+		cardBgColor,
+		cardBorderColor,
+	]);
+
+	const setCtaOverride = (code, value) => {
+		const next = { ...ctaLabelOverrides };
+		if (value && value.trim()) {
+			next[code] = value;
+		} else {
+			delete next[code];
+		}
+		setAttributes({ ctaLabelOverrides: next });
+	};
 
 	const inspector = (
 		<InspectorControls>
@@ -78,29 +197,75 @@ export function Edit({ attributes, setAttributes }) {
 					</BaseControl>
 				))}
 			</PanelBody>
+			{listingPlatforms.length > 0 && (
+				<PanelBody
+					title={__('CTA ラベル上書き', 'affilicard')}
+					initialOpen={false}
+				>
+					{listingPlatforms.map((code) => (
+						<TextControl
+							key={code}
+							label={code}
+							value={ctaLabelOverrides[code] || ''}
+							onChange={(value) => setCtaOverride(code, value)}
+							placeholder={__('未設定（プラットフォーム既定）', 'affilicard')}
+							__nextHasNoMarginBottom
+						/>
+					))}
+				</PanelBody>
+			)}
 		</InspectorControls>
 	);
 
 	if (productId) {
 		return (
-			<div className="affilicard-block-placeholder">
+			<div
+				{...blockProps}
+				className={`${blockProps.className ?? ''} affilicard-block-preview`.trim()}
+			>
 				{inspector}
-				<p>
-					{__('選択中の商品: ', 'affilicard')}
-					<strong>{selectedTitle || `#${productId}`}</strong>
-				</p>
-				<Button
-					variant="secondary"
-					onClick={() => setAttributes({ productId: undefined })}
-				>
-					{__('商品を変更', 'affilicard')}
-				</Button>
+				<BlockControls>
+					<ToolbarGroup>
+						<ToolbarButton
+							onClick={() => setAttributes({ productId: undefined })}
+						>
+							{__('商品を変更', 'affilicard')}
+						</ToolbarButton>
+					</ToolbarGroup>
+				</BlockControls>
+				{previewState === 'loading' && <Spinner />}
+				{previewState === 'error' && (
+					<p>{__('プレビューを取得できませんでした。', 'affilicard')}</p>
+				)}
+				{previewHtml && (
+					// プレビューはエディタ上で非インタラクティブ（block-editor.css で
+					// pointer-events: none）。クリックはブロック本体に通って選択され、
+					// CTA リンクの誤遷移も防ぐ。エスケープ済みのサーバ生成 HTML を挿入。
+					// eslint-disable-next-line react/no-danger
+					<div
+						className="affilicard-block-preview__rendered"
+						dangerouslySetInnerHTML={{ __html: previewHtml }}
+					/>
+				)}
+				{previewState === 'idle' && !previewHtml && (
+					<p>{__('プレビューする内容がありません。', 'affilicard')}</p>
+				)}
 			</div>
 		);
 	}
 
+	// ComboboxControl が関数として存在する場合のみ __experimentalRenderItem を使用する。
+	// renderComboboxItem を呼ぶアダプタ: ComboboxControl が渡す引数は { item } の形（item = option object）。
+	const renderItem =
+		typeof ComboboxControl === 'function'
+			? ( { item } ) => renderComboboxItem( item )
+			: undefined;
+
 	return (
-		<div className="affilicard-block-placeholder">
+		<div
+			{...blockProps}
+			className={`${blockProps.className ?? ''} affilicard-block-placeholder`.trim()}
+		>
 			{inspector}
 			<ComboboxControl
 				label={__('商品を検索', 'affilicard')}
@@ -112,6 +277,7 @@ export function Edit({ attributes, setAttributes }) {
 						productId: parseInt(value, 10) || undefined,
 					})
 				}
+				{...(renderItem ? { __experimentalRenderItem: renderItem } : {})}
 			/>
 		</div>
 	);

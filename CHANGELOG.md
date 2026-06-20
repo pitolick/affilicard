@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-20
+
+### Added
+
+- 投稿ブロックエディタに公開と同じカードの WYSIWYG プレビュー（認証済み専用 REST `GET affilicard/v1/products/{id}/card-preview` 経由・status 非依存。フロントの publish ガードは不変）
+- CTA ラベルのブロック単位上書き（優先順位: ブロック属性 > listing `button_label_override` > プラットフォーム既定）。`block.json` に `ctaLabelOverrides` 属性を追加
+- 商品検索の強化: external_id（`affilicard_extid_*` ミラー）の OR 検索、空入力時の最近商品表示、候補のサムネイル＋プラットフォーム＋価格リッチ表示（`__experimentalRenderItem`・不在時テキストフォールバック）
+
+### Changed
+
+- カード描画ロジックを `CardHtmlBuilder` に抽出し、フロント `Block::render` と REST プレビューで共有
+- 商品一覧 REST（`/products`）の検索を `ProductRepository::search()` に集約し、各項目に thumbnail/price/platform を付与
+
 ## [1.2.0] - 2026-06-20
 
 ### Added

@@ -4,7 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Rest;
 
 use Affilicard\PostType\ProductPostType;
-use Affilicard\Repository\ProductRepository;
+use Affilicard\Repository\ProductRepositoryInterface;
 use WP_REST_Request;
 use WP_REST_Response;
 
@@ -20,7 +20,7 @@ final class ProductsController {
 	 */
 	private const MAX_BULK_ITEMS = 100;
 
-	public function __construct( private ProductRepository $repository ) {}
+	public function __construct( private ProductRepositoryInterface $repository ) {}
 
 	public function registerRoutes( string $namespace ): void {
 		register_rest_route(
@@ -208,50 +208,11 @@ final class ProductsController {
 		$per_page = (int) ( $request->get_param( 'per_page' ) ?? 20 );
 		$page     = (int) ( $request->get_param( 'page' ) ?? 1 );
 
-		$posts = get_posts(
-			array(
-				'post_type'      => ProductPostType::POST_TYPE,
-				'post_status'    => 'any',
-				's'              => $search,
-				'posts_per_page' => $per_page,
-				'paged'          => $page,
-				'orderby'        => 'modified',
-				'order'          => 'DESC',
-			)
-		);
-
-		$items = array();
-		if ( is_array( $posts ) ) {
-			foreach ( $posts as $post ) {
-				if ( ! is_object( $post ) ) {
-					continue;
-				}
-				$post_id = isset( $post->ID ) ? (int) $post->ID : 0;
-				if ( 0 === $post_id ) {
-					continue;
-				}
-
-				$product_type = get_post_meta( $post_id, ProductPostType::META_PRODUCT_TYPE, true );
-				$items[]      = array(
-					'id'           => $post_id,
-					'title'        => (string) ( $post->post_title ?? '' ),
-					'status'       => (string) ( $post->post_status ?? '' ),
-					'product_type' => is_string( $product_type ) ? $product_type : '',
-					'modified'     => (string) ( $post->post_modified ?? '' ),
-				);
-			}
-		}
-
-		$counts = wp_count_posts( ProductPostType::POST_TYPE );
-		$total  = 0;
-		if ( is_object( $counts ) ) {
-			foreach ( get_object_vars( $counts ) as $status_count ) {
-				$total += (int) $status_count;
-			}
-		}
+		$result      = $this->repository->search( $search, $per_page, $page );
+		$total       = (int) ( $result['total'] ?? 0 );
 		$total_pages = $per_page > 0 ? (int) ceil( $total / $per_page ) : 0;
 
-		$response = new WP_REST_Response( $items, 200 );
+		$response = new WP_REST_Response( $result['items'] ?? array(), 200 );
 		$response->header( 'X-WP-Total', (string) $total );
 		$response->header( 'X-WP-TotalPages', (string) $total_pages );
 		return $response;

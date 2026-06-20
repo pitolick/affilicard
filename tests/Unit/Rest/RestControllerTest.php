@@ -6,6 +6,7 @@ namespace Affilicard\Tests\Unit\Rest;
 use Affilicard\Cron\ListingRefresher;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Repository\ProductRepository;
+use Affilicard\Rest\CardPreviewController;
 use Affilicard\Rest\CredentialsController;
 use Affilicard\Rest\PlatformsController;
 use Affilicard\Rest\ProductsController;
@@ -36,7 +37,8 @@ final class RestControllerTest extends TestCase {
 			new SettingsController(),
 			new PlatformsController(),
 			new CredentialsController( new ProviderRegistry() ),
-			new RefreshController( $refresher )
+			new RefreshController( $refresher ),
+			new CardPreviewController( new ProductRepository() )
 		);
 
 		WP_Mock::expectActionAdded( 'rest_api_init', array( $controller, 'registerRoutes' ) );
@@ -49,9 +51,10 @@ final class RestControllerTest extends TestCase {
 		// platforms は 1 ルート
 		// credentials は 4 ルート（platform credentials, platform test-connection, provider credentials, provider test-connection）
 		// refresh は 1 ルート
+		// preview は 1 ルート
 		$call_count = 0;
 		WP_Mock::userFunction( 'register_rest_route' )
-			->times( 10 )
+			->times( 11 )
 			->andReturnUsing(
 				function ( $namespace, $route ) use ( &$call_count ) {
 					$call_count++;
@@ -63,7 +66,7 @@ final class RestControllerTest extends TestCase {
 
 		$controller->registerRoutes();
 
-		$this->assertSame( 10, $call_count );
+		$this->assertSame( 11, $call_count );
 		$this->assertConditionsMet();
 	}
 }
