@@ -599,7 +599,8 @@ final class ProductRepositoryTest extends TestCase {
 
 		$this->assertCount( 1, $result['items'] );
 		$this->assertSame( 5, $result['items'][0]['id'] );
-		$this->assertSame( 5, $result['total'] ); // publish(3) + draft(2)
+		// total は全ステータス合算で publish 3 件と draft 2 件の計 5 件。
+		$this->assertSame( 5, $result['total'] );
 	}
 
 	public function test_search_with_no_enabled_platforms_skips_extid_query_and_returns_title_results_only(): void {
