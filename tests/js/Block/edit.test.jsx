@@ -67,9 +67,35 @@ describe( 'Edit', () => {
 		await waitFor( () =>
 			expect( screen.getByText( 'プレビュー本文' ) ).toBeInTheDocument()
 		);
+		expect( productsApi.getCardPreview ).toHaveBeenCalledWith( 7, {
+			hidePlatforms: [],
+			ctaLabelOverrides: {},
+			ctaBgColor: undefined,
+			ctaTextColor: undefined,
+			cardBgColor: undefined,
+			cardBorderColor: undefined,
+		} );
+	} );
+
+	test( 'passes attribute params to getCardPreview', async () => {
+		setup( {
+			productId: 7,
+			hidePlatforms: [ 'dmm-books' ],
+			ctaLabelOverrides: { 'dmm-books': '購入' },
+			ctaBgColor: '#ff0000',
+			ctaTextColor: '#ffffff',
+		} );
+		await waitFor( () =>
+			expect( screen.getByText( 'プレビュー本文' ) ).toBeInTheDocument()
+		);
 		expect( productsApi.getCardPreview ).toHaveBeenCalledWith(
 			7,
-			expect.objectContaining( {} )
+			expect.objectContaining( {
+				hidePlatforms: [ 'dmm-books' ],
+				ctaLabelOverrides: { 'dmm-books': '購入' },
+				ctaBgColor: '#ff0000',
+				ctaTextColor: '#ffffff',
+			} )
 		);
 	} );
 
@@ -120,5 +146,21 @@ describe( 'Edit', () => {
 				screen.getByText( 'プレビューを取得できませんでした。' )
 			).toBeInTheDocument()
 		);
+	} );
+
+	test( 'does not show stale HTML when getCardPreview rejects', async () => {
+		productsApi.getCardPreview.mockRejectedValue( new Error( 'network error' ) );
+		setup( { productId: 7 } );
+		await waitFor( () =>
+			expect(
+				screen.getByText( 'プレビューを取得できませんでした。' )
+			).toBeInTheDocument()
+		);
+		// エラー時は previewHtml がリセットされるためプレビュー本文は表示されない
+		expect( screen.queryByText( 'プレビュー本文' ) ).not.toBeInTheDocument();
+		// 空メッセージも表示されない（error 状態では idle 条件が false）
+		expect(
+			screen.queryByText( 'プレビューする内容がありません。' )
+		).not.toBeInTheDocument();
 	} );
 } );

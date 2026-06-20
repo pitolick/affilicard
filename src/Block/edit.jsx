@@ -86,7 +86,11 @@ export function Edit({ attributes, setAttributes }) {
 					setPreviewHtml(res?.html || '');
 					setPreviewState('idle');
 				})
-				.catch(() => active && setPreviewState('error'));
+				.catch(() => {
+					if (!active) return;
+					setPreviewHtml('');
+					setPreviewState('error');
+				});
 		}, 300);
 		return () => {
 			active = false;
@@ -139,15 +143,13 @@ export function Edit({ attributes, setAttributes }) {
 				{previewState === 'error' && (
 					<p>{__('プレビューを取得できませんでした。', 'affilicard')}</p>
 				)}
-				{previewState !== 'error' && previewHtml && (
+				{previewHtml && (
 					// eslint-disable-next-line react/no-danger
 					<div dangerouslySetInnerHTML={{ __html: previewHtml }} />
 				)}
-				{previewState !== 'loading' &&
-					previewState !== 'error' &&
-					!previewHtml && (
-						<p>{__('プレビューする内容がありません。', 'affilicard')}</p>
-					)}
+				{previewState === 'idle' && !previewHtml && (
+					<p>{__('プレビューする内容がありません。', 'affilicard')}</p>
+				)}
 			</div>
 		);
 	}
