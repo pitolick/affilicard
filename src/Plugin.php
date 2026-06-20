@@ -14,6 +14,7 @@ use Affilicard\Provider\Dmm\DmmProvider;
 use Affilicard\Provider\ManualProvider;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Repository\ProductRepository;
+use Affilicard\Rest\CardPreviewController;
 use Affilicard\Rest\CredentialsController;
 use Affilicard\Rest\PlatformsController;
 use Affilicard\Rest\ProductsController;
@@ -65,12 +66,14 @@ final class Plugin {
 		self::buildProductTypeRegistry();
 
 		// REST API
-		$rest = new RestController(
-			new ProductsController( new ProductRepository() ),
+		$repository = new ProductRepository();
+		$rest       = new RestController(
+			new ProductsController( $repository ),
 			new SettingsController(),
 			new PlatformsController(),
 			new CredentialsController( $providers ),
-			new RefreshController( new ListingRefresher( $providers, new ProductRepository() ) )
+			new RefreshController( new ListingRefresher( $providers, new ProductRepository() ) ),
+			new CardPreviewController( $repository )
 		);
 		$rest->register();
 
