@@ -221,25 +221,35 @@ final class ProductRepository implements ProductRepositoryInterface {
 			)
 		);
 
-		$meta_query = array( 'relation' => 'OR' );
+		$enabled_codes = array();
 		foreach ( PlatformConfig::all() as $platform ) {
-			$meta_query[] = array(
-				'key'     => ProductPostType::externalIdMetaKey( (string) $platform->code ),
-				'value'   => $term,
-				'compare' => 'LIKE',
-			);
+			if ( $platform->enabled ) {
+				$enabled_codes[] = (string) $platform->code;
+			}
 		}
 
-		$by_extid = get_posts(
-			array(
-				'post_type'      => ProductPostType::POST_TYPE,
-				'post_status'    => 'any',
-				'meta_query'     => $meta_query,
-				'posts_per_page' => -1,
-				'orderby'        => 'modified',
-				'order'          => 'DESC',
-			)
-		);
+		$by_extid = array();
+		if ( array() !== $enabled_codes ) {
+			$meta_query = array( 'relation' => 'OR' );
+			foreach ( $enabled_codes as $code ) {
+				$meta_query[] = array(
+					'key'     => ProductPostType::externalIdMetaKey( $code ),
+					'value'   => $term,
+					'compare' => 'LIKE',
+				);
+			}
+
+			$by_extid = get_posts(
+				array(
+					'post_type'      => ProductPostType::POST_TYPE,
+					'post_status'    => 'any',
+					'meta_query'     => $meta_query,
+					'posts_per_page' => -1,
+					'orderby'        => 'modified',
+					'order'          => 'DESC',
+				)
+			);
+		}
 
 		$merged = array();
 		foreach ( array_merge( is_array( $by_title ) ? $by_title : array(), is_array( $by_extid ) ? $by_extid : array() ) as $post ) {

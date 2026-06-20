@@ -493,9 +493,35 @@ final class ProductRepositoryTest extends TestCase {
 			$this->fakePost( 20, 'ID一致', '2026-06-15 00:00:00' ),
 		);
 
+		$platformCode = 'test-platform';
+		$searchTerm   = 'abc';
+
 		WP_Mock::userFunction( 'get_posts' )->andReturnUsing(
-			static function ( $args ) use ( $byTitle, $byExtId ) {
-				return isset( $args['meta_query'] ) ? $byExtId : $byTitle;
+			function ( $args ) use ( $byTitle, $byExtId, $platformCode, $searchTerm ) {
+				if ( isset( $args['meta_query'] ) ) {
+					// extid 用クエリの構造をアサート
+					\PHPUnit\Framework\Assert::assertSame( 'OR', $args['meta_query']['relation'] );
+					\PHPUnit\Framework\Assert::assertSame(
+						array(
+							'key'     => \Affilicard\PostType\ProductPostType::externalIdMetaKey( $platformCode ),
+							'value'   => $searchTerm,
+							'compare' => 'LIKE',
+						),
+						$args['meta_query'][0]
+					);
+					\PHPUnit\Framework\Assert::assertSame( \Affilicard\PostType\ProductPostType::POST_TYPE, $args['post_type'] );
+					\PHPUnit\Framework\Assert::assertSame( 'any', $args['post_status'] );
+					\PHPUnit\Framework\Assert::assertSame( -1, $args['posts_per_page'] );
+					return $byExtId;
+				}
+				// title 用クエリの構造をアサート
+				\PHPUnit\Framework\Assert::assertSame( $searchTerm, $args['s'] );
+				\PHPUnit\Framework\Assert::assertSame( \Affilicard\PostType\ProductPostType::POST_TYPE, $args['post_type'] );
+				\PHPUnit\Framework\Assert::assertSame( 'any', $args['post_status'] );
+				\PHPUnit\Framework\Assert::assertSame( -1, $args['posts_per_page'] );
+				\PHPUnit\Framework\Assert::assertSame( 'modified', $args['orderby'] );
+				\PHPUnit\Framework\Assert::assertSame( 'DESC', $args['order'] );
+				return $byTitle;
 			}
 		);
 
@@ -505,11 +531,15 @@ final class ProductRepositoryTest extends TestCase {
 			->andReturn(
 				array(
 					array(
-						'code'         => 'test-platform',
-						'name'         => 'テストプラットフォーム',
-						'provider'     => 'manual',
-						'displayOrder' => 1,
-						'enabled'      => true,
+						'code'            => $platformCode,
+						'name'            => 'テストプラットフォーム',
+						'provider'        => 'manual',
+						'displayOrder'    => 1,
+						'enabled'         => true,
+						'applicableTypes' => array(),
+						'buttonLabel'     => 'テスト',
+						'brandColor'      => '#000000',
+						'buttonTextColor' => '#ffffff',
 					),
 				)
 			);
@@ -519,7 +549,7 @@ final class ProductRepositoryTest extends TestCase {
 			->andReturn( false );
 
 		$repo   = new ProductRepository();
-		$result = $repo->search( 'abc', 20, 1 );
+		$result = $repo->search( $searchTerm, 20, 1 );
 
 		$ids = array_map( static fn( $i ) => $i['id'], $result['items'] );
 		$this->assertSame( array( 20, 10 ), $ids ); // modified 降順・一意
@@ -534,8 +564,15 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'get_posts' )
 			->once()
 			->andReturnUsing(
-				static function ( $args ) use ( $posts ) {
+				function ( $args ) use ( $posts ) {
 					// term 空時は s キーも meta_query キーもない
+					\PHPUnit\Framework\Assert::assertSame( ProductPostType::POST_TYPE, $args['post_type'] );
+					\PHPUnit\Framework\Assert::assertSame( 'any', $args['post_status'] );
+					\PHPUnit\Framework\Assert::assertSame( 'modified', $args['orderby'] );
+					\PHPUnit\Framework\Assert::assertSame( 'DESC', $args['order'] );
+					\PHPUnit\Framework\Assert::assertArrayHasKey( 'paged', $args );
+					\PHPUnit\Framework\Assert::assertArrayNotHasKey( 's', $args );
+					\PHPUnit\Framework\Assert::assertArrayNotHasKey( 'meta_query', $args );
 					return ( ! isset( $args['s'] ) && ! isset( $args['meta_query'] ) ) ? $posts : array();
 				}
 			);
@@ -563,6 +600,38 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertCount( 1, $result['items'] );
 		$this->assertSame( 5, $result['items'][0]['id'] );
 		$this->assertSame( 5, $result['total'] ); // publish(3) + draft(2)
+	}
+
+	public function test_search_with_no_enabled_platforms_skips_extid_query_and_returns_title_results_only(): void {
+		$byTitle = array( $this->fakePost( 30, 'タイトルのみ一致', '2026-06-19 00:00:00' ) );
+
+		// プラットフォーム未登録: get_posts は1回のみ（title 用 s クエリのみ）
+		WP_Mock::userFunction( 'get_posts' )
+			->once()
+			->andReturnUsing(
+				function ( $args ) use ( $byTitle ) {
+					// extid 用クエリ（meta_query）が呼ばれていないことを確認
+					\PHPUnit\Framework\Assert::assertArrayNotHasKey( 'meta_query', $args );
+					\PHPUnit\Framework\Assert::assertSame( 'no-platform-term', $args['s'] );
+					return $byTitle;
+				}
+			);
+
+		// enabled プラットフォーム 0 件
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_platforms', array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->andReturn( 'generic' );
+		WP_Mock::userFunction( 'get_the_post_thumbnail_url' )
+			->andReturn( false );
+
+		$repo   = new ProductRepository();
+		$result = $repo->search( 'no-platform-term', 20, 1 );
+
+		$this->assertCount( 1, $result['items'] );
+		$this->assertSame( 30, $result['items'][0]['id'] );
+		$this->assertSame( 1, $result['total'] );
 	}
 
 	public function test_listingSummary_returns_first_platform_and_price(): void {
