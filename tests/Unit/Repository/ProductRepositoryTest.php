@@ -469,6 +469,137 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertSame( 2, $repo->countFallbackProducts() );
 	}
 
+	// -------------------------------------------------------
+	// search() テスト
+	// -------------------------------------------------------
+
+	/**
+	 * fakePost ヘルパ: 検索結果用の軽量 post オブジェクト。
+	 */
+	private function fakePost( int $id, string $title, string $modified ): object {
+		return (object) array(
+			'ID'            => $id,
+			'post_type'     => ProductPostType::POST_TYPE,
+			'post_title'    => $title,
+			'post_status'   => 'publish',
+			'post_modified' => $modified,
+		);
+	}
+
+	public function test_search_merges_title_and_external_id_matches_unique_by_id(): void {
+		$byTitle = array( $this->fakePost( 10, 'タイトル一致', '2026-06-10 00:00:00' ) );
+		$byExtId = array(
+			$this->fakePost( 10, 'タイトル一致', '2026-06-10 00:00:00' ), // 重複
+			$this->fakePost( 20, 'ID一致', '2026-06-15 00:00:00' ),
+		);
+
+		WP_Mock::userFunction( 'get_posts' )->andReturnUsing(
+			static function ( $args ) use ( $byTitle, $byExtId ) {
+				return isset( $args['meta_query'] ) ? $byExtId : $byTitle;
+			}
+		);
+
+		// 各 post の共通モック
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_platforms', array() )
+			->andReturn(
+				array(
+					array(
+						'code'         => 'test-platform',
+						'name'         => 'テストプラットフォーム',
+						'provider'     => 'manual',
+						'displayOrder' => 1,
+						'enabled'      => true,
+					),
+				)
+			);
+		WP_Mock::userFunction( 'get_post_meta' )
+			->andReturn( 'generic' );
+		WP_Mock::userFunction( 'get_the_post_thumbnail_url' )
+			->andReturn( false );
+
+		$repo   = new ProductRepository();
+		$result = $repo->search( 'abc', 20, 1 );
+
+		$ids = array_map( static fn( $i ) => $i['id'], $result['items'] );
+		$this->assertSame( array( 20, 10 ), $ids ); // modified 降順・一意
+		$this->assertSame( 2, $result['total'] );
+	}
+
+	public function test_search_empty_term_returns_recent_products_with_wp_count_posts_total(): void {
+		$posts = array(
+			$this->fakePost( 5, '最近の商品', '2026-06-18 00:00:00' ),
+		);
+
+		WP_Mock::userFunction( 'get_posts' )
+			->once()
+			->andReturnUsing(
+				static function ( $args ) use ( $posts ) {
+					// term 空時は s キーも meta_query キーもない
+					return ( ! isset( $args['s'] ) && ! isset( $args['meta_query'] ) ) ? $posts : array();
+				}
+			);
+
+		WP_Mock::userFunction( 'wp_count_posts' )
+			->with( ProductPostType::POST_TYPE )
+			->andReturn(
+				(object) array(
+					'publish' => 3,
+					'draft'   => 2,
+				)
+			);
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_platforms', array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->andReturn( 'generic' );
+		WP_Mock::userFunction( 'get_the_post_thumbnail_url' )
+			->andReturn( false );
+
+		$repo   = new ProductRepository();
+		$result = $repo->search( '', 20, 1 );
+
+		$this->assertCount( 1, $result['items'] );
+		$this->assertSame( 5, $result['items'][0]['id'] );
+		$this->assertSame( 5, $result['total'] ); // publish(3) + draft(2)
+	}
+
+	public function test_listingSummary_returns_first_platform_and_price(): void {
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 99, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'dmm-books',
+						'price'    => '¥660',
+					),
+					array(
+						'platform' => 'amazon-kindle',
+						'price'    => '¥550',
+					),
+				)
+			);
+
+		$repo   = new ProductRepository();
+		$result = $repo->listingSummary( 99 );
+
+		$this->assertSame( '¥660', $result['price'] );
+		$this->assertSame( 'dmm-books', $result['platform'] );
+	}
+
+	public function test_listingSummary_returns_empty_when_no_listings(): void {
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 98, ProductPostType::META_LISTINGS, true )
+			->andReturn( array() );
+
+		$repo   = new ProductRepository();
+		$result = $repo->listingSummary( 98 );
+
+		$this->assertSame( '', $result['price'] );
+		$this->assertSame( '', $result['platform'] );
+	}
+
 	public function test_syncDerivedMeta_mirrors_external_ids_and_sets_schema_version(): void {
 		$repo = new ProductRepository();
 		WP_Mock::userFunction( 'get_post_meta' )
