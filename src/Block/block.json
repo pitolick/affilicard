@@ -24,6 +24,10 @@
 		"ctaBgColor": { "type": "string" },
 		"ctaTextColor": { "type": "string" },
 		"cardBgColor": { "type": "string" },
-		"cardBorderColor": { "type": "string" }
+		"cardBorderColor": { "type": "string" },
+		"ctaLabelOverrides": {
+			"type": "object",
+			"default": {}
+		}
 	}
 }
