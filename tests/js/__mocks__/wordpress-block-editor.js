@@ -12,9 +12,13 @@ function ColorPalette( { value, onChange } ) {
 	} );
 }
 
+function BlockControls( { children } ) {
+	return React.createElement( 'div', { 'data-slot': 'block-controls' }, children );
+}
+
 function useBlockProps() {
 	return {};
 }
 useBlockProps.save = () => ( {} );
 
-module.exports = { __esModule: true, InspectorControls, ColorPalette, useBlockProps };
+module.exports = { __esModule: true, InspectorControls, ColorPalette, BlockControls, useBlockProps };

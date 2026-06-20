@@ -4,10 +4,12 @@ import {
 	ComboboxControl,
 	PanelBody,
 	BaseControl,
-	Button,
+	ToolbarGroup,
+	ToolbarButton,
+	Spinner,
 } from '@wordpress/components';
-import { InspectorControls, ColorPalette } from '@wordpress/block-editor';
-import { searchProducts, getProduct } from '../Admin/api/products';
+import { InspectorControls, ColorPalette, BlockControls } from '@wordpress/block-editor';
+import { searchProducts, getCardPreview } from '../Admin/api/products';
 
 const COLOR_FIELDS = [
 	{ attr: 'ctaBgColor', label: __('ボタン背景色', 'affilicard') },
@@ -17,10 +19,21 @@ const COLOR_FIELDS = [
 ];
 
 export function Edit({ attributes, setAttributes }) {
-	const { productId } = attributes;
+	const {
+		productId,
+		hidePlatforms = [],
+		ctaLabelOverrides = {},
+		ctaBgColor,
+		ctaTextColor,
+		cardBgColor,
+		cardBorderColor,
+	} = attributes;
 	const [options, setOptions] = useState([]);
 	const [filter, setFilter] = useState('');
-	const [selectedTitle, setSelectedTitle] = useState('');
+
+	// プレビュー用 state
+	const [previewHtml, setPreviewHtml] = useState('');
+	const [previewState, setPreviewState] = useState('idle'); // idle | loading | error
 
 	useEffect(() => {
 		if (!filter) {
@@ -50,19 +63,47 @@ export function Edit({ attributes, setAttributes }) {
 		};
 	}, [filter]);
 
+	// productId 選択時のプレビュー fetch（属性変更デバウンス 300ms）
 	useEffect(() => {
 		if (!productId) {
-			setSelectedTitle('');
+			setPreviewHtml('');
+			setPreviewState('idle');
 			return;
 		}
 		let active = true;
-		getProduct(productId)
-			.then((p) => active && setSelectedTitle(p?.title ?? ''))
-			.catch(() => active && setSelectedTitle(''));
+		setPreviewState('loading');
+		const timer = setTimeout(() => {
+			getCardPreview(productId, {
+				hidePlatforms,
+				ctaLabelOverrides,
+				ctaBgColor,
+				ctaTextColor,
+				cardBgColor,
+				cardBorderColor,
+			})
+				.then((res) => {
+					if (!active) return;
+					setPreviewHtml(res?.html || '');
+					setPreviewState('idle');
+				})
+				.catch(() => active && setPreviewState('error'));
+		}, 300);
 		return () => {
 			active = false;
+			clearTimeout(timer);
 		};
-	}, [productId]);
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [
+		productId,
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		JSON.stringify(hidePlatforms),
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		JSON.stringify(ctaLabelOverrides),
+		ctaBgColor,
+		ctaTextColor,
+		cardBgColor,
+		cardBorderColor,
+	]);
 
 	const inspector = (
 		<InspectorControls>
@@ -83,18 +124,30 @@ export function Edit({ attributes, setAttributes }) {
 
 	if (productId) {
 		return (
-			<div className="affilicard-block-placeholder">
+			<div className="affilicard-block-preview">
 				{inspector}
-				<p>
-					{__('選択中の商品: ', 'affilicard')}
-					<strong>{selectedTitle || `#${productId}`}</strong>
-				</p>
-				<Button
-					variant="secondary"
-					onClick={() => setAttributes({ productId: undefined })}
-				>
-					{__('商品を変更', 'affilicard')}
-				</Button>
+				<BlockControls>
+					<ToolbarGroup>
+						<ToolbarButton
+							onClick={() => setAttributes({ productId: undefined })}
+						>
+							{__('商品を変更', 'affilicard')}
+						</ToolbarButton>
+					</ToolbarGroup>
+				</BlockControls>
+				{previewState === 'loading' && <Spinner />}
+				{previewState === 'error' && (
+					<p>{__('プレビューを取得できませんでした。', 'affilicard')}</p>
+				)}
+				{previewState !== 'error' && previewHtml && (
+					// eslint-disable-next-line react/no-danger
+					<div dangerouslySetInnerHTML={{ __html: previewHtml }} />
+				)}
+				{previewState !== 'loading' &&
+					previewState !== 'error' &&
+					!previewHtml && (
+						<p>{__('プレビューする内容がありません。', 'affilicard')}</p>
+					)}
 			</div>
 		);
 	}

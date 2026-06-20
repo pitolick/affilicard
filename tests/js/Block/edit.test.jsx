@@ -16,6 +16,9 @@ describe( 'Edit', () => {
 			id: 7,
 			title: 'サンプル漫画 1巻',
 		} );
+		productsApi.getCardPreview.mockResolvedValue( {
+			html: '<div class="affilicard-card">プレビュー本文</div>',
+		} );
 	} );
 
 	const setup = ( attributes = {} ) => {
@@ -57,26 +60,65 @@ describe( 'Edit', () => {
 		expect( setAttributes ).toHaveBeenCalledWith( { productId: 7 } );
 	} );
 
-	test( 'shows selected product title when productId set', async () => {
+	// 旧: プレースホルダで商品タイトルを表示していた。
+	// 新: getCardPreview が返す HTML でプレビューを描画する。
+	test( 'shows preview HTML when productId set', async () => {
 		setup( { productId: 7 } );
-		expect( await screen.findByText( /サンプル漫画 1巻/ ) ).toBeInTheDocument();
+		await waitFor( () =>
+			expect( screen.getByText( 'プレビュー本文' ) ).toBeInTheDocument()
+		);
+		expect( productsApi.getCardPreview ).toHaveBeenCalledWith(
+			7,
+			expect.objectContaining( {} )
+		);
 	} );
 
 	test( 'renders color palette controls in inspector', async () => {
 		setup( { productId: 7 } );
-		// Await getProduct resolution to avoid act() warnings.
-		await screen.findByText( /サンプル漫画 1巻/ );
+		// getCardPreview の解決を待ってから色設定 UI を確認する。
+		await waitFor( () =>
+			expect( screen.getByText( 'プレビュー本文' ) ).toBeInTheDocument()
+		);
 		expect( screen.getAllByText( /色/ ).length ).toBeGreaterThan( 0 );
 	} );
 
 	test( 'updates ctaBgColor via color palette', async () => {
 		const { setAttributes } = setup( { productId: 7 } );
-		// Await getProduct resolution to avoid act() warnings.
-		await screen.findByText( /サンプル漫画 1巻/ );
+		// getCardPreview の解決を待ってから操作する。
+		await waitFor( () =>
+			expect( screen.getByText( 'プレビュー本文' ) ).toBeInTheDocument()
+		);
 		const palettes = document.querySelectorAll( '[data-color-palette]' );
 		fireEvent.change( palettes[ 0 ], { target: { value: '#ff0000' } } );
 		expect( setAttributes ).toHaveBeenCalledWith(
 			expect.objectContaining( { ctaBgColor: '#ff0000' } )
+		);
+	} );
+
+	test( 'shows toolbar button to change product when productId set', async () => {
+		setup( { productId: 7 } );
+		await waitFor( () =>
+			expect( screen.getByText( 'プレビュー本文' ) ).toBeInTheDocument()
+		);
+		expect( screen.getByText( '商品を変更' ) ).toBeInTheDocument();
+	} );
+
+	test( 'clicking "商品を変更" calls setAttributes with undefined productId', async () => {
+		const { setAttributes } = setup( { productId: 7 } );
+		await waitFor( () =>
+			expect( screen.getByText( 'プレビュー本文' ) ).toBeInTheDocument()
+		);
+		fireEvent.click( screen.getByText( '商品を変更' ) );
+		expect( setAttributes ).toHaveBeenCalledWith( { productId: undefined } );
+	} );
+
+	test( 'shows error message when getCardPreview rejects', async () => {
+		productsApi.getCardPreview.mockRejectedValue( new Error( 'network error' ) );
+		setup( { productId: 7 } );
+		await waitFor( () =>
+			expect(
+				screen.getByText( 'プレビューを取得できませんでした。' )
+			).toBeInTheDocument()
 		);
 	} );
 } );

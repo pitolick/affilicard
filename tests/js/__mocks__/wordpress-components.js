@@ -153,6 +153,22 @@ function BaseControl( { label, children } ) {
 	return React.createElement( 'div', null, label, children );
 }
 
+function ToolbarGroup( { children } ) {
+	return React.createElement( 'div', { 'data-toolbar-group': true }, children );
+}
+
+function ToolbarButton( { children, onClick } ) {
+	return React.createElement(
+		'button',
+		{ type: 'button', 'data-toolbar-button': true, onClick },
+		children
+	);
+}
+
+function Spinner() {
+	return React.createElement( 'span', { 'data-spinner': true, 'aria-label': 'loading' } );
+}
+
 module.exports = {
 	__esModule: true,
 	TextControl,
@@ -165,4 +181,7 @@ module.exports = {
 	PanelBody,
 	Panel,
 	BaseControl,
+	ToolbarGroup,
+	ToolbarButton,
+	Spinner,
 };
