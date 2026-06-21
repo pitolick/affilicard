@@ -20,6 +20,18 @@ jobs:
             exit 1
           fi
           echo "CHANGELOG にバージョン ${VERSION} のセクションを確認しました。"
+      - name: コミット済み Version ヘッダがタグと一致するか検証（PUC 自動更新検知のため）
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # plugin-update-checker はタグ名でなく、タグのツリーにコミットされた
+          # affilicard.php の "Version:" ヘッダを最新版数として読む。zip へのビルド時注入だけでは
+          # 検知されないため、コミット済みヘッダがタグと一致していることをリリース前に必須化する。
+          COMMITTED="$(grep -E '^ \* Version:' affilicard.php | head -1 | sed -E 's/^ \* Version:[[:space:]]*//')"
+          if [ "${COMMITTED}" != "${VERSION}" ]; then
+            echo "::error::affilicard.php のコミット済み Version (${COMMITTED}) がタグ (${VERSION}) と一致しません。plugin-update-checker はタグのツリーの Version ヘッダを読むため、リリース前に affilicard.php の Version をタグと同じ値にコミットしてください。"
+            exit 1
+          fi
+          echo "コミット済み Version (${COMMITTED}) = タグ (${VERSION}) を確認しました。"
       - name: タグからバージョンを affilicard.php / package.json に注入
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
