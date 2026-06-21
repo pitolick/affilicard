@@ -14,13 +14,14 @@ if ( get_option( 'affilicard_demo_seeded' ) ) {
 
 $repo = new \Affilicard\Repository\ProductRepository();
 
-$listing = static function ( string $platform, string $aff, string $price, string $badge = '', string $fetched = '2026-04-20T10:30:00+09:00' ): array {
+$listing = static function ( string $platform, string $aff, string $price, string $badge = '', string $list_price = '', string $fetched = '2026-04-20T10:30:00+09:00' ): array {
 	return array(
 		'platform'        => $platform,
 		'enabled'         => true,
 		'affiliate_url'   => $aff,
 		'regular_url'     => '',
 		'price'           => $price,
+		'list_price'      => $list_price,
 		'badge'           => $badge,
 		'last_fetched_at' => $fetched,
 	);
@@ -32,7 +33,7 @@ $p_generic = $repo->save(
 		'status'       => 'publish',
 		'product_type' => 'generic',
 		'stock_status' => 'available',
-		'listings'     => array( $listing( 'dmm-books', 'https://example.com/aff-generic', '1,200' ) ),
+		'listings'     => array( $listing( 'dmm-books', 'https://example.com/aff-generic', '1,200', '', '1,500' ) ),
 	)
 );
 
@@ -44,9 +45,9 @@ $p_ebook = $repo->save(
 		'stock_status' => 'available',
 		'content'      => "<!-- wp:paragraph -->\n<p>架空のダンジョンを舞台にした冒険グルメ漫画のサンプル紹介文です。書影・著者・あらすじ・複数ストアの価格行・税込表記・価格時点フッタの表示確認用ダミーデータ。</p>\n<!-- /wp:paragraph -->",
 		'listings'     => array(
-			$listing( 'dmm-books', 'https://example.com/dmm', '600', '40%OFF' ),
+			$listing( 'dmm-books', 'https://example.com/dmm', '600', '40%OFF', '1,000' ),
 			$listing( 'amazon-kindle', 'https://example.com/amz', '660', '50%ポイント還元' ),
-			$listing( 'rakuten-kobo', 'https://example.com/kobo', '640' ),
+			$listing( 'rakuten-kobo', 'https://example.com/kobo', '640', '', '900' ),
 		),
 		'extras'       => array(
 			array(

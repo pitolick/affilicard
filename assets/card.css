@@ -11,6 +11,10 @@
 }
 
 .affilicard-card {
+	/* コンテナクエリの基準。レスポンシブ切替を viewport ではなくカード自身の幅で
+	   判定し、サイドバー等でカードが狭いコンテナに入った場合も正しく縦積みに切替える
+	   （価格とボタンの重なり・右はみ出しを防ぐ）。 */
+	container-type: inline-size;
 	/* block から上書きされる themeable 変数（card-bg/border のみ既定値を持つ）。
 	   --affilicard-cta-bg / --affilicard-cta-text は意図的に未定義のまま：
 	   CardRenderer がインラインで var(--affilicard-cta-bg, <brandColor>) と書くため、
@@ -195,6 +199,12 @@
 	min-width: 0;
 }
 
+.affilicard-card__list-price {
+	font-size: 13px;
+	color: var(--affilicard-text-light);
+	text-decoration: line-through;
+}
+
 .affilicard-card__price {
 	font-size: 20px;
 	font-weight: 700;
@@ -250,8 +260,11 @@
 	color: var(--affilicard-text-light);
 }
 
-/* SP: 1 カラム、書影トップ中央、店舗行は縦積み */
-@media (max-width: 600px) {
+/* 狭幅: 1 カラム、書影トップ中央、店舗行は縦積み。
+   コンテナクエリ（カード自身の幅）で判定するため、viewport が広くてもカードが
+   狭いコンテナ（サイドバー等）にあれば縦積みに切替わり、価格とボタンの重なりや
+   右はみ出しを防ぐ。 */
+@container (max-width: 600px) {
 	.affilicard-card__inner {
 		grid-template-columns: 1fr;
 	}

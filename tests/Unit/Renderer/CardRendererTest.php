@@ -30,6 +30,23 @@ final class CardRendererTest extends TestCase {
 		return new PlatformDefinition( 'example-store', 'サンプルストア', 'manual', 1, true, array( 'generic' ), 'ストアで見る', '#2563eb', '#ffffff' );
 	}
 
+	/**
+	 * price/list_price/badge を持つ 1 listing の商品を組み立てる（URL 必須＝価格行が描画される）。
+	 */
+	private function pricedProduct( string $price, string $listPrice, string $badge = '' ): array {
+		$listing = array(
+			'platform'      => 'example-store',
+			'enabled'       => true,
+			'affiliate_url' => 'https://x',
+			'price'         => $price,
+			'list_price'    => $listPrice,
+		);
+		if ( '' !== $badge ) {
+			$listing['badge'] = $badge;
+		}
+		return $this->product( array( 'listings' => array( $listing ) ) );
+	}
+
 	private function product( array $overrides = array() ): array {
 		return array_merge(
 			array(
@@ -266,6 +283,76 @@ final class CardRendererTest extends TestCase {
 		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
 		$this->assertStringContainsString( 'affilicard-card__price', $html );
 		$this->assertStringContainsString( '¥1,200', $html );
+	}
+
+	public function test_list_price_shown_when_greater_than_price(): void {
+		$html = ( new CardRenderer() )->render( $this->pricedProduct( '100', '814' ), array( $this->store() ) );
+		$this->assertStringContainsString( 'affilicard-card__list-price', $html );
+		$this->assertStringContainsString( '¥814', $html );
+		// 出力順: list-price が price より前
+		$this->assertLessThan(
+			strpos( $html, 'affilicard-card__price' ),
+			strpos( $html, 'affilicard-card__list-price' )
+		);
+	}
+
+	public function test_list_price_hidden_when_equal_to_price(): void {
+		$html = ( new CardRenderer() )->render( $this->pricedProduct( '100', '100' ), array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__list-price', $html );
+	}
+
+	public function test_list_price_hidden_when_less_than_price(): void {
+		$html = ( new CardRenderer() )->render( $this->pricedProduct( '100', '80' ), array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__list-price', $html );
+	}
+
+	public function test_list_price_hidden_when_string_equal_values(): void {
+		$html1 = ( new CardRenderer() )->render( $this->pricedProduct( '100', '100.0' ), array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__list-price', $html1 );
+		$html2 = ( new CardRenderer() )->render( $this->pricedProduct( '1000', '1,000' ), array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__list-price', $html2 );
+	}
+
+	public function test_list_price_hidden_when_empty(): void {
+		$html = ( new CardRenderer() )->render( $this->pricedProduct( '100', '' ), array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__list-price', $html );
+	}
+
+	public function test_list_price_hidden_when_non_numeric(): void {
+		$html = ( new CardRenderer() )->render( $this->pricedProduct( '100', '無料' ), array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__list-price', $html );
+	}
+
+	public function test_list_price_hidden_when_price_empty(): void {
+		$html = ( new CardRenderer() )->render( $this->pricedProduct( '', '814' ), array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__list-price', $html );
+	}
+
+	public function test_list_price_hidden_when_price_non_numeric(): void {
+		$html = ( new CardRenderer() )->render( $this->pricedProduct( '無料', '814' ), array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__list-price', $html );
+		// price 自体は従来どおり描画される（非空のため）
+		$this->assertStringContainsString( 'affilicard-card__price', $html );
+	}
+
+	public function test_list_price_hidden_for_zero_or_negative(): void {
+		$html0 = ( new CardRenderer() )->render( $this->pricedProduct( '100', '0' ), array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__list-price', $html0 );
+		$htmlNeg = ( new CardRenderer() )->render( $this->pricedProduct( '100', '-100' ), array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__list-price', $htmlNeg );
+	}
+
+	public function test_list_price_normalizes_yen_and_comma(): void {
+		$html = ( new CardRenderer() )->render( $this->pricedProduct( '1,000', '¥1,200' ), array( $this->store() ) );
+		$this->assertStringContainsString( 'affilicard-card__list-price', $html );
+		$this->assertStringContainsString( '¥1,200', $html );
+	}
+
+	public function test_list_price_coexists_with_badge(): void {
+		$html = ( new CardRenderer() )->render( $this->pricedProduct( '100', '814', '87%OFF' ), array( $this->store() ) );
+		$this->assertStringContainsString( 'affilicard-card__list-price', $html );
+		$this->assertStringContainsString( 'affilicard-card__discount', $html );
+		$this->assertStringContainsString( '87%OFF', $html );
 	}
 
 	public function test_renders_discontinued_badge(): void {
