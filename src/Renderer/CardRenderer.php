@@ -273,9 +273,19 @@ final class CardRenderer {
 			}
 			$btn_style = 'background:var(--affilicard-cta-bg,' . $brand . ');color:var(--affilicard-cta-text,' . $text . ');';
 
-			// 価格エリア（¥価格 + （税込） + 割引バッジ）。
-			$pricing = '';
-			$price   = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
+			// 価格エリア（通常価格(取り消し線) + ¥価格 + （税込） + 割引バッジ）。
+			$pricing  = '';
+			$price    = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
+			$list_raw = isset( $listing['list_price'] ) ? trim( (string) $listing['list_price'] ) : '';
+
+			// 通常価格(取り消し線): list_price と price が共に正の数値で list_price > price のときのみ。
+			$list_num  = self::priceToNumber( $list_raw );
+			$price_num = self::priceToNumber( $price );
+			if ( null !== $list_num && null !== $price_num && $list_num > $price_num ) {
+				$list_no_yen = (string) preg_replace( '/^[\x{00A5}\x{FFE5}\s]+/u', '', $list_raw );
+				$pricing    .= '<span class="affilicard-card__list-price">¥' . esc_html( $list_no_yen ) . '</span>';
+			}
+
 			if ( '' !== $price ) {
 				// 先頭の半角¥(U+00A5)/全角￥(U+FFE5)/空白のみを安全に除去（ltrim のバイト単位破壊を回避）。
 				$price_no_yen = (string) preg_replace( '/^[\x{00A5}\x{FFE5}\s]+/u', '', $price );
@@ -294,5 +304,18 @@ final class CardRenderer {
 				. '</li>';
 		}
 		return '' === $rows ? '' : '<ul class="affilicard-card__listings">' . $rows . '</ul>';
+	}
+
+	/**
+	 * 価格文字列を比較用の正の数値に変換する。¥/￥/カンマ/空白を除去し、
+	 * is_numeric かつ 0 より大きいなら float を返す。それ以外は null。
+	 */
+	private static function priceToNumber( string $raw ): ?float {
+		$normalized = preg_replace( '/[\x{00A5}\x{FFE5},\s]/u', '', $raw );
+		if ( null === $normalized || '' === $normalized || ! is_numeric( $normalized ) ) {
+			return null;
+		}
+		$num = (float) $normalized;
+		return $num > 0 ? $num : null;
 	}
 }

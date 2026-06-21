@@ -195,6 +195,12 @@
 	min-width: 0;
 }
 
+.affilicard-card__list-price {
+	font-size: 13px;
+	color: var(--affilicard-text-light);
+	text-decoration: line-through;
+}
+
 .affilicard-card__price {
 	font-size: 20px;
 	font-weight: 700;
