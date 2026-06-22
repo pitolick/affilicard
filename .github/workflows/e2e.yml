@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 30
     # wp-env requires Docker — ubuntu-latest has Docker pre-installed.
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # E2E は push しないため資格情報を .git/config に残さない（漏えい面を縮小）
           persist-credentials: false
