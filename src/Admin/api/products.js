@@ -33,6 +33,9 @@ export function getCardPreview(id, params = {}) {
 	(params.hidePlatforms || []).forEach((code) =>
 		query.append('hidePlatforms[]', code)
 	);
+	(params.onlyPlatforms || []).forEach((code) =>
+		query.append('onlyPlatforms[]', code)
+	);
 	Object.entries(params.ctaLabelOverrides || {}).forEach(([code, label]) =>
 		query.set(`ctaLabelOverrides[${code}]`, label)
 	);

@@ -69,6 +69,7 @@ describe( 'Edit', () => {
 		);
 		expect( productsApi.getCardPreview ).toHaveBeenCalledWith( 7, {
 			hidePlatforms: [],
+			onlyPlatforms: [],
 			ctaLabelOverrides: {},
 			ctaBgColor: undefined,
 			ctaTextColor: undefined,
@@ -177,12 +178,15 @@ describe( 'Edit', () => {
 
 		test( 'listing のプラットフォームごとに CTA ラベル上書き欄が出る', async () => {
 			setup( { productId: 7 } );
-			expect( await screen.findByLabelText( 'dmm-books' ) ).toBeInTheDocument();
+			// 表示プラットフォームの checkbox も同名ラベルなので role で textbox に限定する。
+			expect(
+				await screen.findByRole( 'textbox', { name: 'dmm-books' } )
+			).toBeInTheDocument();
 		} );
 
 		test( '値入力で setAttributes が ctaLabelOverrides に code を含めて呼ばれる', async () => {
 			const { setAttributes } = setup( { productId: 7 } );
-			const input = await screen.findByLabelText( 'dmm-books' );
+			const input = await screen.findByRole( 'textbox', { name: 'dmm-books' } );
 			fireEvent.change( input, { target: { value: '今すぐ読む' } } );
 			expect( setAttributes ).toHaveBeenCalledWith( {
 				ctaLabelOverrides: { 'dmm-books': '今すぐ読む' },
@@ -194,7 +198,7 @@ describe( 'Edit', () => {
 				productId: 7,
 				ctaLabelOverrides: { 'dmm-books': '購入する' },
 			} );
-			const input = await screen.findByLabelText( 'dmm-books' );
+			const input = await screen.findByRole( 'textbox', { name: 'dmm-books' } );
 			fireEvent.change( input, { target: { value: '' } } );
 			const calls = setAttributes.mock.calls.filter( ( c ) =>
 				Object.prototype.hasOwnProperty.call( c[ 0 ], 'ctaLabelOverrides' )
@@ -215,6 +219,63 @@ describe( 'Edit', () => {
 				expect( productsApi.getCardPreview ).toHaveBeenCalled()
 			);
 			expect( screen.queryByText( 'CTA ラベル上書き' ) ).not.toBeInTheDocument();
+		} );
+	} );
+
+	// 表示プラットフォーム（onlyPlatforms）パネル
+	describe( '表示プラットフォームパネル', () => {
+		beforeEach( () => {
+			productsApi.getProduct.mockResolvedValue( {
+				id: 7,
+				title: 'サンプル漫画 1巻',
+				listings: [
+					{ platform: 'dmm-books', enabled: true },
+					{ platform: 'example-store', enabled: true },
+				],
+			} );
+		} );
+
+		test( 'listing のプラットフォームごとに表示チェックボックスが出る', async () => {
+			setup( { productId: 7 } );
+			expect(
+				await screen.findByRole( 'checkbox', { name: 'dmm-books' } )
+			).toBeInTheDocument();
+			expect(
+				screen.getByRole( 'checkbox', { name: 'example-store' } )
+			).toBeInTheDocument();
+		} );
+
+		test( 'チェックで setAttributes が onlyPlatforms に code を追加して呼ばれる', async () => {
+			const { setAttributes } = setup( { productId: 7 } );
+			const checkbox = await screen.findByRole( 'checkbox', {
+				name: 'dmm-books',
+			} );
+			fireEvent.click( checkbox );
+			expect( setAttributes ).toHaveBeenCalledWith( {
+				onlyPlatforms: [ 'dmm-books' ],
+			} );
+		} );
+
+		test( '再クリックで setAttributes が onlyPlatforms から code を除去して呼ばれる', async () => {
+			const { setAttributes } = setup( {
+				productId: 7,
+				onlyPlatforms: [ 'dmm-books' ],
+			} );
+			const checkbox = await screen.findByRole( 'checkbox', {
+				name: 'dmm-books',
+			} );
+			fireEvent.click( checkbox );
+			expect( setAttributes ).toHaveBeenCalledWith( { onlyPlatforms: [] } );
+		} );
+
+		test( 'onlyPlatforms がプレビュー（getCardPreview）に渡る', async () => {
+			setup( { productId: 7, onlyPlatforms: [ 'dmm-books' ] } );
+			await waitFor( () =>
+				expect( productsApi.getCardPreview ).toHaveBeenCalledWith(
+					7,
+					expect.objectContaining( { onlyPlatforms: [ 'dmm-books' ] } )
+				)
+			);
 		} );
 	} );
 

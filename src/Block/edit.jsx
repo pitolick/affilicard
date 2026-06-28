@@ -1,6 +1,7 @@
 import { useEffect, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import {
+	CheckboxControl,
 	ComboboxControl,
 	PanelBody,
 	BaseControl,
@@ -60,6 +61,7 @@ export function Edit({ attributes, setAttributes }) {
 	const {
 		productId,
 		hidePlatforms = [],
+		onlyPlatforms = [],
 		ctaLabelOverrides = {},
 		ctaBgColor,
 		ctaTextColor,
@@ -139,6 +141,7 @@ export function Edit({ attributes, setAttributes }) {
 		const timer = setTimeout(() => {
 			getCardPreview(productId, {
 				hidePlatforms,
+				onlyPlatforms,
 				ctaLabelOverrides,
 				ctaBgColor,
 				ctaTextColor,
@@ -165,6 +168,8 @@ export function Edit({ attributes, setAttributes }) {
 		productId,
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 		JSON.stringify(hidePlatforms),
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		JSON.stringify(onlyPlatforms),
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 		JSON.stringify(ctaLabelOverrides),
 		ctaBgColor,
@@ -197,6 +202,31 @@ export function Edit({ attributes, setAttributes }) {
 					</BaseControl>
 				))}
 			</PanelBody>
+			{listingPlatforms.length > 0 && (
+				<PanelBody
+					title={__('表示プラットフォーム', 'affilicard')}
+					initialOpen={false}
+				>
+					<p className="components-base-control__help">
+						{__('未選択なら全プラットフォームを表示します。', 'affilicard')}
+					</p>
+					{listingPlatforms.map((code) => (
+						<CheckboxControl
+							key={code}
+							label={code}
+							checked={onlyPlatforms.includes(code)}
+							onChange={(checked) =>
+								setAttributes({
+									onlyPlatforms: checked
+										? [...onlyPlatforms, code]
+										: onlyPlatforms.filter((c) => c !== code),
+								})
+							}
+							__nextHasNoMarginBottom
+						/>
+					))}
+				</PanelBody>
+			)}
 			{listingPlatforms.length > 0 && (
 				<PanelBody
 					title={__('CTA ラベル上書き', 'affilicard')}

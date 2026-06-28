@@ -171,10 +171,24 @@ function Spinner() {
 	return React.createElement( 'span', { 'data-spinner': true, 'aria-label': 'loading' } );
 }
 
+function CheckboxControl( { label, checked, onChange } ) {
+	return React.createElement(
+		'label',
+		null,
+		label,
+		React.createElement( 'input', {
+			type: 'checkbox',
+			checked: Boolean( checked ),
+			onChange: ( e ) => onChange( e.target.checked ),
+		} )
+	);
+}
+
 module.exports = {
 	__esModule: true,
 	TextControl,
 	ToggleControl,
+	CheckboxControl,
 	SelectControl,
 	Button,
 	Notice,

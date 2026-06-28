@@ -28,6 +28,7 @@ final class CardRenderer {
 		}
 
 		$hide          = isset( $options['hide_platforms'] ) && is_array( $options['hide_platforms'] ) ? array_map( 'strval', $options['hide_platforms'] ) : array();
+		$only          = isset( $options['only_platforms'] ) && is_array( $options['only_platforms'] ) ? array_map( 'strval', $options['only_platforms'] ) : array();
 		$image_url     = isset( $options['image_url'] ) ? (string) $options['image_url'] : '';
 		$colors        = isset( $options['colors'] ) && is_array( $options['colors'] ) ? $options['colors'] : array();
 		$header_keys   = isset( $options['header_keys'] ) && is_array( $options['header_keys'] ) ? array_map( 'strval', $options['header_keys'] ) : array( 'author', 'publisher' );
@@ -77,6 +78,7 @@ final class CardRenderer {
 				isset( $product['listings'] ) && is_array( $product['listings'] ) ? $product['listings'] : array(),
 				$by_code,
 				$hide,
+				$only,
 				$cta_overrides
 			);
 		}
@@ -86,7 +88,12 @@ final class CardRenderer {
 
 		if ( $is_available ) {
 			$html .= $this->renderTimestamp(
-				isset( $product['listings'] ) && is_array( $product['listings'] ) ? $product['listings'] : array()
+				$this->visibleListings(
+					isset( $product['listings'] ) && is_array( $product['listings'] ) ? $product['listings'] : array(),
+					$by_code,
+					$hide,
+					$only
+				)
 			);
 		}
 
@@ -225,10 +232,21 @@ final class CardRenderer {
 	 * @param list<array<string, mixed>>        $listings
 	 * @param array<string, PlatformDefinition> $by_code
 	 * @param list<string>                      $hide
+	 * @param list<string>                      $only          許可リスト（空 = 全表示）
 	 * @param array<string, string>             $cta_overrides ブロック属性由来の CTA ラベル上書き（code→label）
 	 */
-	private function renderListings( array $listings, array $by_code, array $hide, array $cta_overrides = array() ): string {
-		$rows = '';
+	/**
+	 * 表示対象（platform 既知・hide 非該当・only 許可・platform/listing 有効）の listing だけを返す。
+	 * CTA 行（renderListings）と日時フッター（renderTimestamp）が同一集合を見るための共有フィルタ。
+	 *
+	 * @param list<array<string, mixed>>        $listings
+	 * @param array<string, PlatformDefinition> $by_code
+	 * @param list<string>                      $hide
+	 * @param list<string>                      $only     許可リスト（空 = 全表示）
+	 * @return list<array<string, mixed>>
+	 */
+	private function visibleListings( array $listings, array $by_code, array $hide, array $only ): array {
+		$out = array();
 		foreach ( $listings as $listing ) {
 			if ( ! is_array( $listing ) ) {
 				continue;
@@ -237,13 +255,32 @@ final class CardRenderer {
 			if ( '' === $code || ! isset( $by_code[ $code ] ) || in_array( $code, $hide, true ) ) {
 				continue;
 			}
-			$platform = $by_code[ $code ];
-			if ( ! $platform->enabled ) {
+			if ( ! empty( $only ) && ! in_array( $code, $only, true ) ) {
+				continue;
+			}
+			if ( ! $by_code[ $code ]->enabled ) {
 				continue;
 			}
 			if ( isset( $listing['enabled'] ) && false === (bool) $listing['enabled'] ) {
 				continue;
 			}
+			// URL が無い listing は CTA 行を出さない＝非表示扱い。
+			// renderListings の行と renderTimestamp の日付計算を同一集合に揃える。
+			$affiliate = isset( $listing['affiliate_url'] ) ? trim( (string) $listing['affiliate_url'] ) : '';
+			$regular   = isset( $listing['regular_url'] ) ? trim( (string) $listing['regular_url'] ) : '';
+			if ( '' === $affiliate && '' === $regular ) {
+				continue;
+			}
+			$out[] = $listing;
+		}
+		return $out;
+	}
+
+	private function renderListings( array $listings, array $by_code, array $hide, array $only, array $cta_overrides = array() ): string {
+		$rows = '';
+		foreach ( $this->visibleListings( $listings, $by_code, $hide, $only ) as $listing ) {
+			$code     = (string) $listing['platform'];
+			$platform = $by_code[ $code ];
 
 			$affiliate = isset( $listing['affiliate_url'] ) ? trim( (string) $listing['affiliate_url'] ) : '';
 			$regular   = isset( $listing['regular_url'] ) ? trim( (string) $listing['regular_url'] ) : '';

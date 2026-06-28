@@ -39,6 +39,13 @@ final class CardHtmlBuilder {
 			? $attributes['hidePlatforms']
 			: array();
 
+		$only_platforms = $this->sanitizeOnlyPlatforms(
+			isset( $attributes['onlyPlatforms'] ) && is_array( $attributes['onlyPlatforms'] )
+				? $attributes['onlyPlatforms']
+				: array(),
+			$known_codes
+		);
+
 		$cta_overrides = $this->sanitizeCtaOverrides(
 			isset( $attributes['ctaLabelOverrides'] ) && is_array( $attributes['ctaLabelOverrides'] )
 				? $attributes['ctaLabelOverrides']
@@ -53,6 +60,7 @@ final class CardHtmlBuilder {
 
 		$options = array(
 			'hide_platforms'      => $hide_platforms,
+			'only_platforms'      => $only_platforms,
 			'image_url'           => $this->featuredImageUrl( (int) ( $product['id'] ?? 0 ) ),
 			'colors'              => array(
 				'card_bg'     => isset( $attributes['cardBgColor'] ) ? (string) $attributes['cardBgColor'] : '',
@@ -67,6 +75,24 @@ final class CardHtmlBuilder {
 		);
 
 		return ( new CardRenderer() )->render( $product, $platforms, $options );
+	}
+
+	/**
+	 * @param array<int|string, mixed> $raw         任意混入を含む platform code 配列
+	 * @param list<string>             $known_codes 既知 platform code
+	 * @return list<string>
+	 */
+	public function sanitizeOnlyPlatforms( array $raw, array $known_codes ): array {
+		$clean = array();
+		foreach ( $raw as $code ) {
+			if ( ! is_string( $code ) ) {
+				continue;
+			}
+			if ( in_array( $code, $known_codes, true ) && ! in_array( $code, $clean, true ) ) {
+				$clean[] = $code;
+			}
+		}
+		return $clean;
 	}
 
 	/**

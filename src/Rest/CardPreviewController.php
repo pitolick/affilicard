@@ -34,6 +34,10 @@ final class CardPreviewController {
 							'type'    => 'array',
 							'default' => array(),
 						),
+						'onlyPlatforms'     => array(
+							'type'    => 'array',
+							'default' => array(),
+						),
 						'ctaLabelOverrides' => array(
 							'type'    => 'object',
 							'default' => array(),
@@ -78,10 +82,12 @@ final class CardPreviewController {
 		}
 
 		$hide = $request->get_param( 'hidePlatforms' );
+		$only = $request->get_param( 'onlyPlatforms' );
 		$cta  = $request->get_param( 'ctaLabelOverrides' );
 
 		$attributes = array(
 			'hidePlatforms'     => is_array( $hide ) ? array_map( 'strval', $hide ) : array(),
+			'onlyPlatforms'     => is_array( $only ) ? array_map( 'strval', $only ) : array(),
 			'ctaLabelOverrides' => is_array( $cta ) ? $cta : array(),
 			'ctaBgColor'        => (string) ( $request->get_param( 'ctaBgColor' ) ?? '' ),
 			'ctaTextColor'      => (string) ( $request->get_param( 'ctaTextColor' ) ?? '' ),

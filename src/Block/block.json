@@ -21,6 +21,11 @@
 			"items": { "type": "string" },
 			"default": []
 		},
+		"onlyPlatforms": {
+			"type": "array",
+			"items": { "type": "string" },
+			"default": []
+		},
 		"ctaBgColor": { "type": "string" },
 		"ctaTextColor": { "type": "string" },
 		"cardBgColor": { "type": "string" },

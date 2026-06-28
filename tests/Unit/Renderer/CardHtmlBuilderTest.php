@@ -84,6 +84,16 @@ final class CardHtmlBuilderTest extends TestCase {
 		$this->assertStringContainsString( 'affilicard-card', $html );
 	}
 
+	public function test_sanitize_only_platforms_keeps_known_codes_only(): void {
+		$builder = new CardHtmlBuilder();
+		$result  = $builder->sanitizeOnlyPlatforms(
+			// 重複（dmm-books×2）・未知 code・非文字列を含め、既知 code のみ 1 件ずつ残ることを押さえる。
+			array( 'dmm-books', 'dmm-books', 'unknown-pf', 123 ),
+			array( 'dmm-books', 'example-store' )
+		);
+		$this->assertSame( array( 'dmm-books' ), $result );
+	}
+
 	public function test_build_passes_cta_label_overrides_to_renderer(): void {
 		\WP_Mock::userFunction( 'get_option' )->andReturn(
 			array(

@@ -121,6 +121,67 @@ final class CardPreviewControllerTest extends TestCase {
 		$this->assertArrayHasKey( 'html', $data );
 	}
 
+	public function test_preview_passes_only_platforms_to_builder(): void {
+		$repository = $this->createMock( ProductRepositoryInterface::class );
+		$repository->method( 'find' )->willReturn(
+			array(
+				'id'           => 1,
+				'title'        => 'テスト商品',
+				'content'      => '',
+				'status'       => 'publish',
+				'product_type' => 'generic',
+				'stock_status' => 'available',
+				'extras'       => array(),
+				'listings'     => array(),
+				'modified'     => '',
+			)
+		);
+
+		$controller = new CardPreviewController( $repository );
+		$request    = $this->makeRequest(
+			array(
+				'id'            => 1,
+				'onlyPlatforms' => array( 'dmm-books' ),
+			)
+		);
+
+		$response = $controller->preview( $request );
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertArrayHasKey( 'html', $response->get_data() );
+	}
+
+	public function test_preview_guards_only_platforms_non_array(): void {
+		$repository = $this->createMock( ProductRepositoryInterface::class );
+		$repository->method( 'find' )->willReturn(
+			array(
+				'id'           => 3,
+				'title'        => '商品C',
+				'content'      => '',
+				'status'       => 'draft',
+				'product_type' => 'generic',
+				'stock_status' => 'available',
+				'extras'       => array(),
+				'listings'     => array(),
+				'modified'     => '',
+			)
+		);
+
+		$controller = new CardPreviewController( $repository );
+		// onlyPlatforms に非配列を渡しても 200 で返ること（空配列として処理）
+		$request = $this->makeRequest(
+			array(
+				'id'            => 3,
+				'onlyPlatforms' => 'not-an-array',
+			)
+		);
+
+		$response = $controller->preview( $request );
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertArrayHasKey( 'html', $response->get_data() );
+	}
+
 	public function test_preview_guards_hide_platforms_non_array(): void {
 		$repository = $this->createMock( ProductRepositoryInterface::class );
 		$repository->method( 'find' )->willReturn(
