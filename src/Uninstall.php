@@ -21,12 +21,17 @@ final class Uninstall {
 		'affilicard_rakuten_settings',
 		'affilicard_link_checker_settings',
 		'affilicard_schema_version',
+		'affilicard_platforms',
+		'affilicard_general',
+		'affilicard_seeded_at',
 	);
 
 	public static function run(): void {
 		foreach ( self::OPTION_KEYS as $option_key ) {
 			delete_option( $option_key );
 		}
+
+		self::deleteProviderCredentials();
 
 		$product_ids = get_posts(
 			array(
@@ -44,5 +49,27 @@ final class Uninstall {
 		foreach ( $product_ids as $product_id ) {
 			wp_delete_post( (int) $product_id, true );
 		}
+	}
+
+	/**
+	 * `affilicard_provider_<code>_credentials` 形式の credentials オプションを一括削除する。
+	 *
+	 * ProviderCredentials は provider コード毎に動的なキー名で書き込むため、
+	 * 固定リストでは捕捉できない。option_name の前方一致で wp_options から DELETE する。
+	 */
+	private static function deleteProviderCredentials(): void {
+		global $wpdb;
+
+		if ( ! isset( $wpdb ) || ! is_object( $wpdb ) ) {
+			return;
+		}
+
+		$like = $wpdb->esc_like( 'affilicard_provider_' ) . '%';
+		$wpdb->query(
+			$wpdb->prepare(
+				"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+				$like
+			)
+		);
 	}
 }

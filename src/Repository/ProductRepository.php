@@ -406,11 +406,14 @@ final class ProductRepository implements ProductRepositoryInterface {
 	/**
 	 * 各 listing の external_id を `affilicard_extid_<platform>` meta にミラーする。
 	 *
-	 * Phase 4a-1 では削除済み platform の stale meta クリーンアップは行わない（4a-3 で対応）。
+	 * 再書き込み時、今回の listing 集合に含まれない既存の extid mirror meta は削除する。
+	 * これにより platform 変更・削除後に stale な `affilicard_extid_<platform>` が残り、
+	 * findByExternalId が誤 hit して誤 upsert する問題を防ぐ。
 	 *
 	 * @param array<int, mixed> $listings
 	 */
 	private function syncExternalIdMirror( int $postId, array $listings ): void {
+		$desired_keys = array();
 		foreach ( $listings as $listing ) {
 			if ( ! is_array( $listing ) ) {
 				continue;
@@ -420,11 +423,38 @@ final class ProductRepository implements ProductRepositoryInterface {
 			if ( '' === $platform || '' === $external_id ) {
 				continue;
 			}
-			update_post_meta(
-				$postId,
-				ProductPostType::externalIdMetaKey( $platform ),
-				$external_id
-			);
+			$meta_key                  = ProductPostType::externalIdMetaKey( $platform );
+			$desired_keys[ $meta_key ] = $external_id;
+		}
+
+		$this->purgeStaleExternalIdMirror( $postId, array_keys( $desired_keys ) );
+
+		foreach ( $desired_keys as $meta_key => $external_id ) {
+			update_post_meta( $postId, $meta_key, $external_id );
+		}
+	}
+
+	/**
+	 * 投稿の既存 extid mirror meta のうち、$keepKeys に含まれないものを削除する。
+	 *
+	 * @param array<int, string> $keepKeys 維持する extid mirror meta キー。
+	 */
+	private function purgeStaleExternalIdMirror( int $postId, array $keepKeys ): void {
+		$all_meta = get_post_meta( $postId );
+		if ( ! is_array( $all_meta ) ) {
+			return;
+		}
+
+		$keep = array_flip( $keepKeys );
+		foreach ( array_keys( $all_meta ) as $meta_key ) {
+			$meta_key = (string) $meta_key;
+			if ( 0 !== strpos( $meta_key, ProductPostType::META_EXTID_PREFIX ) ) {
+				continue;
+			}
+			if ( isset( $keep[ $meta_key ] ) ) {
+				continue;
+			}
+			delete_post_meta( $postId, $meta_key );
 		}
 	}
 

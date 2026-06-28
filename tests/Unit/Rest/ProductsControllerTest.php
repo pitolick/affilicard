@@ -81,6 +81,10 @@ final class ProductsControllerTest extends TestCase {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( $id, ProductPostType::META_SCHEMA_VERSION, true )
 			->andReturn( SchemaVersion::CURRENT );
+		// extid mirror の stale cleanup 用の全 meta 列挙（既存 stale なし）。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $id )
+			->andReturn( array() );
 	}
 
 	public function test_create_upserts_via_repository_and_returns_201_with_saved_data(): void {
@@ -108,6 +112,72 @@ final class ProductsControllerTest extends TestCase {
 		$data = $response->get_data();
 		$this->assertSame( 42, $data['id'] );
 		$this->assertSame( 'タイトル', $data['title'] );
+	}
+
+	public function test_create_downgrades_publish_to_pending_without_publish_posts(): void {
+		// publish_posts を持たないユーザーが status=publish を要求 → pending に降格して保存。
+		WP_Mock::userFunction( 'current_user_can' )
+			->with( 'publish_posts' )
+			->andReturn( false );
+
+		$repository = Mockery::mock( ProductRepositoryInterface::class );
+		$repository->shouldReceive( 'save' )
+			->once()
+			->andReturnUsing(
+				function ( array $data ) {
+					$this->assertSame( 'pending', $data['status'] );
+					return 99;
+				}
+			);
+		$repository->shouldReceive( 'find' )->with( 99 )->andReturn(
+			array(
+				'id'     => 99,
+				'title'  => 'タイトル',
+				'status' => 'pending',
+			)
+		);
+
+		$controller = new ProductsController( $repository );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products' );
+		$request->set_param( 'title', 'タイトル' );
+		$request->set_param( 'status', 'publish' );
+
+		$response = $controller->create( $request );
+
+		$this->assertSame( 201, $response->get_status() );
+	}
+
+	public function test_create_keeps_publish_when_user_can_publish_posts(): void {
+		// publish_posts を持つユーザーは status=publish のまま保存される（降格しない）。
+		WP_Mock::userFunction( 'current_user_can' )
+			->with( 'publish_posts' )
+			->andReturn( true );
+
+		$repository = Mockery::mock( ProductRepositoryInterface::class );
+		$repository->shouldReceive( 'save' )
+			->once()
+			->andReturnUsing(
+				function ( array $data ) {
+					$this->assertSame( 'publish', $data['status'] );
+					return 100;
+				}
+			);
+		$repository->shouldReceive( 'find' )->with( 100 )->andReturn(
+			array(
+				'id'     => 100,
+				'title'  => 'タイトル',
+				'status' => 'publish',
+			)
+		);
+
+		$controller = new ProductsController( $repository );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products' );
+		$request->set_param( 'title', 'タイトル' );
+		$request->set_param( 'status', 'publish' );
+
+		$response = $controller->create( $request );
+
+		$this->assertSame( 201, $response->get_status() );
 	}
 
 	public function test_get_returns_404_when_product_not_found(): void {

@@ -290,6 +290,63 @@ final class ProductRepositoryTest extends TestCase {
 		);
 	}
 
+	public function test_save_deletes_stale_external_id_mirror_meta(): void {
+		// 既存は dmm-books の extid mirror を持つが、新 listing は amazon-kindle のみ。
+		// 旧 affilicard_extid_dmm-books が delete_post_meta で削除され、
+		// 新 affilicard_extid_amazon-kindle が書かれることを検証する。
+		WP_Mock::userFunction( 'wp_insert_post' )->andReturn( 800 );
+
+		// 全 meta 列挙: extid mirror + 無関係 meta を返す。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 800 )
+			->andReturn(
+				array(
+					ProductPostType::externalIdMetaKey( 'dmm-books' ) => array( 'old-ext' ),
+					ProductPostType::META_PRODUCT_TYPE => array( 'ebook' ),
+				)
+			);
+
+		WP_Mock::userFunction( 'delete_post_meta' )
+			->once()
+			->with( 800, ProductPostType::externalIdMetaKey( 'dmm-books' ) )
+			->andReturn( true );
+		// 無関係 meta は削除されないこと。
+		WP_Mock::userFunction( 'delete_post_meta' )
+			->with( 800, ProductPostType::META_PRODUCT_TYPE )
+			->never();
+
+		$mirror_calls = array();
+		WP_Mock::userFunction( 'update_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$mirror_calls ) {
+					if ( 0 === strpos( (string) $key, ProductPostType::META_EXTID_PREFIX ) ) {
+						$mirror_calls[ $key ] = $value;
+					}
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$repo->save(
+			array(
+				'title'        => 'A',
+				'product_type' => 'ebook',
+				'listings'     => array(
+					array(
+						'platform'    => 'amazon-kindle',
+						'external_id' => 'B0NEW',
+					),
+				),
+			)
+		);
+
+		$this->assertSame(
+			array( ProductPostType::externalIdMetaKey( 'amazon-kindle' ) => 'B0NEW' ),
+			$mirror_calls
+		);
+		$this->assertConditionsMet();
+	}
+
 	public function test_delete_calls_wp_delete_post_with_force_true(): void {
 		WP_Mock::userFunction( 'wp_delete_post' )
 			->once()
@@ -682,6 +739,10 @@ final class ProductRepositoryTest extends TestCase {
 					),
 				)
 			);
+		// extid mirror の stale cleanup 用の全 meta 列挙（既存 stale なし）。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42 )
+			->andReturn( array() );
 		WP_Mock::userFunction( 'update_post_meta' )
 			->once()->with( 42, 'affilicard_extid_dmm-books', 'X1' )->andReturn( true );
 		WP_Mock::userFunction( 'update_post_meta' )
