@@ -8,7 +8,7 @@
 
 ### Added
 
-- 商品カードに `onlyPlatforms`（表示プラットフォーム許可リスト）属性を追加。指定した platform の listing のみ描画する（既存 `hidePlatforms` と併用可、未指定なら全表示）。ブロックエディタに選択 UI を追加。
+- 商品カードに `onlyPlatforms`（表示プラットフォーム許可リスト）属性を追加。指定した platform の listing のみ描画する（既存 `hidePlatforms` と併用可、未指定なら全表示）。ブロックエディタに選択 UI を追加し、**エディタプレビューにも `onlyPlatforms` を反映**（card-preview REST 経由）。
 
 ## [1.4.1] - 2026-06-21
 

@@ -141,6 +141,7 @@ export function Edit({ attributes, setAttributes }) {
 		const timer = setTimeout(() => {
 			getCardPreview(productId, {
 				hidePlatforms,
+				onlyPlatforms,
 				ctaLabelOverrides,
 				ctaBgColor,
 				ctaTextColor,
@@ -167,6 +168,8 @@ export function Edit({ attributes, setAttributes }) {
 		productId,
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 		JSON.stringify(hidePlatforms),
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		JSON.stringify(onlyPlatforms),
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 		JSON.stringify(ctaLabelOverrides),
 		ctaBgColor,
