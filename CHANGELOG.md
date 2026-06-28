@@ -10,6 +10,15 @@
 
 - 商品カードに `onlyPlatforms`（表示プラットフォーム許可リスト）属性を追加。指定した platform の listing のみ描画する（既存 `hidePlatforms` と併用可、未指定なら全表示）。ブロックエディタに選択 UI を追加し、**エディタプレビューにも `onlyPlatforms` を反映**（card-preview REST 経由）。
 
+### Fixed
+
+- 監査で確認した既存バグを修正（#57）:
+  - `Uninstall` が現行オプション（`affilicard_platforms` / `affilicard_general` / `affilicard_seeded_at`）と provider credentials を削除せずデータ残留・再インストール seed 不発になる問題を修正。
+  - REST の商品 create/update が `publish_posts` を検証せず公開できた問題を修正（公開権限が無ければ `pending` に降格）。
+  - `Block` の autoCreate が失敗時に transient ロックを解放せず 5 分間リトライ不能になる問題を修正。
+  - extid mirror の再書き込みで stale な `affilicard_extid_*` meta が残り誤 upsert を招く問題を修正。
+- 日時フッターが非表示プラットフォーム（`onlyPlatforms`/`hidePlatforms`/URL 無し）の `last_fetched_at` を参照していた不整合を修正し、表示中の listing 集合に揃えた。
+
 ## [1.4.1] - 2026-06-21
 
 ### Fixed
