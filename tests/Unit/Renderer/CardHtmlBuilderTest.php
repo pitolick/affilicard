@@ -87,7 +87,8 @@ final class CardHtmlBuilderTest extends TestCase {
 	public function test_sanitize_only_platforms_keeps_known_codes_only(): void {
 		$builder = new CardHtmlBuilder();
 		$result  = $builder->sanitizeOnlyPlatforms(
-			array( 'dmm-books', 'unknown-pf', 123 ),
+			// 重複（dmm-books×2）・未知 code・非文字列を含め、既知 code のみ 1 件ずつ残ることを押さえる。
+			array( 'dmm-books', 'dmm-books', 'unknown-pf', 123 ),
 			array( 'dmm-books', 'example-store' )
 		);
 		$this->assertSame( array( 'dmm-books' ), $result );

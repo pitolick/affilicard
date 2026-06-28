@@ -880,4 +880,63 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( 'https://dmm', $html );
 		$this->assertStringNotContainsString( 'https://store', $html );
 	}
+
+	public function test_timestamp_ignores_listing_hidden_by_only_platforms(): void {
+		// 非表示プラットフォーム（example-store）の方が新しい last_fetched_at を持つ場合でも、
+		// 表示中（dmm-books）の日付がフッターに出る（CTA 表示と価格鮮度を一致させる）。
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'        => 'dmm-books',
+						'enabled'         => true,
+						'affiliate_url'   => 'https://dmm',
+						'last_fetched_at' => '2026-04-18T09:00:00+09:00',
+					),
+					array(
+						'platform'        => 'example-store',
+						'enabled'         => true,
+						'affiliate_url'   => 'https://store',
+						'last_fetched_at' => '2026-04-25T09:00:00+09:00',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render(
+			$product,
+			array( $this->dmmBooks(), $this->store() ),
+			array( 'only_platforms' => array( 'dmm-books' ) )
+		);
+		$this->assertStringContainsString( '2026年4月18日時点の価格', $html );
+		$this->assertStringNotContainsString( '2026年4月25日', $html );
+	}
+
+	public function test_timestamp_ignores_listing_hidden_by_hide_platforms(): void {
+		// hide_platforms でも同様に、非表示 listing の日付はフッターに採用されない。
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'        => 'dmm-books',
+						'enabled'         => true,
+						'affiliate_url'   => 'https://dmm',
+						'last_fetched_at' => '2026-04-18T09:00:00+09:00',
+					),
+					array(
+						'platform'        => 'example-store',
+						'enabled'         => true,
+						'affiliate_url'   => 'https://store',
+						'last_fetched_at' => '2026-04-25T09:00:00+09:00',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render(
+			$product,
+			array( $this->dmmBooks(), $this->store() ),
+			array( 'hide_platforms' => array( 'example-store' ) )
+		);
+		$this->assertStringContainsString( '2026年4月18日時点の価格', $html );
+		$this->assertStringNotContainsString( '2026年4月25日', $html );
+	}
 }
