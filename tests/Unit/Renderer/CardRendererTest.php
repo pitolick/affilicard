@@ -932,7 +932,7 @@ final class CardRendererTest extends TestCase {
 				),
 			)
 		);
-		$html = ( new CardRenderer() )->render( $product, array( $this->dmmBooks(), $this->store() ) );
+		$html    = ( new CardRenderer() )->render( $product, array( $this->dmmBooks(), $this->store() ) );
 		$this->assertStringContainsString( '2026年4月18日時点の価格', $html );
 		$this->assertStringNotContainsString( '2026年4月25日', $html );
 	}
