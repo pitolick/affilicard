@@ -26,12 +26,6 @@ final class Uninstall {
 		'affilicard_seeded_at',
 	);
 
-	/**
-	 * Provider credentials オプション (`affilicard_provider_<code>_credentials`) の
-	 * option_name 前方一致パターン。
-	 */
-	private const PROVIDER_CREDENTIALS_LIKE = 'affilicard_provider_%';
-
 	public static function run(): void {
 		foreach ( self::OPTION_KEYS as $option_key ) {
 			delete_option( $option_key );
