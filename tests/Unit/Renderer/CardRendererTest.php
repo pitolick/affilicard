@@ -799,4 +799,61 @@ final class CardRendererTest extends TestCase {
 		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
 		$this->assertStringNotContainsString( 'affilicard-card__timestamp', $html );
 	}
+
+	public function test_only_platforms_shows_listed_platform_only(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array( 'platform' => 'dmm-books', 'enabled' => true, 'affiliate_url' => 'https://dmm' ),
+					array( 'platform' => 'example-store', 'enabled' => true, 'affiliate_url' => 'https://store' ),
+				),
+			)
+		);
+		$html = ( new CardRenderer() )->render(
+			$product,
+			array( $this->dmmBooks(), $this->store() ),
+			array( 'only_platforms' => array( 'dmm-books' ) )
+		);
+		$this->assertStringContainsString( 'https://dmm', $html );
+		$this->assertStringNotContainsString( 'https://store', $html );
+	}
+
+	public function test_only_platforms_empty_shows_all(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array( 'platform' => 'dmm-books', 'enabled' => true, 'affiliate_url' => 'https://dmm' ),
+					array( 'platform' => 'example-store', 'enabled' => true, 'affiliate_url' => 'https://store' ),
+				),
+			)
+		);
+		$html = ( new CardRenderer() )->render(
+			$product,
+			array( $this->dmmBooks(), $this->store() ),
+			array( 'only_platforms' => array() )
+		);
+		$this->assertStringContainsString( 'https://dmm', $html );
+		$this->assertStringContainsString( 'https://store', $html );
+	}
+
+	public function test_only_platforms_combined_with_hide(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array( 'platform' => 'dmm-books', 'enabled' => true, 'affiliate_url' => 'https://dmm' ),
+					array( 'platform' => 'example-store', 'enabled' => true, 'affiliate_url' => 'https://store' ),
+				),
+			)
+		);
+		$html = ( new CardRenderer() )->render(
+			$product,
+			array( $this->dmmBooks(), $this->store() ),
+			array(
+				'only_platforms' => array( 'dmm-books', 'example-store' ),
+				'hide_platforms' => array( 'example-store' ),
+			)
+		);
+		$this->assertStringContainsString( 'https://dmm', $html );
+		$this->assertStringNotContainsString( 'https://store', $html );
+	}
 }

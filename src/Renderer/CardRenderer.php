@@ -28,6 +28,7 @@ final class CardRenderer {
 		}
 
 		$hide          = isset( $options['hide_platforms'] ) && is_array( $options['hide_platforms'] ) ? array_map( 'strval', $options['hide_platforms'] ) : array();
+		$only          = isset( $options['only_platforms'] ) && is_array( $options['only_platforms'] ) ? array_map( 'strval', $options['only_platforms'] ) : array();
 		$image_url     = isset( $options['image_url'] ) ? (string) $options['image_url'] : '';
 		$colors        = isset( $options['colors'] ) && is_array( $options['colors'] ) ? $options['colors'] : array();
 		$header_keys   = isset( $options['header_keys'] ) && is_array( $options['header_keys'] ) ? array_map( 'strval', $options['header_keys'] ) : array( 'author', 'publisher' );
@@ -77,6 +78,7 @@ final class CardRenderer {
 				isset( $product['listings'] ) && is_array( $product['listings'] ) ? $product['listings'] : array(),
 				$by_code,
 				$hide,
+				$only,
 				$cta_overrides
 			);
 		}
@@ -225,9 +227,10 @@ final class CardRenderer {
 	 * @param list<array<string, mixed>>        $listings
 	 * @param array<string, PlatformDefinition> $by_code
 	 * @param list<string>                      $hide
+	 * @param list<string>                      $only          許可リスト（空 = 全表示）
 	 * @param array<string, string>             $cta_overrides ブロック属性由来の CTA ラベル上書き（code→label）
 	 */
-	private function renderListings( array $listings, array $by_code, array $hide, array $cta_overrides = array() ): string {
+	private function renderListings( array $listings, array $by_code, array $hide, array $only, array $cta_overrides = array() ): string {
 		$rows = '';
 		foreach ( $listings as $listing ) {
 			if ( ! is_array( $listing ) ) {
@@ -235,6 +238,9 @@ final class CardRenderer {
 			}
 			$code = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
 			if ( '' === $code || ! isset( $by_code[ $code ] ) || in_array( $code, $hide, true ) ) {
+				continue;
+			}
+			if ( ! empty( $only ) && ! in_array( $code, $only, true ) ) {
 				continue;
 			}
 			$platform = $by_code[ $code ];
