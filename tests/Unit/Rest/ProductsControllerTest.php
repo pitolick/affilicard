@@ -81,6 +81,10 @@ final class ProductsControllerTest extends TestCase {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( $id, ProductPostType::META_SCHEMA_VERSION, true )
 			->andReturn( SchemaVersion::CURRENT );
+		// extid mirror の stale cleanup 用の全 meta 列挙（既存 stale なし）。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $id )
+			->andReturn( array() );
 	}
 
 	public function test_create_upserts_via_repository_and_returns_201_with_saved_data(): void {
