@@ -163,7 +163,7 @@ final class ProductsController {
 				continue;
 			}
 
-			$data = ProductSchema::sanitizeItem( $raw );
+			$data = $this->enforcePublishCapability( ProductSchema::sanitizeItem( $raw ) );
 			if ( '' === $data['title'] ) {
 				++$failed;
 				$results[] = array(
@@ -219,7 +219,7 @@ final class ProductsController {
 	}
 
 	public function create( WP_REST_Request $request ): WP_REST_Response {
-		$data = $this->extractProductData( $request );
+		$data = $this->enforcePublishCapability( $this->extractProductData( $request ) );
 
 		$id = $this->repository->save( $data );
 		if ( $id <= 0 ) {
@@ -267,7 +267,7 @@ final class ProductsController {
 
 		// PATCH は部分更新。送信されたフィールドだけを既存値の上に重ね、
 		// 未送信フィールド（metabox では title / content / status 等）は既存値を保持する。
-		$data       = array_merge( $existing, $this->extractProductData( $request ) );
+		$data       = array_merge( $existing, $this->enforcePublishCapability( $this->extractProductData( $request ) ) );
 		$data['id'] = $id;
 
 		$saved_id = $this->repository->save( $data );
@@ -309,6 +309,32 @@ final class ProductsController {
 		}
 
 		return new WP_REST_Response( null, 204 );
+	}
+
+	/**
+	 * publish_posts 権限を持たないユーザーが status=publish|future を要求した場合、
+	 * status を pending に降格する（公開権限バイパスの防止・非破壊）。
+	 *
+	 * status が未指定、または publish/future 以外なら何もしない。
+	 *
+	 * @param array<string, mixed> $data
+	 * @return array<string, mixed>
+	 */
+	private function enforcePublishCapability( array $data ): array {
+		if ( ! isset( $data['status'] ) ) {
+			return $data;
+		}
+
+		$status = (string) $data['status'];
+		if ( 'publish' !== $status && 'future' !== $status ) {
+			return $data;
+		}
+
+		if ( ! current_user_can( 'publish_posts' ) ) {
+			$data['status'] = 'pending';
+		}
+
+		return $data;
 	}
 
 	/**
