@@ -264,6 +264,13 @@ final class CardRenderer {
 			if ( isset( $listing['enabled'] ) && false === (bool) $listing['enabled'] ) {
 				continue;
 			}
+			// URL が無い listing は CTA 行を出さない＝非表示扱い。
+			// renderListings の行と renderTimestamp の日付計算を同一集合に揃える。
+			$affiliate = isset( $listing['affiliate_url'] ) ? trim( (string) $listing['affiliate_url'] ) : '';
+			$regular   = isset( $listing['regular_url'] ) ? trim( (string) $listing['regular_url'] ) : '';
+			if ( '' === $affiliate && '' === $regular ) {
+				continue;
+			}
 			$out[] = $listing;
 		}
 		return $out;

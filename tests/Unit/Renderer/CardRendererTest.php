@@ -911,6 +911,32 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringNotContainsString( '2026年4月25日', $html );
 	}
 
+	public function test_timestamp_ignores_listing_without_url(): void {
+		// URL 無し listing は CTA 行が出ないので、その last_fetched_at もフッターに採用されない。
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'        => 'dmm-books',
+						'enabled'         => true,
+						'affiliate_url'   => 'https://dmm',
+						'last_fetched_at' => '2026-04-18T09:00:00+09:00',
+					),
+					array(
+						'platform'        => 'example-store',
+						'enabled'         => true,
+						'affiliate_url'   => '',
+						'regular_url'     => '',
+						'last_fetched_at' => '2026-04-25T09:00:00+09:00',
+					),
+				),
+			)
+		);
+		$html = ( new CardRenderer() )->render( $product, array( $this->dmmBooks(), $this->store() ) );
+		$this->assertStringContainsString( '2026年4月18日時点の価格', $html );
+		$this->assertStringNotContainsString( '2026年4月25日', $html );
+	}
+
 	public function test_timestamp_ignores_listing_hidden_by_hide_platforms(): void {
 		// hide_platforms でも同様に、非表示 listing の日付はフッターに採用されない。
 		$product = $this->product(
