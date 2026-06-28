@@ -264,6 +264,32 @@ final class BlockTest extends TestCase {
 		$this->assertStringNotContainsString( '>ISBN<', $html );
 	}
 
+	public function test_render_releases_lock_when_autocreate_fails(): void {
+		// autoCreator->create() が null（失敗）を返したとき、5 分ロックを即解放するため
+		// delete_transient が呼ばれることを検証する。空 Registry で create() は null になる。
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'findByExternalId' )->with( 'dmm-books', 'ext-9' )->andReturn( null );
+		$repo->shouldNotReceive( 'find' );
+
+		WP_Mock::userFunction( 'get_option' )->andReturn( array() );
+		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
+		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_autocreate_dmm-books_ext-9' )
+			->andReturn( true );
+
+		$block = new Block( $repo, new ProductAutoCreator( new ProviderRegistry(), $repo ) );
+		$html  = $block->render(
+			array(
+				'externalId' => 'ext-9',
+				'platform'   => 'dmm-books',
+			)
+		);
+
+		$this->assertSame( '', $html );
+	}
+
 	public function test_render_skips_autocreate_when_locked(): void {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'findByExternalId' )->andReturn( null );

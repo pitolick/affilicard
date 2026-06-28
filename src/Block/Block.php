@@ -134,6 +134,9 @@ final class Block {
 
 		$post_id = $this->autoCreator->create( $platform, $externalId );
 		if ( null === $post_id ) {
+			// 失敗時はロックを即解放し、次回リクエストで再試行できるようにする
+			// （解放しないと 5 分間リトライ不能になる）。
+			delete_transient( $lock_key );
 			return null;
 		}
 		return $this->repository->find( $post_id );
