@@ -804,12 +804,20 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array( 'platform' => 'dmm-books', 'enabled' => true, 'affiliate_url' => 'https://dmm' ),
-					array( 'platform' => 'example-store', 'enabled' => true, 'affiliate_url' => 'https://store' ),
+					array(
+						'platform'      => 'dmm-books',
+						'enabled'       => true,
+						'affiliate_url' => 'https://dmm',
+					),
+					array(
+						'platform'      => 'example-store',
+						'enabled'       => true,
+						'affiliate_url' => 'https://store',
+					),
 				),
 			)
 		);
-		$html = ( new CardRenderer() )->render(
+		$html    = ( new CardRenderer() )->render(
 			$product,
 			array( $this->dmmBooks(), $this->store() ),
 			array( 'only_platforms' => array( 'dmm-books' ) )
@@ -822,12 +830,20 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array( 'platform' => 'dmm-books', 'enabled' => true, 'affiliate_url' => 'https://dmm' ),
-					array( 'platform' => 'example-store', 'enabled' => true, 'affiliate_url' => 'https://store' ),
+					array(
+						'platform'      => 'dmm-books',
+						'enabled'       => true,
+						'affiliate_url' => 'https://dmm',
+					),
+					array(
+						'platform'      => 'example-store',
+						'enabled'       => true,
+						'affiliate_url' => 'https://store',
+					),
 				),
 			)
 		);
-		$html = ( new CardRenderer() )->render(
+		$html    = ( new CardRenderer() )->render(
 			$product,
 			array( $this->dmmBooks(), $this->store() ),
 			array( 'only_platforms' => array() )
@@ -840,12 +856,20 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array( 'platform' => 'dmm-books', 'enabled' => true, 'affiliate_url' => 'https://dmm' ),
-					array( 'platform' => 'example-store', 'enabled' => true, 'affiliate_url' => 'https://store' ),
+					array(
+						'platform'      => 'dmm-books',
+						'enabled'       => true,
+						'affiliate_url' => 'https://dmm',
+					),
+					array(
+						'platform'      => 'example-store',
+						'enabled'       => true,
+						'affiliate_url' => 'https://store',
+					),
 				),
 			)
 		);
-		$html = ( new CardRenderer() )->render(
+		$html    = ( new CardRenderer() )->render(
 			$product,
 			array( $this->dmmBooks(), $this->store() ),
 			array(
