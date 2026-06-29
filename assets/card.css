@@ -151,6 +151,8 @@
 
 .affilicard-card__preorder .affilicard-card__badge {
 	margin-top: 0;
+	margin-left: 0;
+	margin-right: 0;
 }
 
 .affilicard-card__release-date {
