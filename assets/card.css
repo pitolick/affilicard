@@ -135,6 +135,18 @@
 	background: #b91c1c;
 }
 
+.affilicard-card__badge--preorder {
+	background: #fde68a;
+	color: #92400e;
+}
+
+.affilicard-card__release-date {
+	margin-top: 0.25rem;
+	font-size: 0.85em;
+	font-weight: 600;
+	color: #b45309;
+}
+
 .affilicard-card__desc {
 	margin-top: 10px;
 	font-size: 13px;
