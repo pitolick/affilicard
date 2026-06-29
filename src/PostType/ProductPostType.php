@@ -18,6 +18,7 @@ final class ProductPostType {
 	public const META_LISTINGS       = 'affilicard_listings';
 	public const META_SCHEMA_VERSION = 'affilicard_schema_version';
 	public const META_EXTID_PREFIX   = 'affilicard_extid_';
+	public const META_RELEASE_DATE   = 'affilicard_release_date';
 
 	/**
 	 * プラットフォーム別の外部 ID を保存する meta キーを生成する。

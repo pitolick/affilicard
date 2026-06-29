@@ -27,6 +27,7 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 *   status: string,
 	 *   product_type: string,
 	 *   stock_status: string,
+	 *   release_date: string,
 	 *   extras: array<int, mixed>,
 	 *   listings: array<int, mixed>,
 	 *   schema_version: string,
@@ -59,6 +60,7 @@ final class ProductRepository implements ProductRepositoryInterface {
 			'status'         => (string) ( $post->post_status ?? '' ),
 			'product_type'   => (string) get_post_meta( $postId, ProductPostType::META_PRODUCT_TYPE, true ),
 			'stock_status'   => StockStatus::normalize( (string) get_post_meta( $postId, ProductPostType::META_STOCK_STATUS, true ) ),
+			'release_date'   => (string) get_post_meta( $postId, ProductPostType::META_RELEASE_DATE, true ),
 			'extras'         => $extras,
 			'listings'       => $listings,
 			'schema_version' => (string) get_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, true ),
@@ -175,12 +177,17 @@ final class ProductRepository implements ProductRepositoryInterface {
 		);
 		$extras       = isset( $data['extras'] ) && is_array( $data['extras'] ) ? $data['extras'] : array();
 		$listings     = isset( $data['listings'] ) && is_array( $data['listings'] ) ? $data['listings'] : array();
+		$release_date = isset( $data['release_date'] ) ? (string) $data['release_date'] : '';
+		if ( 1 !== preg_match( '/^\d{4}-\d{2}-\d{2}$/', $release_date ) ) {
+			$release_date = '';
+		}
 
 		update_post_meta( $postId, ProductPostType::META_PRODUCT_TYPE, $product_type );
 		update_post_meta( $postId, ProductPostType::META_STOCK_STATUS, $stock_status );
 		update_post_meta( $postId, ProductPostType::META_EXTRAS, $extras );
 		update_post_meta( $postId, ProductPostType::META_LISTINGS, $listings );
 		update_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
+		update_post_meta( $postId, ProductPostType::META_RELEASE_DATE, $release_date );
 
 		$this->syncExternalIdMirror( $postId, $listings );
 	}

@@ -48,6 +48,12 @@ final class ProductSchema {
 				'default'           => array(),
 				'sanitize_callback' => array( self::class, 'sanitizeExtras' ),
 			),
+			'release_date' => array(
+				'type'              => 'string',
+				'required'          => false,
+				'default'           => '',
+				'sanitize_callback' => array( self::class, 'sanitizeReleaseDate' ),
+			),
 			'listings'     => array(
 				'type'              => 'array',
 				'default'           => array(),
@@ -83,7 +89,7 @@ final class ProductSchema {
 	 * 単品 create と同等のサニタイズを適用する。extras/listings は既存 sanitizer を再利用。
 	 *
 	 * @param array<string, mixed> $item
-	 * @return array{title: string, content: string, status: string, product_type: string, stock_status: string, extras: list<array<string, string>>, listings: list<array<string, mixed>>}
+	 * @return array{title: string, content: string, status: string, product_type: string, stock_status: string, release_date: string, extras: list<array<string, string>>, listings: list<array<string, mixed>>}
 	 */
 	public static function sanitizeItem( array $item ): array {
 		$status = isset( $item['status'] ) ? (string) $item['status'] : 'publish';
@@ -106,6 +112,7 @@ final class ProductSchema {
 			'status'       => $status,
 			'product_type' => $product_type,
 			'stock_status' => $stock_status,
+			'release_date' => self::sanitizeReleaseDate( $item['release_date'] ?? '' ),
 			'extras'       => self::sanitizeExtras( $item['extras'] ?? array() ),
 			'listings'     => self::sanitizeListings( $item['listings'] ?? array() ),
 		);
@@ -151,6 +158,16 @@ final class ProductSchema {
 		}
 
 		return $result;
+	}
+
+	/**
+	 * release_date を `YYYY-MM-DD` のみ許可する。不正・空は空文字。
+	 *
+	 * @param mixed $value
+	 */
+	public static function sanitizeReleaseDate( $value ): string {
+		$str = is_string( $value ) ? trim( $value ) : '';
+		return 1 === preg_match( '/^\d{4}-\d{2}-\d{2}$/', $str ) ? $str : '';
 	}
 
 	/**
