@@ -164,6 +164,7 @@ final class ProductSchema {
 	 * release_date を `YYYY-MM-DD` のみ許可する。不正・空は空文字。
 	 *
 	 * @param mixed $value
+	 * @return string
 	 */
 	public static function sanitizeReleaseDate( $value ): string {
 		$str = is_string( $value ) ? trim( $value ) : '';

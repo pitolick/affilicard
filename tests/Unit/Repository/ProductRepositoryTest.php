@@ -443,7 +443,7 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertNull( $repo->findBySlug( 'missing' ) );
 	}
 
-	public function test_saveMeta_calls_update_post_meta_for_five_keys_and_does_not_call_insert_or_update_post(): void {
+	public function test_saveMeta_calls_update_post_meta_for_all_keys_and_does_not_call_insert_or_update_post(): void {
 		// wp_update_post / wp_insert_post should never be called.
 		WP_Mock::userFunction( 'wp_update_post' )->never();
 		WP_Mock::userFunction( 'wp_insert_post' )->never();
