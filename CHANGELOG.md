@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-06-29
+
+### Added
+
+- 商品カードに**予約（発売前）状態**を追加。商品に発売日 `release_date`（`YYYY-MM-DD`）を持たせると、カード描画時に `now < release_date` の場合は「予約受付中」バッジ＋発売日表示＋CTA「予約する」で描画し、**発売日を過ぎると自動的に通常表示へ戻る**（再取得・Cron 不要）。在庫バッジとは別系統で、予約中も CTA は隠さない。CTA ラベルの優先順は block override > listing override > 予約既定「予約する」> platform 既定。
+- `release_date` を商品メタ `affilicard_release_date` として永続化（REST CRUD `ProductSchema` ＋ `register_post_meta`／`YYYY-MM-DD` のみ許可）。商品編集 metabox に発売日の日付コントロールを追加。
+- 発売日由来の予約判定を行う純粋ヘルパ `Affilicard\Stock\ReleaseDate`（時刻は引数で受け取りテスト可能）。時刻依存は `CardHtmlBuilder` に閉じ、`CardRenderer` は純粋レンダラを維持。
+
 ## [1.5.0] - 2026-06-28
 
 ### Added
