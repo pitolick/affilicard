@@ -1,5 +1,5 @@
 import { useEntityProp } from '@wordpress/core-data';
-import { PanelBody, SelectControl } from '@wordpress/components';
+import { PanelBody, SelectControl, TextControl } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import { ListingsEditor } from './ListingsEditor';
 import { ExtrasEditor } from './ExtrasEditor';
@@ -22,6 +22,7 @@ export function ProductSettingsPanel() {
 
 	const productType = m.affilicard_product_type || 'generic';
 	const stockStatus = m.affilicard_stock_status || 'available';
+	const releaseDate = m.affilicard_release_date || '';
 	const listings = asArray(m.affilicard_listings);
 	const extras = asArray(m.affilicard_extras);
 
@@ -42,6 +43,13 @@ export function ProductSettingsPanel() {
 				<StockStatusSelect
 					value={stockStatus}
 					onChange={(v) => patch({ affilicard_stock_status: v })}
+				/>
+				<TextControl
+					type="date"
+					label={__('発売日（予約商品・任意）', 'affilicard')}
+					help={__('未来の日付を入れると発売日まで予約カード表示になります', 'affilicard')}
+					value={releaseDate}
+					onChange={(v) => patch({ affilicard_release_date: v })}
 				/>
 			</PanelBody>
 			<PanelBody title={__('追加情報', 'affilicard')} initialOpen={false}>

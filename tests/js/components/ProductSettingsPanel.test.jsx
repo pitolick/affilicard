@@ -31,6 +31,34 @@ describe( 'ProductSettingsPanel', () => {
 		expect( screen.getByText( 'listing がありません' ) ).toBeInTheDocument();
 	} );
 
+	test( '発売日コントロールが描画される', async () => {
+		setEntityMeta( {
+			affilicard_product_type: 'ebook',
+			affilicard_stock_status: 'available',
+			affilicard_listings: [],
+			affilicard_extras: [],
+			affilicard_release_date: '2026-12-31',
+		} );
+		render( <ProductSettingsPanel /> );
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+		const input = screen.getByLabelText( '発売日（予約商品・任意）' );
+		expect( input ).toBeInTheDocument();
+		expect( input ).toHaveValue( '2026-12-31' );
+	} );
+
+	test( '発売日の変更で affilicard_release_date が patch される', async () => {
+		setEntityMeta( {
+			affilicard_listings: [],
+			affilicard_extras: [],
+			affilicard_release_date: '',
+		} );
+		render( <ProductSettingsPanel /> );
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+		const input = screen.getByLabelText( '発売日（予約商品・任意）' );
+		fireEvent.change( input, { target: { value: '2027-03-01' } } );
+		expect( input ).toHaveValue( '2027-03-01' );
+	} );
+
 	// 回帰防止: setMeta(object) で meta が更新され再レンダーされること。
 	// 以前 setMeta を更新関数形式にしたところ useEntityProp が関数を解釈せず
 	// listing 追加が反映されない不具合があった（E2E で発覚）。

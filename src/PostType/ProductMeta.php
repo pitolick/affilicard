@@ -89,5 +89,20 @@ final class ProductMeta {
 				},
 			)
 		);
+
+		register_post_meta(
+			ProductPostType::POST_TYPE,
+			ProductPostType::META_RELEASE_DATE,
+			array(
+				'type'              => 'string',
+				'single'            => true,
+				'default'           => '',
+				'show_in_rest'      => true,
+				'auth_callback'     => $auth,
+				'sanitize_callback' => static function ( $value ) {
+					return ProductSchema::sanitizeReleaseDate( $value );
+				},
+			)
+		);
 	}
 }
