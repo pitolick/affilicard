@@ -27,6 +27,8 @@ final class CardPreviewControllerTest extends TestCase {
 		WP_Mock::userFunction( 'get_option' )->andReturn( array() );
 		// featured image → get_post_thumbnail_id を 0（サムネイルなし）で返す
 		WP_Mock::userFunction( 'get_post_thumbnail_id' )->andReturn( 0 );
+		// build() が呼ぶ current_time を固定（発売日なし商品は is_preorder=false のまま）
+		WP_Mock::userFunction( 'current_time', array( 'return' => '2026-06-29' ) );
 	}
 
 	public function tearDown(): void {

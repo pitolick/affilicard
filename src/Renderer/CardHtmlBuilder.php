@@ -58,6 +58,10 @@ final class CardHtmlBuilder {
 		$hidden_keys = null !== $type ? $type->cardHiddenKeys() : array();
 		$media_label = null !== $type ? $type->cardMediaLabel() : (string) __( '商品画像', 'affilicard' );
 
+		$release_date = isset( $product['release_date'] ) ? (string) $product['release_date'] : '';
+		$today        = (string) current_time( 'Y-m-d' );
+		$is_preorder  = \Affilicard\Stock\ReleaseDate::isPreorder( $release_date, $today );
+
 		$options = array(
 			'hide_platforms'      => $hide_platforms,
 			'only_platforms'      => $only_platforms,
@@ -72,6 +76,8 @@ final class CardHtmlBuilder {
 			'hidden_keys'         => $hidden_keys,
 			'media_label'         => $media_label,
 			'cta_label_overrides' => $cta_overrides,
+			'is_preorder'         => $is_preorder,
+			'release_date_label'  => $is_preorder ? \Affilicard\Stock\ReleaseDate::label( $release_date ) : '',
 		);
 
 		return ( new CardRenderer() )->render( $product, $platforms, $options );

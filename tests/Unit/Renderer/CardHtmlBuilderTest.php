@@ -18,6 +18,33 @@ final class CardHtmlBuilderTest extends TestCase {
 		WP_Mock::userFunction( 'sanitize_hex_color', array( 'return_arg' => 0 ) );
 	}
 
+	/**
+	 * テスト用商品配列を生成するヘルパ。デフォルト値に $overrides をマージして返す。
+	 *
+	 * @param array<string, mixed> $overrides
+	 * @return array<string, mixed>
+	 */
+	private function productWith( array $overrides = array() ): array {
+		$defaults = array(
+			'id'           => 1,
+			'title'        => 'テスト商品',
+			'content'      => '',
+			'status'       => 'publish',
+			'product_type' => 'generic',
+			'stock_status' => 'available',
+			'extras'       => array(),
+			'listings'     => array(
+				array(
+					'platform'      => 'dmm-books',
+					'enabled'       => true,
+					'affiliate_url' => 'https://al.dmm.com/x',
+				),
+			),
+			'modified'     => '',
+		);
+		return array_merge( $defaults, $overrides );
+	}
+
 	protected function tearDown(): void {
 		WP_Mock::tearDown();
 	}
@@ -65,6 +92,7 @@ final class CardHtmlBuilderTest extends TestCase {
 		\WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing(
 			static fn( $v ) => is_string( $v ) ? trim( $v ) : ''
 		);
+		WP_Mock::userFunction( 'current_time', array( 'return' => '2026-06-29' ) );
 
 		$builder = new CardHtmlBuilder();
 		$product = array(
@@ -116,6 +144,7 @@ final class CardHtmlBuilderTest extends TestCase {
 		\WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing(
 			static fn( $v ) => is_string( $v ) ? trim( $v ) : ''
 		);
+		WP_Mock::userFunction( 'current_time', array( 'return' => '2026-06-29' ) );
 
 		$builder = new CardHtmlBuilder();
 		$product = array(
@@ -139,5 +168,62 @@ final class CardHtmlBuilderTest extends TestCase {
 		$html = $builder->build( $product, array( 'ctaLabelOverrides' => array( 'dmm-books' => 'ブロック上書き' ) ) );
 		$this->assertStringContainsString( 'ブロック上書き', $html );
 		$this->assertStringNotContainsString( 'この値段で読む →', $html );
+	}
+
+	public function test_future_release_date_renders_preorder(): void {
+		WP_Mock::userFunction( 'current_time', array( 'return' => '2026-06-29' ) );
+		\WP_Mock::userFunction( 'get_option' )->andReturn(
+			array(
+				array(
+					'code'             => 'dmm-books',
+					'name'             => 'DMMブックス',
+					'provider'         => 'dmm-ebook',
+					'displayOrder'     => 1,
+					'enabled'          => true,
+					'applicableTypes'  => array( 'ebook' ),
+					'buttonLabel'      => 'この値段で読む →',
+					'brandColor'       => '#d72d65',
+					'buttonTextColor'  => '#ffffff',
+					'autoRefresh'      => true,
+					'refreshFrequency' => 'weekly',
+				),
+			)
+		);
+		\WP_Mock::userFunction( 'get_post_thumbnail_id' )->andReturn( 0 );
+		\WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing(
+			static fn( $v ) => is_string( $v ) ? trim( $v ) : ''
+		);
+		$product = $this->productWith( array( 'release_date' => '2026-07-17' ) );
+		$html    = ( new \Affilicard\Renderer\CardHtmlBuilder() )->build( $product, array() );
+		$this->assertStringContainsString( '予約受付中', $html );
+		$this->assertStringContainsString( '予約する', $html );
+	}
+
+	public function test_past_release_date_renders_normal(): void {
+		WP_Mock::userFunction( 'current_time', array( 'return' => '2026-08-01' ) );
+		\WP_Mock::userFunction( 'get_option' )->andReturn(
+			array(
+				array(
+					'code'             => 'dmm-books',
+					'name'             => 'DMMブックス',
+					'provider'         => 'dmm-ebook',
+					'displayOrder'     => 1,
+					'enabled'          => true,
+					'applicableTypes'  => array( 'ebook' ),
+					'buttonLabel'      => 'この値段で読む →',
+					'brandColor'       => '#d72d65',
+					'buttonTextColor'  => '#ffffff',
+					'autoRefresh'      => true,
+					'refreshFrequency' => 'weekly',
+				),
+			)
+		);
+		\WP_Mock::userFunction( 'get_post_thumbnail_id' )->andReturn( 0 );
+		\WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing(
+			static fn( $v ) => is_string( $v ) ? trim( $v ) : ''
+		);
+		$product = $this->productWith( array( 'release_date' => '2026-07-17' ) );
+		$html    = ( new \Affilicard\Renderer\CardHtmlBuilder() )->build( $product, array() );
+		$this->assertStringNotContainsString( '予約受付中', $html );
 	}
 }
