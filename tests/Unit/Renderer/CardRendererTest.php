@@ -518,7 +518,7 @@ final class CardRendererTest extends TestCase {
 	}
 
 	private function dmmBooks(): PlatformDefinition {
-		return new PlatformDefinition( 'dmm-books', 'DMMブックス', 'dmm-ebook', 1, true, array( 'ebook' ), 'この値段で読む →', '#d72d65', '#ffffff' );
+		return new PlatformDefinition( 'dmm-books', 'DMMブックス', 'dmm-ebook', 1, true, array( 'ebook' ), 'DMMブックスで読む', '#d72d65', '#ffffff' );
 	}
 
 	private function makePlatform( string $code, string $name, string $buttonLabel ): PlatformDefinition {
@@ -590,7 +590,7 @@ final class CardRendererTest extends TestCase {
 			)
 		);
 		$html    = ( new CardRenderer() )->render( $product, array( $this->dmmBooks() ) );
-		$this->assertStringContainsString( 'この値段で読む →', $html );
+		$this->assertStringContainsString( 'DMMブックスで読む', $html );
 		$this->assertStringContainsString( 'var(--affilicard-cta-bg,#d72d65)', $html );
 	}
 
@@ -994,6 +994,14 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( '2026年7月17日発売', $html );
 		$this->assertStringContainsString( '予約する', $html );
 		$this->assertStringContainsString( 'https://aff.example/x', $html ); // CTA は隠れない
+		// バッジと発売日が同一の flex コンテナ内に収まることを確認する。
+		$this->assertStringContainsString( 'affilicard-card__preorder', $html );
+		$preorder_pos    = strpos( $html, 'affilicard-card__preorder' );
+		$badge_pos       = strpos( $html, 'affilicard-card__badge--preorder' );
+		$release_pos     = strpos( $html, '2026年7月17日発売' );
+		$preorder_end    = strpos( $html, '</div>', (int) $preorder_pos );
+		$this->assertGreaterThan( $preorder_pos, $badge_pos );
+		$this->assertLessThan( $preorder_end, $release_pos );
 	}
 
 	public function test_not_preorder_uses_platform_label_and_no_badge(): void {
