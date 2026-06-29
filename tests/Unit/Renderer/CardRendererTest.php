@@ -965,4 +965,90 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( '2026年4月18日時点の価格', $html );
 		$this->assertStringNotContainsString( '2026年4月25日', $html );
 	}
+
+	private function availableWithCta(): array {
+		return $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'      => 'example-store',
+						'enabled'       => true,
+						'affiliate_url' => 'https://aff.example/x',
+					),
+				),
+			)
+		);
+	}
+
+	public function test_preorder_shows_badge_release_date_and_reserve_cta(): void {
+		$html = ( new CardRenderer() )->render(
+			$this->availableWithCta(),
+			array( $this->store() ),
+			array(
+				'is_preorder'        => true,
+				'release_date_label' => '2026年7月17日発売',
+			)
+		);
+		$this->assertStringContainsString( 'affilicard-card__badge--preorder', $html );
+		$this->assertStringContainsString( '予約受付中', $html );
+		$this->assertStringContainsString( '2026年7月17日発売', $html );
+		$this->assertStringContainsString( '予約する', $html );
+		$this->assertStringContainsString( 'https://aff.example/x', $html ); // CTA は隠れない
+	}
+
+	public function test_not_preorder_uses_platform_label_and_no_badge(): void {
+		$html = ( new CardRenderer() )->render(
+			$this->availableWithCta(),
+			array( $this->store() ),
+			array( 'is_preorder' => false )
+		);
+		$this->assertStringNotContainsString( 'affilicard-card__badge--preorder', $html );
+		$this->assertStringContainsString( 'ストアで見る', $html );
+	}
+
+	public function test_explicit_cta_override_wins_over_preorder(): void {
+		$html = ( new CardRenderer() )->render(
+			$this->availableWithCta(),
+			array( $this->store() ),
+			array(
+				'is_preorder'         => true,
+				'cta_label_overrides' => array( 'example-store' => 'いますぐ見る' ),
+			)
+		);
+		$this->assertStringContainsString( 'いますぐ見る', $html );
+		$this->assertStringNotContainsString( '予約する', $html );
+	}
+
+	public function test_listing_override_wins_over_preorder(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'              => 'example-store',
+						'enabled'               => true,
+						'affiliate_url'         => 'https://aff.example/x',
+						'button_label_override' => 'いますぐ予約',
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render(
+			$product,
+			array( $this->store() ),
+			array( 'is_preorder' => true )
+		);
+		$this->assertStringContainsString( 'いますぐ予約', $html );
+		$this->assertStringNotContainsString( '予約する', $html );
+	}
+
+	public function test_preorder_without_release_date_label_omits_date_line(): void {
+		$html = ( new CardRenderer() )->render(
+			$this->availableWithCta(),
+			array( $this->store() ),
+			array( 'is_preorder' => true )
+		);
+		$this->assertStringContainsString( 'affilicard-card__badge--preorder', $html );
+		$this->assertStringContainsString( '予約受付中', $html );
+		$this->assertStringNotContainsString( 'affilicard-card__release-date', $html );
+	}
 }

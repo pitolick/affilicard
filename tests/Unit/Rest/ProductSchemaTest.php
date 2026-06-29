@@ -184,6 +184,26 @@ final class ProductSchemaTest extends TestCase {
 		$this->assertSame( 'u-next', $clean['listings'][0]['platform'] );
 	}
 
+	public function test_sanitize_item_keeps_valid_release_date(): void {
+		$out = \Affilicard\Rest\ProductSchema::sanitizeItem(
+			array(
+				'title'        => 'X 5巻',
+				'release_date' => '2026-07-17',
+			)
+		);
+		$this->assertSame( '2026-07-17', $out['release_date'] );
+	}
+
+	public function test_sanitize_item_clears_invalid_release_date(): void {
+		$out = \Affilicard\Rest\ProductSchema::sanitizeItem(
+			array(
+				'title'        => 'X 5巻',
+				'release_date' => '2026/07/17',
+			)
+		);
+		$this->assertSame( '', $out['release_date'] );
+	}
+
 	public function test_updateArgs_is_partial_no_required_no_defaults(): void {
 		// PATCH（部分更新）用 args は required / default を持たず、
 		// 未指定フィールドが null（未送信）扱いになるようにする。

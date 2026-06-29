@@ -51,6 +51,7 @@ final class BlockTest extends TestCase {
 		$this->mockFoundPost( 7, '解決された商品' );
 		WP_Mock::userFunction( 'get_option', array( 'return' => array() ) );
 		WP_Mock::userFunction( 'get_post_thumbnail_id', array( 'return' => 0 ) );
+		WP_Mock::userFunction( 'current_time', array( 'return' => '2026-06-29' ) );
 
 		$block = new Block( new ProductRepository(), new ProductAutoCreator( new ProviderRegistry(), new ProductRepository() ) );
 		$html  = $block->render( array( 'productId' => 7 ) );
@@ -81,6 +82,7 @@ final class BlockTest extends TestCase {
 		$this->mockFoundPost( 7, '解決された商品' );
 		WP_Mock::userFunction( 'get_option', array( 'return' => array() ) );
 		WP_Mock::userFunction( 'get_post_thumbnail_id', array( 'return' => 0 ) );
+		WP_Mock::userFunction( 'current_time', array( 'return' => '2026-06-29' ) );
 
 		$block = new Block( new ProductRepository(), new ProductAutoCreator( new ProviderRegistry(), new ProductRepository() ) );
 		$html  = $block->render( array( 'slug' => 'my-slug' ) );
@@ -93,6 +95,7 @@ final class BlockTest extends TestCase {
 		$this->mockFoundPost( 7, '解決された商品' );
 		WP_Mock::userFunction( 'get_option', array( 'return' => array() ) );
 		WP_Mock::userFunction( 'get_post_thumbnail_id', array( 'return' => 0 ) );
+		WP_Mock::userFunction( 'current_time', array( 'return' => '2026-06-29' ) );
 
 		$block = new Block( new ProductRepository(), new ProductAutoCreator( new ProviderRegistry(), new ProductRepository() ) );
 		$html  = $block->render(
@@ -121,6 +124,7 @@ final class BlockTest extends TestCase {
 		$this->mockFoundPost( 7, '解決された商品' );
 		WP_Mock::userFunction( 'get_option', array( 'return' => array() ) );
 		WP_Mock::userFunction( 'get_post_thumbnail_id', array( 'return' => 0 ) );
+		WP_Mock::userFunction( 'current_time', array( 'return' => '2026-06-29' ) );
 
 		$block = new Block( new ProductRepository(), new ProductAutoCreator( new ProviderRegistry(), new ProductRepository() ) );
 		$html  = $block->render(
@@ -203,6 +207,7 @@ final class BlockTest extends TestCase {
 		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
 		WP_Mock::userFunction( 'set_transient' )->andReturn( true );
 		WP_Mock::userFunction( 'get_post_thumbnail_id' )->andReturn( 0 );
+		WP_Mock::userFunction( 'current_time', array( 'return' => '2026-06-29' ) );
 
 		$block = new Block( $repo, new ProductAutoCreator( $registry, $repo ) );
 		$html  = $block->render(
@@ -254,6 +259,7 @@ final class BlockTest extends TestCase {
 
 		WP_Mock::userFunction( 'get_option', array( 'return' => array() ) );
 		WP_Mock::userFunction( 'get_post_thumbnail_id', array( 'return' => 0 ) );
+		WP_Mock::userFunction( 'current_time', array( 'return' => '2026-06-29' ) );
 
 		$block = new Block( new ProductRepository(), new ProductAutoCreator( new ProviderRegistry(), new ProductRepository() ) );
 		$html  = $block->render( array( 'productId' => 42 ) );

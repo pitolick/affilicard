@@ -89,6 +89,39 @@ $p_disc = $repo->save(
 	)
 );
 
+// 予約（発売前）商品: release_date が未来 → カードは「予約受付中」バッジ＋CTA「予約する」＋発売日を表示する。
+$p_preorder = $repo->save(
+	array(
+		'title'        => 'サンプル新刊 5巻（予約・発売前）',
+		'status'       => 'publish',
+		'product_type' => 'ebook',
+		'stock_status' => 'available',
+		'release_date' => gmdate( 'Y-m-d', time() + ( 30 * DAY_IN_SECONDS ) ),
+		'content'      => "<!-- wp:paragraph -->\n<p>発売前の新刊サンプル。発売日までは予約カード（予約受付中バッジ・CTA「予約する」・発売日表示）になり、発売日を過ぎると自動で通常表示へ戻る確認用ダミーデータ。</p>\n<!-- /wp:paragraph -->",
+		'listings'     => array( $listing( 'dmm-books', 'https://example.com/aff-preorder', '700' ) ),
+		'extras'       => array(
+			array( 'key' => 'author', 'label' => '著者', 'value' => '架空 花子' ),
+			array( 'key' => 'publisher', 'label' => '出版社', 'value' => 'サンプル出版社' ),
+		),
+	)
+);
+
+// 発売済み（release_date が過去）商品: 予約表示にならず通常カードになる対照サンプル。
+$p_released = $repo->save(
+	array(
+		'title'        => 'サンプル既刊 1巻（発売済み・対照）',
+		'status'       => 'publish',
+		'product_type' => 'ebook',
+		'stock_status' => 'available',
+		'release_date' => gmdate( 'Y-m-d', time() - ( 30 * DAY_IN_SECONDS ) ),
+		'listings'     => array( $listing( 'dmm-books', 'https://example.com/aff-released', '600' ) ),
+		'extras'       => array(
+			array( 'key' => 'author', 'label' => '著者', 'value' => '架空 花子' ),
+			array( 'key' => 'publisher', 'label' => '出版社', 'value' => 'サンプル出版社' ),
+		),
+	)
+);
+
 $block = static function ( int $id, array $attrs = array() ): string {
 	$a = array_merge( array( 'productId' => $id ), $attrs );
 	return '<!-- wp:affilicard/product-card ' . wp_json_encode( $a ) . ' /-->';
@@ -98,6 +131,11 @@ $content = implode(
 	"\n\n",
 	array(
 		'<!-- wp:heading --><h2>Affilicard デモ（ダミーデータ）</h2><!-- /wp:heading -->',
+		'<!-- wp:heading {"level":3} --><h3>予約（発売前）カード確認</h3><!-- /wp:heading -->',
+		'<!-- wp:paragraph --><p>上＝発売前（予約受付中・「予約する」・発売日表示）／下＝発売済み（通常表示）。発売日を過ぎると上のカードも自動で通常表示へ戻ります。</p><!-- /wp:paragraph -->',
+		$block( $p_preorder ),
+		$block( $p_released ),
+		'<!-- wp:heading {"level":3} --><h3>各種カード表示</h3><!-- /wp:heading -->',
 		$block(
 			$p_ebook,
 			array(

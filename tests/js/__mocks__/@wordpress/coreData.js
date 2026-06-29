@@ -9,6 +9,8 @@
 const React = require( 'react' );
 
 let initialMeta = {};
+let lastSetterCall = null;
+
 const setEntityMeta = ( meta ) => {
 	initialMeta = { ...meta };
 };
@@ -23,6 +25,7 @@ const useEntityProp = ( kind, name, prop ) => {
 				'useEntityProp setter does not accept updater functions'
 			);
 		}
+		lastSetterCall = next;
 		setMetaState( ( prev ) => ( { ...( prev || {} ), ...next } ) );
 	};
 	return [ meta, setValue ];
@@ -32,5 +35,12 @@ module.exports = {
 	__esModule: true,
 	useEntityProp,
 	setEntityMeta,
-	_reset: () => ( initialMeta = {} ),
+	_reset: () => {
+		initialMeta = {};
+		lastSetterCall = null;
+	},
+	getLastSetterCall: () => lastSetterCall,
+	clearLastSetterCall: () => {
+		lastSetterCall = null;
+	},
 };

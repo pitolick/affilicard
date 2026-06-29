@@ -41,6 +41,9 @@ final class CardRenderer {
 		$stock        = StockStatus::normalize( isset( $product['stock_status'] ) ? (string) $product['stock_status'] : null );
 		$is_available = StockStatus::AVAILABLE === $stock;
 
+		$is_preorder        = $is_available && ! empty( $options['is_preorder'] );
+		$release_date_label = isset( $options['release_date_label'] ) ? (string) $options['release_date_label'] : '';
+
 		$extras = isset( $product['extras'] ) && is_array( $product['extras'] ) ? $product['extras'] : array();
 
 		$style = $this->rootStyle( $colors );
@@ -66,6 +69,13 @@ final class CardRenderer {
 			$html .= '<span class="affilicard-card__badge affilicard-card__badge--' . esc_attr( $stock ) . '">' . esc_html( StockStatus::label( $stock ) ) . '</span>';
 		}
 
+		if ( $is_preorder ) {
+			$html .= '<span class="affilicard-card__badge affilicard-card__badge--preorder">' . esc_html__( '予約受付中', 'affilicard' ) . '</span>';
+			if ( '' !== $release_date_label ) {
+				$html .= '<div class="affilicard-card__release-date">' . esc_html( $release_date_label ) . '</div>';
+			}
+		}
+
 		$content = (string) ( $product['content'] ?? '' );
 		if ( '' !== $content ) {
 			$html .= '<div class="affilicard-card__desc">' . wp_kses_post( $content ) . '</div>';
@@ -79,7 +89,8 @@ final class CardRenderer {
 				$by_code,
 				$hide,
 				$only,
-				$cta_overrides
+				$cta_overrides,
+				$is_preorder
 			);
 		}
 
@@ -276,7 +287,7 @@ final class CardRenderer {
 		return $out;
 	}
 
-	private function renderListings( array $listings, array $by_code, array $hide, array $only, array $cta_overrides = array() ): string {
+	private function renderListings( array $listings, array $by_code, array $hide, array $only, array $cta_overrides = array(), bool $is_preorder = false ): string {
 		$rows = '';
 		foreach ( $this->visibleListings( $listings, $by_code, $hide, $only ) as $listing ) {
 			$code     = (string) $listing['platform'];
@@ -295,6 +306,8 @@ final class CardRenderer {
 				$label = $block_override;
 			} elseif ( '' !== $override ) {
 				$label = $override;
+			} elseif ( $is_preorder ) {
+				$label = (string) __( '予約する', 'affilicard' );
 			} else {
 				$label = $platform->buttonLabel;
 			}

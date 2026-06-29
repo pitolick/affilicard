@@ -99,6 +99,9 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 101, ProductPostType::META_SCHEMA_VERSION, true )
 			->andReturn( SchemaVersion::CURRENT );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 101, ProductPostType::META_RELEASE_DATE, true )
+			->andReturn( '' );
 
 		$repo   = new ProductRepository();
 		$result = $repo->find( 101 );
@@ -114,6 +117,33 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertSame( $listings, $result['listings'] );
 		$this->assertSame( SchemaVersion::CURRENT, $result['schema_version'] );
 		$this->assertSame( '2026-05-29 12:00:00', $result['modified'] );
+	}
+
+	public function test_find_includes_release_date(): void {
+		$post = (object) array(
+			'ID'            => 7,
+			'post_type'     => \Affilicard\PostType\ProductPostType::POST_TYPE,
+			'post_title'    => 'X 5巻',
+			'post_content'  => '',
+			'post_status'   => 'publish',
+			'post_modified' => '2026-06-01 00:00:00',
+		);
+		WP_Mock::userFunction( 'get_post', array( 'return' => $post ) );
+		WP_Mock::userFunction(
+			'get_post_meta',
+			array(
+				'return' => function ( $id, $key, $single ) {
+					if ( \Affilicard\PostType\ProductPostType::META_RELEASE_DATE === $key ) {
+						return '2026-07-17';
+					}
+					return '';
+				},
+			)
+		);
+		// StockStatus::normalize 用に空→available。JsonField decode は配列以外で array() を返す。
+		$repo = new \Affilicard\Repository\ProductRepository();
+		$out  = $repo->find( 7 );
+		$this->assertSame( '2026-07-17', $out['release_date'] );
 	}
 
 	public function test_find_by_external_id_returns_first_match(): void {
@@ -413,7 +443,7 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertNull( $repo->findBySlug( 'missing' ) );
 	}
 
-	public function test_saveMeta_calls_update_post_meta_for_five_keys_and_does_not_call_insert_or_update_post(): void {
+	public function test_saveMeta_calls_update_post_meta_for_all_keys_and_does_not_call_insert_or_update_post(): void {
 		// wp_update_post / wp_insert_post should never be called.
 		WP_Mock::userFunction( 'wp_update_post' )->never();
 		WP_Mock::userFunction( 'wp_insert_post' )->never();
@@ -460,6 +490,7 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertContains( ProductPostType::META_EXTRAS, $called_keys );
 		$this->assertContains( ProductPostType::META_LISTINGS, $called_keys );
 		$this->assertContains( ProductPostType::META_SCHEMA_VERSION, $called_keys );
+		$this->assertContains( ProductPostType::META_RELEASE_DATE, $called_keys );
 	}
 
 	public function test_saveMeta_uses_generic_when_product_type_empty(): void {

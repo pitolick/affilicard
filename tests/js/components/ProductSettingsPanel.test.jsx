@@ -1,7 +1,7 @@
 jest.mock( '../../../src/Admin/api/platforms' );
 
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { setEntityMeta, _reset } from '@wordpress/core-data';
+import { setEntityMeta, _reset, getLastSetterCall, clearLastSetterCall } from '@wordpress/core-data';
 import { fetchPlatforms } from '../../../src/Admin/api/platforms';
 import { ProductSettingsPanel } from '../../../src/Admin/components/ProductSettingsPanel';
 
@@ -29,6 +29,39 @@ describe( 'ProductSettingsPanel', () => {
 		render( <ProductSettingsPanel /> );
 		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
 		expect( screen.getByText( 'listing がありません' ) ).toBeInTheDocument();
+	} );
+
+	test( '発売日コントロールが描画される', async () => {
+		setEntityMeta( {
+			affilicard_product_type: 'ebook',
+			affilicard_stock_status: 'available',
+			affilicard_listings: [],
+			affilicard_extras: [],
+			affilicard_release_date: '2026-12-31',
+		} );
+		render( <ProductSettingsPanel /> );
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+		const input = screen.getByLabelText( '発売日（予約商品・任意）' );
+		expect( input ).toBeInTheDocument();
+		expect( input ).toHaveValue( '2026-12-31' );
+	} );
+
+	test( '発売日の変更で affilicard_release_date が patch される', async () => {
+		setEntityMeta( {
+			affilicard_listings: [],
+			affilicard_extras: [],
+			affilicard_release_date: '',
+		} );
+		render( <ProductSettingsPanel /> );
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+		const input = screen.getByLabelText( '発売日（予約商品・任意）' );
+		clearLastSetterCall();
+		fireEvent.change( input, { target: { value: '2027-03-01' } } );
+		expect( input ).toHaveValue( '2027-03-01' );
+		// meta setter が正しい affilicard_release_date を持つオブジェクトで呼ばれたことを確認
+		expect( getLastSetterCall() ).toEqual( expect.objectContaining( {
+			affilicard_release_date: '2027-03-01',
+		} ) );
 	} );
 
 	// 回帰防止: setMeta(object) で meta が更新され再レンダーされること。

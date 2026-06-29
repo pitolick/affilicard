@@ -137,4 +137,30 @@ final class ProductMetaTest extends TestCase {
 		$twice = $cb( $once );
 		$this->assertSame( $once, $twice );
 	}
+
+	public function test_registers_release_date_as_string_meta(): void {
+		$reg = $this->captureRegistrations();
+
+		$this->assertArrayHasKey( ProductPostType::META_RELEASE_DATE, $reg );
+		[ $post_type, $args ] = $reg[ ProductPostType::META_RELEASE_DATE ];
+		$this->assertSame( ProductPostType::POST_TYPE, $post_type );
+		$this->assertSame( 'string', $args['type'] );
+		$this->assertTrue( $args['single'] );
+		$this->assertSame( '', $args['default'] );
+		$this->assertTrue( $args['show_in_rest'] );
+		$this->assertIsCallable( $args['auth_callback'] );
+		$this->assertIsCallable( $args['sanitize_callback'] );
+	}
+
+	public function test_release_date_sanitize_callback_delegates_to_product_schema(): void {
+		$reg = $this->captureRegistrations();
+		$cb  = $reg[ ProductPostType::META_RELEASE_DATE ][1]['sanitize_callback'];
+
+		// 正当な YYYY-MM-DD はそのまま返す
+		$this->assertSame( '2026-12-31', $cb( '2026-12-31' ) );
+
+		// 不正な値は空文字を返す
+		$this->assertSame( '', $cb( 'not-a-date' ) );
+		$this->assertSame( '', $cb( '' ) );
+	}
 }
