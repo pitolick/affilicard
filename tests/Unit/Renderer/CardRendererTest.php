@@ -996,10 +996,10 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( 'https://aff.example/x', $html ); // CTA は隠れない
 		// バッジと発売日が同一の flex コンテナ内に収まることを確認する。
 		$this->assertStringContainsString( 'affilicard-card__preorder', $html );
-		$preorder_pos    = strpos( $html, 'affilicard-card__preorder' );
-		$badge_pos       = strpos( $html, 'affilicard-card__badge--preorder' );
-		$release_pos     = strpos( $html, '2026年7月17日発売' );
-		$preorder_end    = strpos( $html, '</div>', (int) $preorder_pos );
+		$preorder_pos = strpos( $html, 'affilicard-card__preorder' );
+		$badge_pos    = strpos( $html, 'affilicard-card__badge--preorder' );
+		$release_pos  = strpos( $html, '2026年7月17日発売' );
+		$preorder_end = strpos( $html, '</div>', (int) $preorder_pos );
 		$this->assertGreaterThan( $preorder_pos, $badge_pos );
 		$this->assertLessThan( $preorder_end, $release_pos );
 	}
