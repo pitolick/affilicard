@@ -91,7 +91,8 @@
 .affilicard-card__title,
 .affilicard-card__desc,
 .affilicard-card__extras,
-.affilicard-card__badge {
+.affilicard-card__badge,
+.affilicard-card__preorder {
 	margin-left: 20px;
 	margin-right: 20px;
 }
@@ -140,8 +141,21 @@
 	color: #92400e;
 }
 
-.affilicard-card__release-date {
+.affilicard-card__preorder {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	flex-wrap: wrap;
 	margin-top: 0.25rem;
+}
+
+.affilicard-card__preorder .affilicard-card__badge {
+	margin-top: 0;
+	margin-left: 0;
+	margin-right: 0;
+}
+
+.affilicard-card__release-date {
 	font-size: 0.85em;
 	font-weight: 600;
 	color: #b45309;

@@ -70,10 +70,12 @@ final class CardRenderer {
 		}
 
 		if ( $is_preorder ) {
+			$html .= '<div class="affilicard-card__preorder">';
 			$html .= '<span class="affilicard-card__badge affilicard-card__badge--preorder">' . esc_html__( '予約受付中', 'affilicard' ) . '</span>';
 			if ( '' !== $release_date_label ) {
-				$html .= '<div class="affilicard-card__release-date">' . esc_html( $release_date_label ) . '</div>';
+				$html .= '<span class="affilicard-card__release-date">' . esc_html( $release_date_label ) . '</span>';
 			}
+			$html .= '</div>';
 		}
 
 		$content = (string) ( $product['content'] ?? '' );
