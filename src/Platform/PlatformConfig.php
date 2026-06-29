@@ -99,7 +99,7 @@ final class PlatformConfig {
 				1,
 				true,
 				array( 'ebook' ),
-				__( 'この値段で読む →', 'affilicard' ),
+				__( 'DMMブックスで読む', 'affilicard' ),
 				'#d72d65',
 				'#ffffff',
 				true,
