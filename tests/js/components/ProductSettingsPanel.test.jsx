@@ -64,6 +64,23 @@ describe( 'ProductSettingsPanel', () => {
 		} ) );
 	} );
 
+	test( 'マスク設定を meta に保存する', async () => {
+		setEntityMeta( {
+			affilicard_product_type: 'ebook',
+			affilicard_stock_status: 'available',
+			affilicard_listings: [],
+			affilicard_extras: [],
+			affilicard_mask_blur: false,
+			affilicard_mask_r18: false,
+			affilicard_mask_label: '',
+		} );
+		render( <ProductSettingsPanel /> );
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+		clearLastSetterCall();
+		fireEvent.click( screen.getByLabelText( '表紙にぼかしを掛ける' ) );
+		expect( getLastSetterCall() ).toMatchObject( { affilicard_mask_blur: true } );
+	} );
+
 	// 回帰防止: setMeta(object) で meta が更新され再レンダーされること。
 	// 以前 setMeta を更新関数形式にしたところ useEntityProp が関数を解釈せず
 	// listing 追加が反映されない不具合があった（E2E で発覚）。
