@@ -33,6 +33,9 @@
 		"ctaLabelOverrides": {
 			"type": "object",
 			"default": {}
-		}
+		},
+		"maskBlur": { "type": "boolean" },
+		"maskR18": { "type": "boolean" },
+		"maskLabel": { "type": "string" }
 	}
 }

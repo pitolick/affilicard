@@ -75,6 +75,9 @@ describe( 'Edit', () => {
 			ctaTextColor: undefined,
 			cardBgColor: undefined,
 			cardBorderColor: undefined,
+			maskBlur: undefined,
+			maskR18: undefined,
+			maskLabel: '',
 		} );
 	} );
 
@@ -354,6 +357,28 @@ describe( 'Edit', () => {
 			// button の親の button（option ボタン）をクリック
 			fireEvent.click( button.closest( 'button' ) );
 			expect( setAttributes ).toHaveBeenCalledWith( { productId: 7 } );
+		} );
+	} );
+
+	// Task 5: 表紙マスクパネル
+	describe( '表紙マスクパネル', () => {
+		test( '表紙マスクのトグルで属性を設定する', async () => {
+			const setAttributes = jest.fn();
+			render( <Edit attributes={ { productId: 5 } } setAttributes={ setAttributes } /> );
+			// 「表紙にぼかしを掛ける」チェックボックス
+			// productId 選択時の非同期 effect（getProduct / getCardPreview）が act() 外で
+			// state 更新しないよう、findByLabelText で解決を待ってから操作する。
+			fireEvent.click( await screen.findByLabelText( '表紙にぼかしを掛ける' ) );
+			expect( setAttributes ).toHaveBeenCalledWith( { maskBlur: true } );
+		} );
+
+		test( 'R18 ラベル入力で maskLabel を設定する', async () => {
+			const setAttributes = jest.fn();
+			render( <Edit attributes={ { productId: 5 } } setAttributes={ setAttributes } /> );
+			fireEvent.change( await screen.findByLabelText( 'ラベルテキスト（任意）' ), {
+				target: { value: '成人向け表現を含みます' },
+			} );
+			expect( setAttributes ).toHaveBeenCalledWith( { maskLabel: '成人向け表現を含みます' } );
 		} );
 	} );
 
