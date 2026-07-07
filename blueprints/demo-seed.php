@@ -100,8 +100,16 @@ $p_preorder = $repo->save(
 		'content'      => "<!-- wp:paragraph -->\n<p>発売前の新刊サンプル。発売日までは予約カード（予約受付中バッジ・CTA「予約する」・発売日表示）になり、発売日を過ぎると自動で通常表示へ戻る確認用ダミーデータ。</p>\n<!-- /wp:paragraph -->",
 		'listings'     => array( $listing( 'dmm-books', 'https://example.com/aff-preorder', '700' ) ),
 		'extras'       => array(
-			array( 'key' => 'author', 'label' => '著者', 'value' => '架空 花子' ),
-			array( 'key' => 'publisher', 'label' => '出版社', 'value' => 'サンプル出版社' ),
+			array(
+				'key'   => 'author',
+				'label' => '著者',
+				'value' => '架空 花子',
+			),
+			array(
+				'key'   => 'publisher',
+				'label' => '出版社',
+				'value' => 'サンプル出版社',
+			),
 		),
 	)
 );
@@ -116,9 +124,64 @@ $p_released = $repo->save(
 		'release_date' => gmdate( 'Y-m-d', time() - ( 30 * DAY_IN_SECONDS ) ),
 		'listings'     => array( $listing( 'dmm-books', 'https://example.com/aff-released', '600' ) ),
 		'extras'       => array(
-			array( 'key' => 'author', 'label' => '著者', 'value' => '架空 花子' ),
-			array( 'key' => 'publisher', 'label' => '出版社', 'value' => 'サンプル出版社' ),
+			array(
+				'key'   => 'author',
+				'label' => '著者',
+				'value' => '架空 花子',
+			),
+			array(
+				'key'   => 'publisher',
+				'label' => '出版社',
+				'value' => 'サンプル出版社',
+			),
 		),
+	)
+);
+
+// 表紙マスク確認用サンプル（架空データ）。
+$p_mask_blur = $repo->save(
+	array(
+		'title'        => 'サンプル作品（ぼかしのみ）',
+		'status'       => 'publish',
+		'product_type' => 'ebook',
+		'stock_status' => 'available',
+		'mask_blur'    => true,
+		'listings'     => array( $listing( 'dmm-books', 'https://example.com/aff-blur', '700' ) ),
+	)
+);
+
+$p_mask_label = $repo->save(
+	array(
+		'title'        => 'サンプル作品（ぼかし＋ラベル）',
+		'status'       => 'publish',
+		'product_type' => 'ebook',
+		'stock_status' => 'available',
+		'mask_blur'    => true,
+		'mask_label'   => '刺激的な表現を含みます',
+		'listings'     => array( $listing( 'dmm-books', 'https://example.com/aff-label', '700' ) ),
+	)
+);
+
+$p_mask_r18 = $repo->save(
+	array(
+		'title'        => 'サンプル作品（R18・18+ バッジ）',
+		'status'       => 'publish',
+		'product_type' => 'ebook',
+		'stock_status' => 'available',
+		'mask_r18'     => true,
+		'mask_label'   => '成人向け',
+		'listings'     => array( $listing( 'dmm-books', 'https://example.com/aff-r18', '700' ) ),
+	)
+);
+
+// ブロック優先の対照: 商品側は mask 無しだが、ブロック属性でぼかしを上書きする。
+$p_mask_inherit = $repo->save(
+	array(
+		'title'        => 'サンプル作品（商品側マスク無し・ブロックで上書き）',
+		'status'       => 'publish',
+		'product_type' => 'ebook',
+		'stock_status' => 'available',
+		'listings'     => array( $listing( 'dmm-books', 'https://example.com/aff-inherit', '700' ) ),
 	)
 );
 
@@ -152,6 +215,19 @@ $content = implode(
 		),
 		$block( $p_out ),
 		$block( $p_disc ),
+		'<!-- wp:heading {"level":3} --><h3>表紙マスク確認</h3><!-- /wp:heading -->',
+		'<!-- wp:paragraph --><p>なし／ぼかしのみ／ぼかし＋ラベル／R18（18+ バッジ＋ぼかし強制）／ブロック属性でぼかしを上書き（商品側は無し）の対照。</p><!-- /wp:paragraph -->',
+		$block( $p_ebook ),
+		$block( $p_mask_blur ),
+		$block( $p_mask_label ),
+		$block( $p_mask_r18 ),
+		$block(
+			$p_mask_inherit,
+			array(
+				'maskBlur'  => true,
+				'maskLabel' => 'ブロック属性で上書き',
+			)
+		),
 	)
 );
 
