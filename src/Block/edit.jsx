@@ -69,7 +69,7 @@ export function Edit({ attributes, setAttributes }) {
 		cardBorderColor,
 		maskBlur,
 		maskR18,
-		maskLabel = '',
+		maskLabel,
 	} = attributes;
 	const [options, setOptions] = useState([]);
 	const [filter, setFilter] = useState('');
@@ -274,7 +274,7 @@ export function Edit({ attributes, setAttributes }) {
 				/>
 				<TextControl
 					label={__('ラベルテキスト（任意）', 'affilicard')}
-					value={maskLabel}
+					value={maskLabel ?? ''}
 					onChange={(value) => setAttributes({ maskLabel: value })}
 					placeholder={__('未設定（継承）', 'affilicard')}
 					__nextHasNoMarginBottom

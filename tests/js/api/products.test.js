@@ -83,6 +83,7 @@ describe( 'api/products', () => {
 		getCardPreview( 7, {} );
 		const path = apiFetch.mock.calls[ 0 ][ 0 ].path;
 		expect( path ).not.toContain( 'maskBlur' );
+		expect( path ).not.toContain( 'maskR18' );
 		expect( path ).not.toContain( 'maskLabel' );
 	} );
 } );

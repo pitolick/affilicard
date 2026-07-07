@@ -77,7 +77,7 @@ describe( 'Edit', () => {
 			cardBorderColor: undefined,
 			maskBlur: undefined,
 			maskR18: undefined,
-			maskLabel: '',
+			maskLabel: undefined,
 		} );
 	} );
 
