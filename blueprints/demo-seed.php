@@ -185,6 +185,60 @@ $p_mask_inherit = $repo->save(
 	)
 );
 
+// 表紙マスク（ぼかし／R18／ラベル）は書影 <img> に掛かるため、マスク確認用サンプルには
+// アイキャッチ（book cover 相当）が必要。GD/Imagick 非依存でダミー書影を生成するため SVG を
+// uploads に書き出して添付する（Playground の PHP に画像拡張が無くても確実に書影が出る）。
+// SVG を <img> で表示しても CSS filter: blur() は効くのでぼかしの視認に問題はない。
+$set_demo_cover = static function ( int $post_id, string $label, string $bg ): void {
+	if ( $post_id <= 0 ) {
+		return;
+	}
+	$uploads = wp_upload_dir();
+	if ( ! empty( $uploads['error'] ) ) {
+		return;
+	}
+	$safe_label = htmlspecialchars( $label, ENT_QUOTES, 'UTF-8' );
+	$svg        = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 560" width="400" height="560">'
+		. '<rect width="400" height="560" fill="' . $bg . '"/>'
+		. '<rect x="28" y="70" width="344" height="180" fill="#ffffff" opacity="0.28"/>'
+		. '<rect x="28" y="380" width="344" height="90" fill="#ffffff" opacity="0.28"/>'
+		. '<circle cx="200" cy="300" r="70" fill="#ffffff" opacity="0.22"/>'
+		. '<text x="40" y="52" font-family="sans-serif" font-size="26" font-weight="700" fill="#ffffff">AFFILICARD DEMO</text>'
+		. '<text x="40" y="520" font-family="sans-serif" font-size="30" font-weight="700" fill="#ffffff">' . $safe_label . '</text>'
+		. '</svg>';
+
+	$filename = 'affilicard-demo-cover-' . $post_id . '.svg';
+	$file     = trailingslashit( $uploads['path'] ) . $filename;
+	if ( false === file_put_contents( $file, $svg ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+		return;
+	}
+
+	$attach_id = wp_insert_attachment(
+		array(
+			'post_mime_type' => 'image/svg+xml',
+			'post_title'     => 'Affilicard demo cover ' . $post_id,
+			'post_status'    => 'inherit',
+			'guid'           => trailingslashit( $uploads['url'] ) . $filename,
+		),
+		$file,
+		$post_id
+	);
+	if ( is_wp_error( $attach_id ) || ! $attach_id ) {
+		return;
+	}
+	// SVG はサブサイズを持たないため _wp_attached_file だけ設定すれば
+	// wp_get_attachment_image_url( $id, 'medium' ) がフルサイズ URL を返す。
+	update_post_meta( $attach_id, '_wp_attached_file', _wp_relative_upload_path( $file ) );
+	set_post_thumbnail( $post_id, $attach_id );
+};
+
+// マスク確認セクションの各サンプル（＋「なし」対照の $p_ebook）にダミー書影を設定。
+$set_demo_cover( (int) $p_ebook, 'NO MASK', '#2f5c94' );
+$set_demo_cover( (int) $p_mask_blur, 'BLUR', '#944828' );
+$set_demo_cover( (int) $p_mask_label, 'BLUR + LABEL', '#783078' );
+$set_demo_cover( (int) $p_mask_r18, 'R18', '#963028' );
+$set_demo_cover( (int) $p_mask_inherit, 'BLOCK OVERRIDE', '#347860' );
+
 $block = static function ( int $id, array $attrs = array() ): string {
 	$a = array_merge( array( 'productId' => $id ), $attrs );
 	return '<!-- wp:affilicard/product-card ' . wp_json_encode( $a ) . ' /-->';
