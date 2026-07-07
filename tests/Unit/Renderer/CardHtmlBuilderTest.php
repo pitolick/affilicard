@@ -226,4 +226,46 @@ final class CardHtmlBuilderTest extends TestCase {
 		$html    = ( new \Affilicard\Renderer\CardHtmlBuilder() )->build( $product, array() );
 		$this->assertStringNotContainsString( '予約受付中', $html );
 	}
+
+	public function test_resolve_mask_block_overrides_product_meta(): void {
+		$builder = new \Affilicard\Renderer\CardHtmlBuilder();
+		$product = array(
+			'mask_blur'  => false,
+			'mask_r18'   => false,
+			'mask_label' => '継承ラベル',
+		);
+
+		// ブロック属性が明示 → ブロック優先。maskLabel 未定義 → 継承。
+		$resolved = $builder->resolveMask(
+			array(
+				'maskBlur' => true,
+				'maskR18'  => false,
+			),
+			$product
+		);
+		$this->assertTrue( $resolved['blur'] );
+		$this->assertFalse( $resolved['r18'] );
+		$this->assertSame( '継承ラベル', $resolved['label'] );
+	}
+
+	public function test_resolve_mask_inherits_when_attribute_absent(): void {
+		$builder  = new \Affilicard\Renderer\CardHtmlBuilder();
+		$product  = array(
+			'mask_blur'  => true,
+			'mask_r18'   => true,
+			'mask_label' => 'x',
+		);
+		$resolved = $builder->resolveMask( array(), $product );
+		$this->assertTrue( $resolved['blur'] );
+		$this->assertTrue( $resolved['r18'] );
+		$this->assertSame( 'x', $resolved['label'] );
+	}
+
+	public function test_resolve_mask_empty_string_label_is_override(): void {
+		$builder = new \Affilicard\Renderer\CardHtmlBuilder();
+		$product = array( 'mask_label' => '継承' );
+		// maskLabel が空文字で定義済み → 上書き（＝ラベル消し）。
+		$resolved = $builder->resolveMask( array( 'maskLabel' => '' ), $product );
+		$this->assertSame( '', $resolved['label'] );
+	}
 }
