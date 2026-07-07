@@ -214,6 +214,66 @@ final class CardPreviewControllerTest extends TestCase {
 		$this->assertSame( 200, $response->get_status() );
 	}
 
+	public function test_preview_passes_mask_attributes_when_present(): void {
+		// マスクの重ね表示は image_url が空でないときのみ描画されるため、
+		// このテストだけ WP 関数スタブをリセットしてサムネイルありに差し替える
+		// （setUp() の get_post_thumbnail_id=0 は他テストの前提のため変更しない）。
+		WP_Mock::setUp();
+		WP_Mock::userFunction( '__', array( 'return_arg' => 0 ) );
+		WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing(
+			static fn( $v ) => is_string( $v ) ? trim( $v ) : ''
+		);
+		WP_Mock::userFunction( 'sanitize_hex_color', array( 'return_arg' => 0 ) );
+		WP_Mock::passthruFunction( 'esc_html' );
+		WP_Mock::passthruFunction( 'esc_attr' );
+		WP_Mock::passthruFunction( 'esc_url' );
+		WP_Mock::userFunction( 'get_option' )->andReturn( array() );
+		WP_Mock::userFunction( 'current_time', array( 'return' => '2026-06-29' ) );
+		WP_Mock::userFunction( 'get_post_thumbnail_id' )->andReturn( 321 );
+		WP_Mock::userFunction( 'wp_get_attachment_image_url' )->andReturn( 'https://example.com/cover.jpg' );
+
+		$repository = $this->createMock( ProductRepositoryInterface::class );
+		$repository->method( 'find' )->willReturn(
+			array(
+				'id'           => 7,
+				'title'        => 'マスク商品',
+				'content'      => '',
+				'status'       => 'publish',
+				'product_type' => 'generic',
+				'stock_status' => 'available',
+				'extras'       => array(),
+				'listings'     => array(),
+				'modified'     => '',
+				// 商品側 meta: r18=true（マスク要）・独自ラベル保持。
+				// maskR18 を未送信のまま preview してもこの値が継承されることを確認する。
+				'mask_blur'    => false,
+				'mask_r18'     => true,
+				'mask_label'   => '元ラベル',
+			)
+		);
+
+		$controller = new CardPreviewController( $repository );
+		$request    = $this->makeRequest(
+			array(
+				'id'        => 7,
+				'maskBlur'  => '1',
+				'maskLabel' => '注意',
+				// maskR18 は未送信のまま（resolveMask の継承を確認する）。
+			)
+		);
+
+		$response = $controller->preview( $request );
+
+		$this->assertSame( 200, $response->get_status() );
+		$data = $response->get_data();
+		$this->assertStringContainsString( 'affilicard-card__cover--masked', $data['html'] );
+		// maskLabel は送信値で上書きされる。
+		$this->assertStringContainsString( '注意', $data['html'] );
+		$this->assertStringNotContainsString( '元ラベル', $data['html'] );
+		// maskR18 は未送信 → 商品 meta の true を継承し R18 バッジが出る。
+		$this->assertStringContainsString( 'aria-label="18+"', $data['html'] );
+	}
+
 	public function test_can_edit_posts_delegates_to_current_user_can(): void {
 		WP_Mock::userFunction( 'current_user_can' )
 			->with( 'edit_posts' )

@@ -58,6 +58,15 @@ final class CardPreviewController {
 							'type'    => 'string',
 							'default' => '',
 						),
+						'maskBlur'          => array(
+							'type' => 'boolean',
+						),
+						'maskR18'           => array(
+							'type' => 'boolean',
+						),
+						'maskLabel'         => array(
+							'type' => 'string',
+						),
 					),
 				),
 			)
@@ -94,6 +103,17 @@ final class CardPreviewController {
 			'cardBgColor'       => (string) ( $request->get_param( 'cardBgColor' ) ?? '' ),
 			'cardBorderColor'   => (string) ( $request->get_param( 'cardBorderColor' ) ?? '' ),
 		);
+
+		if ( null !== $request->get_param( 'maskBlur' ) ) {
+			$attributes['maskBlur'] = filter_var( $request->get_param( 'maskBlur' ), FILTER_VALIDATE_BOOLEAN );
+		}
+		if ( null !== $request->get_param( 'maskR18' ) ) {
+			$attributes['maskR18'] = filter_var( $request->get_param( 'maskR18' ), FILTER_VALIDATE_BOOLEAN );
+		}
+		$mask_label = $request->get_param( 'maskLabel' );
+		if ( null !== $mask_label ) {
+			$attributes['maskLabel'] = (string) $mask_label;
+		}
 
 		$html = ( new CardHtmlBuilder() )->build( $product, $attributes );
 
