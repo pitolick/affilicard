@@ -248,6 +248,24 @@ final class CardHtmlBuilderTest extends TestCase {
 		$this->assertSame( '継承ラベル', $resolved['label'] );
 	}
 
+	public function test_resolve_mask_false_override_wins_over_true_product_meta_blur(): void {
+		$builder = new \Affilicard\Renderer\CardHtmlBuilder();
+		$product = array( 'mask_blur' => true );
+
+		// ブロック属性 false は「未指定」ではなく明示的な上書き → 商品 meta の true より優先される。
+		$resolved = $builder->resolveMask( array( 'maskBlur' => false ), $product );
+		$this->assertFalse( $resolved['blur'] );
+	}
+
+	public function test_resolve_mask_false_override_wins_over_true_product_meta_r18(): void {
+		$builder = new \Affilicard\Renderer\CardHtmlBuilder();
+		$product = array( 'mask_r18' => true );
+
+		// ブロック属性 false は「未指定」ではなく明示的な上書き → 商品 meta の true より優先される。
+		$resolved = $builder->resolveMask( array( 'maskR18' => false ), $product );
+		$this->assertFalse( $resolved['r18'] );
+	}
+
 	public function test_resolve_mask_inherits_when_attribute_absent(): void {
 		$builder  = new \Affilicard\Renderer\CardHtmlBuilder();
 		$product  = array(

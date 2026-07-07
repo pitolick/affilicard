@@ -1075,6 +1075,8 @@ final class CardRendererTest extends TestCase {
 		);
 		$this->assertStringContainsString( 'affilicard-card__cover--masked', $html );
 		$this->assertStringContainsString( 'affilicard-card__cover-blur', $html );
+		// blur のみ（R18 バッジもラベルも無い）場合は overlay div 自体が省略される。
+		$this->assertStringNotContainsString( 'affilicard-card__cover-overlay', $html );
 	}
 
 	public function test_mask_r18_forces_blur_and_shows_badge(): void {
