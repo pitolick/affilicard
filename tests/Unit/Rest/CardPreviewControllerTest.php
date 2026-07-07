@@ -273,7 +273,8 @@ final class CardPreviewControllerTest extends TestCase {
 		$this->assertStringContainsString( '注意', $data['html'] );
 		$this->assertStringNotContainsString( '元ラベル', $data['html'] );
 		// maskR18 は未送信 → 商品 meta の true を継承し R18 バッジが出る。
-		$this->assertStringContainsString( 'aria-label="18+"', $data['html'] );
+		// バッジの図案（aria-label 等）は変わり得るため、安定した class で presence を固定する。
+		$this->assertStringContainsString( 'affilicard-card__cover-badge', $data['html'] );
 	}
 
 	public function test_preview_mask_blur_alone_forces_masked_overlay(): void {

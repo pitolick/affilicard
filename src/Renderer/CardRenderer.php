@@ -15,10 +15,12 @@ use Affilicard\Stock\StockStatus;
 final class CardRenderer {
 
 	/**
-	 * R18 バッジ（自作オリジナル「18+」）。assets/r18-badge.svg と同期。
+	 * R18 バッジ（自作オリジナル・白地に太い赤リング＋黒「18」＋赤の禁止斜線）。
+	 * assets/r18-badge.svg と同期。既存キャラクター／マークを模倣しない汎用の禁止標識風デザイン。
+	 * 白ディスク＋黒数字で任意の表紙上でも視認性を確保。
 	 * 静的マークアップのみで外部依存・副作用を持たない（純粋レンダラの制約を維持）。
 	 */
-	private const R18_BADGE_SVG = '<svg class="affilicard-card__cover-badge" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="18+"><circle cx="50" cy="50" r="46" fill="#d11f26" stroke="#ffffff" stroke-width="6"/><text x="50" y="60" text-anchor="middle" font-family="Arial, sans-serif" font-size="38" font-weight="700" fill="#ffffff">18+</text></svg>';
+	private const R18_BADGE_SVG = '<svg class="affilicard-card__cover-badge" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="18歳未満閲覧禁止"><circle cx="50" cy="50" r="43" fill="#ffffff" stroke="#e60012" stroke-width="10"/><text x="50" y="67" text-anchor="middle" font-family="Arial, sans-serif" font-size="52" font-weight="700" fill="#111111">18</text><line x1="21" y1="21" x2="79" y2="79" stroke="#e60012" stroke-width="10" stroke-linecap="round"/></svg>';
 
 	/**
 	 * @param array<string, mixed>     $product   ProductRepository::find() の戻り値形
