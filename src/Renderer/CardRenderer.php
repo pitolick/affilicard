@@ -15,6 +15,14 @@ use Affilicard\Stock\StockStatus;
 final class CardRenderer {
 
 	/**
+	 * R18 バッジ（自作オリジナル・白地に太い赤リング＋黒「18」＋赤の禁止斜線）。
+	 * assets/r18-badge.svg と同期。既存キャラクター／マークを模倣しない汎用の禁止標識風デザイン。
+	 * 白ディスク＋黒数字で任意の表紙上でも視認性を確保。
+	 * 静的マークアップのみで外部依存・副作用を持たない（純粋レンダラの制約を維持）。
+	 */
+	private const R18_BADGE_SVG = '<svg class="affilicard-card__cover-badge" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="18歳未満閲覧禁止"><circle cx="50" cy="50" r="43" fill="#ffffff" stroke="#e60012" stroke-width="10"/><text x="50" y="67" text-anchor="middle" font-family="Arial, sans-serif" font-size="52" font-weight="700" fill="#111111">18</text><line x1="21" y1="21" x2="79" y2="79" stroke="#e60012" stroke-width="10" stroke-linecap="round"/></svg>';
+
+	/**
 	 * @param array<string, mixed>     $product   ProductRepository::find() の戻り値形
 	 * @param list<PlatformDefinition> $platforms enabled な platform（displayOrder 昇順想定）
 	 * @param array<string, mixed>     $options   hide_platforms / image_url / colors
@@ -38,6 +46,12 @@ final class CardRenderer {
 			? $options['cta_label_overrides']
 			: array();
 
+		$mask_blur  = ! empty( $options['mask_blur'] );
+		$mask_r18   = ! empty( $options['mask_r18'] );
+		$mask_label = isset( $options['mask_label'] ) ? trim( (string) $options['mask_label'] ) : '';
+		// R18 はぼかしを強制する。
+		$mask_blur = $mask_blur || $mask_r18;
+
 		$stock        = StockStatus::normalize( isset( $product['stock_status'] ) ? (string) $product['stock_status'] : null );
 		$is_available = StockStatus::AVAILABLE === $stock;
 
@@ -51,10 +65,29 @@ final class CardRenderer {
 
 		$html .= '<div class="affilicard-card__inner">';
 
-		// 書影カラム（画像が無ければプレースホルダ）。
+		// 書影カラム（画像が無ければプレースホルダ）。マスク時のみラッパを導入し、
+		// マスクなしは従来の素の <img> をバイト一致で維持する。
 		$html .= '<div class="affilicard-card__media">';
 		if ( '' !== $image_url ) {
-			$html .= '<img src="' . esc_url( $image_url ) . '" alt="' . esc_attr( (string) ( $product['title'] ?? '' ) ) . '" loading="lazy" />';
+			$img = '<img src="' . esc_url( $image_url ) . '" alt="' . esc_attr( (string) ( $product['title'] ?? '' ) ) . '" loading="lazy" />';
+			if ( $mask_blur ) {
+				$overlay = '';
+				if ( $mask_r18 ) {
+					$overlay .= self::R18_BADGE_SVG;
+				}
+				if ( '' !== $mask_label ) {
+					$overlay .= '<span class="affilicard-card__cover-label">' . esc_html( $mask_label ) . '</span>';
+				}
+				$overlay_html = '' !== $overlay
+					? '<div class="affilicard-card__cover-overlay">' . $overlay . '</div>'
+					: '';
+				$html        .= '<div class="affilicard-card__cover affilicard-card__cover--masked">'
+					. '<div class="affilicard-card__cover-blur">' . $img . '</div>'
+					. $overlay_html
+					. '</div>';
+			} else {
+				$html .= $img;
+			}
 		} else {
 			$html .= '<div class="affilicard-card__media-placeholder">' . esc_html( $media_label ) . '</div>';
 		}

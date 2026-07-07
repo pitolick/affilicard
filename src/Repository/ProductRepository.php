@@ -28,6 +28,9 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 *   product_type: string,
 	 *   stock_status: string,
 	 *   release_date: string,
+	 *   mask_blur: bool,
+	 *   mask_r18: bool,
+	 *   mask_label: string,
 	 *   extras: array<int, mixed>,
 	 *   listings: array<int, mixed>,
 	 *   schema_version: string,
@@ -61,6 +64,9 @@ final class ProductRepository implements ProductRepositoryInterface {
 			'product_type'   => (string) get_post_meta( $postId, ProductPostType::META_PRODUCT_TYPE, true ),
 			'stock_status'   => StockStatus::normalize( (string) get_post_meta( $postId, ProductPostType::META_STOCK_STATUS, true ) ),
 			'release_date'   => (string) get_post_meta( $postId, ProductPostType::META_RELEASE_DATE, true ),
+			'mask_blur'      => (bool) get_post_meta( $postId, ProductPostType::META_MASK_BLUR, true ),
+			'mask_r18'       => (bool) get_post_meta( $postId, ProductPostType::META_MASK_R18, true ),
+			'mask_label'     => (string) get_post_meta( $postId, ProductPostType::META_MASK_LABEL, true ),
 			'extras'         => $extras,
 			'listings'       => $listings,
 			'schema_version' => (string) get_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, true ),
@@ -181,6 +187,9 @@ final class ProductRepository implements ProductRepositoryInterface {
 		if ( 1 !== preg_match( '/^\d{4}-\d{2}-\d{2}$/', $release_date ) ) {
 			$release_date = '';
 		}
+		$mask_blur  = ! empty( $data['mask_blur'] );
+		$mask_r18   = ! empty( $data['mask_r18'] );
+		$mask_label = isset( $data['mask_label'] ) ? sanitize_text_field( (string) $data['mask_label'] ) : '';
 
 		update_post_meta( $postId, ProductPostType::META_PRODUCT_TYPE, $product_type );
 		update_post_meta( $postId, ProductPostType::META_STOCK_STATUS, $stock_status );
@@ -188,6 +197,9 @@ final class ProductRepository implements ProductRepositoryInterface {
 		update_post_meta( $postId, ProductPostType::META_LISTINGS, $listings );
 		update_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
 		update_post_meta( $postId, ProductPostType::META_RELEASE_DATE, $release_date );
+		update_post_meta( $postId, ProductPostType::META_MASK_BLUR, $mask_blur );
+		update_post_meta( $postId, ProductPostType::META_MASK_R18, $mask_r18 );
+		update_post_meta( $postId, ProductPostType::META_MASK_LABEL, $mask_label );
 
 		$this->syncExternalIdMirror( $postId, $listings );
 	}

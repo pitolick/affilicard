@@ -46,6 +46,15 @@ export function getCardPreview(id, params = {}) {
 			}
 		}
 	);
+	if (params.maskBlur !== undefined) {
+		query.set('maskBlur', params.maskBlur ? '1' : '0');
+	}
+	if (params.maskR18 !== undefined) {
+		query.set('maskR18', params.maskR18 ? '1' : '0');
+	}
+	if (params.maskLabel !== undefined) {
+		query.set('maskLabel', params.maskLabel);
+	}
 	const qs = query.toString();
 	return apiFetch({
 		path: `${BASE}/${id}/card-preview${qs ? `?${qs}` : ''}`,

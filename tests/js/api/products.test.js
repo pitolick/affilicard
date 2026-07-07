@@ -11,6 +11,7 @@ import {
 	saveProduct,
 	updateProduct,
 	deleteProduct,
+	getCardPreview,
 } from '../../../src/Admin/api/products';
 
 beforeEach( () => {
@@ -66,5 +67,23 @@ describe( 'api/products', () => {
 			path: '/affilicard/v1/products/9',
 			method: 'DELETE',
 		} );
+	} );
+
+	it( 'getCardPreview はマスクパラメータを付与する', () => {
+		apiFetch.mockResolvedValue( { html: '' } );
+		getCardPreview( 7, { maskBlur: true, maskR18: false, maskLabel: 'ご注意' } );
+		const path = apiFetch.mock.calls[ 0 ][ 0 ].path;
+		expect( path ).toContain( 'maskBlur=1' );
+		expect( path ).toContain( 'maskR18=0' );
+		expect( path ).toContain( 'maskLabel=' );
+	} );
+
+	it( 'getCardPreview はマスク未指定なら付与しない（継承維持）', () => {
+		apiFetch.mockResolvedValue( { html: '' } );
+		getCardPreview( 7, {} );
+		const path = apiFetch.mock.calls[ 0 ][ 0 ].path;
+		expect( path ).not.toContain( 'maskBlur' );
+		expect( path ).not.toContain( 'maskR18' );
+		expect( path ).not.toContain( 'maskLabel' );
 	} );
 } );

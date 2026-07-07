@@ -104,5 +104,50 @@ final class ProductMeta {
 				},
 			)
 		);
+
+		register_post_meta(
+			ProductPostType::POST_TYPE,
+			ProductPostType::META_MASK_BLUR,
+			array(
+				'type'              => 'boolean',
+				'single'            => true,
+				'default'           => false,
+				'show_in_rest'      => true,
+				'auth_callback'     => $auth,
+				'sanitize_callback' => static function ( $value ) {
+					return (bool) $value;
+				},
+			)
+		);
+
+		register_post_meta(
+			ProductPostType::POST_TYPE,
+			ProductPostType::META_MASK_R18,
+			array(
+				'type'              => 'boolean',
+				'single'            => true,
+				'default'           => false,
+				'show_in_rest'      => true,
+				'auth_callback'     => $auth,
+				'sanitize_callback' => static function ( $value ) {
+					return (bool) $value;
+				},
+			)
+		);
+
+		register_post_meta(
+			ProductPostType::POST_TYPE,
+			ProductPostType::META_MASK_LABEL,
+			array(
+				'type'              => 'string',
+				'single'            => true,
+				'default'           => '',
+				'show_in_rest'      => true,
+				'auth_callback'     => $auth,
+				'sanitize_callback' => static function ( $value ) {
+					return sanitize_text_field( (string) $value );
+				},
+			)
+		);
 	}
 }

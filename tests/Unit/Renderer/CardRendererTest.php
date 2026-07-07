@@ -1059,4 +1059,78 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( '予約受付中', $html );
 		$this->assertStringNotContainsString( 'affilicard-card__release-date', $html );
 	}
+
+	public function test_mask_blur_wraps_cover_with_blur_class(): void {
+		$html = ( new CardRenderer() )->render(
+			array(
+				'title'        => 'サンプル作品',
+				'stock_status' => 'available',
+				'listings'     => array(),
+			),
+			array(),
+			array(
+				'image_url' => 'https://example.com/c.jpg',
+				'mask_blur' => true,
+			)
+		);
+		$this->assertStringContainsString( 'affilicard-card__cover--masked', $html );
+		$this->assertStringContainsString( 'affilicard-card__cover-blur', $html );
+		// blur のみ（R18 バッジもラベルも無い）場合は overlay div 自体が省略される。
+		$this->assertStringNotContainsString( 'affilicard-card__cover-overlay', $html );
+	}
+
+	public function test_mask_r18_forces_blur_and_shows_badge(): void {
+		$html = ( new CardRenderer() )->render(
+			array(
+				'title'        => 'サンプル作品',
+				'stock_status' => 'available',
+				'listings'     => array(),
+			),
+			array(),
+			array(
+				'image_url' => 'https://example.com/c.jpg',
+				'mask_blur' => false,
+				'mask_r18'  => true,
+			)
+		);
+		// R18 はぼかしを強制する。
+		$this->assertStringContainsString( 'affilicard-card__cover--masked', $html );
+		$this->assertStringContainsString( 'affilicard-card__cover-badge', $html );
+	}
+
+	public function test_mask_label_shown_only_when_masked_and_nonempty(): void {
+		$masked = ( new CardRenderer() )->render(
+			array(
+				'title'        => 'サンプル作品',
+				'stock_status' => 'available',
+				'listings'     => array(),
+			),
+			array(),
+			array(
+				'image_url'  => 'https://example.com/c.jpg',
+				'mask_blur'  => true,
+				'mask_label' => 'ご注意',
+			)
+		);
+		$this->assertStringContainsString( 'affilicard-card__cover-label', $masked );
+		$this->assertStringContainsString( 'ご注意', $masked );
+
+		// マスクなし＋ラベルありでもラベルは出さない（通常描画）。
+		$plain = ( new CardRenderer() )->render(
+			array(
+				'title'        => 'サンプル作品',
+				'stock_status' => 'available',
+				'listings'     => array(),
+			),
+			array(),
+			array(
+				'image_url'  => 'https://example.com/c.jpg',
+				'mask_blur'  => false,
+				'mask_r18'   => false,
+				'mask_label' => 'ご注意',
+			)
+		);
+		$this->assertStringNotContainsString( 'affilicard-card__cover', $plain );
+		$this->assertStringNotContainsString( 'ご注意', $plain );
+	}
 }

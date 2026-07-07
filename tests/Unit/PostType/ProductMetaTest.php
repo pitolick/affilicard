@@ -163,4 +163,36 @@ final class ProductMetaTest extends TestCase {
 		$this->assertSame( '', $cb( 'not-a-date' ) );
 		$this->assertSame( '', $cb( '' ) );
 	}
+
+	public function test_registers_mask_meta_fields(): void {
+		$reg = $this->captureRegistrations();
+
+		$this->assertArrayHasKey( ProductPostType::META_MASK_BLUR, $reg );
+		[ $post_type, $blur_args ] = $reg[ ProductPostType::META_MASK_BLUR ];
+		$this->assertSame( ProductPostType::POST_TYPE, $post_type );
+		$this->assertSame( 'boolean', $blur_args['type'] );
+		$this->assertTrue( $blur_args['single'] );
+		$this->assertFalse( $blur_args['default'] );
+		$this->assertTrue( $blur_args['show_in_rest'] );
+		$this->assertIsCallable( $blur_args['auth_callback'] );
+		$this->assertIsCallable( $blur_args['sanitize_callback'] );
+
+		$this->assertArrayHasKey( ProductPostType::META_MASK_R18, $reg );
+		[ , $r18_args ] = $reg[ ProductPostType::META_MASK_R18 ];
+		$this->assertSame( 'boolean', $r18_args['type'] );
+		$this->assertTrue( $r18_args['single'] );
+		$this->assertFalse( $r18_args['default'] );
+		$this->assertTrue( $r18_args['show_in_rest'] );
+		$this->assertIsCallable( $r18_args['auth_callback'] );
+		$this->assertIsCallable( $r18_args['sanitize_callback'] );
+
+		$this->assertArrayHasKey( ProductPostType::META_MASK_LABEL, $reg );
+		[ , $label_args ] = $reg[ ProductPostType::META_MASK_LABEL ];
+		$this->assertSame( 'string', $label_args['type'] );
+		$this->assertTrue( $label_args['single'] );
+		$this->assertSame( '', $label_args['default'] );
+		$this->assertTrue( $label_args['show_in_rest'] );
+		$this->assertIsCallable( $label_args['auth_callback'] );
+		$this->assertIsCallable( $label_args['sanitize_callback'] );
+	}
 }

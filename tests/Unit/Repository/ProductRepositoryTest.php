@@ -102,6 +102,15 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 101, ProductPostType::META_RELEASE_DATE, true )
 			->andReturn( '' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 101, ProductPostType::META_MASK_BLUR, true )
+			->andReturn( '' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 101, ProductPostType::META_MASK_R18, true )
+			->andReturn( '' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 101, ProductPostType::META_MASK_LABEL, true )
+			->andReturn( '' );
 
 		$repo   = new ProductRepository();
 		$result = $repo->find( 101 );
@@ -117,6 +126,9 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertSame( $listings, $result['listings'] );
 		$this->assertSame( SchemaVersion::CURRENT, $result['schema_version'] );
 		$this->assertSame( '2026-05-29 12:00:00', $result['modified'] );
+		$this->assertFalse( $result['mask_blur'] );
+		$this->assertFalse( $result['mask_r18'] );
+		$this->assertSame( '', $result['mask_label'] );
 	}
 
 	public function test_find_includes_release_date(): void {
@@ -144,6 +156,38 @@ final class ProductRepositoryTest extends TestCase {
 		$repo = new \Affilicard\Repository\ProductRepository();
 		$out  = $repo->find( 7 );
 		$this->assertSame( '2026-07-17', $out['release_date'] );
+	}
+
+	public function test_find_includes_mask_fields(): void {
+		$post = (object) array(
+			'ID'            => 8,
+			'post_type'     => ProductPostType::POST_TYPE,
+			'post_title'    => 'マスク商品',
+			'post_content'  => '',
+			'post_status'   => 'publish',
+			'post_modified' => '2026-07-07 00:00:00',
+		);
+		WP_Mock::userFunction( 'get_post', array( 'return' => $post ) );
+		WP_Mock::userFunction(
+			'get_post_meta',
+			array(
+				'return' => function ( $id, $key, $single ) {
+					$map = array(
+						ProductPostType::META_MASK_BLUR  => '1',
+						ProductPostType::META_MASK_R18   => '',
+						ProductPostType::META_MASK_LABEL => 'サンプル注意文言',
+					);
+					return $map[ $key ] ?? '';
+				},
+			)
+		);
+
+		$repo    = new ProductRepository();
+		$product = $repo->find( 8 );
+
+		$this->assertTrue( $product['mask_blur'] );
+		$this->assertFalse( $product['mask_r18'] );
+		$this->assertSame( 'サンプル注意文言', $product['mask_label'] );
 	}
 
 	public function test_find_by_external_id_returns_first_match(): void {
@@ -447,6 +491,7 @@ final class ProductRepositoryTest extends TestCase {
 		// wp_update_post / wp_insert_post should never be called.
 		WP_Mock::userFunction( 'wp_update_post' )->never();
 		WP_Mock::userFunction( 'wp_insert_post' )->never();
+		WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing( static fn( $v ) => is_string( $v ) ? trim( $v ) : $v );
 
 		$extras   = array(
 			array(
@@ -461,12 +506,14 @@ final class ProductRepositoryTest extends TestCase {
 			),
 		);
 
-		$called_keys = array();
+		$called_keys   = array();
+		$called_values = array();
 		WP_Mock::userFunction( 'update_post_meta' )
 			->andReturnUsing(
-				function ( $post_id, $key, $value ) use ( &$called_keys ) {
+				function ( $post_id, $key, $value ) use ( &$called_keys, &$called_values ) {
 					$this->assertSame( 5, $post_id );
-					$called_keys[] = $key;
+					$called_keys[]         = $key;
+					$called_values[ $key ] = $value;
 					if ( ProductPostType::META_EXTRAS === $key || ProductPostType::META_LISTINGS === $key ) {
 						$this->assertIsArray( $value );
 					}
@@ -482,6 +529,9 @@ final class ProductRepositoryTest extends TestCase {
 				'stock_status' => 'available',
 				'extras'       => $extras,
 				'listings'     => $listings,
+				'mask_blur'    => true,
+				'mask_r18'     => false,
+				'mask_label'   => 'サンプル注意文言',
 			)
 		);
 
@@ -491,6 +541,12 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertContains( ProductPostType::META_LISTINGS, $called_keys );
 		$this->assertContains( ProductPostType::META_SCHEMA_VERSION, $called_keys );
 		$this->assertContains( ProductPostType::META_RELEASE_DATE, $called_keys );
+		$this->assertContains( ProductPostType::META_MASK_BLUR, $called_keys );
+		$this->assertContains( ProductPostType::META_MASK_R18, $called_keys );
+		$this->assertContains( ProductPostType::META_MASK_LABEL, $called_keys );
+		$this->assertTrue( $called_values[ ProductPostType::META_MASK_BLUR ] );
+		$this->assertFalse( $called_values[ ProductPostType::META_MASK_R18 ] );
+		$this->assertSame( 'サンプル注意文言', $called_values[ ProductPostType::META_MASK_LABEL ] );
 	}
 
 	public function test_saveMeta_uses_generic_when_product_type_empty(): void {

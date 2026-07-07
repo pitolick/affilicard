@@ -67,6 +67,9 @@ export function Edit({ attributes, setAttributes }) {
 		ctaTextColor,
 		cardBgColor,
 		cardBorderColor,
+		maskBlur,
+		maskR18,
+		maskLabel,
 	} = attributes;
 	const [options, setOptions] = useState([]);
 	const [filter, setFilter] = useState('');
@@ -147,6 +150,9 @@ export function Edit({ attributes, setAttributes }) {
 				ctaTextColor,
 				cardBgColor,
 				cardBorderColor,
+				maskBlur,
+				maskR18,
+				maskLabel,
 			})
 				.then((res) => {
 					if (!active) return;
@@ -176,6 +182,9 @@ export function Edit({ attributes, setAttributes }) {
 		ctaTextColor,
 		cardBgColor,
 		cardBorderColor,
+		maskBlur,
+		maskR18,
+		maskLabel,
 	]);
 
 	const setCtaOverride = (code, value) => {
@@ -244,6 +253,33 @@ export function Edit({ attributes, setAttributes }) {
 					))}
 				</PanelBody>
 			)}
+			<PanelBody
+				title={__('表紙マスク', 'affilicard')}
+				initialOpen={false}
+			>
+				<p className="components-base-control__help">
+					{__('未設定なら商品側の設定を継承します。', 'affilicard')}
+				</p>
+				<CheckboxControl
+					label={__('表紙にぼかしを掛ける', 'affilicard')}
+					checked={!!maskBlur}
+					onChange={(checked) => setAttributes({ maskBlur: checked })}
+					__nextHasNoMarginBottom
+				/>
+				<CheckboxControl
+					label={__('R18（18+ バッジ＋ぼかしを強制）', 'affilicard')}
+					checked={!!maskR18}
+					onChange={(checked) => setAttributes({ maskR18: checked })}
+					__nextHasNoMarginBottom
+				/>
+				<TextControl
+					label={__('ラベルテキスト（任意）', 'affilicard')}
+					value={maskLabel ?? ''}
+					onChange={(value) => setAttributes({ maskLabel: value })}
+					placeholder={__('未設定（継承）', 'affilicard')}
+					__nextHasNoMarginBottom
+				/>
+			</PanelBody>
 		</InspectorControls>
 	);
 

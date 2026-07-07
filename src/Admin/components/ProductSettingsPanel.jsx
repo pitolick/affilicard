@@ -1,5 +1,5 @@
 import { useEntityProp } from '@wordpress/core-data';
-import { PanelBody, SelectControl, TextControl } from '@wordpress/components';
+import { PanelBody, SelectControl, TextControl, CheckboxControl } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import { ListingsEditor } from './ListingsEditor';
 import { ExtrasEditor } from './ExtrasEditor';
@@ -23,6 +23,9 @@ export function ProductSettingsPanel() {
 	const productType = m.affilicard_product_type || 'generic';
 	const stockStatus = m.affilicard_stock_status || 'available';
 	const releaseDate = m.affilicard_release_date || '';
+	const maskBlur = !!m.affilicard_mask_blur;
+	const maskR18 = !!m.affilicard_mask_r18;
+	const maskLabel = m.affilicard_mask_label || '';
 	const listings = asArray(m.affilicard_listings);
 	const extras = asArray(m.affilicard_extras);
 
@@ -50,6 +53,26 @@ export function ProductSettingsPanel() {
 					help={__('未来の日付を入れると発売日まで予約カード表示になります', 'affilicard')}
 					value={releaseDate}
 					onChange={(v) => patch({ affilicard_release_date: v })}
+				/>
+			</PanelBody>
+			<PanelBody title={__('表紙マスク', 'affilicard')} initialOpen={false}>
+				<CheckboxControl
+					label={__('表紙にぼかしを掛ける', 'affilicard')}
+					checked={maskBlur}
+					onChange={(v) => patch({ affilicard_mask_blur: v })}
+					__nextHasNoMarginBottom
+				/>
+				<CheckboxControl
+					label={__('R18（18+ バッジ＋ぼかしを強制）', 'affilicard')}
+					checked={maskR18}
+					onChange={(v) => patch({ affilicard_mask_r18: v })}
+					__nextHasNoMarginBottom
+				/>
+				<TextControl
+					label={__('ラベルテキスト（任意）', 'affilicard')}
+					help={__('ぼかし/R18 のとき表紙上に表示する注意文言', 'affilicard')}
+					value={maskLabel}
+					onChange={(v) => patch({ affilicard_mask_label: v })}
 				/>
 			</PanelBody>
 			<PanelBody title={__('追加情報', 'affilicard')} initialOpen={false}>

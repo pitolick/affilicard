@@ -53,6 +53,8 @@ final class CardHtmlBuilder {
 			$known_codes
 		);
 
+		$mask = $this->resolveMask( $attributes, $product );
+
 		$type        = self::typeRegistry()->get( isset( $product['product_type'] ) ? (string) $product['product_type'] : '' );
 		$header_keys = null !== $type ? $type->cardHeaderKeys() : array( 'author', 'publisher' );
 		$hidden_keys = null !== $type ? $type->cardHiddenKeys() : array();
@@ -78,6 +80,9 @@ final class CardHtmlBuilder {
 			'cta_label_overrides' => $cta_overrides,
 			'is_preorder'         => $is_preorder,
 			'release_date_label'  => $is_preorder ? \Affilicard\Stock\ReleaseDate::label( $release_date ) : '',
+			'mask_blur'           => $mask['blur'],
+			'mask_r18'            => $mask['r18'],
+			'mask_label'          => $mask['label'],
 		);
 
 		return ( new CardRenderer() )->render( $product, $platforms, $options );
@@ -120,6 +125,32 @@ final class CardHtmlBuilder {
 			$clean[ $code ] = $value;
 		}
 		return $clean;
+	}
+
+	/**
+	 * マスク設定をブロック属性優先・商品 meta 継承で解決する（属性ごと独立）。
+	 * boolean はブロック属性が存在し null でなければ採用、maskLabel は
+	 * 未定義＝継承／定義済み（空文字含む）＝上書き。
+	 *
+	 * @param array<string, mixed> $attributes ブロック属性
+	 * @param array<string, mixed> $product    Repository::find() の戻り値形
+	 * @return array{blur: bool, r18: bool, label: string}
+	 */
+	public function resolveMask( array $attributes, array $product ): array {
+		$blur  = array_key_exists( 'maskBlur', $attributes ) && null !== $attributes['maskBlur']
+			? (bool) $attributes['maskBlur']
+			: (bool) ( $product['mask_blur'] ?? false );
+		$r18   = array_key_exists( 'maskR18', $attributes ) && null !== $attributes['maskR18']
+			? (bool) $attributes['maskR18']
+			: (bool) ( $product['mask_r18'] ?? false );
+		$label = array_key_exists( 'maskLabel', $attributes ) && null !== $attributes['maskLabel']
+			? (string) $attributes['maskLabel']
+			: (string) ( $product['mask_label'] ?? '' );
+		return array(
+			'blur'  => $blur,
+			'r18'   => $r18,
+			'label' => $label,
+		);
 	}
 
 	private static function typeRegistry(): ProductTypeRegistry {
