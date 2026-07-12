@@ -53,9 +53,12 @@
 }
 
 /* メディア枠: box-sizing:border-box（カード共通ルール）のもとで inline aspect-ratio が
-   border-box（padding 込み）に効くため、枠自体が type 別の外形比率を保つ。display:block に
-   することで grid の align-items:stretch より aspect-ratio の高さ計算を優先させ、
-   本文カラムが長くても枠が引き伸ばされず type 比率のまま留まる。内側の画像/プレースホルダは
+   border-box（padding 込み）に効くため、枠自体が type 別の外形比率を保つ。grid item は
+   親 .affilicard-card__inner の align-items:stretch の対象になり、本文カラムが長いと
+   行の高さまで引き伸ばされる（stretch による definite なクロスサイズは inline
+   aspect-ratio より優先される）。align-self:start でこの grid item だけストレッチを止め、
+   クロスサイズを auto に戻すことで aspect-ratio が幅 160px から高さを計算し、type 比率の
+   まま留まる（従来の align-items:flex-start と同じ上寄せにもなる）。内側の画像/プレースホルダは
    width/height:100% で枠の content box（= 枠 - padding）いっぱいに広がる。
    padding は上下左右対称にする：左右非対称（左20/右16）だと content box が右へ寄り
    メディアが右寄りに見え、border-box に効く aspect-ratio の見え方も左右で歪む。全辺 20px の
@@ -63,6 +66,7 @@
 .affilicard-card__media {
 	padding: 20px;
 	display: block;
+	align-self: start;
 }
 
 .affilicard-card__media-image {
