@@ -104,9 +104,17 @@ final class CardRenderer {
 				$html .= '<img class="affilicard-card__media-image" src="' . $src . '" alt="' . $alt . '" loading="lazy"' . $aspect_attr . ' />';
 			}
 		} else {
-			$html .= '<div class="affilicard-card__media-placeholder"' . $aspect_attr . '>'
+			// 可視ラベルは中立の「画像がありません」に固定する（type 名を出すと読み込み失敗に見えるため）。
+			// type別ラベル（書影／商品画像／キービジュアル等）は role="img" + aria-label の
+			// スクリーンリーダー向け情報として保持する。
+			$placeholder_label = sprintf(
+				/* translators: %s: media type label (e.g. 書影). */
+				(string) __( '%sがありません', 'affilicard' ),
+				$media_label
+			);
+			$html .= '<div class="affilicard-card__media-placeholder"' . $aspect_attr . ' role="img" aria-label="' . esc_attr( $placeholder_label ) . '">'
 				. '<span class="affilicard-card__media-placeholder-icon" aria-hidden="true">' . self::MEDIA_PLACEHOLDER_ICON_SVG . '</span>'
-				. '<span class="affilicard-card__media-placeholder-label">' . esc_html( $media_label ) . '</span>'
+				. '<span class="affilicard-card__media-placeholder-label" aria-hidden="true">' . esc_html__( '画像がありません', 'affilicard' ) . '</span>'
 				. '</div>';
 		}
 		$html .= '</div>';

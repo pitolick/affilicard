@@ -481,19 +481,21 @@ final class CardRendererTest extends TestCase {
 	}
 
 	public function test_media_label_option_used_for_placeholder(): void {
-		// image_url 未指定 → プレースホルダに media_label が出る。
+		// image_url 未指定 → プレースホルダの aria-label に type別 media_label が使われる
+		// （可視ラベルは中立の「画像がありません」に固定・media_label はそこには出ない）。
 		$html = ( new CardRenderer() )->render(
 			$this->product(),
 			array( $this->store() ),
 			array( 'media_label' => '商品画像' )
 		);
 		$this->assertStringContainsString( 'affilicard-card__media-placeholder', $html );
-		$this->assertStringContainsString( '商品画像', $html );
+		$this->assertStringContainsString( 'aria-label="商品画像がありません"', $html );
 	}
 
 	public function test_default_placeholder_label_when_no_option(): void {
 		$html = ( new CardRenderer() )->render( $this->product(), array( $this->store() ) );
-		$this->assertStringContainsString( '商品画像', $html );
+		$this->assertStringContainsString( 'aria-label="商品画像がありません"', $html );
+		$this->assertStringContainsString( '画像がありません', $html );
 	}
 
 	public function test_media_frame_has_aspect_ratio_from_option(): void {
@@ -596,12 +598,18 @@ final class CardRendererTest extends TestCase {
 			) // image_url 未指定
 		);
 		$this->assertStringContainsString( 'affilicard-card__media-placeholder', $html );
-		$this->assertStringContainsString( 'キービジュアル', $html );
 		$this->assertStringContainsString( 'affilicard-card__media-placeholder-icon', $html ); // 汎用アイコン
 		$this->assertStringContainsString( 'aspect-ratio: 1 / 1', $html );
-		// aspect-ratio はプレースホルダ要素自身が持つ（枠 .affilicard-card__media 側ではない）。
+		// 可視ラベルは type 名ではなく中立の「画像がありません」に固定（読み込み失敗に見えるのを防ぐ）。
 		$this->assertMatchesRegularExpression(
-			'/<div class="affilicard-card__media-placeholder" style="aspect-ratio: 1 \/ 1">/',
+			'/<span class="affilicard-card__media-placeholder-label" aria-hidden="true">画像がありません<\/span>/',
+			$html
+		);
+		// type別ラベル（キービジュアル等）はスクリーンリーダー向け aria-label に「〜がありません」で残す。
+		$this->assertStringContainsString( 'aria-label="キービジュアルがありません"', $html );
+		// aspect-ratio と role="img"/aria-label はプレースホルダ要素自身が持つ（枠 .affilicard-card__media 側ではない）。
+		$this->assertMatchesRegularExpression(
+			'/<div class="affilicard-card__media-placeholder" style="aspect-ratio: 1 \/ 1" role="img" aria-label="キービジュアルがありません">/',
 			$html
 		);
 	}
