@@ -55,10 +55,11 @@ final class CardHtmlBuilder {
 
 		$mask = $this->resolveMask( $attributes, $product );
 
-		$type        = self::typeRegistry()->get( isset( $product['product_type'] ) ? (string) $product['product_type'] : '' );
-		$header_keys = null !== $type ? $type->cardHeaderKeys() : array( 'author', 'publisher' );
-		$hidden_keys = null !== $type ? $type->cardHiddenKeys() : array();
-		$media_label = null !== $type ? $type->cardMediaLabel() : (string) __( '商品画像', 'affilicard' );
+		$type         = self::typeRegistry()->get( isset( $product['product_type'] ) ? (string) $product['product_type'] : '' );
+		$header_keys  = null !== $type ? $type->cardHeaderKeys() : array( 'author', 'publisher' );
+		$hidden_keys  = null !== $type ? $type->cardHiddenKeys() : array();
+		$media_label  = null !== $type ? $type->cardMediaLabel() : (string) __( '商品画像', 'affilicard' );
+		$media_aspect = null !== $type ? $type->cardMediaAspectRatio() : '1 / 1';
 
 		$release_date = isset( $product['release_date'] ) ? (string) $product['release_date'] : '';
 		$today        = (string) current_time( 'Y-m-d' );
@@ -77,6 +78,7 @@ final class CardHtmlBuilder {
 			'header_keys'         => $header_keys,
 			'hidden_keys'         => $hidden_keys,
 			'media_label'         => $media_label,
+			'media_aspect_ratio'  => $media_aspect,
 			'cta_label_overrides' => $cta_overrides,
 			'is_preorder'         => $is_preorder,
 			'release_date_label'  => $is_preorder ? \Affilicard\Stock\ReleaseDate::label( $release_date ) : '',
