@@ -258,14 +258,15 @@ $set_demo_cover = static function ( int $post_id, string $label, string $bg, str
 	$safe_label = htmlspecialchars( $label, ENT_QUOTES, 'UTF-8' );
 
 	if ( 'portrait' === $ratio ) {
-		// 既存の書影マスク確認サンプル向け。挙動維持のためマークアップは変更しない。
-		$svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 560" width="400" height="560">'
-			. '<rect width="400" height="560" fill="' . $bg . '"/>'
-			. '<rect x="28" y="70" width="344" height="180" fill="#ffffff" opacity="0.28"/>'
-			. '<rect x="28" y="380" width="344" height="90" fill="#ffffff" opacity="0.28"/>'
-			. '<circle cx="200" cy="300" r="70" fill="#ffffff" opacity="0.22"/>'
-			. '<text x="40" y="52" font-family="sans-serif" font-size="26" font-weight="700" fill="#ffffff">AFFILICARD DEMO</text>'
-			. '<text x="40" y="520" font-family="sans-serif" font-size="30" font-weight="700" fill="#ffffff">' . $safe_label . '</text>'
+		// 電子書籍(ebook)の書影・マスク確認サンプル向け。キャンバスをフレーム比率と
+		// 同じ 2:3(400x600)にし、object-fit:contain で上下に余白が出ないようにする。
+		$svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600" width="400" height="600">'
+			. '<rect width="400" height="600" fill="' . $bg . '"/>'
+			. '<rect x="28" y="80" width="344" height="190" fill="#ffffff" opacity="0.28"/>'
+			. '<rect x="28" y="410" width="344" height="96" fill="#ffffff" opacity="0.28"/>'
+			. '<circle cx="200" cy="320" r="72" fill="#ffffff" opacity="0.22"/>'
+			. '<text x="40" y="56" font-family="sans-serif" font-size="26" font-weight="700" fill="#ffffff">AFFILICARD DEMO</text>'
+			. '<text x="40" y="560" font-family="sans-serif" font-size="30" font-weight="700" fill="#ffffff">' . $safe_label . '</text>'
 			. '</svg>';
 	} else {
 		// vod 近似正方(square)・contain 確認用の横長(landscape)。
