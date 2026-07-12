@@ -496,6 +496,46 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( '商品画像', $html );
 	}
 
+	public function test_media_frame_has_aspect_ratio_from_option(): void {
+		$html = ( new CardRenderer() )->render(
+			$this->product(),
+			array( $this->store() ),
+			array(
+				'image_url'          => 'https://img/photo.jpg',
+				'media_aspect_ratio' => '2 / 3',
+			)
+		);
+		$this->assertStringContainsString( 'aspect-ratio: 2 / 3', $html );
+	}
+
+	public function test_media_image_uses_object_fit_contain_class(): void {
+		$html = ( new CardRenderer() )->render(
+			$this->product(),
+			array( $this->store() ),
+			array(
+				'image_url'          => 'https://img/photo.jpg',
+				'media_aspect_ratio' => '1 / 1',
+			)
+		);
+		// 全 type 共通の contain 用クラスが画像に付く。
+		$this->assertStringContainsString( 'affilicard-card__media-image', $html );
+	}
+
+	public function test_placeholder_has_label_and_icon_and_aspect(): void {
+		$html = ( new CardRenderer() )->render(
+			$this->product(),
+			array( $this->store() ),
+			array(
+				'media_label'        => 'キービジュアル',
+				'media_aspect_ratio' => '1 / 1',
+			) // image_url 未指定
+		);
+		$this->assertStringContainsString( 'affilicard-card__media-placeholder', $html );
+		$this->assertStringContainsString( 'キービジュアル', $html );
+		$this->assertStringContainsString( 'affilicard-card__media-placeholder-icon', $html ); // 汎用アイコン
+		$this->assertStringContainsString( 'aspect-ratio: 1 / 1', $html );
+	}
+
 	public function test_custom_header_keys_option_promotes_to_meta(): void {
 		$product = $this->product(
 			array(

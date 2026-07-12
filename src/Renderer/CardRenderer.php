@@ -22,6 +22,9 @@ final class CardRenderer {
 	 */
 	private const R18_BADGE_SVG = '<svg class="affilicard-card__cover-badge" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="18歳未満閲覧禁止"><circle cx="50" cy="50" r="43" fill="#ffffff" stroke="#e60012" stroke-width="10"/><text x="50" y="67" text-anchor="middle" font-family="Arial, sans-serif" font-size="52" font-weight="700" fill="#111111">18</text><line x1="21" y1="21" x2="79" y2="79" stroke="#e60012" stroke-width="10" stroke-linecap="round"/></svg>';
 
+	/** 画像なしプレースホルダの汎用アイコン(中立の「画像」意匠。既存マーク非模倣・静的 SVG)。 */
+	private const MEDIA_PLACEHOLDER_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="画像なし"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M4 17l5-5 4 4 3-3 4 4"/></svg>';
+
 	/**
 	 * @param array<string, mixed>     $product   ProductRepository::find() の戻り値形
 	 * @param list<PlatformDefinition> $platforms enabled な platform（displayOrder 昇順想定）
@@ -42,6 +45,7 @@ final class CardRenderer {
 		$header_keys   = isset( $options['header_keys'] ) && is_array( $options['header_keys'] ) ? array_map( 'strval', $options['header_keys'] ) : array( 'author', 'publisher' );
 		$hidden_keys   = isset( $options['hidden_keys'] ) && is_array( $options['hidden_keys'] ) ? array_map( 'strval', $options['hidden_keys'] ) : array();
 		$media_label   = isset( $options['media_label'] ) ? (string) $options['media_label'] : (string) __( '商品画像', 'affilicard' );
+		$media_aspect  = isset( $options['media_aspect_ratio'] ) ? trim( (string) $options['media_aspect_ratio'] ) : '1 / 1';
 		$cta_overrides = isset( $options['cta_label_overrides'] ) && is_array( $options['cta_label_overrides'] )
 			? $options['cta_label_overrides']
 			: array();
@@ -65,11 +69,11 @@ final class CardRenderer {
 
 		$html .= '<div class="affilicard-card__inner">';
 
-		// 書影カラム（画像が無ければプレースホルダ）。マスク時のみラッパを導入し、
-		// マスクなしは従来の素の <img> をバイト一致で維持する。
-		$html .= '<div class="affilicard-card__media">';
+		// 書影カラム（画像が無ければプレースホルダ）。メディア枠は type 別アスペクト比で固定し、
+		// 実画像は object-fit: contain（全 type 共通）で枠内に収める。mask/R18/label は不変。
+		$html .= '<div class="affilicard-card__media" style="aspect-ratio: ' . esc_attr( $media_aspect ) . '">';
 		if ( '' !== $image_url ) {
-			$img = '<img src="' . esc_url( $image_url ) . '" alt="' . esc_attr( (string) ( $product['title'] ?? '' ) ) . '" loading="lazy" />';
+			$img = '<img class="affilicard-card__media-image" src="' . esc_url( $image_url ) . '" alt="' . esc_attr( (string) ( $product['title'] ?? '' ) ) . '" loading="lazy" />';
 			if ( $mask_blur ) {
 				$overlay = '';
 				if ( $mask_r18 ) {
@@ -89,7 +93,10 @@ final class CardRenderer {
 				$html .= $img;
 			}
 		} else {
-			$html .= '<div class="affilicard-card__media-placeholder">' . esc_html( $media_label ) . '</div>';
+			$html .= '<div class="affilicard-card__media-placeholder">'
+				. '<span class="affilicard-card__media-placeholder-icon" aria-hidden="true">' . self::MEDIA_PLACEHOLDER_ICON_SVG . '</span>'
+				. '<span class="affilicard-card__media-placeholder-label">' . esc_html( $media_label ) . '</span>'
+				. '</div>';
 		}
 		$html .= '</div>';
 
