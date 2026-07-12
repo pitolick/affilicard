@@ -129,6 +129,10 @@ final class EbookTypeTest extends TestCase {
 		$this->assertSame( '書影', ( new EbookType() )->cardMediaLabel() );
 	}
 
+	public function test_card_media_aspect_ratio_is_portrait(): void {
+		$this->assertSame( '2 / 3', ( new EbookType() )->cardMediaAspectRatio() );
+	}
+
 	public function test_validate_extras_keeps_known_keys_and_strips_unknown(): void {
 		$type = new EbookType();
 

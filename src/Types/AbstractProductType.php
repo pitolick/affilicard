@@ -71,6 +71,10 @@ abstract class AbstractProductType implements ProductTypeInterface {
 		return __( '商品画像', 'affilicard' );
 	}
 
+	public function cardMediaAspectRatio(): string {
+		return '1 / 1';
+	}
+
 	/**
 	 * extrasSchema の card 区分に一致するキー一覧を返す（既定 'detail'）。
 	 *

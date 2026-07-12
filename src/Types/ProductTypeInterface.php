@@ -45,6 +45,11 @@ interface ProductTypeInterface {
 	public function cardMediaLabel(): string;
 
 	/**
+	 * カードのメディア枠アスペクト比（CSS aspect-ratio 値。例 "2 / 3" / "1 / 1"）。
+	 */
+	public function cardMediaAspectRatio(): string;
+
+	/**
 	 * provider から取得した raw を extras 行（Hybrid 形式）に変換する。
 	 *
 	 * @param array<string, mixed> $providerRaw
