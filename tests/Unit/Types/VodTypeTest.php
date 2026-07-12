@@ -62,6 +62,11 @@ final class VodTypeTest extends TestCase {
 		$this->assertSame( 'キービジュアル', $type->cardMediaLabel() );
 	}
 
+	public function test_card_media_aspect_ratio_defaults_to_square(): void {
+		$type = new VodType();
+		$this->assertSame( '1 / 1', $type->cardMediaAspectRatio() );
+	}
+
 	public function test_extract_extras_from_provider_returns_empty(): void {
 		$type = new VodType();
 		$this->assertSame( array(), $type->extractExtrasFromProvider( 'manual', array() ) );

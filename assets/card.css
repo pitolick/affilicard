@@ -37,7 +37,9 @@
 	border-radius: var(--affilicard-radius);
 	overflow: hidden;
 	background: var(--affilicard-card-bg);
-	box-shadow: 0 3px 10px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.04);
+	box-shadow:
+		0 3px 10px rgba(0, 0, 0, 0.07),
+		0 1px 3px rgba(0, 0, 0, 0.04);
 	color: var(--affilicard-text);
 	font-size: 15px;
 	line-height: 1.7;
@@ -50,52 +52,80 @@
 	align-items: stretch;
 }
 
+/* メディア枠: inline aspect-ratio は枠自体ではなく内側の実画像/マスクカバー/プレースホルダ
+   側に付与する（CardRenderer 側）。type 別の比率がそのまま実際の content box（= 表示される
+   画像領域そのもの）に適用され、枠の padding が比率を歪ませることはない。grid item は
+   親 .affilicard-card__inner の align-items:stretch の対象になり、本文カラムが長いと
+   行の高さまで引き伸ばされてしまうため、align-self:start でこの grid item だけストレッチを
+   止め、内容以上に高さが伸びないようにする（従来の align-items:flex-start と同じ上寄せにもなる）。 */
 .affilicard-card__media {
-	padding: 20px 16px 20px 20px;
-	display: flex;
-	align-items: flex-start;
+	padding: 20px;
+	display: block;
+	align-self: start;
 }
 
-.affilicard-card__media img {
+.affilicard-card__media-image {
 	width: 100%;
+	/* inline aspect-ratio(要素自身に付与) が幅 100% から高さを計算するため auto にする。 */
 	height: auto;
+	object-fit: contain;
 	display: block;
 	border-radius: 8px;
-	box-shadow: 0 3px 10px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.04);
+	box-shadow:
+		0 3px 10px rgba(0, 0, 0, 0.07),
+		0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .affilicard-card__media-placeholder {
 	width: 100%;
-	aspect-ratio: 2 / 3;
+	/* inline aspect-ratio(要素自身に付与) が幅 100% から高さを計算するため auto にする。 */
+	height: auto;
 	border-radius: 8px;
 	display: flex;
+	flex-direction: column;
 	align-items: center;
 	justify-content: center;
+	gap: 6px;
 	background: #eef1ee;
 	color: var(--affilicard-text-light);
-	font-size: 10px;
-	font-weight: 600;
-	letter-spacing: 0.04em;
-	box-shadow: 0 3px 10px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
-/* 表紙マスク（ぼかし・R18 バッジ・ラベル）。マスク時のみ __cover ラッパが入る。 */
+.affilicard-card__media-placeholder-icon {
+	color: var(--affilicard-text-light);
+	opacity: 0.7;
+}
+
+.affilicard-card__media-placeholder-label {
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+}
+
+/* 表紙マスク（ぼかし・R18 バッジ・ラベル）。マスク時のみ __cover ラッパが入り、
+   inline aspect-ratio はこの __cover 側が持つ（内側のぼかし画像は持たない）。
+   width:100% + aspect-ratio で definite box になるため height は auto にする。 */
 .affilicard-card__cover {
 	position: relative;
 	width: 100%;
+	height: auto;
 	border-radius: 8px;
 	overflow: hidden;
-	box-shadow: 0 3px 10px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.04);
+	box-shadow:
+		0 3px 10px rgba(0, 0, 0, 0.07),
+		0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .affilicard-card__cover-blur {
 	display: block;
+	width: 100%;
+	height: 100%;
 }
 
 .affilicard-card__cover-blur img {
 	display: block;
 	width: 100%;
-	height: auto;
+	height: 100%;
+	object-fit: contain;
 	border-radius: 0;
 	box-shadow: none;
 }
@@ -327,7 +357,9 @@
 	text-decoration: none;
 	white-space: nowrap;
 	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-	transition: opacity 0.15s ease, transform 0.15s ease;
+	transition:
+		opacity 0.15s ease,
+		transform 0.15s ease;
 }
 
 .affilicard-card__cta:hover {
@@ -355,12 +387,18 @@
 
 	.affilicard-card__media {
 		padding: 20px 20px 0;
-		justify-content: center;
 	}
 
-	.affilicard-card__media img,
-	.affilicard-card__media-placeholder {
+	/* aspect-ratio は枠(.affilicard-card__media)ではなく内側の実画像/マスクカバー/
+	   プレースホルダ側にあるため、幅 100px もその子要素側で指定する。inline aspect-ratio
+	   と組み合わせて type 比率どおりの content box（2:3 なら 100×150 / 1:1 なら 100×100）に
+	   なる。枠自体は幅を持たない（display:block のフルwidth）ため、margin:0 auto で
+	   子要素側を水平中央寄せする。 */
+	.affilicard-card__media-image,
+	.affilicard-card__media-placeholder,
+	.affilicard-card__cover {
 		width: 100px;
+		margin: 0 auto;
 	}
 
 	.affilicard-card__row {

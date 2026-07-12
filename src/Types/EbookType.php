@@ -43,6 +43,10 @@ final class EbookType extends AbstractProductType {
 		return __( '書影', 'affilicard' );
 	}
 
+	public function cardMediaAspectRatio(): string {
+		return '2 / 3';
+	}
+
 	/**
 	 * DMM Books の raw 構造から著者/出版社/ISBN を抽出する。
 	 *

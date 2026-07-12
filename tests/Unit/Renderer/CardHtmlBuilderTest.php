@@ -286,4 +286,19 @@ final class CardHtmlBuilderTest extends TestCase {
 		$resolved = $builder->resolveMask( array( 'maskLabel' => '' ), $product );
 		$this->assertSame( '', $resolved['label'] );
 	}
+
+	public function test_build_applies_ebook_media_aspect_ratio(): void {
+		\WP_Mock::userFunction( 'get_option' )->andReturn( array() );
+		\WP_Mock::userFunction( 'get_post_thumbnail_id' )->andReturn( 0 );
+		\WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing(
+			static fn( $v ) => is_string( $v ) ? trim( $v ) : ''
+		);
+		WP_Mock::userFunction( 'current_time', array( 'return' => '2026-06-29' ) );
+
+		$builder = new CardHtmlBuilder();
+		$product = $this->productWith( array( 'product_type' => 'ebook' ) );
+
+		$html = $builder->build( $product, array() );
+		$this->assertStringContainsString( 'aspect-ratio: 2 / 3', $html );
+	}
 }

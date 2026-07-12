@@ -185,11 +185,69 @@ $p_mask_inherit = $repo->save(
 	)
 );
 
+// メディア枠（type 別アスペクト比＋contain＋プレースホルダ）確認用サンプル。
+// vod（画像あり）: 正方に近いデモ画像で 1/1 枠にキービジュアルが収まることを確認。
+$p_vod_image = $repo->save(
+	array(
+		'title'        => 'サンプル映像作品（VOD・キービジュアル）',
+		'status'       => 'publish',
+		'product_type' => 'vod',
+		'stock_status' => 'available',
+		'listings'     => array( $listing( 'dmm-books', 'https://example.com/aff-vod-image', '2,000' ) ),
+	)
+);
+
+// generic（画像なし）: アイキャッチ未設定 → プレースホルダ「商品画像」＋1/1 枠を確認。
+$p_generic_noimage = $repo->save(
+	array(
+		'title'        => 'サンプル雑貨（画像なし・プレースホルダ）',
+		'status'       => 'publish',
+		'product_type' => 'generic',
+		'stock_status' => 'available',
+		'listings'     => array( $listing( 'dmm-books', 'https://example.com/aff-generic-noimage', '900' ) ),
+	)
+);
+
+// ebook（画像なし）: アイキャッチ未設定 → プレースホルダ「書影」＋2/3 枠を確認。
+$p_ebook_noimage = $repo->save(
+	array(
+		'title'        => 'サンプル漫画（書影なし・プレースホルダ）',
+		'status'       => 'publish',
+		'product_type' => 'ebook',
+		'stock_status' => 'available',
+		'listings'     => array( $listing( 'dmm-books', 'https://example.com/aff-ebook-noimage', '600' ) ),
+	)
+);
+
+// vod（画像なし）: アイキャッチ未設定 → プレースホルダ「キービジュアル」＋1/1 枠を確認。
+$p_vod_noimage = $repo->save(
+	array(
+		'title'        => 'サンプル映像作品（画像なし・プレースホルダ）',
+		'status'       => 'publish',
+		'product_type' => 'vod',
+		'stock_status' => 'available',
+		'listings'     => array( $listing( 'dmm-books', 'https://example.com/aff-vod-noimage', '2,200' ) ),
+	)
+);
+
+// generic（横長画像）: 1/1 枠に object-fit: contain でレターボックス収まり、
+// 隣の本文カラムが崩れないことを確認するレイアウト頑健性サンプル。
+$p_generic_landscape = $repo->save(
+	array(
+		'title'        => 'サンプル雑貨（横長画像・contain 確認）',
+		'status'       => 'publish',
+		'product_type' => 'generic',
+		'stock_status' => 'available',
+		'listings'     => array( $listing( 'dmm-books', 'https://example.com/aff-generic-landscape', '1,800' ) ),
+	)
+);
+
 // 表紙マスク（ぼかし／R18／ラベル）は書影 <img> に掛かるため、マスク確認用サンプルには
 // アイキャッチ（book cover 相当）が必要。GD/Imagick 非依存でダミー書影を生成するため SVG を
 // uploads に書き出して添付する（Playground の PHP に画像拡張が無くても確実に書影が出る）。
 // SVG を <img> で表示しても CSS filter: blur() は効くのでぼかしの視認に問題はない。
-$set_demo_cover = static function ( int $post_id, string $label, string $bg ): void {
+// $ratio: 'portrait'(既定・書影マスク確認用) / 'square'(vod 近似正方) / 'landscape'(object-fit:contain 確認用の横長)。
+$set_demo_cover = static function ( int $post_id, string $label, string $bg, string $ratio = 'portrait' ): void {
 	if ( $post_id <= 0 ) {
 		return;
 	}
@@ -198,14 +256,32 @@ $set_demo_cover = static function ( int $post_id, string $label, string $bg ): v
 		return;
 	}
 	$safe_label = htmlspecialchars( $label, ENT_QUOTES, 'UTF-8' );
-	$svg        = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 560" width="400" height="560">'
-		. '<rect width="400" height="560" fill="' . $bg . '"/>'
-		. '<rect x="28" y="70" width="344" height="180" fill="#ffffff" opacity="0.28"/>'
-		. '<rect x="28" y="380" width="344" height="90" fill="#ffffff" opacity="0.28"/>'
-		. '<circle cx="200" cy="300" r="70" fill="#ffffff" opacity="0.22"/>'
-		. '<text x="40" y="52" font-family="sans-serif" font-size="26" font-weight="700" fill="#ffffff">AFFILICARD DEMO</text>'
-		. '<text x="40" y="520" font-family="sans-serif" font-size="30" font-weight="700" fill="#ffffff">' . $safe_label . '</text>'
-		. '</svg>';
+
+	if ( 'portrait' === $ratio ) {
+		// 電子書籍(ebook)の書影・マスク確認サンプル向け。キャンバスをフレーム比率と
+		// 同じ 2:3(400x600)にし、object-fit:contain で上下に余白が出ないようにする。
+		$svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600" width="400" height="600">'
+			. '<rect width="400" height="600" fill="' . $bg . '"/>'
+			. '<rect x="28" y="80" width="344" height="190" fill="#ffffff" opacity="0.28"/>'
+			. '<rect x="28" y="410" width="344" height="96" fill="#ffffff" opacity="0.28"/>'
+			. '<circle cx="200" cy="320" r="72" fill="#ffffff" opacity="0.22"/>'
+			. '<text x="40" y="56" font-family="sans-serif" font-size="26" font-weight="700" fill="#ffffff">AFFILICARD DEMO</text>'
+			. '<text x="40" y="560" font-family="sans-serif" font-size="30" font-weight="700" fill="#ffffff">' . $safe_label . '</text>'
+			. '</svg>';
+	} else {
+		// vod 近似正方(square)・contain 確認用の横長(landscape)。
+		$dimensions             = array(
+			'square'    => array( 480, 480 ),
+			'landscape' => array( 800, 320 ),
+		);
+		list( $width, $height ) = $dimensions[ $ratio ] ?? $dimensions['square'];
+		$svg                    = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' . $width . ' ' . $height . '" width="' . $width . '" height="' . $height . '">'
+			. '<rect width="' . $width . '" height="' . $height . '" fill="' . $bg . '"/>'
+			. '<circle cx="' . ( $width / 2 ) . '" cy="' . ( $height / 2 ) . '" r="' . ( min( $width, $height ) * 0.3 ) . '" fill="#ffffff" opacity="0.22"/>'
+			. '<text x="24" y="40" font-family="sans-serif" font-size="22" font-weight="700" fill="#ffffff">AFFILICARD DEMO</text>'
+			. '<text x="24" y="' . ( $height - 24 ) . '" font-family="sans-serif" font-size="26" font-weight="700" fill="#ffffff">' . $safe_label . '</text>'
+			. '</svg>';
+	}
 
 	$filename = 'affilicard-demo-cover-' . $post_id . '.svg';
 	$file     = trailingslashit( $uploads['path'] ) . $filename;
@@ -238,6 +314,11 @@ $set_demo_cover( (int) $p_mask_blur, 'BLUR', '#944828' );
 $set_demo_cover( (int) $p_mask_label, 'BLUR + LABEL', '#783078' );
 $set_demo_cover( (int) $p_mask_r18, 'R18', '#963028' );
 $set_demo_cover( (int) $p_mask_inherit, 'BLOCK OVERRIDE', '#347860' );
+
+// メディア枠確認セクション: 画像ありの 2 サンプルにのみデモ画像を設定
+// （画像なし 3 サンプルはアイキャッチ未設定のままプレースホルダを確認する）。
+$set_demo_cover( (int) $p_vod_image, 'KEY VISUAL', '#1f7a5c', 'square' );
+$set_demo_cover( (int) $p_generic_landscape, 'LANDSCAPE', '#7a5c1f', 'landscape' );
 
 $block = static function ( int $id, array $attrs = array() ): string {
 	$a = array_merge( array( 'productId' => $id ), $attrs );
@@ -282,6 +363,13 @@ $content = implode(
 				'maskLabel' => 'ブロック属性で上書き',
 			)
 		),
+		'<!-- wp:heading {"level":3} --><h3>メディア枠（type別アスペクト比・contain・プレースホルダ）確認</h3><!-- /wp:heading -->',
+		'<!-- wp:paragraph --><p>vod（画像あり・1/1枠）／画像なし3種（generic「商品画像」・ebook「書影」・vod「キービジュアル」のプレースホルダ）／generic（横長画像・1/1枠に contain でレターボックス収まり隣の本文カラムが崩れないことを確認）。</p><!-- /wp:paragraph -->',
+		$block( $p_vod_image ),
+		$block( $p_generic_noimage ),
+		$block( $p_ebook_noimage ),
+		$block( $p_vod_noimage ),
+		$block( $p_generic_landscape ),
 	)
 );
 

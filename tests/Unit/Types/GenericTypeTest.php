@@ -42,6 +42,10 @@ final class GenericTypeTest extends TestCase {
 		$this->assertSame( '商品画像', ( new GenericType() )->cardMediaLabel() );
 	}
 
+	public function test_card_media_aspect_ratio_defaults_to_square(): void {
+		$this->assertSame( '1 / 1', ( new GenericType() )->cardMediaAspectRatio() );
+	}
+
 	public function test_extract_extras_from_provider_returns_empty(): void {
 		$type = new GenericType();
 

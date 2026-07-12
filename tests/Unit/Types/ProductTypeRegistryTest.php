@@ -97,6 +97,10 @@ final class ProductTypeRegistryTest extends TestCase {
 			public function cardMediaLabel(): string {
 				return '';
 			}
+
+			public function cardMediaAspectRatio(): string {
+				return '1 / 1';
+			}
 		};
 	}
 }
