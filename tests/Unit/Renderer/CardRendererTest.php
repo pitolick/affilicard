@@ -546,6 +546,46 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( 'affilicard-card__media-image', $html );
 	}
 
+	public function test_unmasked_image_carries_aspect_ratio_not_media_container(): void {
+		// content box(実画像領域)を歪ませないため、aspect-ratio は padding 込みの
+		// .affilicard-card__media(枠)ではなく実画像要素そのものに付く。
+		$html = ( new CardRenderer() )->render(
+			$this->product(),
+			array( $this->store() ),
+			array(
+				'image_url'          => 'https://img/photo.jpg',
+				'media_aspect_ratio' => '2 / 3',
+			)
+		);
+		$this->assertStringContainsString( '<div class="affilicard-card__media">', $html );
+		$this->assertMatchesRegularExpression(
+			'/<img class="affilicard-card__media-image"[^>]*style="aspect-ratio: 2 \/ 3"/',
+			$html
+		);
+	}
+
+	public function test_masked_cover_wrapper_carries_aspect_ratio_not_inner_image(): void {
+		// マスク時は cover ラッパが aspect-ratio を持ち、内側のぼかし画像は持たない
+		// （ぼかし画像は cover の content box をそのまま埋める）。
+		$html = ( new CardRenderer() )->render(
+			$this->product(),
+			array(),
+			array(
+				'image_url'          => 'https://img/cover.jpg',
+				'mask_blur'          => true,
+				'media_aspect_ratio' => '2 / 3',
+			)
+		);
+		$this->assertMatchesRegularExpression(
+			'/<div class="affilicard-card__cover affilicard-card__cover--masked" style="aspect-ratio: 2 \/ 3">/',
+			$html
+		);
+		$this->assertDoesNotMatchRegularExpression(
+			'/<img class="affilicard-card__media-image"[^>]*aspect-ratio/',
+			$html
+		);
+	}
+
 	public function test_placeholder_has_label_and_icon_and_aspect(): void {
 		$html = ( new CardRenderer() )->render(
 			$this->product(),
@@ -559,6 +599,11 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( 'キービジュアル', $html );
 		$this->assertStringContainsString( 'affilicard-card__media-placeholder-icon', $html ); // 汎用アイコン
 		$this->assertStringContainsString( 'aspect-ratio: 1 / 1', $html );
+		// aspect-ratio はプレースホルダ要素自身が持つ（枠 .affilicard-card__media 側ではない）。
+		$this->assertMatchesRegularExpression(
+			'/<div class="affilicard-card__media-placeholder" style="aspect-ratio: 1 \/ 1">/',
+			$html
+		);
 	}
 
 	public function test_custom_header_keys_option_promotes_to_meta(): void {

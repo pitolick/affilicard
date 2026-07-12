@@ -72,12 +72,20 @@ final class CardRenderer {
 
 		$html .= '<div class="affilicard-card__inner">';
 
-		// 書影カラム（画像が無ければプレースホルダ）。メディア枠は type 別アスペクト比で固定し、
+		// 書影カラム（画像が無ければプレースホルダ）。inline aspect-ratio は枠（padding 込みの
+		// border-box）ではなく実画像/マスクカバー/プレースホルダ側に付与し、type 別の比率が
+		// そのまま実際の content box に適用されるようにする（padding が比率を歪ませない）。
 		// 実画像は object-fit: contain（全 type 共通）で枠内に収める。mask/R18/label は不変。
-		$html .= '<div class="affilicard-card__media" style="aspect-ratio: ' . esc_attr( $media_aspect ) . '">';
+		$aspect_attr = ' style="aspect-ratio: ' . esc_attr( $media_aspect ) . '"';
+
+		$html .= '<div class="affilicard-card__media">';
 		if ( '' !== $image_url ) {
-			$img = '<img class="affilicard-card__media-image" src="' . esc_url( $image_url ) . '" alt="' . esc_attr( (string) ( $product['title'] ?? '' ) ) . '" loading="lazy" />';
+			$src = esc_url( $image_url );
+			$alt = esc_attr( (string) ( $product['title'] ?? '' ) );
 			if ( $mask_blur ) {
+				// マスク時: aspect-ratio はカバーラッパ側が持つ。内側のぼかし画像は cover を
+				// そのまま埋めるだけでよい（アスペクトを持たせない）。
+				$img     = '<img class="affilicard-card__media-image" src="' . $src . '" alt="' . $alt . '" loading="lazy" />';
 				$overlay = '';
 				if ( $mask_r18 ) {
 					$overlay .= self::R18_BADGE_SVG;
@@ -88,15 +96,15 @@ final class CardRenderer {
 				$overlay_html = '' !== $overlay
 					? '<div class="affilicard-card__cover-overlay">' . $overlay . '</div>'
 					: '';
-				$html        .= '<div class="affilicard-card__cover affilicard-card__cover--masked">'
+				$html        .= '<div class="affilicard-card__cover affilicard-card__cover--masked"' . $aspect_attr . '>'
 					. '<div class="affilicard-card__cover-blur">' . $img . '</div>'
 					. $overlay_html
 					. '</div>';
 			} else {
-				$html .= $img;
+				$html .= '<img class="affilicard-card__media-image" src="' . $src . '" alt="' . $alt . '" loading="lazy"' . $aspect_attr . ' />';
 			}
 		} else {
-			$html .= '<div class="affilicard-card__media-placeholder">'
+			$html .= '<div class="affilicard-card__media-placeholder"' . $aspect_attr . '>'
 				. '<span class="affilicard-card__media-placeholder-icon" aria-hidden="true">' . self::MEDIA_PLACEHOLDER_ICON_SVG . '</span>'
 				. '<span class="affilicard-card__media-placeholder-label">' . esc_html( $media_label ) . '</span>'
 				. '</div>';
