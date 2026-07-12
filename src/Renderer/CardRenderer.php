@@ -38,14 +38,17 @@ final class CardRenderer {
 			}
 		}
 
-		$hide          = isset( $options['hide_platforms'] ) && is_array( $options['hide_platforms'] ) ? array_map( 'strval', $options['hide_platforms'] ) : array();
-		$only          = isset( $options['only_platforms'] ) && is_array( $options['only_platforms'] ) ? array_map( 'strval', $options['only_platforms'] ) : array();
-		$image_url     = isset( $options['image_url'] ) ? (string) $options['image_url'] : '';
-		$colors        = isset( $options['colors'] ) && is_array( $options['colors'] ) ? $options['colors'] : array();
-		$header_keys   = isset( $options['header_keys'] ) && is_array( $options['header_keys'] ) ? array_map( 'strval', $options['header_keys'] ) : array( 'author', 'publisher' );
-		$hidden_keys   = isset( $options['hidden_keys'] ) && is_array( $options['hidden_keys'] ) ? array_map( 'strval', $options['hidden_keys'] ) : array();
-		$media_label   = isset( $options['media_label'] ) ? (string) $options['media_label'] : (string) __( '商品画像', 'affilicard' );
-		$media_aspect  = isset( $options['media_aspect_ratio'] ) ? trim( (string) $options['media_aspect_ratio'] ) : '1 / 1';
+		$hide         = isset( $options['hide_platforms'] ) && is_array( $options['hide_platforms'] ) ? array_map( 'strval', $options['hide_platforms'] ) : array();
+		$only         = isset( $options['only_platforms'] ) && is_array( $options['only_platforms'] ) ? array_map( 'strval', $options['only_platforms'] ) : array();
+		$image_url    = isset( $options['image_url'] ) ? (string) $options['image_url'] : '';
+		$colors       = isset( $options['colors'] ) && is_array( $options['colors'] ) ? $options['colors'] : array();
+		$header_keys  = isset( $options['header_keys'] ) && is_array( $options['header_keys'] ) ? array_map( 'strval', $options['header_keys'] ) : array( 'author', 'publisher' );
+		$hidden_keys  = isset( $options['hidden_keys'] ) && is_array( $options['hidden_keys'] ) ? array_map( 'strval', $options['hidden_keys'] ) : array();
+		$media_label  = isset( $options['media_label'] ) ? (string) $options['media_label'] : (string) __( '商品画像', 'affilicard' );
+		$media_aspect = isset( $options['media_aspect_ratio'] ) ? trim( (string) $options['media_aspect_ratio'] ) : '';
+		if ( '' === $media_aspect ) {
+			$media_aspect = '1 / 1';
+		}
 		$cta_overrides = isset( $options['cta_label_overrides'] ) && is_array( $options['cta_label_overrides'] )
 			? $options['cta_label_overrides']
 			: array();

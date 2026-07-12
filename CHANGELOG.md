@@ -14,6 +14,7 @@
 ### Changed
 
 - メディア枠のアスペクト比固定に伴い、商品カードの書影マークアップを更新（マスクなし画像の従来マークアップから変更）。
+- `ProductTypeInterface` に `cardMediaAspectRatio()` を追加。`AbstractProductType` を継承する型（本プラグインの全既定型）は既定値 `1 / 1` を自動で得るため影響なし。`ProductTypeInterface` を直接実装する外部型がある場合は同メソッド（`string` を返す）の追加が必要。
 
 ## [1.7.0] - 2026-07-07
 

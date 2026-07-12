@@ -508,6 +508,31 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( 'aspect-ratio: 2 / 3', $html );
 	}
 
+	public function test_empty_media_aspect_ratio_falls_back_to_default(): void {
+		$html = ( new CardRenderer() )->render(
+			$this->product(),
+			array( $this->store() ),
+			array(
+				'image_url'          => 'https://img/photo.jpg',
+				'media_aspect_ratio' => '',
+			)
+		);
+		$this->assertStringContainsString( 'aspect-ratio: 1 / 1', $html );
+		$this->assertDoesNotMatchRegularExpression( '/aspect-ratio:\s*"/', $html );
+	}
+
+	public function test_whitespace_only_media_aspect_ratio_falls_back_to_default(): void {
+		$html = ( new CardRenderer() )->render(
+			$this->product(),
+			array( $this->store() ),
+			array(
+				'image_url'          => 'https://img/photo.jpg',
+				'media_aspect_ratio' => '   ',
+			)
+		);
+		$this->assertStringContainsString( 'aspect-ratio: 1 / 1', $html );
+	}
+
 	public function test_media_image_uses_object_fit_contain_class(): void {
 		$html = ( new CardRenderer() )->render(
 			$this->product(),
