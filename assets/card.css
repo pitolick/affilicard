@@ -37,7 +37,9 @@
 	border-radius: var(--affilicard-radius);
 	overflow: hidden;
 	background: var(--affilicard-card-bg);
-	box-shadow: 0 3px 10px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.04);
+	box-shadow:
+		0 3px 10px rgba(0, 0, 0, 0.07),
+		0 1px 3px rgba(0, 0, 0, 0.04);
 	color: var(--affilicard-text);
 	font-size: 15px;
 	line-height: 1.7;
@@ -50,52 +52,77 @@
 	align-items: stretch;
 }
 
+/* メディア枠: box-sizing:border-box（カード共通ルール）のもとで inline aspect-ratio が
+   border-box（padding 込み）に効くため、枠自体が type 別の外形比率を保つ。display:block に
+   することで grid の align-items:stretch より aspect-ratio の高さ計算を優先させ、
+   本文カラムが長くても枠が引き伸ばされず type 比率のまま留まる。内側の画像/プレースホルダは
+   width/height:100% で枠の content box（= 枠 - padding）いっぱいに広がる。
+   padding は上下左右対称にする：左右非対称（左20/右16）だと content box が右へ寄り
+   メディアが右寄りに見え、border-box に効く aspect-ratio の見え方も左右で歪む。全辺 20px の
+   均等 inset なら content box が枠の中央に来て 2:3・1:1 の外形比率どおり中央整列する。 */
 .affilicard-card__media {
-	padding: 20px 16px 20px 20px;
-	display: flex;
-	align-items: flex-start;
+	padding: 20px;
+	display: block;
 }
 
-.affilicard-card__media img {
+.affilicard-card__media-image {
 	width: 100%;
-	height: auto;
+	height: 100%;
+	object-fit: contain;
 	display: block;
 	border-radius: 8px;
-	box-shadow: 0 3px 10px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.04);
+	box-shadow:
+		0 3px 10px rgba(0, 0, 0, 0.07),
+		0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .affilicard-card__media-placeholder {
 	width: 100%;
-	aspect-ratio: 2 / 3;
+	height: 100%;
 	border-radius: 8px;
 	display: flex;
+	flex-direction: column;
 	align-items: center;
 	justify-content: center;
+	gap: 6px;
 	background: #eef1ee;
 	color: var(--affilicard-text-light);
-	font-size: 10px;
+}
+
+.affilicard-card__media-placeholder-icon {
+	color: var(--affilicard-text-light);
+	opacity: 0.7;
+}
+
+.affilicard-card__media-placeholder-label {
+	font-size: 11px;
 	font-weight: 600;
 	letter-spacing: 0.04em;
-	box-shadow: 0 3px 10px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 /* 表紙マスク（ぼかし・R18 バッジ・ラベル）。マスク時のみ __cover ラッパが入る。 */
 .affilicard-card__cover {
 	position: relative;
 	width: 100%;
+	height: 100%;
 	border-radius: 8px;
 	overflow: hidden;
-	box-shadow: 0 3px 10px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.04);
+	box-shadow:
+		0 3px 10px rgba(0, 0, 0, 0.07),
+		0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .affilicard-card__cover-blur {
 	display: block;
+	width: 100%;
+	height: 100%;
 }
 
 .affilicard-card__cover-blur img {
 	display: block;
 	width: 100%;
-	height: auto;
+	height: 100%;
+	object-fit: contain;
 	border-radius: 0;
 	box-shadow: none;
 }
@@ -327,7 +354,9 @@
 	text-decoration: none;
 	white-space: nowrap;
 	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-	transition: opacity 0.15s ease, transform 0.15s ease;
+	transition:
+		opacity 0.15s ease,
+		transform 0.15s ease;
 }
 
 .affilicard-card__cta:hover {
@@ -353,14 +382,13 @@
 		grid-template-columns: 1fr;
 	}
 
+	/* 枠幅を 100px 相当に縮める（枠自身が aspect-ratio を持つため、幅を縮めれば
+	   高さは type 比率のまま自動的に縮む）。display:block のため flex の
+	   justify-content ではなく margin:auto で水平中央寄せする。 */
 	.affilicard-card__media {
-		padding: 20px 20px 0;
-		justify-content: center;
-	}
-
-	.affilicard-card__media img,
-	.affilicard-card__media-placeholder {
 		width: 100px;
+		margin: 0 auto;
+		padding: 20px 20px 0;
 	}
 
 	.affilicard-card__row {
