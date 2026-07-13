@@ -64,6 +64,7 @@ final class RakutenProviderTest extends TestCase {
 		WP_Mock::userFunction( 'home_url' )->andReturn( 'https://shop.example' );
 		WP_Mock::userFunction( 'wp_parse_url' )->andReturnUsing(
 			static function ( $url ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- wp_parse_url() のテストダブル
 				return parse_url( $url );
 			}
 		);
@@ -82,7 +83,12 @@ final class RakutenProviderTest extends TestCase {
 			);
 		WP_Mock::userFunction( 'wp_remote_retrieve_response_code' )->andReturn( 200 );
 		WP_Mock::userFunction( 'wp_remote_retrieve_body' )->andReturn(
-			json_encode( array( 'count' => 1, 'Items' => array() ) )
+			json_encode(
+				array(
+					'count' => 1,
+					'Items' => array(),
+				)
+			)
 		);
 
 		$result = ( new RakutenProvider() )->testConnection(
@@ -105,6 +111,7 @@ final class RakutenProviderTest extends TestCase {
 	public function test_test_connection_uses_allowed_domain_override(): void {
 		WP_Mock::userFunction( 'wp_parse_url' )->andReturnUsing(
 			static function ( $url ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- wp_parse_url() のテストダブル
 				return parse_url( $url );
 			}
 		);
@@ -134,6 +141,7 @@ final class RakutenProviderTest extends TestCase {
 		WP_Mock::userFunction( 'home_url' )->andReturn( 'https://shop.example' );
 		WP_Mock::userFunction( 'wp_parse_url' )->andReturnUsing(
 			static function ( $url ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- wp_parse_url() のテストダブル
 				return parse_url( $url );
 			}
 		);
@@ -159,6 +167,7 @@ final class RakutenProviderTest extends TestCase {
 		WP_Mock::userFunction( 'home_url' )->andReturn( 'https://shop.example' );
 		WP_Mock::userFunction( 'wp_parse_url' )->andReturnUsing(
 			static function ( $url ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- wp_parse_url() のテストダブル
 				return parse_url( $url );
 			}
 		);
