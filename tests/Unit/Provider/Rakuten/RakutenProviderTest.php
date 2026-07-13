@@ -145,6 +145,37 @@ final class RakutenProviderTest extends TestCase {
 		$this->assertSame( 'https://www.other.example', $captured['headers']['Origin'] );
 	}
 
+	public function test_test_connection_normalizes_scheme_less_allowed_domain(): void {
+		WP_Mock::userFunction( 'wp_parse_url' )->andReturnUsing(
+			static function ( $url ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- wp_parse_url() のテストダブル
+				return parse_url( $url );
+			}
+		);
+		$captured = null;
+		WP_Mock::userFunction( 'wp_remote_get' )->once()->andReturnUsing(
+			static function ( $url, $args ) use ( &$captured ) {
+				$captured = $args;
+				return array( 'response' => array( 'code' => 200 ) );
+			}
+		);
+		WP_Mock::userFunction( 'wp_remote_retrieve_response_code' )->andReturn( 200 );
+		WP_Mock::userFunction( 'wp_remote_retrieve_body' )->andReturn( json_encode( array( 'Items' => array() ) ) );
+
+		( new RakutenProvider() )->testConnection(
+			array(
+				'application_id' => 'app-1',
+				'access_key'     => 'pk_test',
+				'affiliate_id'   => 'aff-1',
+				// スキーム無し＋ポート付き → https 補完・ポート保持で正規の Origin になる。
+				'allowed_domain' => 'shop.example:8080',
+			)
+		);
+
+		$this->assertSame( 'https://shop.example:8080', $captured['headers']['Origin'] );
+		$this->assertSame( 'https://shop.example:8080/', $captured['headers']['Referer'] );
+	}
+
 	public function test_test_connection_maps_403_to_referrer_message(): void {
 		WP_Mock::userFunction( 'home_url' )->andReturn( 'https://shop.example' );
 		WP_Mock::userFunction( 'wp_parse_url' )->andReturnUsing(

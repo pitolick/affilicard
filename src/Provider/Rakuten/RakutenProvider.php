@@ -191,10 +191,19 @@ final class RakutenProvider implements ProviderInterface {
 	}
 
 	private static function toOrigin( string $url ): string {
+		$url = trim( $url );
+		// スキームが無ければ https を補い、wp_parse_url が host を認識できるようにする。
+		if ( '' !== $url && 1 !== preg_match( '#^https?://#i', $url ) ) {
+			$url = 'https://' . ltrim( $url, '/' );
+		}
 		$parts = wp_parse_url( $url );
 		if ( is_array( $parts ) && isset( $parts['host'] ) ) {
 			$scheme = isset( $parts['scheme'] ) ? (string) $parts['scheme'] : 'https';
-			return $scheme . '://' . (string) $parts['host'];
+			$origin = $scheme . '://' . (string) $parts['host'];
+			if ( isset( $parts['port'] ) ) {
+				$origin .= ':' . (int) $parts['port'];
+			}
+			return $origin;
 		}
 		return rtrim( $url, '/' );
 	}
