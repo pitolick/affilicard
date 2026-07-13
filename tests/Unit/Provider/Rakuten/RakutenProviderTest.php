@@ -42,10 +42,13 @@ final class RakutenProviderTest extends TestCase {
 		$this->assertCount( 4, $schema );
 		$this->assertSame( 'application_id', $schema[0]['key'] );
 		$this->assertTrue( $schema[0]['required'] );
+		$this->assertSame( 'password', $schema[0]['type'] );
 		$this->assertSame( 'access_key', $schema[1]['key'] );
 		$this->assertTrue( $schema[1]['required'] );
+		$this->assertSame( 'password', $schema[1]['type'] );
 		$this->assertSame( 'affiliate_id', $schema[2]['key'] );
 		$this->assertTrue( $schema[2]['required'] );
+		$this->assertSame( 'password', $schema[2]['type'] );
 		$this->assertSame( 'allowed_domain', $schema[3]['key'] );
 		$this->assertFalse( $schema[3]['required'] );
 		$this->assertSame( 'text', $schema[3]['type'] );
