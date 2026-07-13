@@ -285,4 +285,86 @@ final class RakutenProviderTest extends TestCase {
 		$result = ( new RakutenProvider() )->fetch( '123', array() );
 		$this->assertSame( 'https://img.example/medium.jpg', $result['image_url'] );
 	}
+
+	public function test_fetch_uses_keyword_query_for_non_numeric_external_id(): void {
+		$captured = null;
+		$this->stubFetchResponse( array( 'title' => 'サンプル作品' ), $captured );
+
+		( new RakutenProvider() )->fetch( 'sample-slug', array() );
+
+		$this->assertStringContainsString( 'keyword=sample-slug', $captured );
+		$this->assertStringNotContainsString( 'itemNumber=', $captured );
+	}
+
+	public function test_fetch_returns_null_when_credentials_missing(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_provider_rakuten-kobo_credentials', '' )
+			->andReturn( '' );
+
+		$this->assertNull( ( new RakutenProvider() )->fetch( '123', array() ) );
+	}
+
+	public function test_fetch_returns_null_for_empty_external_id(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_provider_rakuten-kobo_credentials', '' )
+			->andReturn( $this->encryptedCredentials() );
+
+		$this->assertNull( ( new RakutenProvider() )->fetch( '', array() ) );
+	}
+
+	/**
+	 * @param mixed  $remoteReturn wp_remote_get の戻り値
+	 * @param int    $code         HTTP ステータス
+	 * @param string $body         レスポンスボディ
+	 * @dataProvider provideFetchFailureCases
+	 */
+	public function test_fetch_returns_null_on_api_failure( $remoteReturn, int $code, string $body ): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_provider_rakuten-kobo_credentials', '' )
+			->andReturn( $this->encryptedCredentials() );
+		WP_Mock::userFunction( 'home_url' )->andReturn( 'https://shop.example' );
+		WP_Mock::userFunction( 'wp_parse_url' )->andReturnUsing(
+			static function ( $url ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- wp_parse_url() のテストダブル
+				return parse_url( $url );
+			}
+		);
+		WP_Mock::userFunction( 'wp_remote_get' )->once()->andReturn( $remoteReturn );
+		WP_Mock::userFunction( 'wp_remote_retrieve_response_code' )->andReturn( $code );
+		WP_Mock::userFunction( 'wp_remote_retrieve_body' )->andReturn( $body );
+
+		$this->assertNull( ( new RakutenProvider() )->fetch( '123', array() ) );
+	}
+
+	/**
+	 * @return array<string, array{0: mixed, 1: int, 2: string}>
+	 */
+	public function provideFetchFailureCases(): array {
+		return array(
+			'wp_error'       => array( new \WP_Error(), 0, '' ),
+			'non_200'        => array( array( 'response' => array( 'code' => 429 ) ), 429, '' ),
+			'errors_in_body' => array(
+				array( 'response' => array( 'code' => 200 ) ),
+				200,
+				json_encode( array( 'errors' => array( 'errorCode' => 403 ) ) ),
+			),
+			'empty_items'    => array(
+				array( 'response' => array( 'code' => 200 ) ),
+				200,
+				json_encode( array( 'Items' => array() ) ),
+			),
+			'not_json'       => array( array( 'response' => array( 'code' => 200 ) ), 200, 'not-json' ),
+		);
+	}
+
+	public function test_normalize_date_returns_empty_for_invalid_format(): void {
+		$this->stubFetchResponse(
+			array(
+				'title'     => 'サンプル作品',
+				'salesDate' => '発売日未定',
+			)
+		);
+		$result = ( new RakutenProvider() )->fetch( '123', array() );
+		$this->assertSame( '', $result['platform_extras']['release_date'] );
+	}
 }
