@@ -64,7 +64,38 @@ final class RakutenProvider implements ProviderInterface {
 	 * @return array<string, mixed>|null
 	 */
 	public function fetch( string $externalId, array $platformConfig ): ?array {
-		return null; // Task 3 で実装
+		$credentials = ProviderCredentials::get( $this->code() );
+		if ( ! self::hasRequiredCredentials( $credentials ) ) {
+			return null;
+		}
+		if ( '' === $externalId ) {
+			return null;
+		}
+
+		$query = array(
+			'applicationId' => $credentials['application_id'],
+			'affiliateId'   => $credentials['affiliate_id'],
+			'format'        => 'json',
+			'formatVersion' => '2',
+			'hits'          => '1',
+		);
+		if ( 1 === preg_match( '/^\d+$/', $externalId ) ) {
+			$query['itemNumber'] = $externalId;
+		} else {
+			$query['keyword'] = $externalId;
+		}
+
+		$decoded = $this->request( $query, $credentials );
+		if ( null === $decoded ) {
+			return null;
+		}
+
+		$item = self::firstItem( $decoded );
+		if ( null === $item ) {
+			return null;
+		}
+
+		return self::normalizeItem( $item );
 	}
 
 	/**
@@ -190,5 +221,78 @@ final class RakutenProvider implements ProviderInterface {
 			return (bool) is_wp_error( $value );
 		}
 		return $value instanceof \WP_Error;
+	}
+
+	/**
+	 * @param array<string, string> $query
+	 * @param array<string, string> $credentials
+	 * @return array<string, mixed>|null
+	 */
+	private function request( array $query, array $credentials ): ?array {
+		$response = wp_remote_get(
+			self::ENDPOINT . '?' . http_build_query( $query ),
+			$this->requestArgs( $credentials )
+		);
+		if ( self::isWpError( $response ) ) {
+			return null;
+		}
+		if ( 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
+			return null;
+		}
+		$decoded = json_decode( (string) wp_remote_retrieve_body( $response ), true );
+		if ( ! is_array( $decoded ) || isset( $decoded['errors'] ) ) {
+			return null;
+		}
+		return $decoded;
+	}
+
+	/**
+	 * @param array<string, mixed> $decoded
+	 * @return array<string, mixed>|null
+	 */
+	private static function firstItem( array $decoded ): ?array {
+		if ( ! isset( $decoded['Items'] ) || ! is_array( $decoded['Items'] ) || array() === $decoded['Items'] ) {
+			return null;
+		}
+		$first = $decoded['Items'][0] ?? null;
+		return is_array( $first ) ? $first : null;
+	}
+
+	/**
+	 * @param array<string, mixed> $item
+	 * @return array<string, mixed>
+	 */
+	private static function normalizeItem( array $item ): array {
+		$image_url = '';
+		foreach ( array( 'largeImageUrl', 'mediumImageUrl', 'smallImageUrl' ) as $key ) {
+			if ( isset( $item[ $key ] ) && is_string( $item[ $key ] ) && '' !== $item[ $key ] ) {
+				$image_url = $item[ $key ];
+				break;
+			}
+		}
+
+		return array(
+			'title'           => isset( $item['title'] ) ? (string) $item['title'] : '',
+			'price'           => isset( $item['itemPrice'] ) ? (string) $item['itemPrice'] : '',
+			'list_price'      => '',
+			'badge'           => '',
+			'image_url'       => $image_url,
+			'regular_url'     => isset( $item['itemUrl'] ) ? (string) $item['itemUrl'] : '',
+			'affiliate_url'   => isset( $item['affiliateUrl'] ) ? (string) $item['affiliateUrl'] : '',
+			'platform_extras' => array(
+				'release_date' => self::normalizeDate( isset( $item['salesDate'] ) ? (string) $item['salesDate'] : '' ),
+				'series_name'  => isset( $item['seriesName'] ) ? (string) $item['seriesName'] : '',
+				'author'       => isset( $item['author'] ) ? (string) $item['author'] : '',
+				'publisher'    => isset( $item['publisherName'] ) ? (string) $item['publisherName'] : '',
+			),
+			'raw'             => $item,
+		);
+	}
+
+	private static function normalizeDate( string $salesDate ): string {
+		if ( 1 === preg_match( '/^(\d{4})年(\d{1,2})月(\d{1,2})日$/u', $salesDate, $m ) ) {
+			return sprintf( '%04d-%02d-%02d', (int) $m[1], (int) $m[2], (int) $m[3] );
+		}
+		return '';
 	}
 }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace Affilicard\Tests\Unit\Provider\Rakuten;
 
 use Affilicard\Provider\Rakuten\RakutenProvider;
+use Affilicard\Util\Crypto;
+use Affilicard\Util\JsonField;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
 
@@ -20,6 +22,12 @@ final class RakutenProviderTest extends TestCase {
 		WP_Mock::userFunction( 'is_wp_error' )->andReturnUsing(
 			static function ( $value ) {
 				return $value instanceof \WP_Error;
+			}
+		);
+		WP_Mock::userFunction( 'wp_salt' )->with( 'auth' )->andReturn( 'test-salt-1234567890abcdef' );
+		WP_Mock::userFunction( 'wp_json_encode' )->andReturnUsing(
+			static function ( $value ) {
+				return json_encode( $value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
 			}
 		);
 	}
@@ -183,5 +191,96 @@ final class RakutenProviderTest extends TestCase {
 			)
 		);
 		$this->assertFalse( $result['ok'] );
+	}
+
+	/**
+	 * @return string 暗号化済み credentials（get_option が返す値）
+	 */
+	private function encryptedCredentials(): string {
+		return Crypto::encrypt(
+			JsonField::encode(
+				array(
+					'application_id' => 'app-1',
+					'access_key'     => 'pk_test',
+					'affiliate_id'   => 'aff-1',
+				)
+			)
+		);
+	}
+
+	/**
+	 * @param array<string, mixed> $item
+	 */
+	private function stubFetchResponse( array $item, ?string &$captured = null ): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_provider_rakuten-kobo_credentials', '' )
+			->andReturn( $this->encryptedCredentials() );
+		WP_Mock::userFunction( 'home_url' )->andReturn( 'https://shop.example' );
+		WP_Mock::userFunction( 'wp_parse_url' )->andReturnUsing(
+			static function ( $url ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- wp_parse_url() のテストダブル
+				return parse_url( $url );
+			}
+		);
+		WP_Mock::userFunction( 'wp_remote_get' )->once()->andReturnUsing(
+			static function ( $url ) use ( &$captured ) {
+				$captured = $url;
+				return array( 'response' => array( 'code' => 200 ) );
+			}
+		);
+		WP_Mock::userFunction( 'wp_remote_retrieve_response_code' )->andReturn( 200 );
+		WP_Mock::userFunction( 'wp_remote_retrieve_body' )->andReturn(
+			json_encode( array( 'Items' => array( $item ) ) )
+		);
+	}
+
+	public function test_fetch_uses_item_number_query_for_numeric_external_id(): void {
+		$captured = null;
+		$this->stubFetchResponse( array( 'title' => 'サンプル作品' ), $captured );
+
+		$result = ( new RakutenProvider() )->fetch( '8913122576600', array() );
+
+		$this->assertSame( 'サンプル作品', $result['title'] );
+		$this->assertStringContainsString( 'itemNumber=8913122576600', $captured );
+		$this->assertStringNotContainsString( 'keyword=', $captured );
+	}
+
+	public function test_fetch_normalizes_all_fields(): void {
+		$item = array(
+			'title'          => 'サンプル作品',
+			'itemPrice'      => 660,
+			'salesDate'      => '2026年07月10日',
+			'itemUrl'        => 'https://shop.example/item/1',
+			'affiliateUrl'   => 'https://aff.example/hgc/xxx',
+			'largeImageUrl'  => 'https://img.example/large.jpg',
+			'mediumImageUrl' => 'https://img.example/medium.jpg',
+			'seriesName'     => 'サンプルシリーズ',
+			'author'         => 'サンプル著者',
+			'publisherName'  => 'サンプル出版',
+		);
+		$this->stubFetchResponse( $item );
+
+		$result = ( new RakutenProvider() )->fetch( '8913122576600', array() );
+
+		$this->assertSame( 'サンプル作品', $result['title'] );
+		$this->assertSame( '660', $result['price'] );
+		$this->assertSame( '', $result['list_price'] );
+		$this->assertSame( '', $result['badge'] );
+		$this->assertSame( 'https://img.example/large.jpg', $result['image_url'] );
+		$this->assertSame( 'https://shop.example/item/1', $result['regular_url'] );
+		$this->assertSame( 'https://aff.example/hgc/xxx', $result['affiliate_url'] );
+		$this->assertSame( '2026-07-10', $result['platform_extras']['release_date'] );
+		$this->assertSame( 'サンプルシリーズ', $result['platform_extras']['series_name'] );
+	}
+
+	public function test_fetch_falls_back_to_medium_image_when_large_missing(): void {
+		$this->stubFetchResponse(
+			array(
+				'title'          => 'サンプル作品',
+				'mediumImageUrl' => 'https://img.example/medium.jpg',
+			)
+		);
+		$result = ( new RakutenProvider() )->fetch( '123', array() );
+		$this->assertSame( 'https://img.example/medium.jpg', $result['image_url'] );
 	}
 }
