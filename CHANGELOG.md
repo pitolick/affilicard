@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-07-13
+
+### Added
+
+- 楽天Kobo 電子書籍検索 API を使った自動取得 Provider（`RakutenProvider`）を追加。価格・書影・作品URL・アフィリエイトURL・配信日を取得する。2026 年の楽天 API 刷新（`openapi.rakuten.co.jp`・`accessKey` ヘッダ・`Origin` 必須）に対応。
+
 ## [1.8.1] - 2026-07-12
 
 ### Changed

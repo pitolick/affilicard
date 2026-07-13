@@ -13,6 +13,7 @@ use Affilicard\PostType\ProductPostType;
 use Affilicard\Provider\Dmm\DmmProvider;
 use Affilicard\Provider\ManualProvider;
 use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Provider\Rakuten\RakutenProvider;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Rest\CardPreviewController;
 use Affilicard\Rest\CredentialsController;
@@ -115,6 +116,7 @@ final class Plugin {
 		$registry = new ProviderRegistry();
 		$registry->register( new ManualProvider() );
 		$registry->register( new DmmProvider() );
+		$registry->register( new RakutenProvider() );
 		return $registry;
 	}
 
