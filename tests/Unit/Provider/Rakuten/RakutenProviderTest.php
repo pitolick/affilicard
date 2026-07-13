@@ -271,6 +271,8 @@ final class RakutenProviderTest extends TestCase {
 		$this->assertSame( 'https://aff.example/hgc/xxx', $result['affiliate_url'] );
 		$this->assertSame( '2026-07-10', $result['platform_extras']['release_date'] );
 		$this->assertSame( 'サンプルシリーズ', $result['platform_extras']['series_name'] );
+		$this->assertSame( 'サンプル著者', $result['platform_extras']['author'] );
+		$this->assertSame( 'サンプル出版', $result['platform_extras']['publisher'] );
 	}
 
 	public function test_fetch_falls_back_to_medium_image_when_large_missing(): void {
