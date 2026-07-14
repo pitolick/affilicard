@@ -3,37 +3,62 @@ declare(strict_types=1);
 
 namespace Affilicard\Tests\Unit\Rest;
 
-use Affilicard\Platform\PlatformConfig;
-use Affilicard\Provider\ProviderCredentials;
+use Affilicard\Account\AccountCredentials;
+use Affilicard\Account\AccountInterface;
+use Affilicard\Account\AccountRegistry;
 use Affilicard\Provider\ProviderInterface;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Rest\CredentialsController;
-use Affilicard\Util\Crypto;
-use Affilicard\Util\JsonField;
+use Mockery;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
 use WP_REST_Request;
 
+/**
+ * CredentialsController のテスト。
+ *
+ * credentials は account 単位（GET/PUT/DELETE `/accounts/{code}/credentials`）、
+ * 接続テストは provider 単位（POST `/providers/{code}/test-connection`）。
+ *
+ * get_option/update_option/delete_option をインメモリ store で mock し、
+ * AccountCredentials 経由のラウンドトリップを検証する。
+ */
 final class CredentialsControllerTest extends TestCase {
+
+	/** @var array<string, string> */
+	private array $store = array();
 
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
-		WP_Mock::userFunction( '__' )
-			->andReturnUsing(
-				static function ( $text ) {
-					return $text;
-				}
-			);
-		WP_Mock::userFunction( 'wp_salt' )
-			->with( 'auth' )
-			->andReturn( 'test-salt-1234567890abcdef' );
-		WP_Mock::userFunction( 'wp_json_encode' )
-			->andReturnUsing(
-				static function ( $value ) {
-					return json_encode( $value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
-				}
-			);
+		$this->store = array();
+
+		WP_Mock::userFunction( '__' )->andReturnUsing( static fn( $t ) => $t );
+		WP_Mock::userFunction( 'wp_salt' )->andReturn( 'test-salt' );
+		WP_Mock::userFunction( 'wp_json_encode' )->andReturnUsing(
+			static function ( $value ) {
+				return json_encode( $value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
+			}
+		);
+		WP_Mock::userFunction( 'current_user_can' )->andReturn( true );
+
+		WP_Mock::userFunction( 'get_option' )->andReturnUsing(
+			function ( $key, $default = '' ) {
+				return $this->store[ $key ] ?? $default;
+			}
+		);
+		WP_Mock::userFunction( 'update_option' )->andReturnUsing(
+			function ( $key, $value, $autoload = null ) {
+				$this->store[ $key ] = $value;
+				return true;
+			}
+		);
+		WP_Mock::userFunction( 'delete_option' )->andReturnUsing(
+			function ( $key ) {
+				unset( $this->store[ $key ] );
+				return true;
+			}
+		);
 	}
 
 	public function tearDown(): void {
@@ -42,344 +67,347 @@ final class CredentialsControllerTest extends TestCase {
 	}
 
 	/**
-	 * 1 件だけの platform を返す get_option mock を仕込む。
+	 * `sample` account: text 必須 pub ＋ password 必須 sec の 1 account のみを持つ registry。
 	 */
-	private function mockSinglePlatform( string $platformCode, string $providerCode ): void {
-		WP_Mock::userFunction( 'get_option' )
-			->with( PlatformConfig::OPTION_KEY, array() )
-			->andReturn(
-				array(
-					array(
-						'code'            => $platformCode,
-						'name'            => $platformCode,
-						'provider'        => $providerCode,
-						'displayOrder'    => 1,
-						'enabled'         => true,
-						'applicableTypes' => array( 'ebook' ),
-						'buttonLabel'     => 'L',
-						'brandColor'      => '#000000',
-						'buttonTextColor' => '#ffffff',
-					),
-				)
-			);
-	}
-
-	public function test_get_returns_masked_credentials_via_provider_credentials_get_masked(): void {
-		$this->mockSinglePlatform( 'dmm-books', 'dmm-ebook' );
-
-		$values    = array(
-			'api_id'       => 'apikey-abc',
-			'affiliate_id' => 'aff-xyz',
+	private function accounts(): AccountRegistry {
+		$reg = new AccountRegistry();
+		$reg->register(
+			new class() implements AccountInterface {
+				public function code(): string {
+					return 'sample';
+				}
+				public function label(): string {
+					return 'Sample';
+				}
+				public function credentialsSchema(): array {
+					return array(
+						array(
+							'key'      => 'pub',
+							'label'    => 'Pub',
+							'type'     => 'text',
+							'required' => true,
+						),
+						array(
+							'key'      => 'sec',
+							'label'    => 'Sec',
+							'type'     => 'password',
+							'required' => true,
+						),
+					);
+				}
+			}
 		);
-		$encrypted = Crypto::encrypt( JsonField::encode( $values ) );
-
-		WP_Mock::userFunction( 'get_option' )
-			->with( ProviderCredentials::optionKey( 'dmm-ebook' ), '' )
-			->andReturn( $encrypted );
-
-		$controller = new CredentialsController( new ProviderRegistry() );
-		$request    = new WP_REST_Request( 'GET', '/' );
-		$request->set_param( 'code', 'dmm-books' );
-
-		$response = $controller->get( $request );
-
-		$this->assertSame( 200, $response->get_status() );
-		$data = $response->get_data();
-		$this->assertSame( '********bc', $data['api_id'] );
-		$this->assertSame( '*****yz', $data['affiliate_id'] );
+		return $reg;
 	}
-
-	public function test_get_returns_404_when_platform_not_found(): void {
-		WP_Mock::userFunction( 'get_option' )
-			->with( PlatformConfig::OPTION_KEY, array() )
-			->andReturn( array() );
-
-		$controller = new CredentialsController( new ProviderRegistry() );
-		$request    = new WP_REST_Request( 'GET', '/' );
-		$request->set_param( 'code', 'unknown' );
-
-		$response = $controller->get( $request );
-
-		$this->assertSame( 404, $response->get_status() );
-		$data = $response->get_data();
-		$this->assertSame( 'affilicard_platform_not_found', $data['code'] );
-	}
-
-	public function test_update_patches_and_returns_new_masked(): void {
-		$this->mockSinglePlatform( 'dmm-books', 'dmm-ebook' );
-
-		// patch() の current 取得用と、再表示用の get() の 2 回読み。
-		WP_Mock::userFunction( 'get_option' )
-			->with( ProviderCredentials::optionKey( 'dmm-ebook' ), '' )
-			->andReturnUsing(
-				static function ( $key, $default ) {
-					static $first = true;
-					if ( $first ) {
-						$first = false;
-						return '';
-					}
-					return Crypto::encrypt( JsonField::encode( array( 'api_id' => 'new-api-key' ) ) );
-				}
-			);
-
-		WP_Mock::userFunction( 'update_option' )
-			->once()
-			->andReturnUsing(
-				function ( $key, $value, $autoload ) {
-					$this->assertSame( ProviderCredentials::optionKey( 'dmm-ebook' ), $key );
-					$decrypted = Crypto::decrypt( $value );
-					$decoded   = JsonField::decode( $decrypted );
-					$this->assertSame( 'new-api-key', $decoded['api_id'] );
-					return true;
-				}
-			);
-
-		$controller = new CredentialsController( new ProviderRegistry() );
-		$request    = new WP_REST_Request( 'PUT', '/' );
-		$request->set_param( 'code', 'dmm-books' );
-		$request->set_param( 'api_id', 'new-api-key' );
-
-		$response = $controller->update( $request );
-
-		$this->assertSame( 200, $response->get_status() );
-		$data = $response->get_data();
-		$this->assertArrayHasKey( 'api_id', $data );
-		$this->assertSame( '*********ey', $data['api_id'] );
-	}
-
-	public function test_test_connection_resolves_platform_to_provider_and_calls_test_connection(): void {
-		$this->mockSinglePlatform( 'dmm-books', 'dmm-ebook' );
-
-		WP_Mock::userFunction( 'get_option' )
-			->with( ProviderCredentials::optionKey( 'dmm-ebook' ), '' )
-			->andReturn( Crypto::encrypt( JsonField::encode( array( 'api_id' => 'KEY' ) ) ) );
-
-		$provider = new class() implements ProviderInterface {
-			public array $received_credentials = array();
-
-			public function code(): string {
-				return 'dmm-ebook';
-			}
-
-			public function label(): string {
-				return 'DMM';
-			}
-
-			public function isAutomatic(): bool {
-				return true;
-			}
-
-			public function accountCode(): ?string {
-				return null;
-			}
-
-			public function fetch( string $externalId, array $platformConfig ): ?array {
-				return null;
-			}
-
-			public function testConnection( array $credentials ): array {
-				$this->received_credentials = $credentials;
-				return array(
-					'ok'      => true,
-					'message' => '疎通 OK',
-				);
-			}
-		};
-
-		$registry = new ProviderRegistry();
-		$registry->register( $provider );
-
-		$controller = new CredentialsController( $registry );
-		$request    = new WP_REST_Request( 'POST', '/' );
-		$request->set_param( 'code', 'dmm-books' );
-
-		$response = $controller->testConnection( $request );
-
-		$this->assertSame( 200, $response->get_status() );
-		$data = $response->get_data();
-		$this->assertTrue( $data['ok'] );
-		$this->assertSame( '疎通 OK', $data['message'] );
-		$this->assertSame( 'KEY', $provider->received_credentials['api_id'] );
-	}
-
-	public function test_test_connection_returns_404_when_platform_not_found(): void {
-		WP_Mock::userFunction( 'get_option' )
-			->with( PlatformConfig::OPTION_KEY, array() )
-			->andReturn( array() );
-
-		$controller = new CredentialsController( new ProviderRegistry() );
-		$request    = new WP_REST_Request( 'POST', '/' );
-		$request->set_param( 'code', 'unknown' );
-
-		$response = $controller->testConnection( $request );
-
-		$this->assertSame( 404, $response->get_status() );
-		$data = $response->get_data();
-		$this->assertSame( 'affilicard_platform_not_found', $data['code'] );
-	}
-
-	public function test_test_connection_returns_404_when_provider_not_registered(): void {
-		$this->mockSinglePlatform( 'dmm-books', 'missing-provider' );
-
-		$controller = new CredentialsController( new ProviderRegistry() );
-		$request    = new WP_REST_Request( 'POST', '/' );
-		$request->set_param( 'code', 'dmm-books' );
-
-		$response = $controller->testConnection( $request );
-
-		$this->assertSame( 404, $response->get_status() );
-		$data = $response->get_data();
-		$this->assertFalse( $data['ok'] );
-	}
-
-	// ─── Provider 単位ルート ───────────────────────────────────────────────
 
 	/**
-	 * ProviderRegistry に provider を登録するヘルパ。
+	 * `sample` account の credentials を引く fake provider（code 'sample-provider'）を 1 件持つ registry。
+	 * testConnection は受け取った credentials の pub/sec をそのまま message に埋め込んで返す
+	 * ので、merge の結果をテストで検証できる。
 	 */
-	private function makeRegistryWithProvider( string $providerCode ): ProviderRegistry {
-		$provider = new class( $providerCode ) implements ProviderInterface {
-			public function __construct( private string $code ) {}
-
-			public function code(): string {
-				return $this->code;
+	private function providersWithFakeBoundToSample(): ProviderRegistry {
+		$reg = new ProviderRegistry();
+		$reg->register(
+			new class() implements ProviderInterface {
+				public function code(): string {
+					return 'sample-provider';
+				}
+				public function label(): string {
+					return 'Sample Provider';
+				}
+				public function isAutomatic(): bool {
+					return true;
+				}
+				public function accountCode(): ?string {
+					return 'sample';
+				}
+				public function fetch( string $externalId, array $platformConfig ): ?array {
+					return null;
+				}
+				public function testConnection( array $credentials ): array {
+					return array(
+						'ok'      => true,
+						'message' => 'pub=' . ( $credentials['pub'] ?? '' ) . ';sec=' . ( $credentials['sec'] ?? '' ),
+					);
+				}
 			}
-
-			public function label(): string {
-				return $this->code;
-			}
-
-			public function isAutomatic(): bool {
-				return true;
-			}
-
-			public function accountCode(): ?string {
-				return null;
-			}
-
-			public function fetch( string $externalId, array $platformConfig ): ?array {
-				return null;
-			}
-
-			public function testConnection( array $credentials ): array {
-				return array(
-					'ok'      => true,
-					'message' => '疎通 OK',
-				);
-			}
-		};
-
-		$registry = new ProviderRegistry();
-		$registry->register( $provider );
-		return $registry;
+		);
+		return $reg;
 	}
 
-	public function test_getProvider_returns_masked_credentials_for_known_provider(): void {
-		$values    = array(
-			'api_id'       => 'apikey-abc',
-			'affiliate_id' => 'aff-xyz',
+	/**
+	 * account に紐付かない（accountCode が null）fake provider を持つ registry。
+	 */
+	private function providersWithFakeWithoutAccount(): ProviderRegistry {
+		$reg = new ProviderRegistry();
+		$reg->register(
+			new class() implements ProviderInterface {
+				public function code(): string {
+					return 'no-account-provider';
+				}
+				public function label(): string {
+					return 'No Account Provider';
+				}
+				public function isAutomatic(): bool {
+					return true;
+				}
+				public function accountCode(): ?string {
+					return null;
+				}
+				public function fetch( string $externalId, array $platformConfig ): ?array {
+					return null;
+				}
+				public function testConnection( array $credentials ): array {
+					return array(
+						'ok'      => true,
+						'message' => 'keys=' . implode( ',', array_keys( $credentials ) ),
+					);
+				}
+			}
 		);
-		$encrypted = Crypto::encrypt( JsonField::encode( $values ) );
+		return $reg;
+	}
 
-		WP_Mock::userFunction( 'get_option' )
-			->with( ProviderCredentials::optionKey( 'dmm-ebook' ), '' )
-			->andReturn( $encrypted );
+	/**
+	 * Mockery で WP_REST_Request を組み立てる。$params には 'code'（URL パラメータ）と
+	 * body フィールドを両方含める。
+	 *
+	 * @param array<string, mixed> $params
+	 */
+	private function request( array $params ): WP_REST_Request {
+		$request = Mockery::mock( WP_REST_Request::class );
+		$request->shouldReceive( 'get_param' )->andReturnUsing(
+			static function ( $key ) use ( $params ) {
+				return $params[ $key ] ?? null;
+			}
+		);
+		$request->shouldReceive( 'get_params' )->andReturn( $params );
+		return $request;
+	}
 
-		$registry   = $this->makeRegistryWithProvider( 'dmm-ebook' );
-		$controller = new CredentialsController( $registry );
-		$request    = new WP_REST_Request( 'GET', '/' );
-		$request->set_param( 'code', 'dmm-ebook' );
+	// ─── GET /accounts/{code}/credentials ──────────────────────────────────
 
-		$response = $controller->getProvider( $request );
+	/**
+	 * 保存済み credentials を type-aware（text は実値・password は isSet のみ）に返す。
+	 */
+	public function test_getAccount_returns_type_aware_status_for_known_account(): void {
+		AccountCredentials::patch(
+			'sample',
+			array(
+				'pub' => 'PUBVAL',
+				'sec' => 'SECVAL',
+			)
+		);
+
+		$controller = new CredentialsController( new ProviderRegistry(), $this->accounts() );
+		$response   = $controller->getAccount( $this->request( array( 'code' => 'sample' ) ) );
 
 		$this->assertSame( 200, $response->get_status() );
 		$data = $response->get_data();
-		$this->assertSame( '********bc', $data['api_id'] );
-		$this->assertSame( '*****yz', $data['affiliate_id'] );
+		// text はそのまま実値、password は value を返さず isSet のみ。
+		$this->assertSame( 'PUBVAL', $data['pub']['value'] );
+		$this->assertTrue( $data['pub']['isSet'] );
+		$this->assertSame( '', $data['sec']['value'] );
+		$this->assertTrue( $data['sec']['isSet'] );
 	}
 
-	public function test_getProvider_returns_404_for_unknown_provider(): void {
-		$controller = new CredentialsController( new ProviderRegistry() );
-		$request    = new WP_REST_Request( 'GET', '/' );
-		$request->set_param( 'code', 'unknown-provider' );
-
-		$response = $controller->getProvider( $request );
+	public function test_getAccount_returns_404_for_unknown_account(): void {
+		$controller = new CredentialsController( new ProviderRegistry(), $this->accounts() );
+		$response   = $controller->getAccount( $this->request( array( 'code' => 'unknown' ) ) );
 
 		$this->assertSame( 404, $response->get_status() );
-		$data = $response->get_data();
-		$this->assertSame( 'affilicard_provider_not_found', $data['code'] );
+		$this->assertSame( 'affilicard_account_not_found', $response->get_data()['code'] );
 	}
 
-	public function test_testConnectionProvider_returns_ok_for_known_provider(): void {
-		$values    = array( 'api_id' => 'KEY' );
-		$encrypted = Crypto::encrypt( JsonField::encode( $values ) );
+	// ─── PUT /accounts/{code}/credentials ──────────────────────────────────
 
-		WP_Mock::userFunction( 'get_option' )
-			->with( ProviderCredentials::optionKey( 'dmm-ebook' ), '' )
-			->andReturn( $encrypted );
+	/**
+	 * マージ後（stored ＋ 送信値）の状態で必須検証し、欠けていれば 400 を返す。
+	 */
+	public function test_updateAccount_returns_400_when_required_missing_after_merge(): void {
+		$controller = new CredentialsController( new ProviderRegistry(), $this->accounts() );
+		$response   = $controller->updateAccount(
+			$this->request(
+				array(
+					'code' => 'sample',
+					'pub'  => 'x',
+					// sec 欠。
+				)
+			)
+		);
 
-		$registry   = $this->makeRegistryWithProvider( 'dmm-ebook' );
-		$controller = new CredentialsController( $registry );
-		$request    = new WP_REST_Request( 'POST', '/' );
-		$request->set_param( 'code', 'dmm-ebook' );
+		$this->assertSame( 400, $response->get_status() );
+		$data = $response->get_data();
+		$this->assertSame( 'affilicard_missing_required', $data['code'] );
+		$this->assertContains( 'sec', $data['missing'] );
+	}
 
-		$response = $controller->testConnectionProvider( $request );
+	public function test_updateAccount_success_patches_and_returns_status(): void {
+		$controller = new CredentialsController( new ProviderRegistry(), $this->accounts() );
+		$response   = $controller->updateAccount(
+			$this->request(
+				array(
+					'code' => 'sample',
+					'pub'  => 'PUBVAL',
+					'sec'  => 'SECVAL',
+				)
+			)
+		);
+
+		$this->assertSame( 200, $response->get_status() );
+		$data = $response->get_data();
+		$this->assertSame( 'PUBVAL', $data['pub']['value'] );
+		$this->assertTrue( $data['pub']['isSet'] );
+		$this->assertTrue( $data['sec']['isSet'] );
+
+		// 実際に永続化されていることを AccountCredentials 経由でも確認する。
+		$this->assertSame(
+			array(
+				'pub' => 'PUBVAL',
+				'sec' => 'SECVAL',
+			),
+			AccountCredentials::get( 'sample' )
+		);
+	}
+
+	public function test_updateAccount_editing_one_field_does_not_400_when_other_required_already_stored(): void {
+		// sec は既に保存済み。今回は pub だけを編集する。
+		AccountCredentials::patch(
+			'sample',
+			array(
+				'pub' => 'OLD_PUB',
+				'sec' => 'STORED_SEC',
+			)
+		);
+
+		$controller = new CredentialsController( new ProviderRegistry(), $this->accounts() );
+		$response   = $controller->updateAccount(
+			$this->request(
+				array(
+					'code' => 'sample',
+					'pub'  => 'NEW_PUB',
+					// sec は body に含めない。
+				)
+			)
+		);
+
+		$this->assertSame( 200, $response->get_status() );
+		$data = $response->get_data();
+		$this->assertSame( 'NEW_PUB', $data['pub']['value'] );
+		$this->assertTrue( $data['sec']['isSet'] );
+
+		$this->assertSame(
+			array(
+				'pub' => 'NEW_PUB',
+				'sec' => 'STORED_SEC',
+			),
+			AccountCredentials::get( 'sample' )
+		);
+	}
+
+	public function test_updateAccount_returns_404_for_unknown_account(): void {
+		$controller = new CredentialsController( new ProviderRegistry(), $this->accounts() );
+		$response   = $controller->updateAccount(
+			$this->request(
+				array(
+					'code' => 'unknown',
+					'pub'  => 'x',
+					'sec'  => 'y',
+				)
+			)
+		);
+
+		$this->assertSame( 404, $response->get_status() );
+		$this->assertSame( 'affilicard_account_not_found', $response->get_data()['code'] );
+	}
+
+	// ─── DELETE /accounts/{code}/credentials ───────────────────────────────
+
+	/**
+	 * DELETE で credentials を消去できる。
+	 */
+	public function test_deleteAccount_removes_credentials(): void {
+		AccountCredentials::patch(
+			'sample',
+			array(
+				'pub' => 'PUBVAL',
+				'sec' => 'SECVAL',
+			)
+		);
+
+		$controller = new CredentialsController( new ProviderRegistry(), $this->accounts() );
+		$response   = $controller->deleteAccount( $this->request( array( 'code' => 'sample' ) ) );
+
+		$this->assertSame( 200, $response->get_status() );
+		$data = $response->get_data();
+		$this->assertFalse( $data['pub']['isSet'] );
+		$this->assertFalse( $data['sec']['isSet'] );
+
+		$this->assertSame( array(), AccountCredentials::get( 'sample' ) );
+	}
+
+	public function test_deleteAccount_returns_404_for_unknown_account(): void {
+		$controller = new CredentialsController( new ProviderRegistry(), $this->accounts() );
+		$response   = $controller->deleteAccount( $this->request( array( 'code' => 'unknown' ) ) );
+
+		$this->assertSame( 404, $response->get_status() );
+		$this->assertSame( 'affilicard_account_not_found', $response->get_data()['code'] );
+	}
+
+	// ─── POST /providers/{code}/test-connection ────────────────────────────
+
+	/**
+	 * 未登録 provider への test-connection は 404 を返す。
+	 */
+	public function test_testConnection_returns_404_for_unknown_provider(): void {
+		$controller = new CredentialsController( new ProviderRegistry(), $this->accounts() );
+		$response   = $controller->testConnection( $this->request( array( 'code' => 'unknown-provider' ) ) );
+
+		$this->assertSame( 404, $response->get_status() );
+		$this->assertSame( 'affilicard_provider_not_found', $response->get_data()['code'] );
+	}
+
+	public function test_testConnection_merges_submitted_body_over_stored_account_credentials(): void {
+		// account には pub/sec 両方が保存済み。
+		AccountCredentials::patch(
+			'sample',
+			array(
+				'pub' => 'stored-pub',
+				'sec' => 'stored-sec',
+			)
+		);
+
+		$controller = new CredentialsController( $this->providersWithFakeBoundToSample(), $this->accounts() );
+		// body では pub だけ上書きする。sec は保存済みの値が使われるはず。
+		$response = $controller->testConnection(
+			$this->request(
+				array(
+					'code' => 'sample-provider',
+					'pub'  => 'override-pub',
+				)
+			)
+		);
 
 		$this->assertSame( 200, $response->get_status() );
 		$data = $response->get_data();
 		$this->assertTrue( $data['ok'] );
-		$this->assertSame( '疎通 OK', $data['message'] );
+		$this->assertSame( 'pub=override-pub;sec=stored-sec', $data['message'] );
 	}
 
-	public function test_testConnectionProvider_returns_404_for_unknown_provider(): void {
-		$controller = new CredentialsController( new ProviderRegistry() );
-		$request    = new WP_REST_Request( 'POST', '/' );
-		$request->set_param( 'code', 'no-such-provider' );
-
-		$response = $controller->testConnectionProvider( $request );
-
-		$this->assertSame( 404, $response->get_status() );
-		$data = $response->get_data();
-		$this->assertSame( 'affilicard_provider_not_found', $data['code'] );
-	}
-
-	public function test_updateProvider_patches_and_returns_new_masked(): void {
-		WP_Mock::userFunction( 'get_option' )
-			->with( ProviderCredentials::optionKey( 'dmm-ebook' ), '' )
-			->andReturnUsing(
-				static function ( $key, $default ) {
-					static $first = true;
-					if ( $first ) {
-						$first = false;
-						return '';
-					}
-					return Crypto::encrypt( JsonField::encode( array( 'api_id' => 'new-api-key' ) ) );
-				}
-			);
-
-		WP_Mock::userFunction( 'update_option' )
-			->once()
-			->andReturnUsing(
-				function ( $key, $value, $autoload ) {
-					$this->assertSame( ProviderCredentials::optionKey( 'dmm-ebook' ), $key );
-					$decrypted = Crypto::decrypt( $value );
-					$decoded   = JsonField::decode( $decrypted );
-					$this->assertSame( 'new-api-key', $decoded['api_id'] );
-					return true;
-				}
-			);
-
-		$registry   = $this->makeRegistryWithProvider( 'dmm-ebook' );
-		$controller = new CredentialsController( $registry );
-		$request    = new WP_REST_Request( 'PUT', '/' );
-		$request->set_param( 'code', 'dmm-ebook' );
-		$request->set_param( 'api_id', 'new-api-key' );
-
-		$response = $controller->updateProvider( $request );
+	public function test_testConnection_provider_without_account_uses_only_submitted_values(): void {
+		$controller = new CredentialsController( $this->providersWithFakeWithoutAccount(), $this->accounts() );
+		$response   = $controller->testConnection(
+			$this->request(
+				array(
+					'code'  => 'no-account-provider',
+					'token' => 'abc',
+				)
+			)
+		);
 
 		$this->assertSame( 200, $response->get_status() );
 		$data = $response->get_data();
-		$this->assertArrayHasKey( 'api_id', $data );
-		$this->assertSame( '*********ey', $data['api_id'] );
+		$this->assertTrue( $data['ok'] );
+		$this->assertSame( 'keys=token', $data['message'] );
 	}
 }

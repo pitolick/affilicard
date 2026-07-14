@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 namespace Affilicard;
 
+use Affilicard\Account\AccountRegistry;
+use Affilicard\Account\DmmAccount;
+use Affilicard\Account\RakutenAccount;
 use Affilicard\Block\Block;
 use Affilicard\Cron\ListingRefresher;
 use Affilicard\Cron\RefreshScheduler;
@@ -72,7 +75,7 @@ final class Plugin {
 			new ProductsController( $repository ),
 			new SettingsController(),
 			new PlatformsController(),
-			new CredentialsController( $providers ),
+			new CredentialsController( $providers, self::buildAccountRegistry() ),
 			new RefreshController( new ListingRefresher( $providers, new ProductRepository() ) ),
 			new CardPreviewController( $repository )
 		);
@@ -117,6 +120,13 @@ final class Plugin {
 		$registry->register( new ManualProvider() );
 		$registry->register( new DmmProvider() );
 		$registry->register( new RakutenProvider() );
+		return $registry;
+	}
+
+	public static function buildAccountRegistry(): AccountRegistry {
+		$registry = new AccountRegistry();
+		$registry->register( new RakutenAccount() );
+		$registry->register( new DmmAccount() );
 		return $registry;
 	}
 

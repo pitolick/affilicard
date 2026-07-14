@@ -3,68 +3,40 @@ declare(strict_types=1);
 
 namespace Affilicard\Rest;
 
-use Affilicard\Platform\PlatformConfig;
-use Affilicard\Provider\ProviderCredentials;
+use Affilicard\Account\AccountCredentials;
+use Affilicard\Account\AccountRegistry;
 use Affilicard\Provider\ProviderRegistry;
 use WP_REST_Request;
 use WP_REST_Response;
 
 /**
- * 認証情報 REST の実装。2 系統のルートを提供する:
- *
- * - provider 単位（推奨）: `/affilicard/v1/providers/{code}/credentials`
- *   ・`/providers/{code}/test-connection`。{code} は provider code（dmm-ebook 等）。
- *   認証情報は provider 単位で保存されるため、UI はこちらで 1 回だけ編集する。
- * - platform 単位（後方互換）: `/affilicard/v1/platforms/{code}/credentials`
- *   ・`/platforms/{code}/test-connection`。{code} は platform code（dmm-books 等）で、
- *   内部で platform → provider に解決する。新規 UI は provider 系へ移行済み。
+ * 認証情報 REST。credentials は account 単位（GET/PUT/DELETE）、接続テストは provider 単位（POST）。
  */
 final class CredentialsController {
 
-	public function __construct( private ProviderRegistry $providers ) {}
+	public function __construct(
+		private ProviderRegistry $providers,
+		private AccountRegistry $accounts
+	) {}
 
 	public function registerRoutes( string $namespace ): void {
 		register_rest_route(
 			$namespace,
-			'/platforms/(?P<code>[a-z0-9-]+)/credentials',
+			'/accounts/(?P<code>[a-z0-9-]+)/credentials',
 			array(
 				array(
 					'methods'             => 'GET',
-					'callback'            => array( $this, 'get' ),
+					'callback'            => array( $this, 'getAccount' ),
 					'permission_callback' => array( $this, 'canManageOptions' ),
 				),
 				array(
 					'methods'             => 'PUT',
-					'callback'            => array( $this, 'update' ),
-					'permission_callback' => array( $this, 'canManageOptions' ),
-				),
-			)
-		);
-
-		register_rest_route(
-			$namespace,
-			'/platforms/(?P<code>[a-z0-9-]+)/test-connection',
-			array(
-				array(
-					'methods'             => 'POST',
-					'callback'            => array( $this, 'testConnection' ),
-					'permission_callback' => array( $this, 'canManageOptions' ),
-				),
-			)
-		);
-
-		register_rest_route(
-			$namespace,
-			'/providers/(?P<code>[a-z0-9-]+)/credentials',
-			array(
-				array(
-					'methods'             => 'GET',
-					'callback'            => array( $this, 'getProvider' ),
+					'callback'            => array( $this, 'updateAccount' ),
 					'permission_callback' => array( $this, 'canManageOptions' ),
 				),
 				array(
-					'methods'             => 'PUT',
-					'callback'            => array( $this, 'updateProvider' ),
+					'methods'             => 'DELETE',
+					'callback'            => array( $this, 'deleteAccount' ),
 					'permission_callback' => array( $this, 'canManageOptions' ),
 				),
 			)
@@ -76,7 +48,7 @@ final class CredentialsController {
 			array(
 				array(
 					'methods'             => 'POST',
-					'callback'            => array( $this, 'testConnectionProvider' ),
+					'callback'            => array( $this, 'testConnection' ),
 					'permission_callback' => array( $this, 'canManageOptions' ),
 				),
 			)
@@ -87,70 +59,65 @@ final class CredentialsController {
 		return (bool) current_user_can( 'manage_options' );
 	}
 
-	public function get( WP_REST_Request $request ): WP_REST_Response {
-		$platform_code = (string) $request->get_param( 'code' );
-		$provider_code = $this->resolveProviderCode( $platform_code );
-		if ( null === $provider_code ) {
-			return $this->platformNotFound();
+	public function getAccount( WP_REST_Request $request ): WP_REST_Response {
+		$account = $this->accounts->get( (string) $request->get_param( 'code' ) );
+		if ( null === $account ) {
+			return $this->accountNotFound();
 		}
-
-		return new WP_REST_Response( ProviderCredentials::getMasked( $provider_code ), 200 );
+		return new WP_REST_Response( AccountCredentials::getStatusFor( $account ), 200 );
 	}
 
-	public function update( WP_REST_Request $request ): WP_REST_Response {
-		$platform_code = (string) $request->get_param( 'code' );
-		$provider_code = $this->resolveProviderCode( $platform_code );
-		if ( null === $provider_code ) {
-			return $this->platformNotFound();
+	public function updateAccount( WP_REST_Request $request ): WP_REST_Response {
+		$account = $this->accounts->get( (string) $request->get_param( 'code' ) );
+		if ( null === $account ) {
+			return $this->accountNotFound();
 		}
 
-		$params = $request->get_params();
-		if ( ! is_array( $params ) ) {
-			$params = array();
-		}
+		$values = $this->submittedValues( $request );
 
-		// `code` URL パラメータは除外（credentials 本体のみ patch）。
-		unset( $params['code'] );
-
-		$values = array();
-		foreach ( $params as $key => $value ) {
-			if ( ! is_string( $key ) ) {
-				continue;
+		// マージ後状態で required 検証。
+		$merged  = array_merge( AccountCredentials::get( $account->code() ), $values );
+		$missing = array();
+		foreach ( $account->credentialsSchema() as $field ) {
+			if ( ! empty( $field['required'] ) && '' === (string) ( $merged[ $field['key'] ] ?? '' ) ) {
+				$missing[] = (string) $field['key'];
 			}
-			if ( null === $value ) {
-				$values[ $key ] = null;
-				continue;
-			}
-			$values[ $key ] = (string) $value;
 		}
-
-		ProviderCredentials::patch( $provider_code, $values );
-
-		return new WP_REST_Response( ProviderCredentials::getMasked( $provider_code ), 200 );
-	}
-
-	public function testConnection( WP_REST_Request $request ): WP_REST_Response {
-		$platform_code = (string) $request->get_param( 'code' );
-		$platform      = PlatformConfig::find( $platform_code );
-		if ( null === $platform ) {
-			return $this->platformNotFound();
-		}
-
-		$provider = $this->providers->get( $platform->provider );
-		if ( null === $provider ) {
+		if ( array() !== $missing ) {
 			return new WP_REST_Response(
 				array(
-					'ok'      => false,
-					'message' => __( '対応する Provider が見つかりません。', 'affilicard' ),
+					'code'    => 'affilicard_missing_required',
+					'message' => __( '必須項目が未入力です。', 'affilicard' ),
+					'missing' => $missing,
 				),
-				404
+				400
 			);
 		}
 
-		$credentials = ProviderCredentials::get( $platform->provider );
+		AccountCredentials::patch( $account->code(), $values );
+		return new WP_REST_Response( AccountCredentials::getStatusFor( $account ), 200 );
+	}
 
-		$result = $provider->testConnection( $credentials );
+	public function deleteAccount( WP_REST_Request $request ): WP_REST_Response {
+		$account = $this->accounts->get( (string) $request->get_param( 'code' ) );
+		if ( null === $account ) {
+			return $this->accountNotFound();
+		}
+		AccountCredentials::delete( $account->code() );
+		return new WP_REST_Response( AccountCredentials::getStatusFor( $account ), 200 );
+	}
 
+	public function testConnection( WP_REST_Request $request ): WP_REST_Response {
+		$provider = $this->providers->get( (string) $request->get_param( 'code' ) );
+		if ( null === $provider ) {
+			return $this->providerNotFound();
+		}
+
+		$accountCode = $provider->accountCode();
+		$stored      = null === $accountCode ? array() : AccountCredentials::get( $accountCode );
+		$merged      = array_merge( $stored, $this->submittedValues( $request ) );
+
+		$result = $provider->testConnection( $merged );
 		return new WP_REST_Response(
 			array(
 				'ok'      => (bool) ( $result['ok'] ?? false ),
@@ -160,55 +127,33 @@ final class CredentialsController {
 		);
 	}
 
-	public function getProvider( WP_REST_Request $request ): WP_REST_Response {
-		$provider_code = (string) $request->get_param( 'code' );
-		if ( null === $this->providers->get( $provider_code ) ) {
-			return $this->providerNotFound();
-		}
-		return new WP_REST_Response( ProviderCredentials::getMasked( $provider_code ), 200 );
-	}
-
-	public function updateProvider( WP_REST_Request $request ): WP_REST_Response {
-		$provider_code = (string) $request->get_param( 'code' );
-		if ( null === $this->providers->get( $provider_code ) ) {
-			return $this->providerNotFound();
-		}
-
+	/**
+	 * リクエスト body から credentials の文字列マップを取り出す（code は除外）。
+	 *
+	 * @return array<string, string>
+	 */
+	private function submittedValues( WP_REST_Request $request ): array {
 		$params = $request->get_params();
 		if ( ! is_array( $params ) ) {
-			$params = array();
+			return array();
 		}
 		unset( $params['code'] );
-
 		$values = array();
 		foreach ( $params as $key => $value ) {
-			if ( ! is_string( $key ) ) {
-				continue;
+			if ( is_string( $key ) && null !== $value ) {
+				$values[ $key ] = (string) $value;
 			}
-			$values[ $key ] = null === $value ? null : (string) $value;
 		}
-
-		ProviderCredentials::patch( $provider_code, $values );
-
-		return new WP_REST_Response( ProviderCredentials::getMasked( $provider_code ), 200 );
+		return $values;
 	}
 
-	public function testConnectionProvider( WP_REST_Request $request ): WP_REST_Response {
-		$provider_code = (string) $request->get_param( 'code' );
-		$provider      = $this->providers->get( $provider_code );
-		if ( null === $provider ) {
-			return $this->providerNotFound();
-		}
-
-		$credentials = ProviderCredentials::get( $provider_code );
-		$result      = $provider->testConnection( $credentials );
-
+	private function accountNotFound(): WP_REST_Response {
 		return new WP_REST_Response(
 			array(
-				'ok'      => (bool) ( $result['ok'] ?? false ),
-				'message' => (string) ( $result['message'] ?? '' ),
+				'code'    => 'affilicard_account_not_found',
+				'message' => __( '指定されたアカウントが見つかりません。', 'affilicard' ),
 			),
-			200
+			404
 		);
 	}
 
@@ -217,24 +162,6 @@ final class CredentialsController {
 			array(
 				'code'    => 'affilicard_provider_not_found',
 				'message' => __( '指定された Provider が見つかりません。', 'affilicard' ),
-			),
-			404
-		);
-	}
-
-	private function resolveProviderCode( string $platformCode ): ?string {
-		$platform = PlatformConfig::find( $platformCode );
-		if ( null === $platform ) {
-			return null;
-		}
-		return $platform->provider;
-	}
-
-	private function platformNotFound(): WP_REST_Response {
-		return new WP_REST_Response(
-			array(
-				'code'    => 'affilicard_platform_not_found',
-				'message' => __( '指定されたプラットフォームが見つかりません。', 'affilicard' ),
 			),
 			404
 		);
