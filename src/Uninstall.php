@@ -24,6 +24,7 @@ final class Uninstall {
 		'affilicard_platforms',
 		'affilicard_general',
 		'affilicard_seeded_at',
+		'affilicard_legacy_creds_purged',
 	);
 
 	public static function run(): void {
