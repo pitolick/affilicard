@@ -14,7 +14,7 @@
 - Provider スキーマを PHP（`AccountUiList`/`ProviderUiList`）から `window.affilicardAccounts`/`window.affilicardProviders` として注入し、JS のハードコードを廃止。
 - 楽天 API transport を `RakutenClient` に分離。
 
-### Note
+### Notes
 
 - 未公開のため移行は行わない。旧 `affilicard_provider_*` credentials はアップグレード時に削除される。
 

@@ -71,9 +71,10 @@
 | PUT      | `/settings`                         | `manage_options`   | 一般設定更新                                                            |
 | GET      | `/platforms`                        | `manage_options`   | プラットフォーム一覧取得                                                |
 | PUT      | `/platforms`                        | `manage_options`   | プラットフォーム一括更新                                                |
-| GET      | `/platforms/{code}/credentials`     | `manage_options`   | 認証情報取得 (マスク)                                                   |
-| PUT      | `/platforms/{code}/credentials`     | `manage_options`   | 認証情報部分更新                                                        |
-| POST     | `/platforms/{code}/test-connection` | `manage_options`   | 接続テスト                                                              |
+| GET      | `/accounts/{code}/credentials`      | `manage_options`   | アカウント単位の認証情報取得 (マスク)                                    |
+| PUT      | `/accounts/{code}/credentials`      | `manage_options`   | アカウント単位の認証情報保存                                             |
+| DELETE   | `/accounts/{code}/credentials`      | `manage_options`   | アカウント単位の認証情報削除                                             |
+| POST     | `/providers/{code}/test-connection` | `manage_options`   | provider 単位の接続テスト（保存前の入力値でテスト）                       |
 
 ### 認証
 
@@ -169,13 +170,6 @@ curl -u 'username:xxxx xxxx xxxx xxxx xxxx xxxx' \
 6. `Plugin::buildProductTypeRegistry()` に `$registry->register(new MyType())` を追加
 
 実装例は `src/Types/EbookType.php`（API provider 連携あり）と `src/Types/VodType.php`（手動入力のみ・監督/出演を header に昇格）を参照。VOD のように provider 連携が無い場合は `extractExtrasFromProvider()` を空配列で返すだけでよい。新しいプラットフォームを使う場合は `PlatformConfig::defaults()` に `applicableTypes` を新タイプの code にした `PlatformDefinition` を追加する（`src/Platform/PlatformConfig.php` の VOD platform 群を参照）。
-
-### 新しい Provider を追加
-
-1. `src/Provider/My/MyProvider.php` で `ProviderInterface` を実装
-2. `credentialsSchema()` で認証情報フィールドを宣言 (admin UI が自動生成)
-3. `testConnection()` で疎通確認ロジックを書く
-4. `Plugin::buildProviderRegistry()` に登録
 
 ### Account / Provider を追加する
 
