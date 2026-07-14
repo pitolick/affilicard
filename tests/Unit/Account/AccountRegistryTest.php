@@ -34,10 +34,12 @@ final class AccountRegistryTest extends TestCase {
 
 	public function test_all_and_codes_preserve_registration_order(): void {
 		$registry = new AccountRegistry();
-		$registry->register( $this->fakeAccount( 'a', 'A', array() ) );
-		$registry->register( $this->fakeAccount( 'b', 'B', array() ) );
+		$a        = $this->fakeAccount( 'a', 'A', array() );
+		$b        = $this->fakeAccount( 'b', 'B', array() );
+		$registry->register( $a );
+		$registry->register( $b );
 
 		$this->assertSame( array( 'a', 'b' ), $registry->codes() );
-		$this->assertCount( 2, $registry->all() );
+		$this->assertSame( array( $a, $b ), $registry->all() );
 	}
 }

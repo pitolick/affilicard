@@ -130,6 +130,36 @@ describe( 'AccountCredentialEditor', () => {
 		);
 	} );
 
+	test( '400 (missing) エラー時に該当フィールドへ必須エラーを表示し、再保存成功でクリアする', async () => {
+		api.updateCredentials.mockRejectedValueOnce( {
+			code: 'affilicard_missing_required',
+			message: '必須項目が未入力です。',
+			data: { status: 400 },
+			missing: [ 'access_key' ],
+		} );
+
+		render( <AccountCredentialEditor account={ account } providers={ [] } /> );
+		await waitFor( () => screen.getByDisplayValue( 'app-1' ) );
+
+		fireEvent.change( screen.getByLabelText( 'アプリID' ), {
+			target: { value: 'app-2' },
+		} );
+		fireEvent.click( screen.getByText( '認証情報を保存' ) );
+
+		await waitFor( () =>
+			expect( screen.getByText( '必須項目です' ) ).toBeInTheDocument()
+		);
+
+		// 再保存が成功したら必須エラーはクリアされる。
+		fireEvent.click( screen.getByText( '認証情報を保存' ) );
+
+		await waitFor( () =>
+			expect(
+				screen.queryByText( '必須項目です' )
+			).not.toBeInTheDocument()
+		);
+	} );
+
 	test( '表示ボタンで password の入力を平文表示に切り替える', async () => {
 		render( <AccountCredentialEditor account={ account } providers={ [] } /> );
 		await waitFor( () => screen.getByDisplayValue( 'app-1' ) );

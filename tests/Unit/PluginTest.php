@@ -223,6 +223,9 @@ final class PluginTest extends TestCase {
 	}
 
 	public function test_purgeLegacyProviderCredentials_skips_when_already_purged(): void {
+		WP_Mock::userFunction( 'current_user_can' )
+			->with( 'manage_options' )
+			->andReturn( true );
 		WP_Mock::userFunction( 'get_option' )
 			->with( 'affilicard_legacy_creds_purged' )
 			->andReturn( 1 );
@@ -234,7 +237,27 @@ final class PluginTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	/**
+	 * manage_options 権限がないユーザー（例: admin_init が低権限ユーザーで走った場合）では
+	 * purge 処理そのものに入らない（get_option/delete_option/update_option を一切呼ばない）。
+	 */
+	public function test_purgeLegacyProviderCredentials_skips_when_user_cannot_manage_options(): void {
+		WP_Mock::userFunction( 'current_user_can' )
+			->with( 'manage_options' )
+			->andReturn( false );
+		WP_Mock::userFunction( 'get_option' )->never();
+		WP_Mock::userFunction( 'update_option' )->never();
+		WP_Mock::userFunction( 'delete_option' )->never();
+
+		Plugin::purgeLegacyProviderCredentials();
+
+		$this->assertConditionsMet();
+	}
+
 	public function test_purgeLegacyProviderCredentials_deletes_matching_options_and_sets_flag(): void {
+		WP_Mock::userFunction( 'current_user_can' )
+			->with( 'manage_options' )
+			->andReturn( true );
 		WP_Mock::userFunction( 'get_option' )
 			->with( 'affilicard_legacy_creds_purged' )
 			->andReturn( false );

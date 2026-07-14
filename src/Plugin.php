@@ -156,6 +156,9 @@ final class Plugin {
 	 * 旧オプションを admin_init で削除する。`affilicard_legacy_creds_purged` フラグで一度だけ実行する。
 	 */
 	public static function purgeLegacyProviderCredentials(): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
 		if ( get_option( 'affilicard_legacy_creds_purged' ) ) {
 			return;
 		}

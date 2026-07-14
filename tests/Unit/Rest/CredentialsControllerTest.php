@@ -305,6 +305,33 @@ final class CredentialsControllerTest extends TestCase {
 		);
 	}
 
+	/**
+	 * schema に定義されていない未知のキーは PUT body に含まれていても永続化されない。
+	 */
+	public function test_updateAccount_ignores_unknown_keys_not_in_schema(): void {
+		$controller = new CredentialsController( new ProviderRegistry(), $this->accounts() );
+		$response   = $controller->updateAccount(
+			$this->request(
+				array(
+					'code'  => 'sample',
+					'pub'   => 'x',
+					'sec'   => 'y',
+					'bogus' => 'z',
+				)
+			)
+		);
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertArrayNotHasKey( 'bogus', AccountCredentials::get( 'sample' ) );
+		$this->assertSame(
+			array(
+				'pub' => 'x',
+				'sec' => 'y',
+			),
+			AccountCredentials::get( 'sample' )
+		);
+	}
+
 	public function test_updateAccount_returns_404_for_unknown_account(): void {
 		$controller = new CredentialsController( new ProviderRegistry(), $this->accounts() );
 		$response   = $controller->updateAccount(

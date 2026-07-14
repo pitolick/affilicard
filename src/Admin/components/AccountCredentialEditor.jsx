@@ -16,6 +16,7 @@ export function AccountCredentialEditor({ account, providers }) {
 	const [reveal, setReveal] = useState({}); // key -> 表示中か
 	const [result, setResult] = useState(null);
 	const [tests, setTests] = useState({}); // providerCode -> {ok,message}
+	const [missing, setMissing] = useState([]); // required だが未入力だったフィールドキー
 
 	useEffect(() => {
 		fetchCredentials(account.code)
@@ -53,6 +54,7 @@ export function AccountCredentialEditor({ account, providers }) {
 
 	const onSave = async () => {
 		setResult(null);
+		setMissing([]);
 		try {
 			const next = await updateCredentials(account.code, dirtyValues());
 			setStatus(next);
@@ -73,12 +75,14 @@ export function AccountCredentialEditor({ account, providers }) {
 				message: __('認証情報を保存しました', 'affilicard'),
 			});
 		} catch (e) {
-			const missing = e?.data?.missing || e?.missing;
+			const missingKeys = e?.data?.missing || e?.missing || [];
+			setMissing(missingKeys);
 			setResult({
 				ok: false,
-				message: missing
-					? __('必須項目が未入力です', 'affilicard')
-					: __('保存に失敗しました', 'affilicard'),
+				message:
+					missingKeys.length > 0
+						? __('必須項目が未入力です', 'affilicard')
+						: __('保存に失敗しました', 'affilicard'),
 			});
 		}
 	};
@@ -135,10 +139,16 @@ export function AccountCredentialEditor({ account, providers }) {
 			{schema.map((f) => {
 				const isPassword = f.type === 'password';
 				const isSet = Boolean(status[f.key]?.isSet);
+				const isMissing = missing.includes(f.key);
 				return (
 					<div
 						key={f.key}
-						className="affilicard-account-credential-editor__field"
+						className={
+							'affilicard-account-credential-editor__field' +
+							(isMissing
+								? ' affilicard-account-credential-editor__field--error'
+								: '')
+						}
 					>
 						<div className="affilicard-account-credential-editor__field-row">
 							<TextControl
@@ -149,6 +159,16 @@ export function AccountCredentialEditor({ account, providers }) {
 										: 'text'
 								}
 								value={inputs[f.key] ?? ''}
+								className={
+									isMissing
+										? 'affilicard-account-credential-editor__input--error'
+										: undefined
+								}
+								help={
+									isMissing
+										? __('必須項目です', 'affilicard')
+										: undefined
+								}
 								placeholder={
 									isPassword && isSet
 										? __(

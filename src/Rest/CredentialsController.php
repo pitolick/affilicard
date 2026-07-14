@@ -75,6 +75,10 @@ final class CredentialsController {
 
 		$values = $this->submittedValues( $request );
 
+		// account の schema に定義されたキーのみを許可し、未知のキーは永続化しない。
+		$allowedKeys = array_column( $account->credentialsSchema(), 'key' );
+		$values      = array_intersect_key( $values, array_flip( $allowedKeys ) );
+
 		// マージ後状態で required 検証。
 		$merged  = array_merge( AccountCredentials::get( $account->code() ), $values );
 		$missing = array();
@@ -141,7 +145,7 @@ final class CredentialsController {
 		unset( $params['code'] );
 		$values = array();
 		foreach ( $params as $key => $value ) {
-			if ( is_string( $key ) && null !== $value ) {
+			if ( is_string( $key ) && is_scalar( $value ) ) {
 				$values[ $key ] = (string) $value;
 			}
 		}
