@@ -1,5 +1,5 @@
 import { useEffect, useState } from '@wordpress/element';
-import { Button, Notice, Panel, TabPanel } from '@wordpress/components';
+import { Button, Notice, TabPanel } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import { fetchPlatforms, updatePlatforms } from '../api/platforms';
 import { PlatformEditor } from './PlatformEditor';
@@ -104,16 +104,14 @@ export function PlatformsPanel() {
 						);
 					return (
 						<>
-							<Panel>
-								{indexed.map(({ p, i }, localIdx) => (
-									<PlatformEditor
-										key={p.code}
-										platform={p}
-										onChange={onChange(i)}
-										initialOpen={localIdx === 0}
-									/>
-								))}
-							</Panel>
+							{indexed.map(({ p, i }, localIdx) => (
+								<PlatformEditor
+									key={p.code}
+									platform={p}
+									onChange={onChange(i)}
+									initialOpen={localIdx === 0}
+								/>
+							))}
 							<div className="affilicard-platforms-panel__save">
 								<Button
 									variant="primary"

@@ -9,16 +9,29 @@
 
 const React = require( 'react' );
 
-function TextControl( { label, value, onChange, type } ) {
+function TextControl( { label, value, onChange, type, className, help } ) {
+	// help はラベルの子にすると accessible name（getByLabelText の一致文字列）に混ざってしまうため、
+	// label の外側の兄弟要素として描画する。
 	return React.createElement(
-		'label',
+		React.Fragment,
 		null,
-		label,
-		React.createElement( 'input', {
-			type: type ?? 'text',
-			value,
-			onChange: ( e ) => onChange( e.target.value ),
-		} )
+		React.createElement(
+			'label',
+			{ className },
+			label,
+			React.createElement( 'input', {
+				type: type ?? 'text',
+				value,
+				onChange: ( e ) => onChange( e.target.value ),
+			} )
+		),
+		help
+			? React.createElement(
+					'span',
+					{ className: 'components-base-control__help' },
+					help
+				)
+			: null
 	);
 }
 
@@ -54,12 +67,17 @@ function SelectControl( { label, value, options, onChange } ) {
 	);
 }
 
-function Button( { children, onClick, disabled } ) {
+function Button( { children, onClick, disabled, label, icon } ) {
 	return React.createElement(
 		'button',
-		{ onClick, disabled, type: 'button' },
+		{ onClick, disabled, type: 'button', 'aria-label': label },
+		icon || null,
 		children
 	);
+}
+
+function Dashicon( { icon } ) {
+	return React.createElement( 'span', { 'data-dashicon': icon } );
 }
 
 function Notice( { children, status } ) {
@@ -191,6 +209,7 @@ module.exports = {
 	CheckboxControl,
 	SelectControl,
 	Button,
+	Dashicon,
 	Notice,
 	TabPanel,
 	ComboboxControl,

@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-07-14
+
+### Changed (BREAKING)
+
+- 認証情報の保存単位を provider 単位から **account 単位**（`affilicard_account_<code>_credentials`）へ変更。`ProviderInterface` から `credentialsSchema()` を撤去し `accountCode()` を追加、スキーマは `AccountInterface` へ移設。
+- 認証 REST を再構成: credentials は `/accounts/{code}/credentials`（GET/PUT/DELETE）、接続テストは `/providers/{code}/test-connection`（POST・保存前テスト）。旧 platform/provider credentials ルートは撤去。
+- 設定画面の認証フィールドを **write-only ＋ dirty 追跡** 化（未編集の秘匿値を再送しない）。required をサーバ検証。認証パネルを account 単位の折り畳み＋provider 単位の接続テストへ刷新。
+- Provider スキーマを PHP（`AccountUiList`/`ProviderUiList`）から `window.affilicardAccounts`/`window.affilicardProviders` として注入し、JS のハードコードを廃止。
+- 楽天 API transport を `RakutenClient` に分離。
+
+### Notes
+
+- 未公開のため移行は行わない。旧 `affilicard_provider_*` credentials はアップグレード時に削除される。
+
 ## [1.9.0] - 2026-07-13
 
 ### Added

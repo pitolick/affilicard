@@ -70,7 +70,7 @@ export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 
 			<div className="affilicard-platform-editor__section affilicard-platform-editor__section--api">
 				<h4 className="affilicard-platform-editor__subhead">
-					{__('API 連携（自動取得・後回し）', 'affilicard')}
+					{__('API 連携（自動取得）', 'affilicard')}
 				</h4>
 				<SelectControl
 					label={__('Provider', 'affilicard')}

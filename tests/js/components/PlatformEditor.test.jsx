@@ -82,7 +82,7 @@ describe( 'PlatformEditor', () => {
 			<PlatformEditor platform={ basePlatform } onChange={ onChange } />
 		);
 		expect(
-			screen.getByText( 'API 連携（自動取得・後回し）' )
+			screen.getByText( 'API 連携（自動取得）' )
 		).toBeInTheDocument();
 		expect( screen.getByLabelText( 'Provider' ) ).toBeInTheDocument();
 	} );

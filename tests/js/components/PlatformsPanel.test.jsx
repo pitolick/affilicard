@@ -96,15 +96,16 @@ describe( 'PlatformsPanel', () => {
 		);
 	} );
 
-	test( 'wraps platform editors in a panel container', async () => {
+	test( 'renders platform editors flat (no card container, API 認証 と統一)', async () => {
 		fetchPlatforms.mockResolvedValue( platforms );
 		const { container } = render( <PlatformsPanel /> );
 		await waitFor( () =>
 			expect( screen.getByText( /DMM \(dmm\)/ ) ).toBeInTheDocument()
 		);
+		// カード型の Panel ラッパを廃止し、アコーディオンを直接並べる（API 認証タブと同じ見た目）。
 		expect(
 			container.querySelector( '[data-panel-container="true"]' )
-		).toBeInTheDocument();
+		).not.toBeInTheDocument();
 	} );
 
 	test( 'opens the first platform by default', async () => {

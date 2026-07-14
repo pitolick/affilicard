@@ -81,27 +81,118 @@
 	margin: 0 0 16px;
 }
 
-#affilicard-settings-root .affilicard-api-credentials-panel__provider {
-	padding: 16px 0;
-	border-bottom: 1px solid #f0f0f0;
+/* account 単位の認証情報エディタ。platform-editor と同じ余白規律に統一する。 */
+#affilicard-settings-root .affilicard-account-credential-editor {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 4px 0 8px;
 }
 
-#affilicard-settings-root .affilicard-api-credentials-panel__provider h3 {
-	margin: 0 0 8px;
+/* WP コントロール既定の下マージンを打ち消し、gap に寄せる（他パネルと同じ規律）。 */
+#affilicard-settings-root
+	.affilicard-account-credential-editor
+	.components-base-control {
+	margin-bottom: 0;
 }
 
-/* 認証情報フォーム（CredentialEditor）の余白規律 */
-#affilicard-settings-root .affilicard-credential-editor h4 {
-	margin: 0 0 8px;
+#affilicard-settings-root .affilicard-account-credential-editor__field {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
 }
 
-#affilicard-settings-root .affilicard-credential-editor .components-base-control {
-	margin-bottom: 12px;
+/* password 入力と表示トグルを横並びにし、入力を伸ばす。 */
+#affilicard-settings-root .affilicard-account-credential-editor__field-row {
+	display: flex;
+	align-items: flex-end;
+	gap: 8px;
 }
 
-#affilicard-settings-root .affilicard-credential-actions {
+#affilicard-settings-root
+	.affilicard-account-credential-editor__field-row
+	.components-base-control {
+	flex: 1 1 auto;
+}
+
+#affilicard-settings-root
+	.affilicard-account-credential-editor__field-row
+	.components-button {
+	flex: 0 0 auto;
+	margin-bottom: 4px;
+}
+
+/* 「設定済み」バッジ。 */
+#affilicard-settings-root .affilicard-account-credential-editor__badge {
+	align-self: flex-start;
+	padding: 1px 8px;
+	font-size: 11px;
+	line-height: 18px;
+	color: #007017;
+	background: #edfaef;
+	border: 1px solid #b8e6c2;
+	border-radius: 9px;
+}
+
+/* 必須未入力フィールドの強調。 */
+#affilicard-settings-root
+	.affilicard-account-credential-editor__field--error
+	.components-text-control__input {
+	border-color: #cc1818;
+	box-shadow: 0 0 0 1px #cc1818;
+}
+
+#affilicard-settings-root
+	.affilicard-account-credential-editor__field--error
+	.components-base-control__help {
+	color: #cc1818;
+}
+
+/* このアカウントを使う連携（provider 単位の接続テスト）。API 小節と同じ区切り線。 */
+#affilicard-settings-root .affilicard-account-tests {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-top: 4px;
+	padding-top: 12px;
+	border-top: 1px solid #e0e0e0;
+}
+
+#affilicard-settings-root .affilicard-account-tests > .description {
+	margin: 0;
+	font-size: 13px;
+	font-weight: 600;
+	color: #1e1e1e;
+}
+
+#affilicard-settings-root .affilicard-account-tests__row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+#affilicard-settings-root
+	.affilicard-account-tests__row
+	> span:first-child {
+	min-width: 96px;
+}
+
+#affilicard-settings-root .affilicard-account-tests__result--ok {
+	color: #007017;
+}
+
+#affilicard-settings-root .affilicard-account-tests__result--ng {
+	color: #cc1818;
+}
+
+/* 保存/削除アクション。general-panel__actions と同じ規律。 */
+#affilicard-settings-root .affilicard-account-credential-editor__actions {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 8px;
-	margin-top: 8px;
+	align-items: center;
+	margin-top: 4px;
+	padding-top: 12px;
+	border-top: 1px solid #e0e0e0;
 }

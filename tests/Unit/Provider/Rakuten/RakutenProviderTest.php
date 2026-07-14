@@ -44,22 +44,8 @@ final class RakutenProviderTest extends TestCase {
 		$this->assertTrue( $provider->isAutomatic() );
 	}
 
-	public function test_credentials_schema_has_four_entries(): void {
-		$schema = ( new RakutenProvider() )->credentialsSchema();
-
-		$this->assertCount( 4, $schema );
-		$this->assertSame( 'application_id', $schema[0]['key'] );
-		$this->assertTrue( $schema[0]['required'] );
-		$this->assertSame( 'password', $schema[0]['type'] );
-		$this->assertSame( 'access_key', $schema[1]['key'] );
-		$this->assertTrue( $schema[1]['required'] );
-		$this->assertSame( 'password', $schema[1]['type'] );
-		$this->assertSame( 'affiliate_id', $schema[2]['key'] );
-		$this->assertTrue( $schema[2]['required'] );
-		$this->assertSame( 'password', $schema[2]['type'] );
-		$this->assertSame( 'allowed_domain', $schema[3]['key'] );
-		$this->assertFalse( $schema[3]['required'] );
-		$this->assertSame( 'text', $schema[3]['type'] );
+	public function test_account_code_is_rakuten(): void {
+		$this->assertSame( 'rakuten', ( new RakutenProvider() )->accountCode() );
 	}
 
 	public function test_test_connection_fails_with_empty_credentials(): void {
@@ -244,7 +230,7 @@ final class RakutenProviderTest extends TestCase {
 	 */
 	private function stubFetchResponse( array $item, ?string &$captured = null ): void {
 		WP_Mock::userFunction( 'get_option' )
-			->with( 'affilicard_provider_rakuten-kobo_credentials', '' )
+			->with( 'affilicard_account_rakuten_credentials', '' )
 			->andReturn( $this->encryptedCredentials() );
 		WP_Mock::userFunction( 'home_url' )->andReturn( 'https://shop.example' );
 		WP_Mock::userFunction( 'wp_parse_url' )->andReturnUsing(
@@ -329,7 +315,7 @@ final class RakutenProviderTest extends TestCase {
 
 	public function test_fetch_returns_null_when_credentials_missing(): void {
 		WP_Mock::userFunction( 'get_option' )
-			->with( 'affilicard_provider_rakuten-kobo_credentials', '' )
+			->with( 'affilicard_account_rakuten_credentials', '' )
 			->andReturn( '' );
 
 		$this->assertNull( ( new RakutenProvider() )->fetch( '123', array() ) );
@@ -337,7 +323,7 @@ final class RakutenProviderTest extends TestCase {
 
 	public function test_fetch_returns_null_for_empty_external_id(): void {
 		WP_Mock::userFunction( 'get_option' )
-			->with( 'affilicard_provider_rakuten-kobo_credentials', '' )
+			->with( 'affilicard_account_rakuten_credentials', '' )
 			->andReturn( $this->encryptedCredentials() );
 
 		$this->assertNull( ( new RakutenProvider() )->fetch( '', array() ) );
@@ -351,7 +337,7 @@ final class RakutenProviderTest extends TestCase {
 	 */
 	public function test_fetch_returns_null_on_api_failure( $remoteReturn, int $code, string $body ): void {
 		WP_Mock::userFunction( 'get_option' )
-			->with( 'affilicard_provider_rakuten-kobo_credentials', '' )
+			->with( 'affilicard_account_rakuten_credentials', '' )
 			->andReturn( $this->encryptedCredentials() );
 		WP_Mock::userFunction( 'home_url' )->andReturn( 'https://shop.example' );
 		WP_Mock::userFunction( 'wp_parse_url' )->andReturnUsing(

@@ -8,6 +8,7 @@ import apiFetch from '@wordpress/api-fetch';
 import {
 	fetchCredentials,
 	updateCredentials,
+	deleteCredentials,
 	testConnection,
 } from '../../../src/Admin/api/credentials';
 
@@ -17,39 +18,55 @@ beforeEach( () => {
 } );
 
 describe( 'api/credentials', () => {
-	test( 'fetchCredentials calls GET with encoded provider code', async () => {
-		await fetchCredentials( 'dmm-ebook' );
+	test( 'fetchCredentials calls GET with encoded account code', async () => {
+		await fetchCredentials( 'rakuten' );
 		expect( apiFetch ).toHaveBeenCalledWith( {
-			path: '/affilicard/v1/providers/dmm-ebook/credentials',
+			path: '/affilicard/v1/accounts/rakuten/credentials',
 		} );
 	} );
 
 	test( 'updateCredentials calls PUT with values payload', async () => {
-		const values = { api_id: 'abc', affiliate_id: 'def' };
-		await updateCredentials( 'dmm-ebook', values );
+		const values = { access_key: 'abc' };
+		await updateCredentials( 'rakuten', values );
 		expect( apiFetch ).toHaveBeenCalledWith( {
-			path: '/affilicard/v1/providers/dmm-ebook/credentials',
+			path: '/affilicard/v1/accounts/rakuten/credentials',
 			method: 'PUT',
 			data: values,
 		} );
 	} );
 
-	test( 'testConnection calls POST /test-connection with credentials', async () => {
-		const values = { api_id: 'abc', affiliate_id: 'def' };
-		apiFetch.mockResolvedValueOnce( { ok: true, message: 'OK' } );
-		const result = await testConnection( 'dmm-ebook', values );
+	test( 'deleteCredentials calls DELETE on the account credentials route', async () => {
+		await deleteCredentials( 'rakuten' );
 		expect( apiFetch ).toHaveBeenCalledWith( {
-			path: '/affilicard/v1/providers/dmm-ebook/test-connection',
+			path: '/affilicard/v1/accounts/rakuten/credentials',
+			method: 'DELETE',
+		} );
+	} );
+
+	test( 'testConnection calls POST /providers/{code}/test-connection with credentials', async () => {
+		const values = { access_key: 'abc' };
+		apiFetch.mockResolvedValueOnce( { ok: true, message: 'OK' } );
+		const result = await testConnection( 'rakuten-kobo', values );
+		expect( apiFetch ).toHaveBeenCalledWith( {
+			path: '/affilicard/v1/providers/rakuten-kobo/test-connection',
 			method: 'POST',
 			data: values,
 		} );
 		expect( result ).toEqual( { ok: true, message: 'OK' } );
 	} );
 
-	test( 'fetchCredentials encodes special characters in provider code', async () => {
+	test( 'fetchCredentials encodes special characters in account code', async () => {
 		await fetchCredentials( 'my/code' );
 		expect( apiFetch ).toHaveBeenCalledWith( {
-			path: '/affilicard/v1/providers/my%2Fcode/credentials',
+			path: '/affilicard/v1/accounts/my%2Fcode/credentials',
+		} );
+	} );
+
+	test( 'deleteCredentials encodes special characters in account code', async () => {
+		await deleteCredentials( 'my/code' );
+		expect( apiFetch ).toHaveBeenCalledWith( {
+			path: '/affilicard/v1/accounts/my%2Fcode/credentials',
+			method: 'DELETE',
 		} );
 	} );
 } );

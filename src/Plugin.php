@@ -3,6 +3,10 @@ declare(strict_types=1);
 
 namespace Affilicard;
 
+use Affilicard\Account\AccountRegistry;
+use Affilicard\Account\AccountUiList;
+use Affilicard\Account\DmmAccount;
+use Affilicard\Account\RakutenAccount;
 use Affilicard\Block\Block;
 use Affilicard\Cron\ListingRefresher;
 use Affilicard\Cron\RefreshScheduler;
@@ -13,6 +17,7 @@ use Affilicard\PostType\ProductPostType;
 use Affilicard\Provider\Dmm\DmmProvider;
 use Affilicard\Provider\ManualProvider;
 use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Provider\ProviderUiList;
 use Affilicard\Provider\Rakuten\RakutenProvider;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Rest\CardPreviewController;
@@ -60,6 +65,7 @@ final class Plugin {
 
 			add_action( 'admin_menu', array( self::class, 'registerSettingsPage' ) );
 			add_action( 'admin_enqueue_scripts', array( self::class, 'enqueueSettingsAssets' ) );
+			add_action( 'admin_init', array( self::class, 'purgeLegacyProviderCredentials' ) );
 		}
 
 		// ProductType レジストリ（Block の type 解決でも buildProductTypeRegistry() を参照）
@@ -72,7 +78,7 @@ final class Plugin {
 			new ProductsController( $repository ),
 			new SettingsController(),
 			new PlatformsController(),
-			new CredentialsController( $providers ),
+			new CredentialsController( $providers, self::buildAccountRegistry() ),
 			new RefreshController( new ListingRefresher( $providers, new ProductRepository() ) ),
 			new CardPreviewController( $repository )
 		);
@@ -120,6 +126,13 @@ final class Plugin {
 		return $registry;
 	}
 
+	public static function buildAccountRegistry(): AccountRegistry {
+		$registry = new AccountRegistry();
+		$registry->register( new RakutenAccount() );
+		$registry->register( new DmmAccount() );
+		return $registry;
+	}
+
 	public static function buildProductTypeRegistry(): ProductTypeRegistry {
 		$registry = new ProductTypeRegistry();
 		$registry->register( new GenericType() );
@@ -134,6 +147,35 @@ final class Plugin {
 		}
 		PlatformConfig::save( PlatformConfig::defaults() );
 		update_option( self::SEEDED_AT_OPTION, gmdate( 'c' ), false );
+	}
+
+	/**
+	 * `affilicard_provider_<code>_credentials` 形式の旧 provider 単位 credentials を一度きり purge する。
+	 *
+	 * account 単位 credentials（AccountRegistry/CredentialsController）への移行に伴い不要となった
+	 * 旧オプションを admin_init で削除する。`affilicard_legacy_creds_purged` フラグで一度だけ実行する。
+	 */
+	public static function purgeLegacyProviderCredentials(): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		if ( get_option( 'affilicard_legacy_creds_purged' ) ) {
+			return;
+		}
+
+		global $wpdb;
+		if ( ! isset( $wpdb ) || ! is_object( $wpdb ) ) {
+			return;
+		}
+
+		$like = $wpdb->esc_like( 'affilicard_provider_' ) . '%' . $wpdb->esc_like( '_credentials' );
+		$keys = $wpdb->get_col(
+			$wpdb->prepare( "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s", $like )
+		);
+		foreach ( (array) $keys as $key ) {
+			delete_option( (string) $key );
+		}
+		update_option( 'affilicard_legacy_creds_purged', 1, false );
 	}
 
 	public static function registerSettingsPage(): void {
@@ -186,6 +228,12 @@ final class Plugin {
 			$asset['dependencies'],
 			$asset['version'],
 			true
+		);
+		wp_add_inline_script(
+			'affilicard-settings',
+			'window.affilicardAccounts=' . wp_json_encode( AccountUiList::build( self::buildAccountRegistry() ) ) . ';'
+			. 'window.affilicardProviders=' . wp_json_encode( ProviderUiList::build( self::buildProviderRegistry() ) ) . ';',
+			'before'
 		);
 		wp_set_script_translations( 'affilicard-settings', 'affilicard' );
 		wp_enqueue_style( 'wp-components' );

@@ -30,7 +30,7 @@ final class ManualProviderTest extends TestCase {
 		$this->assertSame( 'manual', $provider->code() );
 		$this->assertSame( '手動入力', $provider->label() );
 		$this->assertFalse( $provider->isAutomatic() );
-		$this->assertSame( array(), $provider->credentialsSchema() );
+		$this->assertNull( $provider->accountCode() );
 	}
 
 	public function test_test_connection_always_ok(): void {
