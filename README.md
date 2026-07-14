@@ -177,6 +177,16 @@ curl -u 'username:xxxx xxxx xxxx xxxx xxxx xxxx' \
 3. `testConnection()` で疎通確認ロジックを書く
 4. `Plugin::buildProviderRegistry()` に登録
 
+### Account / Provider を追加する
+
+1. `src/Account/<Name>Account.php` に `AccountInterface`（`code`/`label`/`credentialsSchema`）を実装し、
+   `Plugin::buildAccountRegistry()` に register する。
+2. `src/Provider/<Name>/<Name>Provider.php` に `ProviderInterface`（`code`/`label`/`isAutomatic`/
+   `accountCode`/`fetch`/`testConnection`）を実装し、`Plugin::buildProviderRegistry()` に register する。
+
+設定画面のアカウント認証フィールド・provider ドロップダウンは、`AccountUiList`/`ProviderUiList` →
+`wp_add_inline_script` → `accounts.js`/`providers.js` で **自動生成**される（管理画面 JS の改修は不要）。
+
 ## 開発
 
 ```bash
