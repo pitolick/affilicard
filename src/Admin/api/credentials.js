@@ -1,20 +1,28 @@
 import apiFetch from '@wordpress/api-fetch';
 
-const base = (code) =>
-	`/affilicard/v1/providers/${encodeURIComponent(code)}/credentials`;
+const accountBase = (code) =>
+	`/affilicard/v1/accounts/${encodeURIComponent(code)}/credentials`;
 
-export function fetchCredentials(code) {
-	return apiFetch({ path: base(code) });
+export function fetchCredentials(accountCode) {
+	return apiFetch({ path: accountBase(accountCode) });
 }
 
-export function updateCredentials(code, values) {
-	return apiFetch({ path: base(code), method: 'PUT', data: values });
+export function updateCredentials(accountCode, values) {
+	return apiFetch({
+		path: accountBase(accountCode),
+		method: 'PUT',
+		data: values,
+	});
 }
 
-export function testConnection(code, values) {
+export function deleteCredentials(accountCode) {
+	return apiFetch({ path: accountBase(accountCode), method: 'DELETE' });
+}
+
+export function testConnection(providerCode, values) {
 	return apiFetch({
 		path: `/affilicard/v1/providers/${encodeURIComponent(
-			code
+			providerCode
 		)}/test-connection`,
 		method: 'POST',
 		data: values,

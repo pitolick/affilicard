@@ -1,29 +1,43 @@
-import { PROVIDER_OPTIONS, CRED_SCHEMAS } from '../../../src/Admin/providers';
+/**
+ * Tests for src/Admin/providers.js
+ */
 
-describe( 'providers shared constants', () => {
-	test( 'PROVIDER_OPTIONS lists manual, dmm-ebook and rakuten-kobo', () => {
-		expect( PROVIDER_OPTIONS.map( ( o ) => o.value ) ).toEqual( [
-			'manual',
-			'dmm-ebook',
-			'rakuten-kobo',
-		] );
+describe( 'providers（window.affilicardProviders からの導出）', () => {
+	const load = () => {
+		jest.resetModules();
+		return require( '../../../src/Admin/providers' );
+	};
+
+	afterEach( () => {
+		delete window.affilicardProviders;
 	} );
 
-	test( 'CRED_SCHEMAS: manual empty, dmm-ebook has api_id + affiliate_id', () => {
-		expect( CRED_SCHEMAS.manual ).toEqual( [] );
-		expect( CRED_SCHEMAS[ 'dmm-ebook' ] ).toHaveLength( 2 );
-		expect( CRED_SCHEMAS[ 'dmm-ebook' ][ 0 ].key ).toBe( 'api_id' );
-		expect( CRED_SCHEMAS[ 'dmm-ebook' ][ 1 ].key ).toBe( 'affiliate_id' );
+	it( 'PROVIDER_OPTIONS と providerAccount を導出する', () => {
+		window.affilicardProviders = [
+			{
+				code: 'manual',
+				label: '手動入力',
+				isAutomatic: false,
+				accountCode: null,
+			},
+			{
+				code: 'rakuten-kobo',
+				label: '楽天Kobo',
+				isAutomatic: true,
+				accountCode: 'rakuten',
+			},
+		];
+		const { PROVIDER_OPTIONS, providerAccount } = load();
+		expect( PROVIDER_OPTIONS ).toEqual( [
+			{ label: '手動入力', value: 'manual' },
+			{ label: '楽天Kobo', value: 'rakuten-kobo' },
+		] );
+		expect( providerAccount( 'rakuten-kobo' ) ).toBe( 'rakuten' );
+		expect( providerAccount( 'manual' ) ).toBeNull();
 	} );
 
-	test( 'CRED_SCHEMAS: rakuten-kobo has application_id, access_key, affiliate_id, allowed_domain', () => {
-		expect( CRED_SCHEMAS[ 'rakuten-kobo' ] ).toHaveLength( 4 );
-		expect( CRED_SCHEMAS[ 'rakuten-kobo' ].map( ( f ) => f.key ) ).toEqual( [
-			'application_id',
-			'access_key',
-			'affiliate_id',
-			'allowed_domain',
-		] );
-		expect( CRED_SCHEMAS[ 'rakuten-kobo' ][ 3 ].required ).toBe( false );
+	it( '未定義なら空にフォールバック', () => {
+		const { PROVIDER_OPTIONS } = load();
+		expect( PROVIDER_OPTIONS ).toEqual( [] );
 	} );
 } );

@@ -1,45 +1,44 @@
+import { PanelBody } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
-import { CRED_SCHEMAS, PROVIDER_OPTIONS } from '../providers';
-import { CredentialEditor } from './CredentialEditor';
-
-const providerLabel = (code) =>
-	PROVIDER_OPTIONS.find((o) => o.value === code)?.label ?? code;
+import { ACCOUNTS } from '../accounts';
+import { PROVIDER_OPTIONS, providerAccount } from '../providers';
+import { AccountCredentialEditor } from './AccountCredentialEditor';
 
 export function ApiCredentialsPanel() {
-	// 表示順は PROVIDER_OPTIONS の並び（決定的）。認証スキーマを持つ provider のみ。
-	const providers = PROVIDER_OPTIONS.map((o) => o.value).filter(
-		(code) => (CRED_SCHEMAS[code] ?? []).length > 0
-	);
-
 	return (
 		<div className="affilicard-api-credentials-panel">
 			<h2>{__('API 認証', 'affilicard')}</h2>
 			<p className="description">
 				{__(
-					'API 連携を使う Provider の認証情報を設定します（Provider 単位で 1 回だけ）。',
+					'API 連携を使うアカウントの認証情報を設定します（アカウント単位で共有）。',
 					'affilicard'
 				)}
 			</p>
-			{providers.length === 0 && (
+			{ACCOUNTS.length === 0 && (
 				<p className="description">
 					{__(
-						'認証情報を必要とする Provider はありません。',
+						'認証情報を必要とするアカウントはありません。',
 						'affilicard'
 					)}
 				</p>
 			)}
-			{providers.map((code) => (
-				<div
-					key={code}
-					className="affilicard-api-credentials-panel__provider"
-				>
-					<h3>{providerLabel(code)}</h3>
-					<CredentialEditor
-						providerCode={code}
-						schema={CRED_SCHEMAS[code]}
-					/>
-				</div>
-			))}
+			{ACCOUNTS.map((account) => {
+				const providers = PROVIDER_OPTIONS.filter(
+					(o) => providerAccount(o.value) === account.code
+				).map((o) => ({ code: o.value, label: o.label }));
+				return (
+					<PanelBody
+						key={account.code}
+						title={account.label}
+						initialOpen={false}
+					>
+						<AccountCredentialEditor
+							account={account}
+							providers={providers}
+						/>
+					</PanelBody>
+				);
+			})}
 		</div>
 	);
 }
