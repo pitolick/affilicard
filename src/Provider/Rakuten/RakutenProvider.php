@@ -13,7 +13,7 @@ use Affilicard\Provider\ProviderInterface;
  */
 final class RakutenProvider implements ProviderInterface {
 
-	private const ENDPOINT = 'https://openapi.rakuten.co.jp/services/api/Kobo/EbookSearch/20170426';
+	private ?RakutenClient $client = null;
 
 	public function code(): string {
 		return 'rakuten-kobo';
@@ -57,10 +57,11 @@ final class RakutenProvider implements ProviderInterface {
 			$query['keyword'] = $externalId;
 		}
 
-		$decoded = $this->request( $query, $credentials );
-		if ( null === $decoded ) {
+		$res = $this->client()->request( $query, $credentials );
+		if ( $res['error'] || 200 !== $res['code'] || null === $res['decoded'] || isset( $res['decoded']['errors'] ) ) {
 			return null;
 		}
+		$decoded = $res['decoded'];
 
 		$item = self::firstItem( $decoded );
 		if ( null === $item ) {
@@ -91,27 +92,21 @@ final class RakutenProvider implements ProviderInterface {
 			'keyword'       => '本',
 		);
 
-		$response = wp_remote_get(
-			self::ENDPOINT . '?' . http_build_query( $query ),
-			$this->requestArgs( $credentials )
-		);
-		if ( self::isWpError( $response ) ) {
+		$res = $this->client()->request( $query, $credentials );
+		if ( $res['error'] ) {
 			return array(
 				'ok'      => false,
 				'message' => __( '楽天APIへの接続に失敗しました', 'affilicard' ),
 			);
 		}
 
-		$code    = (int) wp_remote_retrieve_response_code( $response );
-		$decoded = json_decode( (string) wp_remote_retrieve_body( $response ), true );
-
-		if ( 200 !== $code ) {
+		if ( 200 !== $res['code'] ) {
 			return array(
 				'ok'      => false,
-				'message' => self::errorMessage( $code ),
+				'message' => self::errorMessage( $res['code'] ),
 			);
 		}
-		if ( ! is_array( $decoded ) || isset( $decoded['errors'] ) ) {
+		if ( null === $res['decoded'] || isset( $res['decoded']['errors'] ) ) {
 			return array(
 				'ok'      => false,
 				'message' => __( '楽天APIがエラーを返しました', 'affilicard' ),
@@ -133,51 +128,8 @@ final class RakutenProvider implements ProviderInterface {
 			&& ! empty( $credentials['affiliate_id'] );
 	}
 
-	/**
-	 * accessKey はヘッダーで送る（クエリ露出回避）。Origin/Referer は許可ドメイン。
-	 *
-	 * @param array<string, string> $credentials
-	 * @return array{timeout: int, headers: array<string, string>}
-	 */
-	private function requestArgs( array $credentials ): array {
-		$origin = self::toOrigin( $this->resolveDomain( $credentials ) );
-		return array(
-			'timeout' => 10,
-			'headers' => array(
-				'accessKey' => (string) ( $credentials['access_key'] ?? '' ),
-				'Origin'    => $origin,
-				'Referer'   => $origin . '/',
-			),
-		);
-	}
-
-	/**
-	 * @param array<string, string> $credentials
-	 */
-	private function resolveDomain( array $credentials ): string {
-		$domain = trim( (string) ( $credentials['allowed_domain'] ?? '' ) );
-		if ( '' === $domain ) {
-			$domain = (string) home_url();
-		}
-		return $domain;
-	}
-
-	private static function toOrigin( string $url ): string {
-		$url = trim( $url );
-		// スキームが無ければ https を補い、wp_parse_url が host を認識できるようにする。
-		if ( '' !== $url && 1 !== preg_match( '#^https?://#i', $url ) ) {
-			$url = 'https://' . ltrim( $url, '/' );
-		}
-		$parts = wp_parse_url( $url );
-		if ( is_array( $parts ) && isset( $parts['host'] ) ) {
-			$scheme = isset( $parts['scheme'] ) ? (string) $parts['scheme'] : 'https';
-			$origin = $scheme . '://' . (string) $parts['host'];
-			if ( isset( $parts['port'] ) ) {
-				$origin .= ':' . (int) $parts['port'];
-			}
-			return $origin;
-		}
-		return rtrim( $url, '/' );
+	private function client(): RakutenClient {
+		return $this->client ??= new RakutenClient();
 	}
 
 	private static function errorMessage( int $code ): string {
@@ -192,39 +144,6 @@ final class RakutenProvider implements ProviderInterface {
 		}
 		/* translators: %d: HTTP status code */
 		return sprintf( __( '楽天APIが HTTP %d を返しました', 'affilicard' ), $code );
-	}
-
-	/**
-	 * @param mixed $value
-	 */
-	private static function isWpError( $value ): bool {
-		if ( function_exists( 'is_wp_error' ) ) {
-			return (bool) is_wp_error( $value );
-		}
-		return $value instanceof \WP_Error;
-	}
-
-	/**
-	 * @param array<string, string> $query
-	 * @param array<string, string> $credentials
-	 * @return array<string, mixed>|null
-	 */
-	private function request( array $query, array $credentials ): ?array {
-		$response = wp_remote_get(
-			self::ENDPOINT . '?' . http_build_query( $query ),
-			$this->requestArgs( $credentials )
-		);
-		if ( self::isWpError( $response ) ) {
-			return null;
-		}
-		if ( 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
-			return null;
-		}
-		$decoded = json_decode( (string) wp_remote_retrieve_body( $response ), true );
-		if ( ! is_array( $decoded ) || isset( $decoded['errors'] ) ) {
-			return null;
-		}
-		return $decoded;
 	}
 
 	/**
