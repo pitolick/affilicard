@@ -127,10 +127,27 @@ final class UninstallTest extends TestCase {
 
 		Uninstall::run();
 
-		$this->assertCount( 1, $captured, 'provider credentials DELETE が 1 回実行されること' );
+		$this->assertCount( 2, $captured, 'provider credentials と account credentials の DELETE がそれぞれ 1 回ずつ実行されること' );
 		$this->assertStringContainsString( 'DELETE FROM wp_options', $captured[0] );
 		$this->assertStringContainsString( 'affilicard', $captured[0] );
 		$this->assertStringContainsString( 'provider', $captured[0] );
 		$this->assertStringContainsString( 'LIKE', $captured[0] );
+	}
+
+	public function test_run_deletes_account_credentials_via_wpdb_like(): void {
+		$captured = array();
+		$this->mockWpdb( $captured );
+
+		WP_Mock::userFunction( 'delete_option' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array() );
+		WP_Mock::userFunction( 'wp_delete_post' )->never();
+
+		Uninstall::run();
+
+		$this->assertCount( 2, $captured, 'provider credentials と account credentials の DELETE がそれぞれ 1 回ずつ実行されること' );
+		$this->assertStringContainsString( 'DELETE FROM wp_options', $captured[1] );
+		$this->assertStringContainsString( 'affilicard', $captured[1] );
+		$this->assertStringContainsString( 'account', $captured[1] );
+		$this->assertStringContainsString( 'LIKE', $captured[1] );
 	}
 }

@@ -32,6 +32,7 @@ final class Uninstall {
 		}
 
 		self::deleteProviderCredentials();
+		self::deleteAccountCredentials();
 
 		$product_ids = get_posts(
 			array(
@@ -65,6 +66,28 @@ final class Uninstall {
 		}
 
 		$like = $wpdb->esc_like( 'affilicard_provider_' ) . '%';
+		$wpdb->query(
+			$wpdb->prepare(
+				"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+				$like
+			)
+		);
+	}
+
+	/**
+	 * `affilicard_account_<code>_credentials` 形式の credentials オプションを一括削除する。
+	 *
+	 * AccountCredentials は account 単位で動的なキー名で書き込むため、
+	 * 固定リストでは捕捉できない。option_name の前方一致で wp_options から DELETE する。
+	 */
+	private static function deleteAccountCredentials(): void {
+		global $wpdb;
+
+		if ( ! isset( $wpdb ) || ! is_object( $wpdb ) ) {
+			return;
+		}
+
+		$like = $wpdb->esc_like( 'affilicard_account_' ) . '%';
 		$wpdb->query(
 			$wpdb->prepare(
 				"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
