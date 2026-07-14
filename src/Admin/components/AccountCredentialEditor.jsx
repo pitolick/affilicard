@@ -217,7 +217,13 @@ export function AccountCredentialEditor({ account, providers }) {
 								{__('接続テスト', 'affilicard')}
 							</Button>
 							{tests[p.code] && (
-								<span>
+								<span
+									className={
+										tests[p.code].ok
+											? 'affilicard-account-tests__result--ok'
+											: 'affilicard-account-tests__result--ng'
+									}
+								>
 									{tests[p.code].ok ? '✓' : '✗'}{' '}
 									{tests[p.code].message}
 								</span>
