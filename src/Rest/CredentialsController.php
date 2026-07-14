@@ -137,6 +137,7 @@ final class CredentialsController {
 		if ( ! is_array( $params ) ) {
 			return array();
 		}
+		// 'code' は route の {code} 予約パラメータのため除外(同名の credential フィールドは扱わない)。
 		unset( $params['code'] );
 		$values = array();
 		foreach ( $params as $key => $value ) {

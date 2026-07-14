@@ -30,7 +30,7 @@ export function ApiCredentialsPanel() {
 					<PanelBody
 						key={account.code}
 						title={account.label}
-						initialOpen={false}
+						initialOpen={!account.isConfigured}
 					>
 						<AccountCredentialEditor
 							account={account}

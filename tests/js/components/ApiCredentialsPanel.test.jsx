@@ -94,4 +94,46 @@ describe( 'ApiCredentialsPanel', () => {
 			expect( fetchCredentials ).toHaveBeenCalledTimes( 2 )
 		);
 	} );
+
+	test( '未設定(isConfigured:false)の account は PanelBody の initialOpen が true になる', async () => {
+		accountsModule.ACCOUNTS = [
+			{
+				code: 'rakuten',
+				label: '楽天',
+				credentialsSchema: [],
+				isConfigured: false,
+			},
+		];
+
+		const { container } = render( <ApiCredentialsPanel /> );
+
+		// AccountCredentialEditor の fetchCredentials 完了(state 更新)を待ってから
+		// アサーションする（act() 外での更新による console.error を防ぐ）。
+		await waitFor( () => expect( fetchCredentials ).toHaveBeenCalledTimes( 1 ) );
+
+		// PanelBody モックは data-initial-open 属性へ initialOpen を反映する
+		// （折り畳み挙動そのものは WP 実装/E2E で検証するため、モックは子を常に描画する）。
+		expect(
+			container.querySelector( '[data-panel="楽天"]' )
+		).toHaveAttribute( 'data-initial-open', 'true' );
+	} );
+
+	test( '設定済み(isConfigured:true)の account は PanelBody の initialOpen が false になる', async () => {
+		accountsModule.ACCOUNTS = [
+			{
+				code: 'rakuten',
+				label: '楽天',
+				credentialsSchema: [],
+				isConfigured: true,
+			},
+		];
+
+		const { container } = render( <ApiCredentialsPanel /> );
+
+		await waitFor( () => expect( fetchCredentials ).toHaveBeenCalledTimes( 1 ) );
+
+		expect(
+			container.querySelector( '[data-panel="楽天"]' )
+		).toHaveAttribute( 'data-initial-open', 'false' );
+	} );
 } );
