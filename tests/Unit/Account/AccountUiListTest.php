@@ -134,4 +134,51 @@ final class AccountUiListTest extends TestCase {
 
 		$this->assertFalse( $list[0]['isConfigured'] );
 	}
+
+	public function test_build_does_not_leak_stored_credential_values_into_payload(): void {
+		$store = array();
+		WP_Mock::userFunction( 'get_option' )->andReturnUsing(
+			static function ( $key, $default = '' ) use ( &$store ) {
+				return $store[ $key ] ?? $default;
+			}
+		);
+		WP_Mock::userFunction( 'update_option' )->andReturnUsing(
+			static function ( $key, $value ) use ( &$store ) {
+				$store[ $key ] = $value;
+				return true;
+			}
+		);
+
+		$account = $this->account(
+			'secret_test',
+			array(
+				array(
+					'key'      => 'api_key',
+					'label'    => 'API Key',
+					'type'     => 'password',
+					'required' => true,
+				),
+			)
+		);
+
+		// Store a distinctive sentinel value that should NOT appear in output.
+		\Affilicard\Account\AccountCredentials::patch(
+			'secret_test',
+			array( 'api_key' => 'SENTINEL_SECRET_VALUE_XYZ' )
+		);
+
+		$registry = new AccountRegistry();
+		$registry->register( $account );
+
+		$list = AccountUiList::build( $registry );
+
+		// The sentinel value must never appear anywhere in the payload.
+		$encoded = json_encode( $list, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
+		$this->assertStringNotContainsString( 'SENTINEL_SECRET_VALUE_XYZ', $encoded );
+
+		// Verify that build() DID read the stored credentials (isConfigured is true).
+		// This ensures the negative assertion above is meaningful—build() read the secret
+		// but correctly did not leak it.
+		$this->assertTrue( $list[0]['isConfigured'] );
+	}
 }
