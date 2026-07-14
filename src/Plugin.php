@@ -168,7 +168,7 @@ final class Plugin {
 			return;
 		}
 
-		$like = $wpdb->esc_like( 'affilicard_provider_' ) . '%';
+		$like = $wpdb->esc_like( 'affilicard_provider_' ) . '%' . $wpdb->esc_like( '_credentials' );
 		$keys = $wpdb->get_col(
 			$wpdb->prepare( "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s", $like )
 		);

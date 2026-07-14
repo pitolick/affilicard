@@ -67,12 +67,17 @@ function SelectControl( { label, value, options, onChange } ) {
 	);
 }
 
-function Button( { children, onClick, disabled } ) {
+function Button( { children, onClick, disabled, label, icon } ) {
 	return React.createElement(
 		'button',
-		{ onClick, disabled, type: 'button' },
+		{ onClick, disabled, type: 'button', 'aria-label': label },
+		icon || null,
 		children
 	);
+}
+
+function Dashicon( { icon } ) {
+	return React.createElement( 'span', { 'data-dashicon': icon } );
 }
 
 function Notice( { children, status } ) {
@@ -204,6 +209,7 @@ module.exports = {
 	CheckboxControl,
 	SelectControl,
 	Button,
+	Dashicon,
 	Notice,
 	TabPanel,
 	ComboboxControl,

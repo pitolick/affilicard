@@ -66,7 +66,7 @@ final class Uninstall {
 			return;
 		}
 
-		$like = $wpdb->esc_like( 'affilicard_provider_' ) . '%';
+		$like = $wpdb->esc_like( 'affilicard_provider_' ) . '%' . $wpdb->esc_like( '_credentials' );
 		$wpdb->query(
 			$wpdb->prepare(
 				"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
@@ -88,7 +88,7 @@ final class Uninstall {
 			return;
 		}
 
-		$like = $wpdb->esc_like( 'affilicard_account_' ) . '%';
+		$like = $wpdb->esc_like( 'affilicard_account_' ) . '%' . $wpdb->esc_like( '_credentials' );
 		$wpdb->query(
 			$wpdb->prepare(
 				"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",

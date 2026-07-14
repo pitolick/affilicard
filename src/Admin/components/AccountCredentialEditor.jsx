@@ -1,5 +1,5 @@
 import { useEffect, useState } from '@wordpress/element';
-import { TextControl, Button, Notice } from '@wordpress/components';
+import { TextControl, Button, Notice, Dashicon } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import {
 	fetchCredentials,
@@ -17,6 +17,7 @@ export function AccountCredentialEditor({ account, providers }) {
 	const [result, setResult] = useState(null);
 	const [tests, setTests] = useState({}); // providerCode -> {ok,message}
 	const [missing, setMissing] = useState([]); // required だが未入力だったフィールドキー
+	const [busy, setBusy] = useState(false); // 保存/削除/テストの実行中フラグ（同時実行防止）
 
 	useEffect(() => {
 		fetchCredentials(account.code)
@@ -55,6 +56,7 @@ export function AccountCredentialEditor({ account, providers }) {
 	const onSave = async () => {
 		setResult(null);
 		setMissing([]);
+		setBusy(true);
 		try {
 			const next = await updateCredentials(account.code, dirtyValues());
 			setStatus(next);
@@ -84,6 +86,8 @@ export function AccountCredentialEditor({ account, providers }) {
 						? __('必須項目が未入力です', 'affilicard')
 						: __('保存に失敗しました', 'affilicard'),
 			});
+		} finally {
+			setBusy(false);
 		}
 	};
 
@@ -96,6 +100,7 @@ export function AccountCredentialEditor({ account, providers }) {
 		) {
 			return;
 		}
+		setBusy(true);
 		try {
 			const next = await deleteCredentials(account.code);
 			setStatus(next);
@@ -116,10 +121,13 @@ export function AccountCredentialEditor({ account, providers }) {
 				ok: false,
 				message: __('削除に失敗しました', 'affilicard'),
 			});
+		} finally {
+			setBusy(false);
 		}
 	};
 
 	const onTest = async (providerCode) => {
+		setBusy(true);
 		try {
 			const r = await testConnection(providerCode, dirtyValues());
 			setTests({ ...tests, [providerCode]: r });
@@ -131,6 +139,8 @@ export function AccountCredentialEditor({ account, providers }) {
 					message: __('接続テストに失敗しました', 'affilicard'),
 				},
 			});
+		} finally {
+			setBusy(false);
 		}
 	};
 
@@ -181,13 +191,24 @@ export function AccountCredentialEditor({ account, providers }) {
 							/>
 							{isPassword && (
 								<Button
-									variant="tertiary"
+									className="affilicard-account-credential-editor__reveal"
+									icon={
+										<Dashicon
+											icon={
+												reveal[f.key]
+													? 'hidden'
+													: 'visibility'
+											}
+										/>
+									}
+									label={
+										reveal[f.key]
+											? __('隠す', 'affilicard')
+											: __('表示', 'affilicard')
+									}
+									showTooltip
 									onClick={() => toggleReveal(f.key)}
-								>
-									{reveal[f.key]
-										? __('隠す', 'affilicard')
-										: __('表示', 'affilicard')}
-								</Button>
+								/>
 							)}
 						</div>
 						{isPassword && isSet && !dirty[f.key] && (
@@ -212,6 +233,7 @@ export function AccountCredentialEditor({ account, providers }) {
 							<span>{p.label}</span>
 							<Button
 								variant="secondary"
+								disabled={busy}
 								onClick={() => onTest(p.code)}
 							>
 								{__('接続テスト', 'affilicard')}
@@ -234,10 +256,15 @@ export function AccountCredentialEditor({ account, providers }) {
 			)}
 
 			<div className="affilicard-account-credential-editor__actions">
-				<Button variant="secondary" onClick={onSave}>
+				<Button variant="secondary" disabled={busy} onClick={onSave}>
 					{__('認証情報を保存', 'affilicard')}
 				</Button>
-				<Button variant="tertiary" isDestructive onClick={onDelete}>
+				<Button
+					variant="tertiary"
+					isDestructive
+					disabled={busy}
+					onClick={onDelete}
+				>
 					{__('認証情報を削除', 'affilicard')}
 				</Button>
 			</div>

@@ -167,7 +167,7 @@ describe( 'AccountCredentialEditor', () => {
 		const input = screen.getByLabelText( 'アクセスキー' );
 		expect( input.type ).toBe( 'password' );
 
-		fireEvent.click( screen.getByText( '表示' ) );
+		fireEvent.click( screen.getByRole( 'button', { name: '表示' } ) );
 		expect( input.type ).toBe( 'text' );
 	} );
 } );
