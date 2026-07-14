@@ -4,6 +4,7 @@
 >
 > **確定日: 2026-07-14**（brainstorming セッションで確定）
 > **対象バージョン: v2.0.0（MAJOR）**
+> **改訂: rev2（2026-07-14 セルフレビュー反映）**
 
 ---
 
@@ -39,13 +40,13 @@ provider 単位の保存だと、同じアカウント鍵を provider ごとに�
 
 ### スコープ内
 
-- `AccountInterface` / `AccountRegistry` / 具体 Account（`RakutenAccount` / `DmmAccount`）の新設。
+- `AccountInterface` / `AccountRegistry` / 具体 Account（`RakutenAccount` / `DmmAccount`）の新設（`src/Account/`・役割ベース配置）。
 - `ProviderInterface` の改修（`accountCode()` 追加、`credentialsSchema()` 撤去。`testConnection()` は残す）。
-- vendor transport client（`RakutenClient`）の抽出。
-- `AccountCredentials`（`ProviderCredentials` を改名・account 単位化・type-aware status）。
+- vendor transport client（`RakutenClient`・`src/Provider/Rakuten/`）の抽出。
+- `AccountCredentials`（`ProviderCredentials` を改名・account 単位化・type-aware status・**required サーバ検証**）。
 - REST 再構成（credentials=account 単位 / test-connection=provider 単位・入力中値マージ）。
 - SSOT 注入（`window.affilicardAccounts` ＋ `window.affilicardProviders`）と JS 導出（ハードコード廃止）。
-- 管理画面 UI 刷新（`PanelBody` 折り畳み・write-only・dirty 追跡・provider 単位テスト）。
+- 管理画面 UI 刷新（`PanelBody` 折り畳み・write-only・dirty 追跡・provider 単位テスト・アカウント単位削除）。
 - 旧オプションキーのアップグレード削除 ＋ `uninstall.php` 更新。
 - テスト（PHP / JS）・CHANGELOG・README・v2.0.0 bump。
 
@@ -59,9 +60,10 @@ provider 単位の保存だと、同じアカウント鍵を provider ごとに�
 ## 3. 現状の構造（把握済み）
 
 - 保存: `ProviderCredentials`（`src/Provider/ProviderCredentials.php`）が `affilicard_provider_<code>_credentials` に `Crypto`（AES-256-CBC・鍵は `wp_salt('auth')` 派生・IV 毎回ランダム）で暗号化 JSON を保存。`get`/`getMasked`/`patch`（PATCH: null=維持 / string=上書き）/`delete`。
-- REST: `CredentialsController`（`src/Rest/CredentialsController.php`）が platform 系・provider 系の 2 系統を提供。`testConnectionProvider` は body を無視し保存値でテスト。
-- Provider: `ProviderInterface`（`code`/`label`/`isAutomatic`/`fetch`/`credentialsSchema`/`testConnection`）。`ManualProvider` / `Dmm/DmmProvider`（`api_id`/`affiliate_id`）/ `Rakuten/RakutenProvider`（`application_id`/`access_key`/`affiliate_id`/`allowed_domain`。request 組み立て・正規化を private helper で内包）。`ProviderRegistry`。
-- 設定 UI: `Plugin::enqueueSettingsAssets()` が `affilicard-settings`（`build/settings.js`）を enqueue。`src/Admin/providers.js` が `PROVIDER_OPTIONS`/`CRED_SCHEMAS` を**ハードコード**。`ApiCredentialsPanel.jsx` が「空でないスキーマを持つ provider」を描画し、`CredentialEditor.jsx` が各 provider の認証情報を編集。`PlatformEditor.jsx` が `PROVIDER_OPTIONS` をドロップダウンに使用。
+- REST: `CredentialsController`（`src/Rest/CredentialsController.php`）が platform 系・provider 系の 2 系統を提供。`testConnectionProvider` は body を無視し保存値でテスト。**JS（`src/Admin/api/credentials.js`）は provider 系ルートのみ使用し、platform 系ルートには消費者がいない（撤去安全・確認済）。**
+- Provider: `ProviderInterface`（`code`/`label`/`isAutomatic`/`fetch`/`credentialsSchema`/`testConnection`）。`ManualProvider`（`credentialsSchema()` は空配列を返す）/ `Dmm/DmmProvider`（`api_id`/`affiliate_id`。`fetch` は `ProviderCredentials::get($this->code())` で取得）/ `Rakuten/RakutenProvider`（`application_id`/`access_key`/`affiliate_id`/`allowed_domain`。request 組み立て・正規化を private helper で内包）。`ProviderRegistry`。
+- 設定 UI: `Plugin::enqueueSettingsAssets()` が `affilicard-settings`（`build/settings.js`）を enqueue。`Plugin::buildProviderRegistry()` が provider を登録し、`CredentialsController` に注入。`src/Admin/providers.js` が `PROVIDER_OPTIONS`/`CRED_SCHEMAS` を**ハードコード**。`ApiCredentialsPanel.jsx` が「空でないスキーマを持つ provider」を描画し、`CredentialEditor.jsx` が各 provider の認証情報を編集。`PlatformEditor.jsx` が `PROVIDER_OPTIONS` をドロップダウンに使用。
+- Uninstall: `src/Uninstall.php::deleteProviderCredentials()` が `$wpdb` の LIKE（`affilicard_provider_%`）で credentials オプションを一括削除済み。
 
 ---
 
@@ -69,7 +71,7 @@ provider 単位の保存だと、同じアカウント鍵を provider ごとに�
 
 ### 4-1. 新しい連鎖
 
-```
+```text
 platform → provider → account → credentials
 ```
 
@@ -80,10 +82,10 @@ credentials は **account 単位**で保存。複数 provider が同一 account 
 初期セット:
 
 | account code | label | credentialsSchema（key: type） |
-|---|---|---|
+| --- | --- | --- |
 | `rakuten` | 楽天 | `application_id`:text / `access_key`:**password** / `affiliate_id`:text / `allowed_domain`:text |
 | `dmm` | DMM | `api_id`:**password** / `affiliate_id`:text |
-| （将来）`amazon` | Amazon | 承認後に定義 |
+| （将来）`amazon` | Amazon | 承認後に定義（本 spec では未登録） |
 
 秘匿（password＝マスク対象）は `access_key`・`api_id` のみ。他は text。
 
@@ -92,12 +94,13 @@ namespace Affilicard\Account;
 
 interface AccountInterface {
     public function code(): string;              // 'rakuten'
-    public function label(): string;             // '楽天'
+    public function label(): string;             // '楽天'（__() で翻訳）
     /** @return list<array{key:string,label:string,type:'text'|'password',required:bool}> */
     public function credentialsSchema(): array;
 }
 ```
 
+- 配置（役割ベース）: `src/Account/AccountInterface.php` / `AccountRegistry.php` / `RakutenAccount.php` / `DmmAccount.php`。namespace `Affilicard\Account`。
 - `AccountRegistry`（`ProviderRegistry` と対称）を新設。`Plugin::buildAccountRegistry()` で `rakuten` / `dmm` を register。
 - Account は**認証情報の保有者**（スキーマ＋保存の SSOT）。**testConnection は持たない**（下記 4-4 の理由）。
 
@@ -118,12 +121,15 @@ interface ProviderInterface {
 provider→account 紐付け:
 
 | provider | accountCode |
-|---|---|
+| --- | --- |
 | `manual` | `null`（認証パネルに出ない） |
 | `dmm-ebook` | `dmm` |
 | `rakuten-kobo` | `rakuten` |
 
-`manual` は accountCode=null のため、認証パネルに自然に現れない（現行の「空スキーマを filter」より明確）。
+- `manual` は accountCode=null のため、認証パネルに自然に現れない（現行の「空スキーマを filter」より明確）。
+- **credentials の取得元**: provider の `fetch()` は現行 `ProviderCredentials::get($this->code())` を **`AccountCredentials::get($this->accountCode())` に変更**する（DMM/楽天とも）。`testConnection()` は REST から渡される account creds を受け取る。
+- **キー契約**: account の `credentialsSchema()` のキー（`application_id` 等）が、そのアカウントを使う provider の `fetch`/`testConnection` が参照するキーの**契約**になる。同一 vendor の Account と Provider は同じキー名で co-design する（vendor 内の暗黙結合であり許容）。
+- **graceful**: `accountCode()` が null、または未登録アカウントを指す場合、creds は空配列とみなし `fetch()` は null を返す（現行の未設定時挙動と同じ）。
 
 ### 4-4. testConnection は provider 所有（＝API 単位）
 
@@ -136,10 +142,11 @@ provider→account 紐付け:
 
 - **Account = 認証情報の保有者**（スキーマ＋保存）。testConnection は持たない。
 - **Provider = accountCode ＋ fetch ＋ testConnection(account creds)**。テストは provider ごとに独立実行し、UI が provider 単位で ✓/✗ を出して権限差を可視化する。
+- `ManualProvider` も `testConnection()` を持つが（interface 共通）、account を持たないため UI から呼ばれない。schema は Account へ移したので `credentialsSchema()` のみ interface から撤去する（testConnection は API 単位・schema は account 単位という非対称は意図的）。
 
 ### 4-5. vendor transport client の抽出
 
-`RakutenProvider` は「provider の役割」「API 通信」「レスポンス正規化」を 1 クラスに混載している。**API 通信（`toOrigin` / `access_key` ヘッダ / エンドポイント / リクエスト送出）を `RakutenClient` に抽出**し、`RakutenProvider::fetch()` と `RakutenProvider::testConnection()` が共用する。
+`RakutenProvider` は「provider の役割」「API 通信」「レスポンス正規化」を 1 クラスに混載している。**API 通信（`toOrigin` / `access_key` ヘッダ / エンドポイント / リクエスト送出）を `RakutenClient`（`src/Provider/Rakuten/RakutenClient.php`）に抽出**し、`RakutenProvider::fetch()` と `RakutenProvider::testConnection()` が共用する。
 
 - 動機は**現時点の凝集性**（単一責任・小さく境界の明確な単位）。将来投機ではない。
 - 将来 `RakutenTravelProvider` 等を足す際も同 client を共用でき、その追加は内部リファクタで済む（公開面に非破壊）。
@@ -149,14 +156,30 @@ provider→account 紐付け:
 
 公開プラグインなので第三者が `ProviderInterface` を実装し得る。**将来のケイパビリティ追加はコア interface の拡張ではなく、オプションの capability interface（`instanceof` 判定）で足す**ことを設計原則として明文化する。例: 商品検索は `SearchableProvider`（`search(query): candidates[]`）をオプション実装させれば既存 provider を壊さず追加できる。
 
+### 4-7. ファイル配置まとめ（役割ベース）
+
+| 新規/変更 | パス | 役割 |
+| --- | --- | --- |
+| 新規 | `src/Account/AccountInterface.php` | Account 契約 |
+| 新規 | `src/Account/AccountRegistry.php` | Account 登録簿 |
+| 新規 | `src/Account/RakutenAccount.php` / `DmmAccount.php` | 具体 Account（schema） |
+| 新規 | `src/Account/AccountUiList.php` | account の SSOT 注入用ビルダー |
+| 新規 | `src/Provider/ProviderUiList.php` | provider の SSOT 注入用ビルダー |
+| 新規 | `src/Provider/Rakuten/RakutenClient.php` | 楽天 API transport |
+| 改名 | `src/Provider/ProviderCredentials.php` → `src/Account/AccountCredentials.php` | account 単位保存 |
+| 変更 | `src/Provider/ProviderInterface.php` ほか各 Provider | accountCode 追加・credentialsSchema 撤去 |
+| 新規 | `src/Admin/accounts.js` | ACCOUNTS 導出 |
+| 変更 | `src/Admin/providers.js` / `ApiCredentialsPanel.jsx` / `CredentialEditor.jsx`→`AccountCredentialEditor.jsx` / `api/credentials.js` | SSOT 導出・UI 刷新・新ルート |
+
 ---
 
-## 5. 保存・マスク・dirty 追跡・クリーンアップ
+## 5. 保存・マスク・dirty 追跡・required・クリーンアップ
 
 ### 5-1. AccountCredentials（`ProviderCredentials` を改名・account 単位化）
 
+- 配置: `src/Account/AccountCredentials.php`（namespace `Affilicard\Account`）。
 - 保存キー: `affilicard_account_<accountCode>_credentials`（例 `affilicard_account_rakuten_credentials`）。値は現行同様 `Crypto` で AES 暗号化 JSON（`Crypto` は本 spec では**現状維持**）。
-- `get()` / `patch()`（PATCH: null=触らない / string=上書き）/ `delete()` は現行ロジックを account キーで踏襲。
+- `get()` / `patch()`（内部 util の PATCH: null=触らない / string=上書き）/ `delete()` は現行ロジックを account キーで踏襲。REST 層（§6）は **dirty な文字列キーのみ**を渡す（null は使わない）。
 
 ### 5-2. write-only パターン（秘匿値の標準）
 
@@ -165,20 +188,26 @@ WordPress プラグインの API シークレット標準（WP コア Applicatio
 - **GET 応答（type-aware）**: `getStatusFor(AccountInterface $account)` を新設し、フィールド毎に返す:
   - text（`application_id`/`affiliate_id`/`allowed_domain`）→ `{ value: "実値", isSet: bool }`
   - password（`access_key`/`api_id`）→ `{ value: "", isSet: bool }`（**値は withhold**、状態のみ）
-- **PUT 意味論**: `キー省略=維持` / `文字列=差し替え` / `null=クリア（削除ボタン）`。password の空文字は送らない（維持）。
+- **PUT 意味論**: JS は **dirty（変更した）キーだけ**を送る。**キーが含まれれば上書き保存**（text は空文字も保存＝そのフィールドのクリア）、**含まれなければ維持**。password は入力があったときだけ dirty として送られる（未編集は送らない＝維持）。per-field の明示クリアは設けず、アカウント全体のクリアは DELETE（§6・§8-2）。
 - **dirty 追跡（主対策・JS 側）**: 触った項目だけ PUT する。未編集の password は再送しない。これにより「マスク文字列で本物の鍵を壊す」現行バグが**構造的に発生し得なくなる**（マスク値がそもそも編集欄に往復しない）。
-- password の「設定済み」表示は**状態バッジのみ**（末尾数桁も出さない＝App Passwords 準拠）をデフォルトとする。末尾数桁ヒントが必要なら後で調整可。
+- password の「設定済み」表示は**状態バッジのみ**（末尾数桁も出さない＝App Passwords 準拠）をデフォルトとする。
 
 > 補足: 従来案の「サーバ側でマスク一致を判定して無視する二重防御」は**採らない**。write-only パターンの方が標準かつ堅牢（シークレットが編集値として往復しないため、事故が原理的に起きない）。
 
-### 5-3. 旧キーのクリーンアップ（DB 残渣回避）
+### 5-3. required のサーバ検証
 
-移行しない代わりに、**アップグレード時に旧オプションキーを削除**する（version ゲートした upgrade routine）:
+`credentialsSchema()` の `required:true` は**サーバ（PUT）で強制**する。
 
-- `affilicard_provider_dmm-ebook_credentials`
-- `affilicard_provider_rakuten-kobo_credentials`
+- 検証対象は **patch 適用後のマージ状態**（保存済み値 ＋ 今回の差分）。これにより「既に完成済みアカウントの 1 項目だけ編集して保存」は失敗せず、**最終状態が不完全なときだけ 400** を返す。
+- 400 応答は不足キーを示す（`{ code:'affilicard_missing_required', missing:[...] }`）。
+- **完全クリア/削除の逃げ道**: required 検証を通れないため、アカウント単位の「認証情報を削除」操作（option ごと削除＝`AccountCredentials::delete()`）を用意し、これは required 検証を経由しない（UI: §8-2 の削除ボタン、REST: §6 の DELETE）。
 
-`uninstall.php` にも account キー（`affilicard_account_*_credentials`）の削除を追加する。
+### 5-4. 旧キーのクリーンアップ（DB 残渣回避）
+
+移行しない代わりに、**アップグレード時に旧オプションキーを削除**する（version ゲートした upgrade routine）。既存 `Uninstall::deleteProviderCredentials()` と同じ `$wpdb` LIKE 方式を用いる:
+
+- upgrade 時: `affilicard_provider_%` を一括削除（旧 provider 単位 credentials の残渣除去）。
+- `uninstall.php`（`Uninstall`）: 既存の `affilicard_provider_%` 削除に加え、**`affilicard_account_%` の削除を追加**する。
 
 ---
 
@@ -187,15 +216,16 @@ WordPress プラグインの API シークレット標準（WP コア Applicatio
 粒度を自然な単位に一本化し、旧ルートは撤去する:
 
 | ルート | メソッド | 動作 |
-|---|---|---|
+| --- | --- | --- |
 | `/affilicard/v1/accounts/{code}/credentials` | GET | account の creds を **type-aware**（§5-2）で返す（`{value,isSet}`） |
-| 〃 | PUT | dirty 値を PATCH 保存（`null=クリア`）し、GET 相当の status を返す |
-| `/affilicard/v1/providers/{code}/test-connection` | POST | **入力中値（body）** を保存済み account creds に上書きマージ → `provider.testConnection` 実行（保存前テスト） |
+| 〃 | PUT | dirty 値を上書き保存（含まれたキーのみ・text の空文字はクリア）。**required をマージ後状態で検証**（不足なら 400・§5-3）。成功時は GET 相当の status を返す |
+| 〃 | DELETE | account の credentials を option ごと削除（required 検証なし・§5-3 の逃げ道） |
+| `/affilicard/v1/providers/{code}/test-connection` | POST | **入力中の dirty 値（body）** を保存済み account creds に上書きマージ → `provider.testConnection` 実行（保存前テスト） |
 
-- **撤去**: 旧 `/platforms/{code}/credentials`・`/platforms/{code}/test-connection`・`/providers/{code}/credentials`（credentials CRUD は account へ集約）。
-- test-connection が `/providers/{code}` 側なのは、テストが **API（＝provider）単位**だから（§4-4）。provider が自分の `accountCode` を解決し、`body の入力中値 > 保存済み account creds` の優先順でマージして `testConnection` を実行。
-- 権限は現行どおり `manage_options`。
-- 対応する JS api クライアント（`src/Admin/api/`）を account/provider の新ルートに更新。
+- **撤去**: 旧 `/platforms/{code}/credentials`・`/platforms/{code}/test-connection`・`/providers/{code}/credentials`（credentials CRUD は account へ集約）。**JS 消費者がいないことを確認済**（`api/credentials.js` は provider 系のみ、platform 系は未使用）。
+- test-connection が `/providers/{code}` 側なのは、テストが **API（＝provider）単位**だから（§4-4）。provider が自分の `accountCode` を解決し、`body の dirty 値 > 保存済み account creds` の優先順でマージして `testConnection` を実行。**body は保存と同じ dirty 値のみ**（未編集 password は含めない＝保存値に fallback）＝空文字で保存値を潰さない。未知の provider / account は 404。
+- 権限は全ルート `manage_options`。
+- 対応する JS api クライアント（`src/Admin/api/credentials.js`）を account/provider の新ルートに更新（`fetch`/`update`/`delete` = accounts、`testConnection` = providers）。
 
 ---
 
@@ -207,16 +237,16 @@ WordPress プラグインの API シークレット標準（WP コア Applicatio
 
 ### 7-2. PHP ビルダー（2 本）
 
-- `AccountUiList::build(AccountRegistry): list<array{code,label,credentialsSchema}>` — 認証パネル用。
-- `ProviderUiList::build(ProviderRegistry): list<array{code,label,isAutomatic,accountCode}>` — provider ドロップダウン用。
+- `AccountUiList::build(AccountRegistry): list<array{code,label,credentialsSchema}>` — 認証パネル用（`src/Account/AccountUiList.php`）。
+- `ProviderUiList::build(ProviderRegistry): list<array{code,label,isAutomatic,accountCode}>` — provider ドロップダウン用（`src/Provider/ProviderUiList.php`）。
 
 `enqueueSettingsAssets()` の enqueue 直後:
 
 ```php
 wp_add_inline_script(
     'affilicard-settings',
-    'window.affilicardAccounts=' . wp_json_encode( AccountUiList::build( $accounts ) ) . ';'
-  . 'window.affilicardProviders=' . wp_json_encode( ProviderUiList::build( $providers ) ) . ';',
+    'window.affilicardAccounts=' . wp_json_encode( AccountUiList::build( self::buildAccountRegistry() ) ) . ';'
+  . 'window.affilicardProviders=' . wp_json_encode( ProviderUiList::build( self::buildProviderRegistry() ) ) . ';',
     'before'
 );
 ```
@@ -258,7 +288,7 @@ export const PROVIDER_OPTIONS = p.map((x) => ({ label:x.label, value:x.code }));
 export const providerAccount = (code) => p.find((x) => x.code === code)?.accountCode ?? null;
 ```
 
-- 未定義/非配列は `[]` フォールバック（防御的）。
+- 未定義/非配列は `[]` フォールバック（防御的・テスト容易）。
 - `PROVIDER_OPTIONS` の形（`{label,value}`）は不変 → `PlatformEditor.jsx` は実質無改修。
 - 未 push の provider 単位 SSOT ドラフト（`feat/provider-ui-schema-ssot`）は**破棄**し、本 account 版で置換する。差分は「注入 global を 2 本に分離／スキーマ所有を Account へ／JS 導出を account キー化」。
 
@@ -268,23 +298,24 @@ export const providerAccount = (code) => p.find((x) => x.code === code)?.account
 
 ### 8-1. ApiCredentialsPanel
 
-`ACCOUNTS` を走査し、各 account を **`PanelBody`（折り畳み）** で表示。`initialOpen` は「未設定アカウントは開く」等の軽い規則。
+`ACCOUNTS` を走査し、各 account を **`PanelBody`（折り畳み）** で表示。`initialOpen` は「未設定（全 required が未 isSet）のアカウントは開く／設定済みは閉じる」を初期規則とする。
 
-```
+```text
 ■ API 認証
   API 連携を使うアカウントの認証情報を設定します（アカウント単位で共有）。
 
   ▼ 楽天                                                    〔開〕
   ┌──────────────────────────────────────────────────────────┐
   │ アプリID            [ 1023...                 ]   ← text（実値・編集可）
-  │ アクセスキー         [                        ] 👁 削除  ← password（空・設定済みバッジ）
+  │ アクセスキー         [                        ] 👁     ← password（空・設定済みバッジ）
   │ アフィリエイトID     [ 12a3...                 ]   ← text
   │ 許可ドメイン(Origin) [ e-comi.pitolick.com     ]   ← text
   │                                                            │
   │ このアカウントを使う連携:                                  │
   │   ・楽天Kobo      [ 接続テスト ]   ✓ 接続OK               │
   │   ・楽天トラベル   [ 接続テスト ]   ✗ 権限がありません      │
-  │                                       [ 認証情報を保存 ]    │
+  │                                                            │
+  │            [ 認証情報を保存 ]   [ 認証情報を削除 ]          │
   └──────────────────────────────────────────────────────────┘
 
   ▶ DMM                                                     〔閉〕
@@ -295,10 +326,12 @@ export const providerAccount = (code) => p.find((x) => x.code === code)?.account
 - GET `/accounts/{code}/credentials` → 各フィールド `{value,isSet}`。
 - **type で描画分岐**:
   - text → `TextControl`（実値・編集可）。
-  - password → `TextControl type=password`、**空欄＋「設定済み」バッジ**（`isSet` 時）＋目アイコンで一時表示＋「削除」ボタン（`null` 送信でクリア）。
+  - password → `TextControl type=password`、**空欄＋「設定済み」バッジ**（`isSet` 時）＋目アイコンで一時表示。
 - **dirty 追跡**: 変更キーだけ PUT。未編集 password は再送しない。
-- **provider ごとの接続テスト**: `providerAccount(code) === この account` の provider を列挙し、各「接続テスト」で POST `/providers/{code}/test-connection`（**入力中値**を送る）→ provider ごとに ✓/✗ ＋メッセージ。
-- 保存後は GET を再取得して state を更新。
+- **保存**: 「認証情報を保存」→ PUT。required 不足の 400 はフィールド脇にエラー表示。
+- **削除**: 「認証情報を削除」→ DELETE（確認ダイアログ経由）。account の全 credentials を消去（§5-3 の逃げ道・required 検証なし）。
+- **provider ごとの接続テスト**: `providerAccount(code) === この account` の provider を列挙し、各「接続テスト」で POST `/providers/{code}/test-connection`（**保存と同じ dirty 値のみ**を送る＝未編集 password は含めず保存値に fallback）→ provider ごとに ✓/✗ ＋メッセージ。
+- 保存/削除後は GET を再取得して state を更新。
 
 ### 8-3. PlatformEditor
 
@@ -310,8 +343,15 @@ export const providerAccount = (code) => p.find((x) => x.code === code)?.account
 
 ### 9-1. テスト（同一 PR 必須・外部 API はモック）
 
-- **PHP（Docker `composer:2`）**: `AccountRegistry` / `AccountUiList` / `AccountCredentials`（get・patch・`getStatusFor` の type-aware・delete）/ `CredentialsController`（account GET/PUT のマスク＋`null` クリア、provider test-connection の body マージ）/ `ProviderUiList`（accountCode）/ アップグレード時の旧キー削除 / `RakutenClient` 抽出 / Rakuten・Dmm Provider の `testConnection`（account creds 受領）。既存テストの移行を含む。テストは架空プレースホルダ（`sample` / `X` 等）で実在名を書かない。
-- **JS（`npm run test:js`・`tests/js/` 配下）**: `accounts.js` / `providers.js` の window 導出（未定義フォールバック含む）/ `AccountCredentialEditor` の dirty 追跡・write-only（secret 非再送・`null` クリア）・provider 別テスト。
+- **PHP（Docker `composer:2`）**:
+  - `AccountRegistry` / `AccountUiList`（build）/ `ProviderUiList`（accountCode 付き build）。
+  - `AccountCredentials`: `get`・`patch`・`getStatusFor`（type-aware＝password は value 空・text は実値）・`delete`。
+  - `CredentialsController`: account GET（マスク）・PUT（マージ後 required 検証で 400／成功で status）・DELETE、provider test-connection（body マージ・404）。
+  - `ProviderInterface` 改修に伴う各 Provider（`accountCode()`、`fetch` が `AccountCredentials` を読む、`testConnection` が account creds を受ける）。
+  - `RakutenClient` 抽出（request 組み立て・Origin・エラーメッセージ）。
+  - upgrade 時の旧キー削除・`Uninstall` の account キー削除。
+  - 既存 `ProviderCredentials`/`CredentialsController`/Provider テストの移行。テストは架空プレースホルダ（`sample` / `X` 等）で実在名を書かない。
+- **JS（`npm run test:js`・`tests/js/` 配下）**: `accounts.js` / `providers.js` の window 導出（未定義フォールバック含む）/ `AccountCredentialEditor` の dirty 追跡・write-only（secret 非再送）・削除・provider 別テスト。
 
 ### 9-2. バージョン = v2.0.0（MAJOR）
 
@@ -327,5 +367,5 @@ export const providerAccount = (code) => p.find((x) => x.code === code)?.account
 ## 10. 完了条件
 
 - `composer test` / `composer lint` / `npm run test:js` / `npm run build` すべて green。
-- wp-env（実 WP）で楽天の credentials 保存・provider 単位の接続テスト（Origin 依存）が通ることを確認。Playground で UI（折り畳み・write-only・dirty 追跡）と DMM を確認。退行なし。
+- wp-env（実 WP）で楽天の credentials 保存・provider 単位の接続テスト（Origin 依存）が通ることを確認。Playground で UI（折り畳み・write-only・dirty 追跡・削除）と DMM を確認。退行なし。
 - 実装 feature PR は自動マージせず、プレビューでユーザーが確認してからマージ。マージ後タグで `release.yml` が v2.0.0 を Release 公開。
