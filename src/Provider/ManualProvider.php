@@ -20,19 +20,16 @@ final class ManualProvider implements ProviderInterface {
 		return false;
 	}
 
+	public function accountCode(): ?string {
+		return null;
+	}
+
 	/**
 	 * @param array<string, mixed> $platformConfig
 	 * @return array<string, mixed>|null
 	 */
 	public function fetch( string $externalId, array $platformConfig ): ?array {
 		return null;
-	}
-
-	/**
-	 * @return list<array{key: string, label: string, type: 'text'|'password', required: bool}>
-	 */
-	public function credentialsSchema(): array {
-		return array();
 	}
 
 	/**

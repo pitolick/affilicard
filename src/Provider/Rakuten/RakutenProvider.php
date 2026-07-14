@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Provider\Rakuten;
 
-use Affilicard\Provider\ProviderCredentials;
+use Affilicard\Account\AccountCredentials;
 use Affilicard\Provider\ProviderInterface;
 
 /**
@@ -27,36 +27,8 @@ final class RakutenProvider implements ProviderInterface {
 		return true;
 	}
 
-	/**
-	 * @return list<array{key: string, label: string, type: 'text'|'password', required: bool}>
-	 */
-	public function credentialsSchema(): array {
-		return array(
-			array(
-				'key'      => 'application_id',
-				'label'    => __( 'アプリID', 'affilicard' ),
-				'type'     => 'password',
-				'required' => true,
-			),
-			array(
-				'key'      => 'access_key',
-				'label'    => __( 'アクセスキー', 'affilicard' ),
-				'type'     => 'password',
-				'required' => true,
-			),
-			array(
-				'key'      => 'affiliate_id',
-				'label'    => __( 'アフィリエイトID', 'affilicard' ),
-				'type'     => 'password',
-				'required' => true,
-			),
-			array(
-				'key'      => 'allowed_domain',
-				'label'    => __( '許可ドメイン（Origin。空ならサイトURL）', 'affilicard' ),
-				'type'     => 'text',
-				'required' => false,
-			),
-		);
+	public function accountCode(): ?string {
+		return 'rakuten';
 	}
 
 	/**
@@ -64,7 +36,7 @@ final class RakutenProvider implements ProviderInterface {
 	 * @return array<string, mixed>|null
 	 */
 	public function fetch( string $externalId, array $platformConfig ): ?array {
-		$credentials = ProviderCredentials::get( $this->code() );
+		$credentials = AccountCredentials::get( (string) $this->accountCode() );
 		if ( ! self::hasRequiredCredentials( $credentials ) ) {
 			return null;
 		}

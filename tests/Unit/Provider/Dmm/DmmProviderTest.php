@@ -49,18 +49,8 @@ final class DmmProviderTest extends TestCase {
 		$this->assertTrue( $provider->isAutomatic() );
 	}
 
-	public function test_credentials_schema_has_two_required_entries(): void {
-		$provider = new DmmProvider();
-		$schema   = $provider->credentialsSchema();
-
-		$this->assertCount( 2, $schema );
-		$this->assertSame( 'api_id', $schema[0]['key'] );
-		$this->assertTrue( $schema[0]['required'] );
-		$this->assertSame( 'password', $schema[0]['type'] );
-
-		$this->assertSame( 'affiliate_id', $schema[1]['key'] );
-		$this->assertTrue( $schema[1]['required'] );
-		$this->assertSame( 'password', $schema[1]['type'] );
+	public function test_account_code_is_dmm(): void {
+		$this->assertSame( 'dmm', ( new DmmProvider() )->accountCode() );
 	}
 
 	public function test_test_connection_fails_with_empty_credentials(): void {
@@ -138,7 +128,7 @@ final class DmmProviderTest extends TestCase {
 		$encrypted   = Crypto::encrypt( JsonField::encode( $credentials ) );
 
 		WP_Mock::userFunction( 'get_option' )
-			->with( 'affilicard_provider_dmm-ebook_credentials', '' )
+			->with( 'affilicard_account_dmm_credentials', '' )
 			->andReturn( $encrypted );
 
 		$item_json = json_encode(

@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Provider\Dmm;
 
-use Affilicard\Provider\ProviderCredentials;
+use Affilicard\Account\AccountCredentials;
 use Affilicard\Provider\ProviderInterface;
 
 /**
@@ -27,24 +27,8 @@ final class DmmProvider implements ProviderInterface {
 		return true;
 	}
 
-	/**
-	 * @return list<array{key: string, label: string, type: 'text'|'password', required: bool}>
-	 */
-	public function credentialsSchema(): array {
-		return array(
-			array(
-				'key'      => 'api_id',
-				'label'    => __( 'API ID', 'affilicard' ),
-				'type'     => 'password',
-				'required' => true,
-			),
-			array(
-				'key'      => 'affiliate_id',
-				'label'    => __( 'アフィリエイト ID', 'affilicard' ),
-				'type'     => 'password',
-				'required' => true,
-			),
-		);
+	public function accountCode(): ?string {
+		return 'dmm';
 	}
 
 	/**
@@ -52,7 +36,7 @@ final class DmmProvider implements ProviderInterface {
 	 * @return array<string, mixed>|null
 	 */
 	public function fetch( string $externalId, array $platformConfig ): ?array {
-		$credentials = ProviderCredentials::get( $this->code() );
+		$credentials = AccountCredentials::get( (string) $this->accountCode() );
 		if ( empty( $credentials['api_id'] ) || empty( $credentials['affiliate_id'] ) ) {
 			return null;
 		}

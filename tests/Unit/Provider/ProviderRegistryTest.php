@@ -58,11 +58,11 @@ final class ProviderRegistryTest extends TestCase {
 			public function isAutomatic(): bool {
 				return false;
 			}
-			public function fetch( string $externalId, array $platformConfig ): ?array {
+			public function accountCode(): ?string {
 				return null;
 			}
-			public function credentialsSchema(): array {
-				return array();
+			public function fetch( string $externalId, array $platformConfig ): ?array {
+				return null;
 			}
 			public function testConnection( array $credentials ): array {
 				return array(

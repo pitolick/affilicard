@@ -24,6 +24,11 @@ interface ProviderInterface {
 	public function isAutomatic(): bool;
 
 	/**
+	 * この provider が認証情報を引く account のコード（例: 'rakuten'）。手動入力は null。
+	 */
+	public function accountCode(): ?string;
+
+	/**
 	 * 商品 ID から API/スクレイピング等で raw 商品情報を取得する。
 	 *
 	 * 取得不可・credentials 未設定の場合は null を返す。
@@ -32,13 +37,6 @@ interface ProviderInterface {
 	 * @return array{title?: string, price?: string, list_price?: string, badge?: string, image_url?: string, regular_url?: string, affiliate_url?: string, platform_extras?: array<string, mixed>, raw?: array<string, mixed>}|null
 	 */
 	public function fetch( string $externalId, array $platformConfig ): ?array;
-
-	/**
-	 * 管理画面に表示する credentials フィールド定義。
-	 *
-	 * @return list<array{key: string, label: string, type: 'text'|'password', required: bool}>
-	 */
-	public function credentialsSchema(): array;
 
 	/**
 	 * credentials を使った疎通確認。
