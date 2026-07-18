@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [2.1.0]
+
+### Added
+
+- カード書影を表示中ストアの `imagePriority`（DMM > Amazon > 楽天Kobo）順で各ストア CDN 画像から選ぶようにした。`only-platform` で表示を絞ると書影もそれに追従する。listing に画像が無ければ従来どおり投稿アイキャッチにフォールバック。
+- プラットフォーム設定に「画像優先度（imagePriority）」入力を追加（既定 999・後方互換）。
+
 ## [2.0.0] - 2026-07-14
 
 ### Changed (BREAKING)
