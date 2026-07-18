@@ -60,9 +60,12 @@ export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 					label={__('画像優先度（小さいほど優先）', 'affilicard')}
 					type="number"
 					value={String(platform.imagePriority ?? 999)}
-					onChange={(v) =>
-						update({ imagePriority: parseInt(v, 10) || 999 })
-					}
+					onChange={(v) => {
+						const value = parseInt(v, 10);
+						update({
+							imagePriority: Number.isNaN(value) ? 999 : value,
+						});
+					}}
 				/>
 				<TextControl
 					label={__('ブランド色', 'affilicard')}

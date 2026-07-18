@@ -19,6 +19,19 @@ final class CardRendererTest extends TestCase {
 		WP_Mock::passthruFunction( 'wp_kses_post' );
 		WP_Mock::userFunction( '__', array( 'return_arg' => 0 ) );
 		WP_Mock::userFunction( 'sanitize_hex_color', array( 'return_arg' => 0 ) );
+		// 実 WordPress の esc_url_raw() は javascript:/data: 等の危険スキームを排除して空文字を返す
+		// （wp_kses_bad_protocol の再帰比較が不一致になり clean_url() が '' を返す挙動を単純化した stub）。
+		// selectCardImage() の sanitize（本 PR の対象）を検証するため、passthru ではなく最小限だけ再現する。
+		WP_Mock::userFunction( 'esc_url_raw' )
+			->andReturnUsing(
+				static function ( $value ) {
+					$value = is_scalar( $value ) ? (string) $value : '';
+					if ( 1 === preg_match( '/^\s*(javascript|data|vbscript)\s*:/i', $value ) ) {
+						return '';
+					}
+					return $value;
+				}
+			);
 	}
 
 	protected function tearDown(): void {
@@ -1369,5 +1382,24 @@ final class CardRendererTest extends TestCase {
 		);
 		$html    = ( new CardRenderer() )->render( $product, $this->bookPlatforms(), array( 'image_url' => 'https://cdn/eye.jpg' ) );
 		$this->assertStringContainsString( 'https://cdn/eye.jpg', $html );
+	}
+
+	public function test_card_image_skips_invalid_url_and_uses_fallback(): void {
+		// esc_url_raw で空になる無効 URL（javascript: スキーム）は候補から除外され、
+		// 他に有効な listing 画像が無ければアイキャッチ fallback が使われる。
+		$product = array(
+			'title'        => 'X',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'      => 'dmm-books',
+					'affiliate_url' => 'https://a/dmm',
+					'image_url'     => 'javascript:alert(1)',
+				),
+			),
+		);
+		$html    = ( new CardRenderer() )->render( $product, $this->bookPlatforms(), array( 'image_url' => 'https://cdn/eye.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn/eye.jpg', $html );
+		$this->assertStringNotContainsString( 'javascript:alert', $html );
 	}
 }

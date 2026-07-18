@@ -361,6 +361,7 @@ final class CardRenderer {
 		$best_order    = PHP_INT_MAX;
 		foreach ( $visibleListings as $listing ) {
 			$img = isset( $listing['image_url'] ) ? trim( (string) $listing['image_url'] ) : '';
+			$img = esc_url_raw( $img );
 			if ( '' === $img ) {
 				continue;
 			}

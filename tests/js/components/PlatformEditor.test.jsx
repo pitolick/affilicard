@@ -57,7 +57,7 @@ describe( 'PlatformEditor', () => {
 		);
 		expect(
 			screen.getByLabelText( '画像優先度（小さいほど優先）' )
-		).toBeInTheDocument();
+		).toHaveValue( 10 );
 	} );
 
 	test( 'onChange propagates imagePriority patch to parent', () => {
@@ -73,6 +73,22 @@ describe( 'PlatformEditor', () => {
 		);
 		expect( onChange ).toHaveBeenCalledWith(
 			expect.objectContaining( { imagePriority: 20 } )
+		);
+	} );
+
+	test( 'onChange keeps 0 as a valid imagePriority instead of falling back to 999', () => {
+		const onChange = jest.fn();
+		render(
+			<PlatformEditor platform={ basePlatform } onChange={ onChange } />
+		);
+		fireEvent.change(
+			screen.getByLabelText( '画像優先度（小さいほど優先）' ),
+			{
+				target: { value: '0' },
+			}
+		);
+		expect( onChange ).toHaveBeenCalledWith(
+			expect.objectContaining( { imagePriority: 0 } )
 		);
 	} );
 
