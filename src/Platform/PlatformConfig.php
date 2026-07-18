@@ -103,7 +103,8 @@ final class PlatformConfig {
 				'#d72d65',
 				'#ffffff',
 				true,
-				'weekly'
+				'weekly',
+				imagePriority: 10
 			),
 			new PlatformDefinition(
 				'amazon-kindle',
@@ -114,7 +115,8 @@ final class PlatformConfig {
 				array( 'ebook' ),
 				__( 'Kindleで読む', 'affilicard' ),
 				'#ff9900',
-				'#000000'
+				'#000000',
+				imagePriority: 20
 			),
 			new PlatformDefinition(
 				'rakuten-kobo',
@@ -125,7 +127,8 @@ final class PlatformConfig {
 				array( 'ebook' ),
 				__( '楽天Koboで読む', 'affilicard' ),
 				'#bf0000',
-				'#ffffff'
+				'#ffffff',
+				imagePriority: 30
 			),
 			new PlatformDefinition(
 				'bookwalker',

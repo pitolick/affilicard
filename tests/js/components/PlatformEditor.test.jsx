@@ -11,6 +11,7 @@ const basePlatform = {
 	provider: 'manual',
 	enabled: true,
 	displayOrder: 1,
+	imagePriority: 10,
 	applicableTypes: [ 'ebook' ],
 	buttonLabel: '購入',
 	brandColor: '#444444',
@@ -46,6 +47,48 @@ describe( 'PlatformEditor', () => {
 		} );
 		expect( onChange ).toHaveBeenCalledWith(
 			expect.objectContaining( { name: 'DMM Books' } )
+		);
+	} );
+
+	test( 'renders imagePriority input with platform value', () => {
+		const onChange = jest.fn();
+		render(
+			<PlatformEditor platform={ basePlatform } onChange={ onChange } />
+		);
+		expect(
+			screen.getByLabelText( '画像優先度（小さいほど優先）' )
+		).toHaveValue( 10 );
+	} );
+
+	test( 'onChange propagates imagePriority patch to parent', () => {
+		const onChange = jest.fn();
+		render(
+			<PlatformEditor platform={ basePlatform } onChange={ onChange } />
+		);
+		fireEvent.change(
+			screen.getByLabelText( '画像優先度（小さいほど優先）' ),
+			{
+				target: { value: '20' },
+			}
+		);
+		expect( onChange ).toHaveBeenCalledWith(
+			expect.objectContaining( { imagePriority: 20 } )
+		);
+	} );
+
+	test( 'onChange keeps 0 as a valid imagePriority instead of falling back to 999', () => {
+		const onChange = jest.fn();
+		render(
+			<PlatformEditor platform={ basePlatform } onChange={ onChange } />
+		);
+		fireEvent.change(
+			screen.getByLabelText( '画像優先度（小さいほど優先）' ),
+			{
+				target: { value: '0' },
+			}
+		);
+		expect( onChange ).toHaveBeenCalledWith(
+			expect.objectContaining( { imagePriority: 0 } )
 		);
 	} );
 

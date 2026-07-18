@@ -38,14 +38,21 @@ final class CardRenderer {
 			}
 		}
 
-		$hide         = isset( $options['hide_platforms'] ) && is_array( $options['hide_platforms'] ) ? array_map( 'strval', $options['hide_platforms'] ) : array();
-		$only         = isset( $options['only_platforms'] ) && is_array( $options['only_platforms'] ) ? array_map( 'strval', $options['only_platforms'] ) : array();
-		$image_url    = isset( $options['image_url'] ) ? (string) $options['image_url'] : '';
-		$colors       = isset( $options['colors'] ) && is_array( $options['colors'] ) ? $options['colors'] : array();
-		$header_keys  = isset( $options['header_keys'] ) && is_array( $options['header_keys'] ) ? array_map( 'strval', $options['header_keys'] ) : array( 'author', 'publisher' );
-		$hidden_keys  = isset( $options['hidden_keys'] ) && is_array( $options['hidden_keys'] ) ? array_map( 'strval', $options['hidden_keys'] ) : array();
-		$media_label  = isset( $options['media_label'] ) ? (string) $options['media_label'] : (string) __( '商品画像', 'affilicard' );
-		$media_aspect = isset( $options['media_aspect_ratio'] ) ? trim( (string) $options['media_aspect_ratio'] ) : '';
+		$hide             = isset( $options['hide_platforms'] ) && is_array( $options['hide_platforms'] ) ? array_map( 'strval', $options['hide_platforms'] ) : array();
+		$only             = isset( $options['only_platforms'] ) && is_array( $options['only_platforms'] ) ? array_map( 'strval', $options['only_platforms'] ) : array();
+		$fallback_image   = isset( $options['image_url'] ) ? (string) $options['image_url'] : '';
+		$visible_listings = $this->visibleListings(
+			isset( $product['listings'] ) && is_array( $product['listings'] ) ? $product['listings'] : array(),
+			$by_code,
+			$hide,
+			$only
+		);
+		$image_url        = $this->selectCardImage( $visible_listings, $by_code, $fallback_image );
+		$colors           = isset( $options['colors'] ) && is_array( $options['colors'] ) ? $options['colors'] : array();
+		$header_keys      = isset( $options['header_keys'] ) && is_array( $options['header_keys'] ) ? array_map( 'strval', $options['header_keys'] ) : array( 'author', 'publisher' );
+		$hidden_keys      = isset( $options['hidden_keys'] ) && is_array( $options['hidden_keys'] ) ? array_map( 'strval', $options['hidden_keys'] ) : array();
+		$media_label      = isset( $options['media_label'] ) ? (string) $options['media_label'] : (string) __( '商品画像', 'affilicard' );
+		$media_aspect     = isset( $options['media_aspect_ratio'] ) ? trim( (string) $options['media_aspect_ratio'] ) : '';
 		if ( '' === $media_aspect ) {
 			$media_aspect = '1 / 1';
 		}
@@ -159,14 +166,7 @@ final class CardRenderer {
 		$html .= '</div>'; // __inner
 
 		if ( $is_available ) {
-			$html .= $this->renderTimestamp(
-				$this->visibleListings(
-					isset( $product['listings'] ) && is_array( $product['listings'] ) ? $product['listings'] : array(),
-					$by_code,
-					$hide,
-					$only
-				)
-			);
+			$html .= $this->renderTimestamp( $visible_listings );
 		}
 
 		$html .= '</div>'; // __card
@@ -346,6 +346,36 @@ final class CardRenderer {
 			$out[] = $listing;
 		}
 		return $out;
+	}
+
+	/**
+	 * 表示中 listing のうち image_url 非空のものから imagePriority 順で 1 枚選ぶ。
+	 * 同値は displayOrder 昇順 → 出現順。無ければ $fallback（WP アイキャッチ）。
+	 *
+	 * @param list<array<string, mixed>>        $visibleListings visibleListings() の戻り
+	 * @param array<string, PlatformDefinition> $by_code       code => PlatformDefinition
+	 */
+	private function selectCardImage( array $visibleListings, array $by_code, string $fallback ): string {
+		$best_url      = '';
+		$best_priority = PHP_INT_MAX;
+		$best_order    = PHP_INT_MAX;
+		foreach ( $visibleListings as $listing ) {
+			$img = isset( $listing['image_url'] ) ? trim( (string) $listing['image_url'] ) : '';
+			$img = esc_url_raw( $img );
+			if ( '' === $img ) {
+				continue;
+			}
+			$code     = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
+			$def      = $by_code[ $code ] ?? null;
+			$priority = $def instanceof PlatformDefinition ? $def->imagePriority : 999;
+			$order    = $def instanceof PlatformDefinition ? $def->displayOrder : 999;
+			if ( $priority < $best_priority || ( $priority === $best_priority && $order < $best_order ) ) {
+				$best_url      = $img;
+				$best_priority = $priority;
+				$best_order    = $order;
+			}
+		}
+		return '' !== $best_url ? $best_url : $fallback;
 	}
 
 	private function renderListings( array $listings, array $by_code, array $hide, array $only, array $cta_overrides = array(), bool $is_preorder = false ): string {

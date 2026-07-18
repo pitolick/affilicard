@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Tests\Unit\Platform;
 
+use Affilicard\Platform\PlatformConfig;
 use Affilicard\Platform\PlatformDefinition;
 use InvalidArgumentException;
 use WP_Mock;
@@ -135,5 +136,32 @@ final class PlatformDefinitionTest extends TestCase {
 		$arr = $d->toArray();
 		$this->assertTrue( $arr['autoRefresh'] );
 		$this->assertSame( 'daily', $arr['refreshFrequency'] );
+	}
+
+	public function test_imagePriority_defaults_to_999_when_absent(): void {
+		$def = PlatformDefinition::fromArray( array( 'code' => 'x' ) );
+		$this->assertSame( 999, $def->imagePriority );
+	}
+
+	public function test_imagePriority_roundtrips_through_fromArray_and_toArray(): void {
+		$def = PlatformDefinition::fromArray(
+			array(
+				'code'          => 'dmm-books',
+				'imagePriority' => 10,
+			)
+		);
+		$this->assertSame( 10, $def->imagePriority );
+		$this->assertSame( 10, $def->toArray()['imagePriority'] );
+	}
+
+	public function test_defaults_set_image_priority_for_book_platforms(): void {
+		$by_code = array();
+		foreach ( PlatformConfig::defaults() as $def ) {
+			$by_code[ $def->code ] = $def->imagePriority;
+		}
+		$this->assertSame( 10, $by_code['dmm-books'] );
+		$this->assertSame( 20, $by_code['amazon-kindle'] );
+		$this->assertSame( 30, $by_code['rakuten-kobo'] );
+		$this->assertSame( 999, $by_code['bookwalker'] );
 	}
 }

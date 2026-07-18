@@ -19,6 +19,19 @@ final class CardRendererTest extends TestCase {
 		WP_Mock::passthruFunction( 'wp_kses_post' );
 		WP_Mock::userFunction( '__', array( 'return_arg' => 0 ) );
 		WP_Mock::userFunction( 'sanitize_hex_color', array( 'return_arg' => 0 ) );
+		// 実 WordPress の esc_url_raw() は javascript:/data: 等の危険スキームを排除して空文字を返す
+		// （wp_kses_bad_protocol の再帰比較が不一致になり clean_url() が '' を返す挙動を単純化した stub）。
+		// selectCardImage() の sanitize（本 PR の対象）を検証するため、passthru ではなく最小限だけ再現する。
+		WP_Mock::userFunction( 'esc_url_raw' )
+			->andReturnUsing(
+				static function ( $value ) {
+					$value = is_scalar( $value ) ? (string) $value : '';
+					if ( 1 === preg_match( '/^\s*(javascript|data|vbscript)\s*:/i', $value ) ) {
+						return '';
+					}
+					return $value;
+				}
+			);
 	}
 
 	protected function tearDown(): void {
@@ -1250,5 +1263,143 @@ final class CardRendererTest extends TestCase {
 		);
 		$this->assertStringNotContainsString( 'affilicard-card__cover', $plain );
 		$this->assertStringNotContainsString( 'ご注意', $plain );
+	}
+
+	/** @return list<PlatformDefinition> */
+	private function bookPlatforms(): array {
+		return array(
+			new PlatformDefinition( 'dmm-books', 'DMMブックス', 'manual', 1, true, array( 'ebook' ), 'DMMで読む', '#000', '#fff', imagePriority: 10 ),
+			new PlatformDefinition( 'amazon-kindle', 'Amazon', 'manual', 2, true, array( 'ebook' ), 'Kindleで読む', '#000', '#fff', imagePriority: 20 ),
+			new PlatformDefinition( 'rakuten-kobo', '楽天Kobo', 'manual', 3, true, array( 'ebook' ), 'Koboで読む', '#000', '#fff', imagePriority: 30 ),
+		);
+	}
+
+	public function test_card_image_follows_platform_priority_dmm_over_kobo(): void {
+		$product = array(
+			'title'        => 'X',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'      => 'rakuten-kobo',
+					'affiliate_url' => 'https://a/kobo',
+					'image_url'     => 'https://cdn/kobo.jpg',
+				),
+				array(
+					'platform'      => 'dmm-books',
+					'affiliate_url' => 'https://a/dmm',
+					'image_url'     => 'https://cdn/dmm.jpg',
+				),
+			),
+		);
+		$html    = ( new CardRenderer() )->render( $product, $this->bookPlatforms(), array( 'image_url' => 'https://cdn/eyecatch.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn/dmm.jpg', $html );
+		$this->assertStringNotContainsString( 'https://cdn/eyecatch.jpg', $html );
+		$this->assertStringNotContainsString( 'https://cdn/kobo.jpg', $html );
+	}
+
+	public function test_card_image_follows_only_platform_restriction(): void {
+		$product = array(
+			'title'        => 'X',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'      => 'dmm-books',
+					'affiliate_url' => 'https://a/dmm',
+					'image_url'     => 'https://cdn/dmm.jpg',
+				),
+				array(
+					'platform'      => 'rakuten-kobo',
+					'affiliate_url' => 'https://a/kobo',
+					'image_url'     => 'https://cdn/kobo.jpg',
+				),
+			),
+		);
+		// 楽天Kobo のみ表示 → DMM の方が優先度高いが表示外なので Kobo 画像を使う。
+		$html = ( new CardRenderer() )->render(
+			$product,
+			$this->bookPlatforms(),
+			array(
+				'only_platforms' => array( 'rakuten-kobo' ),
+				'image_url'      => 'https://cdn/eyecatch.jpg',
+			)
+		);
+		$this->assertStringContainsString( 'https://cdn/kobo.jpg', $html );
+		$this->assertStringNotContainsString( 'https://cdn/dmm.jpg', $html );
+	}
+
+	public function test_card_image_falls_back_to_eyecatch_when_no_listing_image(): void {
+		$product = array(
+			'title'        => 'X',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'      => 'dmm-books',
+					'affiliate_url' => 'https://a/dmm',
+				), // image_url 無し
+			),
+		);
+		$html    = ( new CardRenderer() )->render( $product, $this->bookPlatforms(), array( 'image_url' => 'https://cdn/eyecatch.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn/eyecatch.jpg', $html );
+	}
+
+	public function test_card_image_tiebreak_prefers_lower_display_order_on_equal_priority(): void {
+		$platforms = array(
+			new PlatformDefinition( 'store-a', 'A', 'manual', 2, true, array( 'ebook' ), 'Aで読む', '#000', '#fff', imagePriority: 10 ),
+			new PlatformDefinition( 'store-b', 'B', 'manual', 1, true, array( 'ebook' ), 'Bで読む', '#000', '#fff', imagePriority: 10 ),
+		);
+		$product   = array(
+			'title'        => 'X',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'      => 'store-a',
+					'affiliate_url' => 'https://a/a',
+					'image_url'     => 'https://cdn/a.jpg',
+				),
+				array(
+					'platform'      => 'store-b',
+					'affiliate_url' => 'https://a/b',
+					'image_url'     => 'https://cdn/b.jpg',
+				),
+			),
+		);
+		$html      = ( new CardRenderer() )->render( $product, $platforms, array( 'image_url' => 'https://cdn/eye.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn/b.jpg', $html );
+		$this->assertStringNotContainsString( 'https://cdn/a.jpg', $html );
+	}
+
+	public function test_card_image_skips_empty_string_image_url(): void {
+		$product = array(
+			'title'        => 'X',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'      => 'dmm-books',
+					'affiliate_url' => 'https://a/dmm',
+					'image_url'     => '',
+				),
+			),
+		);
+		$html    = ( new CardRenderer() )->render( $product, $this->bookPlatforms(), array( 'image_url' => 'https://cdn/eye.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn/eye.jpg', $html );
+	}
+
+	public function test_card_image_skips_invalid_url_and_uses_fallback(): void {
+		// esc_url_raw で空になる無効 URL（javascript: スキーム）は候補から除外され、
+		// 他に有効な listing 画像が無ければアイキャッチ fallback が使われる。
+		$product = array(
+			'title'        => 'X',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'      => 'dmm-books',
+					'affiliate_url' => 'https://a/dmm',
+					'image_url'     => 'javascript:alert(1)',
+				),
+			),
+		);
+		$html    = ( new CardRenderer() )->render( $product, $this->bookPlatforms(), array( 'image_url' => 'https://cdn/eye.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn/eye.jpg', $html );
+		$this->assertStringNotContainsString( 'javascript:alert', $html );
 	}
 }
