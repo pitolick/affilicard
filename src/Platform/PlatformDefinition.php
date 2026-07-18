@@ -26,7 +26,8 @@ final class PlatformDefinition {
 		public readonly string $brandColor,
 		public readonly string $buttonTextColor,
 		public readonly bool $autoRefresh = false,
-		public readonly string $refreshFrequency = 'weekly'
+		public readonly string $refreshFrequency = 'weekly',
+		public readonly int $imagePriority = 999
 	) {
 		if ( '' === $this->code ) {
 			throw new InvalidArgumentException( 'PlatformDefinition: code must not be empty.' );
@@ -49,6 +50,7 @@ final class PlatformDefinition {
 			'buttonTextColor'  => $this->buttonTextColor,
 			'autoRefresh'      => $this->autoRefresh,
 			'refreshFrequency' => $this->refreshFrequency,
+			'imagePriority'    => $this->imagePriority,
 		);
 	}
 
@@ -80,6 +82,8 @@ final class PlatformDefinition {
 			$frequency = 'weekly';
 		}
 
+		$image_priority = isset( $data['imagePriority'] ) ? (int) $data['imagePriority'] : 999;
+
 		return new self(
 			$code,
 			isset( $data['name'] ) ? (string) $data['name'] : $code,
@@ -91,7 +95,8 @@ final class PlatformDefinition {
 			isset( $data['brandColor'] ) && '' !== (string) $data['brandColor'] ? (string) $data['brandColor'] : '#444444',
 			isset( $data['buttonTextColor'] ) && '' !== (string) $data['buttonTextColor'] ? (string) $data['buttonTextColor'] : '#ffffff',
 			isset( $data['autoRefresh'] ) ? (bool) $data['autoRefresh'] : false,
-			$frequency
+			$frequency,
+			$image_priority
 		);
 	}
 }

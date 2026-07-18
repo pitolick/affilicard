@@ -136,4 +136,15 @@ final class PlatformDefinitionTest extends TestCase {
 		$this->assertTrue( $arr['autoRefresh'] );
 		$this->assertSame( 'daily', $arr['refreshFrequency'] );
 	}
+
+	public function test_imagePriority_defaults_to_999_when_absent(): void {
+		$def = PlatformDefinition::fromArray( array( 'code' => 'x' ) );
+		$this->assertSame( 999, $def->imagePriority );
+	}
+
+	public function test_imagePriority_roundtrips_through_fromArray_and_toArray(): void {
+		$def = PlatformDefinition::fromArray( array( 'code' => 'dmm-books', 'imagePriority' => 10 ) );
+		$this->assertSame( 10, $def->imagePriority );
+		$this->assertSame( 10, $def->toArray()['imagePriority'] );
+	}
 }
