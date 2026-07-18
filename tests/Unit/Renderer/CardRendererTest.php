@@ -1251,4 +1251,55 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringNotContainsString( 'affilicard-card__cover', $plain );
 		$this->assertStringNotContainsString( 'ご注意', $plain );
 	}
+
+	/** @return list<PlatformDefinition> */
+	private function bookPlatforms(): array {
+		return array(
+			new PlatformDefinition( 'dmm-books', 'DMMブックス', 'manual', 1, true, array( 'ebook' ), 'DMMで読む', '#000', '#fff', imagePriority: 10 ),
+			new PlatformDefinition( 'amazon-kindle', 'Amazon', 'manual', 2, true, array( 'ebook' ), 'Kindleで読む', '#000', '#fff', imagePriority: 20 ),
+			new PlatformDefinition( 'rakuten-kobo', '楽天Kobo', 'manual', 3, true, array( 'ebook' ), 'Koboで読む', '#000', '#fff', imagePriority: 30 ),
+		);
+	}
+
+	public function test_card_image_follows_platform_priority_dmm_over_kobo(): void {
+		$product = array(
+			'title'        => 'X',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array( 'platform' => 'rakuten-kobo', 'affiliate_url' => 'https://a/kobo', 'image_url' => 'https://cdn/kobo.jpg' ),
+				array( 'platform' => 'dmm-books', 'affiliate_url' => 'https://a/dmm', 'image_url' => 'https://cdn/dmm.jpg' ),
+			),
+		);
+		$html = ( new CardRenderer() )->render( $product, $this->bookPlatforms(), array( 'image_url' => 'https://cdn/eyecatch.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn/dmm.jpg', $html );
+		$this->assertStringNotContainsString( 'https://cdn/eyecatch.jpg', $html );
+		$this->assertStringNotContainsString( 'https://cdn/kobo.jpg', $html );
+	}
+
+	public function test_card_image_follows_only_platform_restriction(): void {
+		$product = array(
+			'title'        => 'X',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array( 'platform' => 'dmm-books', 'affiliate_url' => 'https://a/dmm', 'image_url' => 'https://cdn/dmm.jpg' ),
+				array( 'platform' => 'rakuten-kobo', 'affiliate_url' => 'https://a/kobo', 'image_url' => 'https://cdn/kobo.jpg' ),
+			),
+		);
+		// 楽天Kobo のみ表示 → DMM の方が優先度高いが表示外なので Kobo 画像を使う。
+		$html = ( new CardRenderer() )->render( $product, $this->bookPlatforms(), array( 'only_platforms' => array( 'rakuten-kobo' ), 'image_url' => 'https://cdn/eyecatch.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn/kobo.jpg', $html );
+		$this->assertStringNotContainsString( 'https://cdn/dmm.jpg', $html );
+	}
+
+	public function test_card_image_falls_back_to_eyecatch_when_no_listing_image(): void {
+		$product = array(
+			'title'        => 'X',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array( 'platform' => 'dmm-books', 'affiliate_url' => 'https://a/dmm' ), // image_url 無し
+			),
+		);
+		$html = ( new CardRenderer() )->render( $product, $this->bookPlatforms(), array( 'image_url' => 'https://cdn/eyecatch.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn/eyecatch.jpg', $html );
+	}
 }
