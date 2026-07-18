@@ -144,7 +144,12 @@ final class PlatformDefinitionTest extends TestCase {
 	}
 
 	public function test_imagePriority_roundtrips_through_fromArray_and_toArray(): void {
-		$def = PlatformDefinition::fromArray( array( 'code' => 'dmm-books', 'imagePriority' => 10 ) );
+		$def = PlatformDefinition::fromArray(
+			array(
+				'code'          => 'dmm-books',
+				'imagePriority' => 10,
+			)
+		);
 		$this->assertSame( 10, $def->imagePriority );
 		$this->assertSame( 10, $def->toArray()['imagePriority'] );
 	}
