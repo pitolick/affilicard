@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-07-18
+
+### Changed
+
+- 開発/ビルド依存を更新: `@wordpress/components` 35.0.1 → 36.1.0、`@wordpress/data` 10.48.1 → 10.50.0、`@wordpress/element` 8.1.0 → 8.2.0、`@wordpress/api-fetch` 7.48.1 → 7.50.0、`@wordpress/i18n` 6.22.0 → 6.23.0（Dependabot #70 / #71 / #74 / #73 / #72）。
+- CI: `actions/cache` を 5 → 6 に更新（#61）。
+
+いずれも開発/ビルド・CI 依存の更新で、配布 zip の実行時挙動に変更はありません。
+
 ## [2.1.0]
 
 ### Added
