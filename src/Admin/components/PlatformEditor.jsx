@@ -57,6 +57,14 @@ export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 					}
 				/>
 				<TextControl
+					label={__('画像優先度（小さいほど優先）', 'affilicard')}
+					type="number"
+					value={String(platform.imagePriority ?? 999)}
+					onChange={(v) =>
+						update({ imagePriority: parseInt(v, 10) || 999 })
+					}
+				/>
+				<TextControl
 					label={__('ブランド色', 'affilicard')}
 					value={platform.brandColor ?? '#444444'}
 					onChange={(v) => update({ brandColor: v })}
