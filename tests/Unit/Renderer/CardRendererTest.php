@@ -1328,4 +1328,46 @@ final class CardRendererTest extends TestCase {
 		$html    = ( new CardRenderer() )->render( $product, $this->bookPlatforms(), array( 'image_url' => 'https://cdn/eyecatch.jpg' ) );
 		$this->assertStringContainsString( 'https://cdn/eyecatch.jpg', $html );
 	}
+
+	public function test_card_image_tiebreak_prefers_lower_display_order_on_equal_priority(): void {
+		$platforms = array(
+			new PlatformDefinition( 'store-a', 'A', 'manual', 2, true, array( 'ebook' ), 'Aで読む', '#000', '#fff', imagePriority: 10 ),
+			new PlatformDefinition( 'store-b', 'B', 'manual', 1, true, array( 'ebook' ), 'Bで読む', '#000', '#fff', imagePriority: 10 ),
+		);
+		$product   = array(
+			'title'        => 'X',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'      => 'store-a',
+					'affiliate_url' => 'https://a/a',
+					'image_url'     => 'https://cdn/a.jpg',
+				),
+				array(
+					'platform'      => 'store-b',
+					'affiliate_url' => 'https://a/b',
+					'image_url'     => 'https://cdn/b.jpg',
+				),
+			),
+		);
+		$html      = ( new CardRenderer() )->render( $product, $platforms, array( 'image_url' => 'https://cdn/eye.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn/b.jpg', $html );
+		$this->assertStringNotContainsString( 'https://cdn/a.jpg', $html );
+	}
+
+	public function test_card_image_skips_empty_string_image_url(): void {
+		$product = array(
+			'title'        => 'X',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'      => 'dmm-books',
+					'affiliate_url' => 'https://a/dmm',
+					'image_url'     => '',
+				),
+			),
+		);
+		$html    = ( new CardRenderer() )->render( $product, $this->bookPlatforms(), array( 'image_url' => 'https://cdn/eye.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn/eye.jpg', $html );
+	}
 }
