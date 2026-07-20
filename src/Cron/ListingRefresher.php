@@ -140,8 +140,15 @@ class ListingRefresher {
 		$listing['list_price']       = isset( $fetched['list_price'] ) ? (string) $fetched['list_price'] : ( $listing['list_price'] ?? '' );
 		$listing['badge']            = isset( $fetched['badge'] ) ? (string) $fetched['badge'] : ( $listing['badge'] ?? '' );
 		$listing['image_url']        = isset( $fetched['image_url'] ) ? (string) $fetched['image_url'] : ( $listing['image_url'] ?? '' );
-		$listing['regular_url']      = isset( $fetched['regular_url'] ) ? (string) $fetched['regular_url'] : ( $listing['regular_url'] ?? '' );
-		$listing['affiliate_url']    = isset( $fetched['affiliate_url'] ) ? (string) $fetched['affiliate_url'] : ( $listing['affiliate_url'] ?? '' );
+
+		// regular_url / affiliate_url は isset() だけで判定すると、Provider が空文字を
+		// 返した場合に既存の保存値を空で上書きしてしまう（isset('') === true のため）。
+		// 空文字の fetch 結果では既存値を保持し、非空の場合のみ更新する。
+		$fetched_regular        = isset( $fetched['regular_url'] ) ? (string) $fetched['regular_url'] : '';
+		$listing['regular_url'] = '' !== $fetched_regular ? $fetched_regular : ( $listing['regular_url'] ?? '' );
+
+		$fetched_affiliate        = isset( $fetched['affiliate_url'] ) ? (string) $fetched['affiliate_url'] : '';
+		$listing['affiliate_url'] = '' !== $fetched_affiliate ? $fetched_affiliate : ( $listing['affiliate_url'] ?? '' );
 		return $listing;
 	}
 }

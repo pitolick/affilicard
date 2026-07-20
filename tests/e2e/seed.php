@@ -98,14 +98,13 @@ $repo->saveMeta(
 		'stock_status' => 'available',
 		'listings'     => array(
 			array(
-				'platform'         => 'dmm-books',
-				'enabled'          => true,
-				'update_mode'      => 'manual',
-				'auto_update'      => false,
-				'affiliate_url'    => 'https://example.com/aff-future',
-				'regular_url'      => '',
-				'price'            => '700',
-				'last_verified_at' => gmdate( 'c' ),
+				'platform'      => 'dmm-books',
+				'enabled'       => true,
+				'update_mode'   => 'manual',
+				'auto_update'   => false,
+				'affiliate_url' => 'https://example.com/aff-future',
+				'regular_url'   => '',
+				'price'         => '700',
 			),
 		),
 	)

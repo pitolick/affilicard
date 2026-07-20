@@ -148,6 +148,53 @@ final class ListingRefresherTest extends TestCase {
 		( new ListingRefresher( $registry, $repo ) )->refreshProduct( 10 );
 	}
 
+	public function test_fetch結果のURLが空文字なら保存済みURLを上書きしない(): void {
+		$this->stubDmmPlatform();
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 15 )->andReturn(
+			$this->product(
+				15,
+				array(
+					array(
+						'platform'        => 'dmm-books',
+						'enabled'         => true,
+						'update_mode'     => 'auto',
+						'auto_update'     => true,
+						'external_id'     => 'ext-1',
+						'price'           => '900',
+						'list_price'      => '1000',
+						'badge'           => '',
+						'image_url'       => '',
+						'regular_url'     => 'https://example.test/existing-r',
+						'affiliate_url'   => 'https://example.test/existing-a',
+						'last_fetched_at' => '',
+						'fetch_error'     => '',
+					),
+				)
+			)
+		);
+		$repo->shouldReceive( 'save' )->once()->andReturnUsing(
+			function ( array $d ) {
+				$this->assertSame( '600', $d['listings'][0]['price'] );
+				$this->assertSame( 'https://example.test/existing-r', $d['listings'][0]['regular_url'] );
+				$this->assertSame( 'https://example.test/existing-a', $d['listings'][0]['affiliate_url'] );
+				return 15;
+			}
+		);
+		$registry = $this->dmmProvider(
+			array(
+				'price'           => '600',
+				'list_price'      => '1000',
+				'badge'           => '',
+				'image_url'       => '',
+				'regular_url'     => '',
+				'affiliate_url'   => '',
+				'platform_extras' => array(),
+			)
+		);
+		( new ListingRefresher( $registry, $repo ) )->refreshProduct( 15 );
+	}
+
 	public function test_refresh_skips_manual_and_auto_update_off(): void {
 		WP_Mock::userFunction( 'get_option' )->andReturn( array() );
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
