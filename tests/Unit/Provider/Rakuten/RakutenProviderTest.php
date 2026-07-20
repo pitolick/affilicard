@@ -226,9 +226,9 @@ final class RakutenProviderTest extends TestCase {
 	}
 
 	/**
-	 * @param array<string, mixed> $item
+	 * credentials 用意（get_option 暗号化済み値 + Origin 解決に必要な home_url/wp_parse_url）。
 	 */
-	private function stubFetchResponse( array $item, ?string &$captured = null ): void {
+	private function stubRakutenCredentials(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( 'affilicard_account_rakuten_credentials', '' )
 			->andReturn( $this->encryptedCredentials() );
@@ -239,16 +239,31 @@ final class RakutenProviderTest extends TestCase {
 				return parse_url( $url );
 			}
 		);
+	}
+
+	/**
+	 * API 応答を wp_remote_get 系スタブで用意する。
+	 *
+	 * @param int                  $code     HTTP ステータス
+	 * @param array<string, mixed> $body     デコード前の JSON 相当配列
+	 */
+	private function stubRakutenResponse( int $code, array $body, ?string &$captured = null ): void {
 		WP_Mock::userFunction( 'wp_remote_get' )->once()->andReturnUsing(
-			static function ( $url ) use ( &$captured ) {
+			static function ( $url ) use ( &$captured, $code ) {
 				$captured = $url;
-				return array( 'response' => array( 'code' => 200 ) );
+				return array( 'response' => array( 'code' => $code ) );
 			}
 		);
-		WP_Mock::userFunction( 'wp_remote_retrieve_response_code' )->andReturn( 200 );
-		WP_Mock::userFunction( 'wp_remote_retrieve_body' )->andReturn(
-			json_encode( array( 'Items' => array( $item ) ) )
-		);
+		WP_Mock::userFunction( 'wp_remote_retrieve_response_code' )->andReturn( $code );
+		WP_Mock::userFunction( 'wp_remote_retrieve_body' )->andReturn( json_encode( $body ) );
+	}
+
+	/**
+	 * @param array<string, mixed> $item
+	 */
+	private function stubFetchResponse( array $item, ?string &$captured = null ): void {
+		$this->stubRakutenCredentials();
+		$this->stubRakutenResponse( 200, array( 'Items' => array( $item ) ), $captured );
 	}
 
 	public function test_fetch_uses_item_number_query_for_numeric_external_id(): void {
@@ -311,6 +326,98 @@ final class RakutenProviderTest extends TestCase {
 
 		$this->assertStringContainsString( 'keyword=sample-slug', $captured );
 		$this->assertStringNotContainsString( 'itemNumber=', $captured );
+	}
+
+	public function test_fetch_search_keyでヒットしURLハッシュ一致の1件を採用する(): void {
+		// credentials 用意（既存テストの helper に合わせる）
+		$this->stubRakutenCredentials();
+		// API 応答: 2 件中 1 件だけ external_id と rk ハッシュが一致
+		$this->stubRakutenResponse(
+			200,
+			array(
+				'Items' => array(
+					array(
+						'title'     => '別巻',
+						'itemPrice' => 500,
+						'itemUrl'   => 'https://books.rakuten.co.jp/rk/aaaaaaaa/',
+					),
+					array(
+						'title'        => '対象巻',
+						'itemPrice'    => 693,
+						'itemUrl'      => 'https://books.rakuten.co.jp/rk/deadbeef01/',
+						'affiliateUrl' => 'https://hb.afl.rakuten.co.jp/hgc/xxx/',
+					),
+				),
+			)
+		);
+
+		$provider = new RakutenProvider();
+		$result   = $provider->fetch( 'deadbeef01', array( 'search_key' => '対象巻タイトル' ) );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( '693', $result['price'] );
+		$this->assertSame( 'https://books.rakuten.co.jp/rk/deadbeef01/', $result['regular_url'] );
+	}
+
+	public function test_fetch_ハッシュ一致0件はnullで非破壊(): void {
+		$this->stubRakutenCredentials();
+		$this->stubRakutenResponse(
+			200,
+			array(
+				'Items' => array(
+					array(
+						'title'     => '別巻',
+						'itemPrice' => 500,
+						'itemUrl'   => 'https://books.rakuten.co.jp/rk/aaaaaaaa/',
+					),
+				),
+			)
+		);
+		$provider = new RakutenProvider();
+		$this->assertNull( $provider->fetch( 'deadbeef01', array( 'search_key' => 'タイトル' ) ) );
+	}
+
+	public function test_fetch_ハッシュ一致が複数はnull_誤上書き防止(): void {
+		$this->stubRakutenCredentials();
+		$this->stubRakutenResponse(
+			200,
+			array(
+				'Items' => array(
+					array(
+						'title'     => 'A',
+						'itemPrice' => 500,
+						'itemUrl'   => 'https://books.rakuten.co.jp/rk/dup/',
+					),
+					array(
+						'title'     => 'B',
+						'itemPrice' => 600,
+						'itemUrl'   => 'https://books.rakuten.co.jp/rk/dup/',
+					),
+				),
+			)
+		);
+		$provider = new RakutenProvider();
+		$this->assertNull( $provider->fetch( 'dup', array( 'search_key' => 'タイトル' ) ) );
+	}
+
+	public function test_fetch_数字externalIdはitemNumber検索で先頭ヒット採用(): void {
+		$this->stubRakutenCredentials();
+		$this->stubRakutenResponse(
+			200,
+			array(
+				'Items' => array(
+					array(
+						'title'     => '数字ID商品',
+						'itemPrice' => 1200,
+						'itemUrl'   => 'https://books.rakuten.co.jp/rk/zzzz/',
+					),
+				),
+			)
+		);
+		$provider = new RakutenProvider();
+		$result   = $provider->fetch( '123456', array() ); // search_key 無し・数字 → itemNumber
+		$this->assertIsArray( $result );
+		$this->assertSame( '1200', $result['price'] );
 	}
 
 	public function test_fetch_returns_null_when_credentials_missing(): void {
