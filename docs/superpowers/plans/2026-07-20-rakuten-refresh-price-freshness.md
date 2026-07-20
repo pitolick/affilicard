@@ -1398,7 +1398,7 @@ Expected: 全緑・PHPCS クリーン。
 
 - [ ] **Step 3: CHANGELOG＋バージョン bump（MINOR）**
 
-`CHANGELOG.md` に本機能（楽天refresh再設計・価格鮮度表示・更新頻度制御）を追記。`affilicard.php` の `Version:` ヘッダと他の version 箇所を MINOR bump（現行 v2.0.0 → **v2.1.0**）。PUC 検知のため Version ヘッダのコミット同期を厳守（`project_affilicard_puc_version_header`）。
+`CHANGELOG.md` に本機能（楽天refresh再設計・価格鮮度表示・更新頻度制御）を追記。**併せて未リリースの PR #85（Provider 候補を platform 対応に絞る・既定から BookWalker 除去）も同じ v2.2.0 エントリに記載する**（#85 はリリース延期で main に unreleased 状態のため本リリースに同梱される）。`affilicard.php` の `Version:` ヘッダ・`package.json` の version を MINOR bump（現行 **v2.1.1 → v2.2.0**）。PUC 検知のため Version ヘッダのコミット同期を厳守（`project_affilicard_puc_version_header`）。
 
 - [ ] **Step 4: コミット**
 
