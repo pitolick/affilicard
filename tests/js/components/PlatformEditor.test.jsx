@@ -63,6 +63,44 @@ describe( 'PlatformEditor', () => {
 		expect( values ).toEqual( [ 'manual' ] );
 	} );
 
+	test( '自動 provider 選択中は manual＋その provider のみ（無関係な自動 provider は除外）', () => {
+		jest.resetModules();
+		window.affilicardProviders = [
+			{
+				code: 'manual',
+				label: '手動入力',
+				isAutomatic: false,
+				accountCode: null,
+			},
+			{
+				code: 'dmm-ebook',
+				label: 'DMM API',
+				isAutomatic: true,
+				accountCode: 'dmm',
+			},
+			{
+				code: 'rakuten-kobo',
+				label: '楽天Kobo API',
+				isAutomatic: true,
+				accountCode: 'rakuten',
+			},
+		];
+		const {
+			PlatformEditor: Fresh,
+		} = require( '../../../src/Admin/components/PlatformEditor' );
+		render(
+			<Fresh
+				platform={ { ...basePlatform, provider: 'dmm-ebook' } }
+				onChange={ jest.fn() }
+			/>
+		);
+		const select = screen.getByLabelText( 'Provider' );
+		const values = Array.from(
+			select.querySelectorAll( 'option' )
+		).map( ( o ) => o.value );
+		expect( values ).toEqual( [ 'manual', 'dmm-ebook' ] );
+	} );
+
 	test( 'renders all editor controls with platform values', () => {
 		const onChange = jest.fn();
 		render(
