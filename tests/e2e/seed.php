@@ -15,7 +15,7 @@ $listing = static function ( string $aff ): array {
 			'affiliate_url'    => $aff,
 			'regular_url'      => '',
 			'price'            => '600',
-			'last_verified_at' => current_time( 'c' ),
+			'last_verified_at' => gmdate( 'c' ),
 		),
 	);
 };
@@ -41,7 +41,7 @@ $available_id = $repo->save(
 				'price'            => '600',
 				'badge'            => '40%OFF',
 				'last_fetched_at'  => '2026-04-20T10:30:00+09:00',
-				'last_verified_at' => current_time( 'c' ),
+				'last_verified_at' => gmdate( 'c' ),
 			),
 		),
 	)
@@ -105,7 +105,7 @@ $repo->saveMeta(
 				'affiliate_url'    => 'https://example.com/aff-future',
 				'regular_url'      => '',
 				'price'            => '700',
-				'last_verified_at' => current_time( 'c' ),
+				'last_verified_at' => gmdate( 'c' ),
 			),
 		),
 	)

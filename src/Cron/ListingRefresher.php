@@ -130,8 +130,12 @@ class ListingRefresher {
 			return $listing;
 		}
 
-		$listing['fetch_error']      = '';
-		$listing['last_verified_at'] = $now;
+		$listing['fetch_error'] = '';
+		// PriceFreshness::isPriceDisplayable() は time()（実 UTC epoch）と比較するため、
+		// last_verified_at も実 UTC で記録する必要がある。current_time('c') はサイトのローカル
+		// 時刻に '+00:00' を付与するだけで実 UTC ではない（wp-env 等 UTC 以外のタイムゾーンだと
+		// ずれる）ため、last_fetched_at とは別に gmdate('c') で書く。
+		$listing['last_verified_at'] = gmdate( 'c' );
 		$listing['price']            = isset( $fetched['price'] ) ? (string) $fetched['price'] : ( $listing['price'] ?? '' );
 		$listing['list_price']       = isset( $fetched['list_price'] ) ? (string) $fetched['list_price'] : ( $listing['list_price'] ?? '' );
 		$listing['badge']            = isset( $fetched['badge'] ) ? (string) $fetched['badge'] : ( $listing['badge'] ?? '' );
