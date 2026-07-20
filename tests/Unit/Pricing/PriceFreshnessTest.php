@@ -59,4 +59,13 @@ final class PriceFreshnessTest extends TestCase {
 		);
 		$this->assertFalse( PriceFreshness::isPriceDisplayable( $listing, null, $now ) );
 	}
+
+	public function test_未来のlast_verified_atは非表示(): void {
+		$now     = 1_800_000_000;
+		$listing = array(
+			'price'            => '693',
+			'last_verified_at' => gmdate( 'c', $now + 3600 ), // 1時間後（未来）
+		);
+		$this->assertFalse( PriceFreshness::isPriceDisplayable( $listing, $this->platform( 24 ), $now ) );
+	}
 }

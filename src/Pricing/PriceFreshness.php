@@ -33,6 +33,7 @@ final class PriceFreshness {
 			return false;
 		}
 		$ttl = $platform->priceTtlHours * 3600;
-		return ( $nowTs - $verifiedTs ) <= $ttl;
+		$age = $nowTs - $verifiedTs;
+		return $age >= 0 && $age <= $ttl;
 	}
 }

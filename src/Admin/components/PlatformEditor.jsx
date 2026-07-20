@@ -9,6 +9,25 @@ import { __, sprintf } from '@wordpress/i18n';
 import { triggerRefresh } from '../api/refresh';
 import { providerOptionsFor } from '../providers';
 
+const REFRESH_INTERVAL_PRESETS = [1, 3, 6, 12, 24];
+
+function refreshIntervalOptions(currentHours) {
+	const options = [
+		{ label: __('1時間毎', 'affilicard'), value: '1' },
+		{ label: __('3時間毎', 'affilicard'), value: '3' },
+		{ label: __('6時間毎', 'affilicard'), value: '6' },
+		{ label: __('12時間毎', 'affilicard'), value: '12' },
+		{ label: __('24時間毎', 'affilicard'), value: '24' },
+	];
+	if (!REFRESH_INTERVAL_PRESETS.includes(currentHours)) {
+		options.push({
+			label: `${currentHours}時間毎`,
+			value: String(currentHours),
+		});
+	}
+	return options;
+}
+
 export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 	const update = (patch) => onChange({ ...platform, ...patch });
 
@@ -101,19 +120,9 @@ export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 					<SelectControl
 						label={__('更新間隔（時間毎）', 'affilicard')}
 						value={String(platform.refreshIntervalHours ?? 3)}
-						options={[
-							{ label: __('1時間毎', 'affilicard'), value: '1' },
-							{ label: __('3時間毎', 'affilicard'), value: '3' },
-							{ label: __('6時間毎', 'affilicard'), value: '6' },
-							{
-								label: __('12時間毎', 'affilicard'),
-								value: '12',
-							},
-							{
-								label: __('24時間毎', 'affilicard'),
-								value: '24',
-							},
-						]}
+						options={refreshIntervalOptions(
+							platform.refreshIntervalHours ?? 3
+						)}
 						onChange={(v) =>
 							update({
 								refreshIntervalHours: parseInt(v, 10) || 24,

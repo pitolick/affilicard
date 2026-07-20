@@ -167,6 +167,22 @@ describe( 'PlatformEditor', () => {
 		unmount();
 	} );
 
+	test( '更新間隔（時間毎）が既定候補にない値（旧 weekly 移行の168等）でも選択肢に追加されて表示される', () => {
+		const onChange = jest.fn();
+		render(
+			<PlatformEditor
+				platform={ { ...basePlatform, autoRefresh: true, refreshIntervalHours: 168 } }
+				onChange={ onChange }
+			/>
+		);
+		const select = screen.getByLabelText( '更新間隔（時間毎）' );
+		expect( select ).toHaveValue( '168' );
+		const values = Array.from( select.querySelectorAll( 'option' ) ).map(
+			( o ) => o.value
+		);
+		expect( values ).toEqual( [ '1', '3', '6', '12', '24', '168' ] );
+	} );
+
 	test( '更新間隔（時間毎）変更で refreshIntervalHours を数値化して onChange する', () => {
 		const onChange = jest.fn();
 		render(

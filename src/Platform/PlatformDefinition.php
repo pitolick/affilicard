@@ -24,7 +24,7 @@ final class PlatformDefinition {
 		public readonly string $brandColor,
 		public readonly string $buttonTextColor,
 		public readonly bool $autoRefresh = false,
-		public readonly int $refreshIntervalHours = 24,
+		public readonly int $refreshIntervalHours = 3,
 		public readonly int $imagePriority = 999,
 		public readonly string $eligibleProvider = '',
 		public readonly int $priceTtlHours = 24
@@ -80,14 +80,14 @@ final class PlatformDefinition {
 		}
 
 		// 更新間隔（時間）。旧 refreshFrequency（daily/weekly）からの移行を含む。
-		$interval = 24;
+		$interval = 3;
 		if ( isset( $data['refreshIntervalHours'] ) ) {
 			$interval = (int) $data['refreshIntervalHours'];
 		} elseif ( isset( $data['refreshFrequency'] ) ) {
 			$interval = ( 'weekly' === (string) $data['refreshFrequency'] ) ? 168 : 24;
 		}
 		if ( $interval < 1 ) {
-			$interval = 24;
+			$interval = 3;
 		}
 
 		$price_ttl = isset( $data['priceTtlHours'] ) ? (int) $data['priceTtlHours'] : 24;

@@ -97,10 +97,10 @@ final class PlatformDefinitionTest extends TestCase {
 		);
 	}
 
-	public function test_from_array_defaults_auto_refresh_off_and_interval_24h(): void {
+	public function test_from_array_defaults_auto_refresh_off_and_interval_3h(): void {
 		$d = PlatformDefinition::fromArray( array( 'code' => 'x' ) );
 		$this->assertFalse( $d->autoRefresh );
-		$this->assertSame( 24, $d->refreshIntervalHours );
+		$this->assertSame( 3, $d->refreshIntervalHours );
 	}
 
 	public function test_from_array_reads_auto_refresh_and_migrates_frequency(): void {
@@ -172,14 +172,14 @@ final class PlatformDefinitionTest extends TestCase {
 		$this->assertSame( 168, $weekly->refreshIntervalHours );
 	}
 
-	public function test_refreshIntervalHours_1未満は既定24に矯正(): void {
+	public function test_refreshIntervalHours_1未満は既定3に矯正(): void {
 		$def = PlatformDefinition::fromArray(
 			array(
 				'code'                 => 'x',
 				'refreshIntervalHours' => 0,
 			)
 		);
-		$this->assertSame( 24, $def->refreshIntervalHours );
+		$this->assertSame( 3, $def->refreshIntervalHours );
 	}
 
 	public function test_toArrayはrefreshFrequencyを出力しない(): void {

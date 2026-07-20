@@ -87,7 +87,9 @@ describe( 'PlatformEditor', () => {
 		expect(
 			screen.getByText( '今すぐこのプラットフォームを更新' )
 		).toBeInTheDocument();
-		expect( screen.getByText( '更新間隔（時間毎）' ) ).toBeInTheDocument();
+		expect(
+			screen.getByLabelText( '更新間隔（時間毎）' )
+		).toHaveValue( '3' );
 	} );
 
 	test( 'autoRefresh OFF で頻度 select は非表示', () => {
@@ -99,7 +101,7 @@ describe( 'PlatformEditor', () => {
 		};
 		render( <PlatformEditor platform={ platform } onChange={ () => {} } /> );
 		expect(
-			screen.queryByText( '更新間隔（時間毎）' )
+			screen.queryByLabelText( '更新間隔（時間毎）' )
 		).not.toBeInTheDocument();
 	} );
 } );
