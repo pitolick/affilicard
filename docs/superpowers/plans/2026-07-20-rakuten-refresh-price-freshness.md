@@ -1404,12 +1404,12 @@ Expected: 全緑・PHPCS クリーン。
 
 ```bash
 git add CHANGELOG.md affilicard.php package.json
-git commit -m "chore: v2.1.0（楽天refresh再設計＋価格鮮度表示＋更新頻度制御）"
+git commit -m "chore: v2.2.0（楽天refresh再設計＋価格鮮度表示＋更新頻度制御）"
 ```
 
 - [ ] **Step 5: CodeRabbit → PR（auto-merge しない）**
 
-Run: `coderabbit review --plain`（上限時は数分待つ）→ 指摘対応 → push → PR 作成。**Playground プレビューでユーザーが確認 → マージ**。マージ後にタグ `v2.1.0` ＋ GitHub Release。
+Run: `coderabbit review --plain`（上限時は数分待つ）→ 指摘対応 → push → PR 作成。**Playground プレビューでユーザーが確認 → マージ**。マージ後にタグ `v2.2.0` ＋ GitHub Release。
 
 ---
 

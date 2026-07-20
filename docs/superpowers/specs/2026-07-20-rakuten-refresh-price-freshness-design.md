@@ -140,14 +140,14 @@ listing に新フィールド `last_verified_at`（ISO8601）を追加。**`fetc
 
 ### 4-2. 価格表示ゲート
 
-`CardRenderer::renderListings()`（[CardRenderer.php:419-438]）は listing ごとに **CTA ボタン（URL 由来）と価格スパンを別々に**組み立てる。ここに `isPriceDisplayable(array $listing, PlatformDefinition $platform): bool` を導入し、**価格/取消線/バッジのスパンは displayable の時だけ出す**:
+`CardRenderer::renderListings()`（[CardRenderer.php:419-438]）は listing ごとに **CTA ボタン（URL 由来）と価格スパンを別々に**組み立てる。ここに `isPriceDisplayable(array $listing, ?PlatformDefinition $platform, int $nowTs): bool` を導入し、**価格/取消線/バッジのスパンは displayable の時だけ出す**（TTL は秒単位で比較する）:
 
 ```
 isPriceDisplayable =
-    price が非空
-    かつ platform の provider が自動（= 手動入力価格は表示しない）
-    かつ last_verified_at が非空
-    かつ (now - last_verified_at) <= priceTtlHours
+    platform が非null
+    かつ price が非空
+    かつ last_verified_at が非空・パース可能
+    かつ 0 <= (nowTs - last_verified_at) <= priceTtlHours * 3600
 ```
 
 - displayable でない → 価格スパンを出さず **CTA ボタンのみ**（VOD 等で既に使われている描画状態）。
