@@ -81,13 +81,13 @@ describe( 'PlatformEditor', () => {
 			name: 'DMM',
 			provider: 'dmm-ebook',
 			autoRefresh: true,
-			refreshFrequency: 'weekly',
+			refreshIntervalHours: 3,
 		};
 		render( <PlatformEditor platform={ platform } onChange={ () => {} } /> );
 		expect(
 			screen.getByText( '今すぐこのプラットフォームを更新' )
 		).toBeInTheDocument();
-		expect( screen.getByText( '更新頻度' ) ).toBeInTheDocument();
+		expect( screen.getByText( '更新間隔（時間毎）' ) ).toBeInTheDocument();
 	} );
 
 	test( 'autoRefresh OFF で頻度 select は非表示', () => {
@@ -98,7 +98,9 @@ describe( 'PlatformEditor', () => {
 			autoRefresh: false,
 		};
 		render( <PlatformEditor platform={ platform } onChange={ () => {} } /> );
-		expect( screen.queryByText( '更新頻度' ) ).not.toBeInTheDocument();
+		expect(
+			screen.queryByText( '更新間隔（時間毎）' )
+		).not.toBeInTheDocument();
 	} );
 } );
 

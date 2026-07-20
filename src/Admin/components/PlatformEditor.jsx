@@ -86,7 +86,10 @@ export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 				<SelectControl
 					label={__('Provider', 'affilicard')}
 					value={platform.provider ?? 'manual'}
-					options={providerOptionsFor(platform.provider ?? 'manual')}
+					options={providerOptionsFor(
+						platform.provider ?? 'manual',
+						platform.eligibleProvider ?? ''
+					)}
 					onChange={(v) => update({ provider: v })}
 				/>
 				<ToggleControl
@@ -96,16 +99,30 @@ export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 				/>
 				{platform.autoRefresh && (
 					<SelectControl
-						label={__('更新頻度', 'affilicard')}
-						value={platform.refreshFrequency ?? 'weekly'}
+						label={__('更新間隔（時間毎）', 'affilicard')}
+						value={String(platform.refreshIntervalHours ?? 3)}
 						options={[
-							{ label: __('毎日', 'affilicard'), value: 'daily' },
+							{ label: __('1時間毎', 'affilicard'), value: '1' },
+							{ label: __('3時間毎', 'affilicard'), value: '3' },
+							{ label: __('6時間毎', 'affilicard'), value: '6' },
 							{
-								label: __('毎週', 'affilicard'),
-								value: 'weekly',
+								label: __('12時間毎', 'affilicard'),
+								value: '12',
+							},
+							{
+								label: __('24時間毎', 'affilicard'),
+								value: '24',
 							},
 						]}
-						onChange={(v) => update({ refreshFrequency: v })}
+						onChange={(v) =>
+							update({
+								refreshIntervalHours: parseInt(v, 10) || 24,
+							})
+						}
+						help={__(
+							'価格は取得から24時間で自動的に非表示になります（24時間より短い間隔を推奨）。',
+							'affilicard'
+						)}
 					/>
 				)}
 				<Button

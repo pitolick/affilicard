@@ -101,6 +101,101 @@ describe( 'PlatformEditor', () => {
 		expect( values ).toEqual( [ 'manual', 'dmm-ebook' ] );
 	} );
 
+	test( 'eligibleProvider により provider=manual でも対応する自動 provider が候補に出る', () => {
+		jest.resetModules();
+		window.affilicardProviders = [
+			{
+				code: 'manual',
+				label: '手動入力',
+				isAutomatic: false,
+				accountCode: null,
+			},
+			{
+				code: 'dmm-ebook',
+				label: 'DMM API',
+				isAutomatic: true,
+				accountCode: 'dmm',
+			},
+			{
+				code: 'rakuten-kobo',
+				label: '楽天Kobo API',
+				isAutomatic: true,
+				accountCode: 'rakuten',
+			},
+		];
+		const {
+			PlatformEditor: Fresh,
+		} = require( '../../../src/Admin/components/PlatformEditor' );
+		render(
+			<Fresh
+				platform={ {
+					...basePlatform,
+					provider: 'manual',
+					eligibleProvider: 'rakuten-kobo',
+				} }
+				onChange={ jest.fn() }
+			/>
+		);
+		const select = screen.getByLabelText( 'Provider' );
+		const values = Array.from(
+			select.querySelectorAll( 'option' )
+		).map( ( o ) => o.value );
+		// manual＋eligibleProvider のみ。無関係な dmm-ebook は含まれない。
+		expect( values ).toEqual( [ 'manual', 'rakuten-kobo' ] );
+	} );
+
+	test( '更新間隔（時間毎）入力は refreshIntervalHours の値を表示する（既定 3）', () => {
+		const onChange = jest.fn();
+		render(
+			<PlatformEditor
+				platform={ { ...basePlatform, autoRefresh: true, refreshIntervalHours: 6 } }
+				onChange={ onChange }
+			/>
+		);
+		expect(
+			screen.getByLabelText( '更新間隔（時間毎）' )
+		).toHaveValue( '6' );
+
+		const { unmount } = render(
+			<PlatformEditor
+				platform={ { ...basePlatform, autoRefresh: true } }
+				onChange={ onChange }
+			/>
+		);
+		const selects = screen.getAllByLabelText( '更新間隔（時間毎）' );
+		expect( selects[ selects.length - 1 ] ).toHaveValue( '3' );
+		unmount();
+	} );
+
+	test( '更新間隔（時間毎）変更で refreshIntervalHours を数値化して onChange する', () => {
+		const onChange = jest.fn();
+		render(
+			<PlatformEditor
+				platform={ { ...basePlatform, autoRefresh: true, refreshIntervalHours: 3 } }
+				onChange={ onChange }
+			/>
+		);
+		fireEvent.change( screen.getByLabelText( '更新間隔（時間毎）' ), {
+			target: { value: '12' },
+		} );
+		expect( onChange ).toHaveBeenCalledWith(
+			expect.objectContaining( { refreshIntervalHours: 12 } )
+		);
+	} );
+
+	test( '更新間隔（時間毎）に価格自動非表示の help を表示する', () => {
+		const onChange = jest.fn();
+		render(
+			<PlatformEditor
+				platform={ { ...basePlatform, autoRefresh: true } }
+				onChange={ onChange }
+			/>
+		);
+		expect(
+			screen.getByText( /24時間で自動的に非表示になります/ )
+		).toBeInTheDocument();
+	} );
+
 	test( 'renders all editor controls with platform values', () => {
 		const onChange = jest.fn();
 		render(
