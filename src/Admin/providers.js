@@ -10,5 +10,13 @@ export const PROVIDER_OPTIONS = injected.map((p) => ({
 	value: p.code,
 }));
 
+// platform の Provider 選択肢を絞る。手動系（非自動）は常に候補に含めつつ、
+// 自動 provider は「その platform が現在選択中のもの」だけを残す。これで platform に
+// 無関係な自動 provider（例: Amazon Kindle に DMM）を誤って割り当てられなくなる。
+export const providerOptionsFor = (currentProvider) =>
+	injected
+		.filter((p) => !p.isAutomatic || p.code === currentProvider)
+		.map((p) => ({ label: p.label, value: p.code }));
+
 export const providerAccount = (code) =>
 	injected.find((p) => p.code === code)?.accountCode ?? null;
