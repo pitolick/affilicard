@@ -10,11 +10,12 @@ $repo = new \Affilicard\Repository\ProductRepository();
 $listing = static function ( string $aff ): array {
 	return array(
 		array(
-			'platform'      => 'dmm-books',
-			'enabled'       => true,
-			'affiliate_url' => $aff,
-			'regular_url'   => '',
-			'price'         => '600',
+			'platform'         => 'dmm-books',
+			'enabled'          => true,
+			'affiliate_url'    => $aff,
+			'regular_url'      => '',
+			'price'            => '600',
+			'last_verified_at' => current_time( 'c' ),
 		),
 	);
 };
@@ -33,13 +34,14 @@ $available_id = $repo->save(
 		),
 		'listings'     => array(
 			array(
-				'platform'        => 'dmm-books',
-				'enabled'         => true,
-				'affiliate_url'   => 'https://example.com/aff-a',
-				'regular_url'     => '',
-				'price'           => '600',
-				'badge'           => '40%OFF',
-				'last_fetched_at' => '2026-04-20T10:30:00+09:00',
+				'platform'         => 'dmm-books',
+				'enabled'          => true,
+				'affiliate_url'    => 'https://example.com/aff-a',
+				'regular_url'      => '',
+				'price'            => '600',
+				'badge'            => '40%OFF',
+				'last_fetched_at'  => '2026-04-20T10:30:00+09:00',
+				'last_verified_at' => current_time( 'c' ),
 			),
 		),
 	)
@@ -96,13 +98,14 @@ $repo->saveMeta(
 		'stock_status' => 'available',
 		'listings'     => array(
 			array(
-				'platform'      => 'dmm-books',
-				'enabled'       => true,
-				'update_mode'   => 'manual',
-				'auto_update'   => false,
-				'affiliate_url' => 'https://example.com/aff-future',
-				'regular_url'   => '',
-				'price'         => '700',
+				'platform'         => 'dmm-books',
+				'enabled'          => true,
+				'update_mode'      => 'manual',
+				'auto_update'      => false,
+				'affiliate_url'    => 'https://example.com/aff-future',
+				'regular_url'      => '',
+				'price'            => '700',
+				'last_verified_at' => current_time( 'c' ),
 			),
 		),
 	)
