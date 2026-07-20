@@ -65,7 +65,7 @@ class ListingRefresher {
 			if ( null !== $onlyPlatform && ( $listing['platform'] ?? '' ) !== $onlyPlatform ) {
 				continue;
 			}
-			$listings[ $index ] = $this->refreshListing( $listing );
+			$listings[ $index ] = $this->refreshListing( $listing, (string) $product['title'] );
 			$changed            = true;
 		}
 
@@ -102,7 +102,7 @@ class ListingRefresher {
 	 * @param array<string, mixed> $listing
 	 * @return array<string, mixed>
 	 */
-	private function refreshListing( array $listing ): array {
+	private function refreshListing( array $listing, string $productTitle ): array {
 		$platformCode = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
 		$externalId   = isset( $listing['external_id'] ) ? (string) $listing['external_id'] : '';
 		$now          = (string) current_time( 'c' );
@@ -116,19 +116,39 @@ class ListingRefresher {
 			return $listing;
 		}
 
-		$fetched = $provider->fetch( $externalId, array() );
+		$context = array(
+			'search_key'  => isset( $listing['search_key'] ) && '' !== trim( (string) $listing['search_key'] )
+				? (string) $listing['search_key']
+				: $productTitle,
+			'regular_url' => isset( $listing['regular_url'] ) ? (string) $listing['regular_url'] : '',
+			'external_id' => $externalId,
+		);
+
+		$fetched = $provider->fetch( $externalId, $context );
 		if ( null === $fetched ) {
 			$listing['fetch_error'] = (string) __( '価格情報の取得に失敗しました', 'affilicard' );
 			return $listing;
 		}
 
-		$listing['fetch_error']   = '';
-		$listing['price']         = isset( $fetched['price'] ) ? (string) $fetched['price'] : ( $listing['price'] ?? '' );
-		$listing['list_price']    = isset( $fetched['list_price'] ) ? (string) $fetched['list_price'] : ( $listing['list_price'] ?? '' );
-		$listing['badge']         = isset( $fetched['badge'] ) ? (string) $fetched['badge'] : ( $listing['badge'] ?? '' );
-		$listing['image_url']     = isset( $fetched['image_url'] ) ? (string) $fetched['image_url'] : ( $listing['image_url'] ?? '' );
-		$listing['regular_url']   = isset( $fetched['regular_url'] ) ? (string) $fetched['regular_url'] : ( $listing['regular_url'] ?? '' );
-		$listing['affiliate_url'] = isset( $fetched['affiliate_url'] ) ? (string) $fetched['affiliate_url'] : ( $listing['affiliate_url'] ?? '' );
+		$listing['fetch_error'] = '';
+		// PriceFreshness::isPriceDisplayable() は time()（実 UTC epoch）と比較するため、
+		// last_verified_at も実 UTC で記録する必要がある。current_time('c') はサイトのローカル
+		// 時刻に '+00:00' を付与するだけで実 UTC ではない（wp-env 等 UTC 以外のタイムゾーンだと
+		// ずれる）ため、last_fetched_at とは別に gmdate('c') で書く。
+		$listing['last_verified_at'] = gmdate( 'c' );
+		$listing['price']            = isset( $fetched['price'] ) ? (string) $fetched['price'] : ( $listing['price'] ?? '' );
+		$listing['list_price']       = isset( $fetched['list_price'] ) ? (string) $fetched['list_price'] : ( $listing['list_price'] ?? '' );
+		$listing['badge']            = isset( $fetched['badge'] ) ? (string) $fetched['badge'] : ( $listing['badge'] ?? '' );
+		$listing['image_url']        = isset( $fetched['image_url'] ) ? (string) $fetched['image_url'] : ( $listing['image_url'] ?? '' );
+
+		// regular_url / affiliate_url は isset() だけで判定すると、Provider が空文字を
+		// 返した場合に既存の保存値を空で上書きしてしまう（isset('') === true のため）。
+		// 空文字の fetch 結果では既存値を保持し、非空の場合のみ更新する。
+		$fetched_regular        = isset( $fetched['regular_url'] ) ? (string) $fetched['regular_url'] : '';
+		$listing['regular_url'] = '' !== $fetched_regular ? $fetched_regular : ( $listing['regular_url'] ?? '' );
+
+		$fetched_affiliate        = isset( $fetched['affiliate_url'] ) ? (string) $fetched['affiliate_url'] : '';
+		$listing['affiliate_url'] = '' !== $fetched_affiliate ? $fetched_affiliate : ( $listing['affiliate_url'] ?? '' );
 		return $listing;
 	}
 }

@@ -32,6 +32,11 @@ final class RakutenProvider implements ProviderInterface {
 	}
 
 	/**
+	 * 楽天Kobo 検索 API は商品 ID 直引きができないため、keyword（search_key もしくは
+	 * legacy な external_id）で検索し、各ヒットの itemUrl に含まれる `rk/<hash>` を
+	 * external_id と突き合わせて厳密同定する。ハッシュ一致が 0 件・複数件の場合は
+	 * 誤上書きを避けるため null を返す（非破壊）。
+	 *
 	 * @param array<string, mixed> $platformConfig
 	 * @return array<string, mixed>|null
 	 */
@@ -40,7 +45,11 @@ final class RakutenProvider implements ProviderInterface {
 		if ( ! self::hasRequiredCredentials( $credentials ) ) {
 			return null;
 		}
-		if ( '' === $externalId ) {
+
+		$search_key = isset( $platformConfig['search_key'] ) ? trim( (string) $platformConfig['search_key'] ) : '';
+		$is_numeric = ( '' === $search_key ) && 1 === preg_match( '/^\d+$/', $externalId );
+
+		if ( '' === $search_key && '' === $externalId ) {
 			return null;
 		}
 
@@ -49,11 +58,14 @@ final class RakutenProvider implements ProviderInterface {
 			'affiliateId'   => $credentials['affiliate_id'],
 			'format'        => 'json',
 			'formatVersion' => '2',
-			'hits'          => '1',
+			'hits'          => '30',
 		);
-		if ( 1 === preg_match( '/^\d+$/', $externalId ) ) {
+		if ( '' !== $search_key ) {
+			$query['keyword'] = $search_key;
+		} elseif ( $is_numeric ) {
 			$query['itemNumber'] = $externalId;
 		} else {
+			// legacy: search_key 無し＋非数字 external_id（URLハッシュ）。keyword に載せても一致し得ないが後方互換で叩く。
 			$query['keyword'] = $externalId;
 		}
 
@@ -61,14 +73,48 @@ final class RakutenProvider implements ProviderInterface {
 		if ( $res['error'] || 200 !== $res['code'] || null === $res['decoded'] || isset( $res['decoded']['errors'] ) ) {
 			return null;
 		}
-		$decoded = $res['decoded'];
-
-		$item = self::firstItem( $decoded );
-		if ( null === $item ) {
+		$items = ( isset( $res['decoded']['Items'] ) && is_array( $res['decoded']['Items'] ) ) ? $res['decoded']['Items'] : array();
+		if ( array() === $items ) {
 			return null;
 		}
 
-		return self::normalizeItem( $item );
+		// URLハッシュ一致で厳密同定（誤上書き防止）。
+		if ( '' !== $externalId ) {
+			$matches = array();
+			foreach ( $items as $item ) {
+				if ( ! is_array( $item ) ) {
+					continue;
+				}
+				$url = isset( $item['itemUrl'] ) ? (string) $item['itemUrl'] : '';
+				if ( self::extractRkHash( $url ) === $externalId ) {
+					$matches[] = $item;
+				}
+			}
+			if ( 1 === count( $matches ) ) {
+				return self::normalizeItem( $matches[0] );
+			}
+			if ( count( $matches ) > 1 ) {
+				return null; // 曖昧 → 非破壊
+			}
+		}
+
+		// ハッシュ一致なし: 数字 external_id（itemNumber 検索）は先頭ヒットを採用。それ以外は非破壊 null。
+		if ( $is_numeric ) {
+			$first = self::firstItem( $res['decoded'] );
+			return null === $first ? null : self::normalizeItem( $first );
+		}
+		return null;
+	}
+
+	/**
+	 * itemUrl に含まれる `rk/<hash>` を抽出する。無ければ空文字。
+	 */
+	private static function extractRkHash( string $itemUrl ): string {
+		// delimiter に # を使うため、文字クラス内の # はエスケープする（さもなくば delimiter と衝突し preg_match が Unknown modifier エラーになる）。
+		if ( 1 === preg_match( '#/rk/([^/?\#]+)#', $itemUrl, $m ) ) {
+			return $m[1];
+		}
+		return '';
 	}
 
 	/**

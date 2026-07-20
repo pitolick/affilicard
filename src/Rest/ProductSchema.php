@@ -222,6 +222,8 @@ final class ProductSchema {
 				'image_url'             => isset( $entry['image_url'] ) ? (string) esc_url_raw( (string) $entry['image_url'] ) : '',
 				'button_label_override' => isset( $entry['button_label_override'] ) ? (string) sanitize_text_field( (string) $entry['button_label_override'] ) : '',
 				'last_fetched_at'       => isset( $entry['last_fetched_at'] ) ? (string) sanitize_text_field( (string) $entry['last_fetched_at'] ) : '',
+				'last_verified_at'      => isset( $entry['last_verified_at'] ) ? (string) sanitize_text_field( (string) $entry['last_verified_at'] ) : '',
+				'search_key'            => isset( $entry['search_key'] ) ? (string) sanitize_text_field( (string) $entry['search_key'] ) : '',
 				'fetch_error'           => isset( $entry['fetch_error'] ) ? (string) sanitize_text_field( (string) $entry['fetch_error'] ) : '',
 				'platform_extras'       => $platform_extras,
 			);

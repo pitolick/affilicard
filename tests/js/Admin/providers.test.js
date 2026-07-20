@@ -86,5 +86,22 @@ describe( 'providers（window.affilicardProviders からの導出）', () => {
 				{ label: '手動入力', value: 'manual' },
 			] );
 		} );
+
+		it( 'eligibleProvider を候補に含める（現在 manual でも切替可能に）', () => {
+			const { providerOptionsFor } = load();
+			const opts = providerOptionsFor( 'manual', 'rakuten-kobo' ).map(
+				( o ) => o.value
+			);
+			expect( opts ).toContain( 'manual' );
+			expect( opts ).toContain( 'rakuten-kobo' );
+			expect( opts ).not.toContain( 'dmm-ebook' );
+		} );
+
+		it( 'eligibleProvider 無指定なら従来通り manual＋現在値のみ', () => {
+			const { providerOptionsFor } = load();
+			expect( providerOptionsFor( 'manual' ) ).toEqual( [
+				{ label: '手動入力', value: 'manual' },
+			] );
+		} );
 	} );
 } );

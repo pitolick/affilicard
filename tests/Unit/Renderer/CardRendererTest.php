@@ -19,6 +19,14 @@ final class CardRendererTest extends TestCase {
 		WP_Mock::passthruFunction( 'wp_kses_post' );
 		WP_Mock::userFunction( '__', array( 'return_arg' => 0 ) );
 		WP_Mock::userFunction( 'sanitize_hex_color', array( 'return_arg' => 0 ) );
+		// renderTimestamp() の日付整形用。UTC 固定（gmdate と同じ基準）で PHP 実行環境の
+		// デフォルトタイムゾーン設定に依存しないようにする。
+		WP_Mock::userFunction( 'wp_date' )
+			->andReturnUsing(
+				static function ( $format, $timestamp = null ) {
+					return gmdate( (string) $format, null !== $timestamp ? (int) $timestamp : time() );
+				}
+			);
 		// 実 WordPress の esc_url_raw() は javascript:/data: 等の危険スキームを排除して空文字を返す
 		// （wp_kses_bad_protocol の再帰比較が不一致になり clean_url() が '' を返す挙動を単純化した stub）。
 		// selectCardImage() の sanitize（本 PR の対象）を検証するため、passthru ではなく最小限だけ再現する。
@@ -38,21 +46,28 @@ final class CardRendererTest extends TestCase {
 		WP_Mock::tearDown();
 	}
 
-	private function store(): PlatformDefinition {
+	/**
+	 * @param int $priceTtlHours PriceFreshness の TTL。renderTimestamp の「最新選択/フィルタ」系
+	 *                           テストでは固定日付を使い続けたいので、実質無期限の大きな値を渡せるようにする
+	 *                           （既定 24 は本番既定と一致。呼び出し側を壊さないためデフォルト引数で維持）。
+	 */
+	private function store( int $priceTtlHours = 24 ): PlatformDefinition {
 		// 汎用型(generic)の基準 platform。ebook 固有要素は別タスクで追加する。
-		return new PlatformDefinition( 'example-store', 'サンプルストア', 'manual', 1, true, array( 'generic' ), 'ストアで見る', '#2563eb', '#ffffff' );
+		return new PlatformDefinition( 'example-store', 'サンプルストア', 'manual', 1, true, array( 'generic' ), 'ストアで見る', '#2563eb', '#ffffff', priceTtlHours: $priceTtlHours );
 	}
 
 	/**
 	 * price/list_price/badge を持つ 1 listing の商品を組み立てる（URL 必須＝価格行が描画される）。
+	 * last_verified_at は「1時間前」固定＝ store() 既定 TTL(24h) 内で常に displayable。
 	 */
 	private function pricedProduct( string $price, string $listPrice, string $badge = '' ): array {
 		$listing = array(
-			'platform'      => 'example-store',
-			'enabled'       => true,
-			'affiliate_url' => 'https://x',
-			'price'         => $price,
-			'list_price'    => $listPrice,
+			'platform'         => 'example-store',
+			'enabled'          => true,
+			'affiliate_url'    => 'https://x',
+			'price'            => $price,
+			'list_price'       => $listPrice,
+			'last_verified_at' => gmdate( 'c', time() - 3600 ),
 		);
 		if ( '' !== $badge ) {
 			$listing['badge'] = $badge;
@@ -285,10 +300,11 @@ final class CardRendererTest extends TestCase {
 			array(
 				'listings' => array(
 					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://x',
-						'price'         => '¥1,200',
+						'platform'         => 'example-store',
+						'enabled'          => true,
+						'affiliate_url'    => 'https://x',
+						'price'            => '¥1,200',
+						'last_verified_at' => gmdate( 'c', time() - 3600 ),
 					),
 				),
 			)
@@ -648,8 +664,8 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( 'サンプルブランド', $html );
 	}
 
-	private function dmmBooks(): PlatformDefinition {
-		return new PlatformDefinition( 'dmm-books', 'DMMブックス', 'dmm-ebook', 1, true, array( 'ebook' ), 'DMMブックスで読む', '#d72d65', '#ffffff' );
+	private function dmmBooks( int $priceTtlHours = 24 ): PlatformDefinition {
+		return new PlatformDefinition( 'dmm-books', 'DMMブックス', 'dmm-ebook', 1, true, array( 'ebook' ), 'DMMブックスで読む', '#d72d65', '#ffffff', priceTtlHours: $priceTtlHours );
 	}
 
 	private function makePlatform( string $code, string $name, string $buttonLabel ): PlatformDefinition {
@@ -761,10 +777,11 @@ final class CardRendererTest extends TestCase {
 			array(
 				'listings' => array(
 					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://x',
-						'price'         => '600',
+						'platform'         => 'example-store',
+						'enabled'          => true,
+						'affiliate_url'    => 'https://x',
+						'price'            => '600',
+						'last_verified_at' => gmdate( 'c', time() - 3600 ),
 					),
 				),
 			)
@@ -783,10 +800,11 @@ final class CardRendererTest extends TestCase {
 			array(
 				'listings' => array(
 					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://x',
-						'price'         => '¥1,200',
+						'platform'         => 'example-store',
+						'enabled'          => true,
+						'affiliate_url'    => 'https://x',
+						'price'            => '¥1,200',
+						'last_verified_at' => gmdate( 'c', time() - 3600 ),
 					),
 				),
 			)
@@ -801,11 +819,12 @@ final class CardRendererTest extends TestCase {
 			array(
 				'listings' => array(
 					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://x',
-						'price'         => '600',
-						'badge'         => '40%OFF',
+						'platform'         => 'example-store',
+						'enabled'          => true,
+						'affiliate_url'    => 'https://x',
+						'price'            => '600',
+						'badge'            => '40%OFF',
+						'last_verified_at' => gmdate( 'c', time() - 3600 ),
 					),
 				),
 			)
@@ -833,51 +852,53 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( 'affilicard-card__cta', $html );
 	}
 
-	public function test_renders_price_timestamp_footer_from_last_fetched_at(): void {
+	public function test_renders_price_timestamp_footer_from_last_verified_at(): void {
 		$product = $this->product(
 			array(
 				'listings' => array(
 					array(
-						'platform'        => 'example-store',
-						'enabled'         => true,
-						'affiliate_url'   => 'https://x',
-						'price'           => '600',
-						'last_fetched_at' => '2026-04-20T10:30:00+09:00',
+						'platform'         => 'example-store',
+						'enabled'          => true,
+						'affiliate_url'    => 'https://x',
+						'price'            => '600',
+						'last_verified_at' => '2026-04-20T10:30:00+09:00',
 					),
 				),
 			)
 		);
-		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		// long-TTL の store() を使い、実行日に依存せず固定日付のまま displayable にする
+		// （フッターの「最新日付選択」ロジック自体は Task 10 の鮮度ゲートとは別に検証したい）。
+		$html = ( new CardRenderer() )->render( $product, array( $this->store( 87600 ) ) );
 		$this->assertStringContainsString( 'affilicard-card__timestamp', $html );
 		$this->assertStringContainsString( '2026年4月20日時点の価格', $html );
 	}
 
-	public function test_uses_latest_last_fetched_at_across_listings(): void {
+	public function test_uses_latest_last_verified_at_across_listings(): void {
 		$product = $this->product(
 			array(
 				'listings' => array(
 					array(
-						'platform'        => 'example-store',
-						'enabled'         => true,
-						'affiliate_url'   => 'https://a',
-						'price'           => '600',
-						'last_fetched_at' => '2026-04-18T09:00:00+09:00',
+						'platform'         => 'example-store',
+						'enabled'          => true,
+						'affiliate_url'    => 'https://a',
+						'price'            => '600',
+						'last_verified_at' => '2026-04-18T09:00:00+09:00',
 					),
 					array(
-						'platform'        => 'example-store',
-						'enabled'         => true,
-						'affiliate_url'   => 'https://b',
-						'price'           => '660',
-						'last_fetched_at' => '2026-04-20T09:00:00+09:00',
+						'platform'         => 'example-store',
+						'enabled'          => true,
+						'affiliate_url'    => 'https://b',
+						'price'            => '660',
+						'last_verified_at' => '2026-04-20T09:00:00+09:00',
 					),
 				),
 			)
 		);
-		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store( 87600 ) ) );
 		$this->assertStringContainsString( '2026年4月20日時点の価格', $html );
 	}
 
-	public function test_no_timestamp_footer_when_no_last_fetched_at(): void {
+	public function test_no_timestamp_footer_when_no_last_verified_at(): void {
 		$product = $this->product(
 			array(
 				'listings' => array(
@@ -886,6 +907,46 @@ final class CardRendererTest extends TestCase {
 						'enabled'       => true,
 						'affiliate_url' => 'https://x',
 						'price'         => '600',
+						// last_verified_at 無し＝手動/未確認。price はあっても表示ゲート対象外。
+					),
+				),
+			)
+		);
+		$html = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__timestamp', $html );
+	}
+
+	public function test_renders_badge_hidden_when_price_absent_even_with_verified_at(): void {
+		// badge は「価格スパン」の一部（list-price/price/tax/discount）として扱うため、
+		// last_verified_at があっても price が空なら表示ゲート対象外＝badge も出ない（CTA のみ残る）。
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'         => 'example-store',
+						'enabled'          => true,
+						'affiliate_url'    => 'https://x',
+						'badge'            => 'NEW',
+						'last_verified_at' => gmdate( 'c', time() - 3600 ),
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__discount', $html );
+		$this->assertStringContainsString( 'affilicard-card__cta', $html );
+	}
+
+	public function test_ignores_non_date_last_verified_at(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'         => 'example-store',
+						'enabled'          => true,
+						'affiliate_url'    => 'https://x',
+						'price'            => '600',
+						'last_verified_at' => 'not-a-date',
 					),
 				),
 			)
@@ -894,40 +955,100 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringNotContainsString( 'affilicard-card__timestamp', $html );
 	}
 
-	public function test_renders_badge_without_price(): void {
-		$product = $this->product(
+	// ------------------------------------------------------------------
+	// Task 10: 価格表示ゲート（PriceFreshness::isPriceDisplayable）。
+	// rakuten-kobo（priceTtlHours=24, 本番既定と同値）を $by_code 経由で解決させ、
+	// last_verified_at の有無・鮮度で価格スパン／免責文言の表示可否を検証する。
+	// ------------------------------------------------------------------
+
+	/**
+	 * rakuten-kobo（priceTtlHours=24）で単一 listing を描画する薄い helper。
+	 *
+	 * @param array<string, mixed> $listingOverrides
+	 */
+	private function renderCardWithListing( array $listingOverrides ): string {
+		$listing  = array_merge(
 			array(
-				'listings' => array(
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://x',
-						'badge'         => 'NEW',
-					),
-				),
-			)
+				'platform' => 'rakuten-kobo',
+				'enabled'  => true,
+			),
+			$listingOverrides
 		);
-		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
-		$this->assertStringContainsString( 'affilicard-card__discount', $html );
-		$this->assertStringContainsString( 'NEW', $html );
-		$this->assertStringNotContainsString( 'affilicard-card__tax', $html );
+		$product  = $this->product( array( 'listings' => array( $listing ) ) );
+		$platform = new PlatformDefinition( 'rakuten-kobo', '楽天Kobo', 'manual', 3, true, array( 'ebook' ), 'Koboで読む', '#bf0000', '#ffffff', priceTtlHours: 24 );
+		return ( new CardRenderer() )->render( $product, array( $platform ) );
 	}
 
-	public function test_ignores_non_date_last_fetched_at(): void {
-		$product = $this->product(
+	public function test_確認済み鮮度内の価格は表示される(): void {
+		$html = $this->renderCardWithListing(
 			array(
-				'listings' => array(
-					array(
-						'platform'        => 'example-store',
-						'enabled'         => true,
-						'affiliate_url'   => 'https://x',
-						'price'           => '600',
-						'last_fetched_at' => 'not-a-date',
-					),
-				),
+				'platform'         => 'rakuten-kobo',
+				'price'            => '693',
+				'affiliate_url'    => 'https://hb.afl.rakuten.co.jp/hgc/x/',
+				'last_verified_at' => gmdate( 'c', time() - 3600 ),
 			)
 		);
-		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringContainsString( 'affilicard-card__price', $html );
+		$this->assertStringContainsString( '693', $html );
+	}
+
+	public function test_未確認価格はCTAのみで価格非表示(): void {
+		$html = $this->renderCardWithListing(
+			array(
+				'platform'      => 'rakuten-kobo',
+				'price'         => '693',
+				'affiliate_url' => 'https://hb.afl.rakuten.co.jp/hgc/x/',
+				// last_verified_at 無し
+			)
+		);
+		$this->assertStringNotContainsString( 'affilicard-card__price', $html );
+		$this->assertStringContainsString( 'affilicard-card__cta', $html ); // ボタンは残る
+	}
+
+	public function test_TTL超過価格は非表示(): void {
+		$html = $this->renderCardWithListing(
+			array(
+				'platform'         => 'rakuten-kobo',
+				'price'            => '693',
+				'affiliate_url'    => 'https://hb.afl.rakuten.co.jp/hgc/x/',
+				'last_verified_at' => gmdate( 'c', time() - 25 * 3600 ),
+			)
+		);
+		$this->assertStringNotContainsString( 'affilicard-card__price', $html );
+	}
+
+	public function test_確認済み鮮度内では免責文言に日付が出る(): void {
+		$ts   = time() - 3600;
+		$html = $this->renderCardWithListing(
+			array(
+				'price'            => '693',
+				'affiliate_url'    => 'https://hb.afl.rakuten.co.jp/hgc/x/',
+				'last_verified_at' => gmdate( 'c', $ts ),
+			)
+		);
+		$this->assertStringContainsString( 'affilicard-card__timestamp', $html );
+		$this->assertStringContainsString( gmdate( 'Y年n月j日', $ts ) . '時点の価格', $html );
+	}
+
+	public function test_未確認価格のみではフッターの免責文言は出ない(): void {
+		$html = $this->renderCardWithListing(
+			array(
+				'price'         => '693',
+				'affiliate_url' => 'https://hb.afl.rakuten.co.jp/hgc/x/',
+				// last_verified_at 無し
+			)
+		);
+		$this->assertStringNotContainsString( 'affilicard-card__timestamp', $html );
+	}
+
+	public function test_TTL超過価格のみではフッターの免責文言は出ない(): void {
+		$html = $this->renderCardWithListing(
+			array(
+				'price'            => '693',
+				'affiliate_url'    => 'https://hb.afl.rakuten.co.jp/hgc/x/',
+				'last_verified_at' => gmdate( 'c', time() - 25 * 3600 ),
+			)
+		);
 		$this->assertStringNotContainsString( 'affilicard-card__timestamp', $html );
 	}
 
@@ -1013,29 +1134,31 @@ final class CardRendererTest extends TestCase {
 	}
 
 	public function test_timestamp_ignores_listing_hidden_by_only_platforms(): void {
-		// 非表示プラットフォーム（example-store）の方が新しい last_fetched_at を持つ場合でも、
+		// 非表示プラットフォーム（example-store）の方が新しい last_verified_at を持つ場合でも、
 		// 表示中（dmm-books）の日付がフッターに出る（CTA 表示と価格鮮度を一致させる）。
 		$product = $this->product(
 			array(
 				'listings' => array(
 					array(
-						'platform'        => 'dmm-books',
-						'enabled'         => true,
-						'affiliate_url'   => 'https://dmm',
-						'last_fetched_at' => '2026-04-18T09:00:00+09:00',
+						'platform'         => 'dmm-books',
+						'enabled'          => true,
+						'affiliate_url'    => 'https://dmm',
+						'price'            => '600',
+						'last_verified_at' => '2026-04-18T09:00:00+09:00',
 					),
 					array(
-						'platform'        => 'example-store',
-						'enabled'         => true,
-						'affiliate_url'   => 'https://store',
-						'last_fetched_at' => '2026-04-25T09:00:00+09:00',
+						'platform'         => 'example-store',
+						'enabled'          => true,
+						'affiliate_url'    => 'https://store',
+						'price'            => '600',
+						'last_verified_at' => '2026-04-25T09:00:00+09:00',
 					),
 				),
 			)
 		);
 		$html    = ( new CardRenderer() )->render(
 			$product,
-			array( $this->dmmBooks(), $this->store() ),
+			array( $this->dmmBooks( 87600 ), $this->store( 87600 ) ),
 			array( 'only_platforms' => array( 'dmm-books' ) )
 		);
 		$this->assertStringContainsString( '2026年4月18日時点の価格', $html );
@@ -1043,27 +1166,29 @@ final class CardRendererTest extends TestCase {
 	}
 
 	public function test_timestamp_ignores_listing_without_url(): void {
-		// URL 無し listing は CTA 行が出ないので、その last_fetched_at もフッターに採用されない。
+		// URL 無し listing は CTA 行が出ないので、その last_verified_at もフッターに採用されない。
 		$product = $this->product(
 			array(
 				'listings' => array(
 					array(
-						'platform'        => 'dmm-books',
-						'enabled'         => true,
-						'affiliate_url'   => 'https://dmm',
-						'last_fetched_at' => '2026-04-18T09:00:00+09:00',
+						'platform'         => 'dmm-books',
+						'enabled'          => true,
+						'affiliate_url'    => 'https://dmm',
+						'price'            => '600',
+						'last_verified_at' => '2026-04-18T09:00:00+09:00',
 					),
 					array(
-						'platform'        => 'example-store',
-						'enabled'         => true,
-						'affiliate_url'   => '',
-						'regular_url'     => '',
-						'last_fetched_at' => '2026-04-25T09:00:00+09:00',
+						'platform'         => 'example-store',
+						'enabled'          => true,
+						'affiliate_url'    => '',
+						'regular_url'      => '',
+						'price'            => '600',
+						'last_verified_at' => '2026-04-25T09:00:00+09:00',
 					),
 				),
 			)
 		);
-		$html    = ( new CardRenderer() )->render( $product, array( $this->dmmBooks(), $this->store() ) );
+		$html    = ( new CardRenderer() )->render( $product, array( $this->dmmBooks( 87600 ), $this->store( 87600 ) ) );
 		$this->assertStringContainsString( '2026年4月18日時点の価格', $html );
 		$this->assertStringNotContainsString( '2026年4月25日', $html );
 	}
@@ -1074,23 +1199,25 @@ final class CardRendererTest extends TestCase {
 			array(
 				'listings' => array(
 					array(
-						'platform'        => 'dmm-books',
-						'enabled'         => true,
-						'affiliate_url'   => 'https://dmm',
-						'last_fetched_at' => '2026-04-18T09:00:00+09:00',
+						'platform'         => 'dmm-books',
+						'enabled'          => true,
+						'affiliate_url'    => 'https://dmm',
+						'price'            => '600',
+						'last_verified_at' => '2026-04-18T09:00:00+09:00',
 					),
 					array(
-						'platform'        => 'example-store',
-						'enabled'         => true,
-						'affiliate_url'   => 'https://store',
-						'last_fetched_at' => '2026-04-25T09:00:00+09:00',
+						'platform'         => 'example-store',
+						'enabled'          => true,
+						'affiliate_url'    => 'https://store',
+						'price'            => '600',
+						'last_verified_at' => '2026-04-25T09:00:00+09:00',
 					),
 				),
 			)
 		);
 		$html    = ( new CardRenderer() )->render(
 			$product,
-			array( $this->dmmBooks(), $this->store() ),
+			array( $this->dmmBooks( 87600 ), $this->store( 87600 ) ),
 			array( 'hide_platforms' => array( 'example-store' ) )
 		);
 		$this->assertStringContainsString( '2026年4月18日時点の価格', $html );

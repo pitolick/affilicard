@@ -208,4 +208,24 @@ final class PlatformConfigTest extends TestCase {
 		$dmm      = array_values( array_filter( $defaults, static fn( $d ) => 'dmm-books' === $d->code ) )[0];
 		$this->assertTrue( $dmm->autoRefresh );
 	}
+
+	public function test_defaults_楽天Koboは自動ProviderかつeligibleProvider付き(): void {
+		$byCode = array();
+		foreach ( PlatformConfig::defaults() as $d ) {
+			$byCode[ $d->code ] = $d;
+		}
+		$kobo = $byCode['rakuten-kobo'];
+		$this->assertSame( 'rakuten-kobo', $kobo->provider );
+		$this->assertTrue( $kobo->autoRefresh );
+		$this->assertSame( 'rakuten-kobo', $kobo->eligibleProvider );
+	}
+
+	public function test_defaults_自動Providerは間隔3h_全PFのTTLは24h(): void {
+		foreach ( PlatformConfig::defaults() as $d ) {
+			$this->assertSame( 24, $d->priceTtlHours, "priceTtlHours must be 24 for {$d->code}" );
+			if ( $d->autoRefresh ) {
+				$this->assertSame( 3, $d->refreshIntervalHours, "auto platform {$d->code} interval must be 3h" );
+			}
+		}
+	}
 }

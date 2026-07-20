@@ -103,8 +103,10 @@ final class PlatformConfig {
 				'#d72d65',
 				'#ffffff',
 				true,
-				'weekly',
-				imagePriority: 10
+				3,
+				imagePriority: 10,
+				eligibleProvider: 'dmm-ebook',
+				priceTtlHours: 24
 			),
 			new PlatformDefinition(
 				'amazon-kindle',
@@ -116,19 +118,26 @@ final class PlatformConfig {
 				__( 'Kindleで読む', 'affilicard' ),
 				'#ff9900',
 				'#000000',
-				imagePriority: 20
+				false,
+				24,
+				imagePriority: 20,
+				priceTtlHours: 24
 			),
 			new PlatformDefinition(
 				'rakuten-kobo',
 				__( '楽天Kobo', 'affilicard' ),
-				'manual',
+				'rakuten-kobo',
 				3,
 				true,
 				array( 'ebook' ),
 				__( '楽天Koboで読む', 'affilicard' ),
 				'#bf0000',
 				'#ffffff',
-				imagePriority: 30
+				true,
+				3,
+				imagePriority: 30,
+				eligibleProvider: 'rakuten-kobo',
+				priceTtlHours: 24
 			),
 			new PlatformDefinition(
 				'u-next',
@@ -139,7 +148,10 @@ final class PlatformConfig {
 				array( 'vod' ),
 				__( 'U-NEXTで見る', 'affilicard' ),
 				'#000000',
-				'#ffffff'
+				'#ffffff',
+				false,
+				24,
+				priceTtlHours: 24
 			),
 			new PlatformDefinition(
 				'netflix',
@@ -150,7 +162,10 @@ final class PlatformConfig {
 				array( 'vod' ),
 				__( 'Netflixで見る', 'affilicard' ),
 				'#e50914',
-				'#ffffff'
+				'#ffffff',
+				false,
+				24,
+				priceTtlHours: 24
 			),
 			new PlatformDefinition(
 				'hulu',
@@ -161,7 +176,10 @@ final class PlatformConfig {
 				array( 'vod' ),
 				__( 'Huluで見る', 'affilicard' ),
 				'#1ce783',
-				'#000000'
+				'#000000',
+				false,
+				24,
+				priceTtlHours: 24
 			),
 			new PlatformDefinition(
 				'prime-video',
@@ -172,7 +190,10 @@ final class PlatformConfig {
 				array( 'vod' ),
 				__( 'Prime Videoで見る', 'affilicard' ),
 				'#00a8e1',
-				'#ffffff'
+				'#ffffff',
+				false,
+				24,
+				priceTtlHours: 24
 			),
 			new PlatformDefinition(
 				'danime',
@@ -183,7 +204,10 @@ final class PlatformConfig {
 				array( 'vod' ),
 				__( 'dアニメストアで見る', 'affilicard' ),
 				'#ff6600',
-				'#ffffff'
+				'#ffffff',
+				false,
+				24,
+				priceTtlHours: 24
 			),
 		);
 	}

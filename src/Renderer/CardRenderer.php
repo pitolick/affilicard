@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Renderer;
 
 use Affilicard\Platform\PlatformDefinition;
+use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Stock\StockStatus;
 
 /**
@@ -166,7 +167,7 @@ final class CardRenderer {
 		$html .= '</div>'; // __inner
 
 		if ( $is_available ) {
-			$html .= $this->renderTimestamp( $visible_listings );
+			$html .= $this->renderTimestamp( $visible_listings, $by_code );
 		}
 
 		$html .= '</div>'; // __card
@@ -265,33 +266,37 @@ final class CardRenderer {
 	}
 
 	/**
-	 * listing 群の最新 last_fetched_at（ISO8601）から「※ YYYY年M月D日時点の価格です。…」を生成する。
+	 * 表示中（API確認済み・鮮度内＝PriceFreshness::isPriceDisplayable）listing のうち
+	 * 最新 last_verified_at（ISO8601）から「※ YYYY年M月D日時点の価格です。…」を生成する。
+	 * 表示中の価格 listing が1件も無ければ空文字（免責文言は出さない＝手動/未確認/期限切れのみの
+	 * カードでは価格の裏付けが無いため注記自体を出さない）。
 	 *
-	 * @param list<array<string, mixed>> $listings
+	 * @param list<array<string, mixed>>        $listings 対象 listing 群（visibleListings() の戻り）
+	 * @param array<string, PlatformDefinition> $by_code  code => PlatformDefinition
 	 */
-	private function renderTimestamp( array $listings ): string {
-		$latest = '';
+	private function renderTimestamp( array $listings, array $by_code ): string {
+		$now_ts = time();
+		$latest = 0;
 		foreach ( $listings as $listing ) {
 			if ( ! is_array( $listing ) ) {
 				continue;
 			}
-			$at = isset( $listing['last_fetched_at'] ) ? trim( (string) $listing['last_fetched_at'] ) : '';
-			// last_fetched_at は Cron が current_time('c') で書き込む同一 TZ 値が前提。
-			// 日付プレフィックスを持つ値のみ比較対象とし、不正文字列が最新として選ばれるのを防ぐ。
-			if ( 1 === preg_match( '/^\d{4}-\d{2}-\d{2}/', $at ) && $at > $latest ) {
-				$latest = $at;
+			$code     = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
+			$platform = '' !== $code && isset( $by_code[ $code ] ) ? $by_code[ $code ] : null;
+			if ( ! PriceFreshness::isPriceDisplayable( $listing, $platform, $now_ts ) ) {
+				// CTA 行の価格スパンと同じ集合（表示中のみ）に揃える。
+				continue;
+			}
+			$at = isset( $listing['last_verified_at'] ) ? trim( (string) $listing['last_verified_at'] ) : '';
+			$ts = '' !== $at ? strtotime( $at ) : false;
+			if ( false !== $ts && $ts > $latest ) {
+				$latest = $ts;
 			}
 		}
-		if ( '' === $latest || 1 !== preg_match( '/^(\d{4})-(\d{2})-(\d{2})/', $latest, $m ) ) {
+		if ( 0 === $latest ) {
 			return '';
 		}
-		$date = sprintf(
-			/* translators: 1: year, 2: month, 3: day */
-			(string) __( '%1$d年%2$d月%3$d日', 'affilicard' ),
-			(int) $m[1],
-			(int) $m[2],
-			(int) $m[3]
-		);
+		$date = (string) wp_date( 'Y年n月j日', $latest );
 		$note = sprintf(
 			/* translators: %s: formatted date */
 			(string) __( '※ %s時点の価格です。最新価格は各販売サイトでご確認ください。', 'affilicard' ),
@@ -379,7 +384,8 @@ final class CardRenderer {
 	}
 
 	private function renderListings( array $listings, array $by_code, array $hide, array $only, array $cta_overrides = array(), bool $is_preorder = false ): string {
-		$rows = '';
+		$rows   = '';
+		$now_ts = time();
 		foreach ( $this->visibleListings( $listings, $by_code, $hide, $only ) as $listing ) {
 			$code     = (string) $listing['platform'];
 			$platform = $by_code[ $code ];
@@ -415,27 +421,31 @@ final class CardRenderer {
 			$btn_style = 'background:var(--affilicard-cta-bg,' . $brand . ');color:var(--affilicard-cta-text,' . $text . ');';
 
 			// 価格エリア（通常価格(取り消し線) + ¥価格 + （税込） + 割引バッジ）。
-			$pricing  = '';
-			$price    = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
-			$list_raw = isset( $listing['list_price'] ) ? trim( (string) $listing['list_price'] ) : '';
+			// API 確認済み・鮮度内（PriceFreshness::isPriceDisplayable）のときだけ表示する。
+			// 手動入力／未確認／TTL 期限切れの listing は CTA ボタンのみを残す。
+			$pricing = '';
+			if ( PriceFreshness::isPriceDisplayable( $listing, $platform, $now_ts ) ) {
+				$price    = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
+				$list_raw = isset( $listing['list_price'] ) ? trim( (string) $listing['list_price'] ) : '';
 
-			// 通常価格(取り消し線): list_price と price が共に正の数値で list_price > price のときのみ。
-			$list_num  = self::priceToNumber( $list_raw );
-			$price_num = self::priceToNumber( $price );
-			if ( null !== $list_num && null !== $price_num && $list_num > $price_num ) {
-				$list_no_yen = (string) preg_replace( '/^[\x{00A5}\x{FFE5}\s]+/u', '', $list_raw );
-				$pricing    .= '<span class="affilicard-card__list-price">¥' . esc_html( $list_no_yen ) . '</span>';
-			}
+				// 通常価格(取り消し線): list_price と price が共に正の数値で list_price > price のときのみ。
+				$list_num  = self::priceToNumber( $list_raw );
+				$price_num = self::priceToNumber( $price );
+				if ( null !== $list_num && null !== $price_num && $list_num > $price_num ) {
+					$list_no_yen = (string) preg_replace( '/^[\x{00A5}\x{FFE5}\s]+/u', '', $list_raw );
+					$pricing    .= '<span class="affilicard-card__list-price">¥' . esc_html( $list_no_yen ) . '</span>';
+				}
 
-			if ( '' !== $price ) {
-				// 先頭の半角¥(U+00A5)/全角￥(U+FFE5)/空白のみを安全に除去（ltrim のバイト単位破壊を回避）。
-				$price_no_yen = (string) preg_replace( '/^[\x{00A5}\x{FFE5}\s]+/u', '', $price );
-				$pricing     .= '<span class="affilicard-card__price">¥' . esc_html( $price_no_yen ) . '</span>';
-				$pricing     .= '<span class="affilicard-card__tax">' . esc_html__( '（税込）', 'affilicard' ) . '</span>';
-			}
-			$badge = isset( $listing['badge'] ) ? trim( (string) $listing['badge'] ) : '';
-			if ( '' !== $badge ) {
-				$pricing .= '<span class="affilicard-card__discount">' . esc_html( $badge ) . '</span>';
+				if ( '' !== $price ) {
+					// 先頭の半角¥(U+00A5)/全角￥(U+FFE5)/空白のみを安全に除去（ltrim のバイト単位破壊を回避）。
+					$price_no_yen = (string) preg_replace( '/^[\x{00A5}\x{FFE5}\s]+/u', '', $price );
+					$pricing     .= '<span class="affilicard-card__price">¥' . esc_html( $price_no_yen ) . '</span>';
+					$pricing     .= '<span class="affilicard-card__tax">' . esc_html__( '（税込）', 'affilicard' ) . '</span>';
+				}
+				$badge = isset( $listing['badge'] ) ? trim( (string) $listing['badge'] ) : '';
+				if ( '' !== $badge ) {
+					$pricing .= '<span class="affilicard-card__discount">' . esc_html( $badge ) . '</span>';
+				}
 			}
 
 			$rows .= '<li class="affilicard-card__row">'
