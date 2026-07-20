@@ -60,12 +60,14 @@ final class PriceFreshnessTest extends TestCase {
 		$this->assertFalse( PriceFreshness::isPriceDisplayable( $listing, null, $now ) );
 	}
 
-	public function test_未来のlast_verified_atは非表示(): void {
+	public function test_僅かに未来のlast_verified_atも表示可_クロック差許容(): void {
+		// 書き込み側と描画側 time() のクロック差で verified が僅かに未来になることがある。
+		// これは「たった今確認済み＝最もフレッシュ」なので表示する（鮮度ゲートは古い価格を隠すためのもの）。
 		$now     = 1_800_000_000;
 		$listing = array(
 			'price'            => '693',
-			'last_verified_at' => gmdate( 'c', $now + 3600 ), // 1時間後（未来）
+			'last_verified_at' => gmdate( 'c', $now + 3600 ), // 1時間後（未来・クロック差想定）
 		);
-		$this->assertFalse( PriceFreshness::isPriceDisplayable( $listing, $this->platform( 24 ), $now ) );
+		$this->assertTrue( PriceFreshness::isPriceDisplayable( $listing, $this->platform( 24 ), $now ) );
 	}
 }

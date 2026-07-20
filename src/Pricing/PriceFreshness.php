@@ -32,8 +32,12 @@ final class PriceFreshness {
 		if ( false === $verifiedTs ) {
 			return false;
 		}
+		// 鮮度ゲートの目的は「古い（stale）価格を隠す」こと。verified が僅かに未来
+		// （age < 0）になるのは、書き込み側（別コンテナ/別マシンの Cron・e-comi 投稿）と
+		// 描画側の time() のクロック差で普通に起こり、これは「たった今確認済み＝最もフレッシュ」
+		// を意味するため表示すべき。未来を弾くと fresh な価格を誤って隠すので上限のみで判定する。
 		$ttl = $platform->priceTtlHours * 3600;
 		$age = $nowTs - $verifiedTs;
-		return $age >= 0 && $age <= $ttl;
+		return $age <= $ttl;
 	}
 }
