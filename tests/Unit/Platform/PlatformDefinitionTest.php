@@ -97,13 +97,13 @@ final class PlatformDefinitionTest extends TestCase {
 		);
 	}
 
-	public function test_from_array_defaults_auto_refresh_off_weekly(): void {
+	public function test_from_array_defaults_auto_refresh_off_and_interval_24h(): void {
 		$d = PlatformDefinition::fromArray( array( 'code' => 'x' ) );
 		$this->assertFalse( $d->autoRefresh );
-		$this->assertSame( 'weekly', $d->refreshFrequency );
+		$this->assertSame( 24, $d->refreshIntervalHours );
 	}
 
-	public function test_from_array_reads_auto_refresh_and_frequency(): void {
+	public function test_from_array_reads_auto_refresh_and_migrates_frequency(): void {
 		$d = PlatformDefinition::fromArray(
 			array(
 				'code'             => 'x',
@@ -112,17 +112,17 @@ final class PlatformDefinitionTest extends TestCase {
 			)
 		);
 		$this->assertTrue( $d->autoRefresh );
-		$this->assertSame( 'daily', $d->refreshFrequency );
+		$this->assertSame( 24, $d->refreshIntervalHours );
 	}
 
-	public function test_from_array_rejects_invalid_frequency(): void {
+	public function test_from_array_未知のrefreshFrequency文字列は24hとして扱う(): void {
 		$d = PlatformDefinition::fromArray(
 			array(
 				'code'             => 'x',
 				'refreshFrequency' => 'hourly',
 			)
 		);
-		$this->assertSame( 'weekly', $d->refreshFrequency );
+		$this->assertSame( 24, $d->refreshIntervalHours );
 	}
 
 	public function test_to_array_includes_new_fields(): void {
@@ -135,7 +135,56 @@ final class PlatformDefinitionTest extends TestCase {
 		);
 		$arr = $d->toArray();
 		$this->assertTrue( $arr['autoRefresh'] );
-		$this->assertSame( 'daily', $arr['refreshFrequency'] );
+		$this->assertSame( 24, $arr['refreshIntervalHours'] );
+	}
+
+	public function test_priceTtlHours_既定は24(): void {
+		$def = PlatformDefinition::fromArray( array( 'code' => 'x' ) );
+		$this->assertSame( 24, $def->priceTtlHours );
+		$this->assertSame( 24, $def->toArray()['priceTtlHours'] );
+	}
+
+	public function test_refreshIntervalHours_明示値を保持(): void {
+		$def = PlatformDefinition::fromArray(
+			array(
+				'code'                 => 'x',
+				'refreshIntervalHours' => 3,
+			)
+		);
+		$this->assertSame( 3, $def->refreshIntervalHours );
+		$this->assertSame( 3, $def->toArray()['refreshIntervalHours'] );
+	}
+
+	public function test_旧refreshFrequencyを時間へ移行(): void {
+		$daily  = PlatformDefinition::fromArray(
+			array(
+				'code'             => 'x',
+				'refreshFrequency' => 'daily',
+			)
+		);
+		$weekly = PlatformDefinition::fromArray(
+			array(
+				'code'             => 'y',
+				'refreshFrequency' => 'weekly',
+			)
+		);
+		$this->assertSame( 24, $daily->refreshIntervalHours );
+		$this->assertSame( 168, $weekly->refreshIntervalHours );
+	}
+
+	public function test_refreshIntervalHours_1未満は既定24に矯正(): void {
+		$def = PlatformDefinition::fromArray(
+			array(
+				'code'                 => 'x',
+				'refreshIntervalHours' => 0,
+			)
+		);
+		$this->assertSame( 24, $def->refreshIntervalHours );
+	}
+
+	public function test_toArrayはrefreshFrequencyを出力しない(): void {
+		$def = PlatformDefinition::fromArray( array( 'code' => 'x' ) );
+		$this->assertArrayNotHasKey( 'refreshFrequency', $def->toArray() );
 	}
 
 	public function test_imagePriority_defaults_to_999_when_absent(): void {
