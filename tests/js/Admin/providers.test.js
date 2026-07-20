@@ -40,4 +40,51 @@ describe( 'providers（window.affilicardProviders からの導出）', () => {
 		const { PROVIDER_OPTIONS } = load();
 		expect( PROVIDER_OPTIONS ).toEqual( [] );
 	} );
+
+	describe( 'providerOptionsFor（platform 向けに候補を絞る）', () => {
+		beforeEach( () => {
+			window.affilicardProviders = [
+				{
+					code: 'manual',
+					label: '手動入力',
+					isAutomatic: false,
+					accountCode: null,
+				},
+				{
+					code: 'dmm-ebook',
+					label: 'DMM API',
+					isAutomatic: true,
+					accountCode: 'dmm',
+				},
+				{
+					code: 'rakuten-kobo',
+					label: '楽天Kobo API',
+					isAutomatic: true,
+					accountCode: 'rakuten',
+				},
+			];
+		} );
+
+		it( 'manual 選択中は自動 provider を一切出さない', () => {
+			const { providerOptionsFor } = load();
+			expect( providerOptionsFor( 'manual' ) ).toEqual( [
+				{ label: '手動入力', value: 'manual' },
+			] );
+		} );
+
+		it( '自動 provider 選択中は manual＋その provider のみ（無関係な自動 provider は出さない）', () => {
+			const { providerOptionsFor } = load();
+			expect( providerOptionsFor( 'dmm-ebook' ) ).toEqual( [
+				{ label: '手動入力', value: 'manual' },
+				{ label: 'DMM API', value: 'dmm-ebook' },
+			] );
+		} );
+
+		it( 'provider 未指定は manual のみにフォールバックする', () => {
+			const { providerOptionsFor } = load();
+			expect( providerOptionsFor( undefined ) ).toEqual( [
+				{ label: '手動入力', value: 'manual' },
+			] );
+		} );
+	} );
 } );

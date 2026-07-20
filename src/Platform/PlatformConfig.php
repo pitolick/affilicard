@@ -86,7 +86,7 @@ final class PlatformConfig {
 	}
 
 	/**
-	 * デフォルトのプラットフォーム定義（9 件: ebook 4 + vod 5）。Plugin::onActivate で seed する想定。
+	 * デフォルトのプラットフォーム定義（8 件: ebook 3 + vod 5）。Plugin::onActivate で seed する想定。
 	 *
 	 * @return list<PlatformDefinition>
 	 */
@@ -129,17 +129,6 @@ final class PlatformConfig {
 				'#bf0000',
 				'#ffffff',
 				imagePriority: 30
-			),
-			new PlatformDefinition(
-				'bookwalker',
-				__( 'BookWalker', 'affilicard' ),
-				'manual',
-				4,
-				true,
-				array( 'ebook' ),
-				__( 'BookWalkerで読む', 'affilicard' ),
-				'#1a9bd7',
-				'#ffffff'
 			),
 			new PlatformDefinition(
 				'u-next',

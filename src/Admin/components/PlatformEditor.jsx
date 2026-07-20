@@ -7,7 +7,7 @@ import {
 } from '@wordpress/components';
 import { __, sprintf } from '@wordpress/i18n';
 import { triggerRefresh } from '../api/refresh';
-import { PROVIDER_OPTIONS } from '../providers';
+import { providerOptionsFor } from '../providers';
 
 export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 	const update = (patch) => onChange({ ...platform, ...patch });
@@ -86,7 +86,7 @@ export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 				<SelectControl
 					label={__('Provider', 'affilicard')}
 					value={platform.provider ?? 'manual'}
-					options={PROVIDER_OPTIONS}
+					options={providerOptionsFor(platform.provider ?? 'manual')}
 					onChange={(v) => update({ provider: v })}
 				/>
 				<ToggleControl

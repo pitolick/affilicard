@@ -154,10 +154,10 @@ final class PlatformConfigTest extends TestCase {
 		PlatformConfig::save( array( $first, $other, $second ) );
 	}
 
-	public function test_defaults_returns_nine_entries_with_expected_codes(): void {
+	public function test_defaults_returns_eight_entries_with_expected_codes(): void {
 		$defaults = PlatformConfig::defaults();
 
-		$this->assertCount( 9, $defaults );
+		$this->assertCount( 8, $defaults );
 		$codes = array_map(
 			static function ( PlatformDefinition $d ): string {
 				return $d->code;
@@ -165,18 +165,18 @@ final class PlatformConfigTest extends TestCase {
 			$defaults
 		);
 		$this->assertSame(
-			array( 'dmm-books', 'amazon-kindle', 'rakuten-kobo', 'bookwalker', 'u-next', 'netflix', 'hulu', 'prime-video', 'danime' ),
+			array( 'dmm-books', 'amazon-kindle', 'rakuten-kobo', 'u-next', 'netflix', 'hulu', 'prime-video', 'danime' ),
 			$codes
 		);
 		$this->assertSame( 'dmm-ebook', $defaults[0]->provider );
 		$this->assertSame( 'manual', $defaults[1]->provider );
 		$this->assertSame( 1, $defaults[0]->displayOrder );
-		$this->assertSame( 4, $defaults[3]->displayOrder );
+		$this->assertSame( 3, $defaults[2]->displayOrder );
 	}
 
 	public function test_defaults_include_vod_platforms(): void {
 		$defaults = PlatformConfig::defaults();
-		$this->assertCount( 9, $defaults );
+		$this->assertCount( 8, $defaults );
 
 		$by_code = array();
 		foreach ( $defaults as $def ) {
@@ -190,7 +190,7 @@ final class PlatformConfigTest extends TestCase {
 			$this->assertTrue( $by_code[ $code ]->enabled );
 		}
 
-		// ebook (1-4) に続いて displayOrder が 5-9 で連続していることを確認する。
+		// ebook (1-3) に続く VOD の displayOrder が 5-9 であることを確認する（4 は BookWalker 削除で欠番）。
 		$expected_orders = array(
 			'u-next'      => 5,
 			'netflix'     => 6,

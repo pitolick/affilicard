@@ -162,6 +162,5 @@ final class PlatformDefinitionTest extends TestCase {
 		$this->assertSame( 10, $by_code['dmm-books'] );
 		$this->assertSame( 20, $by_code['amazon-kindle'] );
 		$this->assertSame( 30, $by_code['rakuten-kobo'] );
-		$this->assertSame( 999, $by_code['bookwalker'] );
 	}
 }
