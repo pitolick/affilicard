@@ -208,4 +208,15 @@ final class PlatformConfigTest extends TestCase {
 		$dmm      = array_values( array_filter( $defaults, static fn( $d ) => 'dmm-books' === $d->code ) )[0];
 		$this->assertTrue( $dmm->autoRefresh );
 	}
+
+	public function test_defaults_楽天Koboは自動ProviderかつeligibleProvider付き(): void {
+		$byCode = array();
+		foreach ( PlatformConfig::defaults() as $d ) {
+			$byCode[ $d->code ] = $d;
+		}
+		$kobo = $byCode['rakuten-kobo'];
+		$this->assertSame( 'rakuten-kobo', $kobo->provider );
+		$this->assertTrue( $kobo->autoRefresh );
+		$this->assertSame( 'rakuten-kobo', $kobo->eligibleProvider );
+	}
 }

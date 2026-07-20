@@ -121,14 +121,17 @@ final class PlatformConfig {
 			new PlatformDefinition(
 				'rakuten-kobo',
 				__( '楽天Kobo', 'affilicard' ),
-				'manual',
+				'rakuten-kobo',
 				3,
 				true,
 				array( 'ebook' ),
 				__( '楽天Koboで読む', 'affilicard' ),
 				'#bf0000',
 				'#ffffff',
-				imagePriority: 30
+				true,
+				'weekly',
+				imagePriority: 30,
+				eligibleProvider: 'rakuten-kobo'
 			),
 			new PlatformDefinition(
 				'u-next',
