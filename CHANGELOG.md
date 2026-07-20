@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-07-21
+
+### Added
+
+- 楽天Kobo の自動 Provider（`RakutenProvider`）を **title 検索 → URLハッシュ一致同定** 方式へ再設計。楽天 API は listing 保存済みの external_id（URLハッシュ）をキーワードとして再検索できないため、商品タイトルで検索した結果を listing の URL と突き合わせて同一商品を同定するようにした。
+- **API 準拠の価格鮮度表示**を追加。価格は API で確認済み・鮮度内（既定 TTL 24h）の listing でのみカードに表示し、確認できない/期限切れの listing は非表示にする。判定ロジックを共有ヘルパ `PriceFreshness::isPriceDisplayable()` に集約し、`CardRenderer`（カード表示ゲート・「※ YYYY年M月D日時点の価格です」免責文言の基準を `last_verified_at` へ変更）と商品一覧の `ProductListColumns`（価格非表示 = 未確認/期限切れ時の警告アイコン）で共用する。`ListingRefresher` は更新成功時に `last_verified_at` を記録するようになった。
+- 更新頻度（Cron）を **N時間毎**（既定 3h）で設定できるように変更。`PlatformDefinition` に `priceTtlHours`・`refreshIntervalHours` を追加（`refreshFrequency` を置換）し、`RefreshScheduler` を `refreshIntervalHours` ベースの動的スケジュールに対応させた。設定画面 UI も時間指定の入力に変更。
+- `PlatformDefinition` に `eligibleProvider` を追加。対応する自動 Provider を持つプラットフォームは、現在 manual 運用中でも設定画面の Provider 切替候補に自動 Provider が表示されるようになった（`providerOptionsFor`）。既定の楽天Kobo は自動 Provider（`rakuten-kobo`）＋ `eligibleProvider` に変更。
+
+### Changed
+
+- 設定画面の Provider プルダウンを「manual ＋ そのプラットフォームに対応する自動 Provider」のみに絞り込み、platform に無関係な自動 Provider（例: Amazon Kindle に DMM Provider）を誤って割り当てられないようにした（`providerOptionsFor`。credentials 用の全 Provider 一覧は従来どおり温存）（#85）。
+- 既定プラットフォーム定義から BookWalker を除去（ebook 4件 → 3件、全 9件 → 8件）。BookWalker は ASP 登録のみで商品カード（レーン1: Amazon/楽天Kobo/DMM）の対象外のため、新規インストール時の既定 seed に含めないようにした。既存サイトの設定には影響しない（#85）。
+
 ## [2.1.1] - 2026-07-18
 
 ### Changed
