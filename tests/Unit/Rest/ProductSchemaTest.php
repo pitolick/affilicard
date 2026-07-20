@@ -137,6 +137,42 @@ final class ProductSchemaTest extends TestCase {
 		$this->assertSame( array(), ProductSchema::sanitizeListings( null ) );
 	}
 
+	/**
+	 * last_verified_at（価格鮮度ゲートの基準）と search_key（楽天 refresh の検索キー）が
+	 * サニタイズで欠落しないことを保証する。register_post_meta の sanitize_callback が
+	 * この whitelist を通すため、ここから漏れると保存時に消え、価格が永続的に非表示になる。
+	 */
+	public function test_sanitize_listings_preserves_last_verified_at_and_search_key(): void {
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform'         => 'rakuten-kobo',
+					'price'            => '693',
+					'last_verified_at' => '2026-07-20T17:00:00+00:00',
+					'search_key'       => '架空作品タイトル 3',
+				),
+			)
+		);
+
+		$this->assertCount( 1, $result );
+		$this->assertSame( '2026-07-20T17:00:00+00:00', $result[0]['last_verified_at'] );
+		$this->assertSame( '架空作品タイトル 3', $result[0]['search_key'] );
+	}
+
+	public function test_sanitize_listings_defaults_last_verified_at_and_search_key_to_empty(): void {
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform' => 'dmm-books',
+					'price'    => '600',
+				),
+			)
+		);
+
+		$this->assertSame( '', $result[0]['last_verified_at'] );
+		$this->assertSame( '', $result[0]['search_key'] );
+	}
+
 	public function test_args_requires_title_for_create(): void {
 		$args = ProductSchema::args();
 		$this->assertTrue( $args['title']['required'] ?? false );
