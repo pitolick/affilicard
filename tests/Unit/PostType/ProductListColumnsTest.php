@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Tests\Unit\PostType;
 
+use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductListColumns;
 use Affilicard\PostType\ProductPostType;
 use WP_Mock;
@@ -96,6 +97,38 @@ final class ProductListColumnsTest extends TestCase {
 
 		$this->assertStringNotContainsString( 'dashicons-warning', $output );
 		$this->assertStringContainsString( '—', $output );
+	}
+
+	public function test_renderColumn_echoes_price_hidden_warning_when_price_unverified(): void {
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 321, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform'      => 'rakuten-kobo',
+						'price'         => '693',
+						'affiliate_url' => 'https://hb.afl.rakuten.co.jp/hgc/x/',
+						'regular_url'   => 'https://books.rakuten.co.jp/rk/x/',
+					),
+				)
+			);
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					array(
+						'code'          => 'rakuten-kobo',
+						'priceTtlHours' => 24,
+					),
+				)
+			);
+
+		ob_start();
+		ProductListColumns::renderColumn( ProductListColumns::COLUMN_KEY, 321 );
+		$output = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'dashicons-warning', $output );
+		$this->assertStringContainsString( '価格が未確認/期限切れのためカードで非表示です', $output );
 	}
 
 	public function test_renderColumn_returns_early_for_unrelated_column(): void {

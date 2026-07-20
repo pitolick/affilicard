@@ -3,12 +3,16 @@ declare(strict_types=1);
 
 namespace Affilicard\PostType;
 
+use Affilicard\Platform\PlatformConfig;
+use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Util\JsonField;
 
 /**
  * CPT 一覧画面に「Fallback」カラムを追加する。
  *
  * Listing の `affiliate_url` が空かつ `regular_url` が非空の場合、警告アイコンを表示する。
+ * また、`price` を保持しているが `PriceFreshness::isPriceDisplayable()` が false（未確認/期限切れ）の
+ * 場合も、カード上で価格が非表示になる旨の警告アイコンを表示する。
  */
 final class ProductListColumns {
 
@@ -43,7 +47,9 @@ final class ProductListColumns {
 		$listings_raw = get_post_meta( $post_id, ProductPostType::META_LISTINGS, true );
 		$listings     = is_array( $listings_raw ) ? $listings_raw : ( is_string( $listings_raw ) ? JsonField::decode( $listings_raw, array() ) : array() );
 
-		$has_fallback = false;
+		$now_ts           = time();
+		$has_fallback     = false;
+		$has_hidden_price = false;
 		foreach ( $listings as $listing ) {
 			if ( ! is_array( $listing ) ) {
 				continue;
@@ -52,13 +58,24 @@ final class ProductListColumns {
 			$regular   = isset( $listing['regular_url'] ) ? (string) $listing['regular_url'] : '';
 			if ( '' === $affiliate && '' !== $regular ) {
 				$has_fallback = true;
-				break;
+			}
+
+			$price = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
+			if ( '' !== $price ) {
+				$platform = PlatformConfig::find( (string) ( $listing['platform'] ?? '' ) );
+				if ( ! PriceFreshness::isPriceDisplayable( $listing, $platform, $now_ts ) ) {
+					$has_hidden_price = true;
+				}
 			}
 		}
 
+		if ( $has_hidden_price ) {
+			echo '<span class="dashicons dashicons-warning" style="color:#d63638" title="' . esc_attr__( '価格が未確認/期限切れのためカードで非表示です', 'affilicard' ) . '"></span> ';
+		}
 		if ( $has_fallback ) {
 			echo '<span class="dashicons dashicons-warning" style="color:#dba617" title="' . esc_attr__( 'アフィリエイト URL 未設定、通常 URL にフォールバック中', 'affilicard' ) . '"></span>';
-		} else {
+		}
+		if ( ! $has_hidden_price && ! $has_fallback ) {
 			echo '<span aria-hidden="true">—</span>';
 		}
 	}
