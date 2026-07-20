@@ -163,4 +163,20 @@ final class PlatformDefinitionTest extends TestCase {
 		$this->assertSame( 20, $by_code['amazon-kindle'] );
 		$this->assertSame( 30, $by_code['rakuten-kobo'] );
 	}
+
+	public function test_eligibleProvider_toArrayとfromArrayを往復する(): void {
+		$def = PlatformDefinition::fromArray(
+			array(
+				'code'             => 'rakuten-kobo',
+				'eligibleProvider' => 'rakuten-kobo',
+			)
+		);
+		$this->assertSame( 'rakuten-kobo', $def->eligibleProvider );
+		$this->assertSame( 'rakuten-kobo', $def->toArray()['eligibleProvider'] );
+	}
+
+	public function test_eligibleProvider_欠損時は空文字(): void {
+		$def = PlatformDefinition::fromArray( array( 'code' => 'x' ) );
+		$this->assertSame( '', $def->eligibleProvider );
+	}
 }
