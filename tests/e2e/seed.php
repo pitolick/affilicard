@@ -114,6 +114,17 @@ $available_post = $make_post( array( 'productId' => $available_id, 'ctaBgColor' 
 $out_post       = $make_post( array( 'productId' => $out_id ) );
 $future_post    = $make_post( array( 'productId' => $future_id ) );
 
+// TEMP DEBUG: 価格鮮度ゲートの実入力を CI ログに出す（原因特定用・後で除去）。
+$__dbg      = $repo->find( $available_id );
+$__dl       = is_array( $__dbg['listings'][0] ?? null ) ? $__dbg['listings'][0] : array();
+$__lv       = (string) ( $__dl['last_verified_at'] ?? '(none)' );
+$__pf       = \Affilicard\Platform\PlatformConfig::find( 'dmm-books' );
+$__ttl      = null !== $__pf ? $__pf->priceTtlHours : -1;
+$__disp     = \Affilicard\Pricing\PriceFreshness::isPriceDisplayable( $__dl, $__pf, time() );
+echo 'DEBUG_SEED: lv=' . $__lv . ' vt=' . (string) strtotime( $__lv ) . ' now=' . time()
+	. ' ttl=' . $__ttl . ' price=' . (string) ( $__dl['price'] ?? '?' )
+	. ' pf=' . ( null !== $__pf ? 'set' : 'NULL' ) . ' disp=' . ( $__disp ? 'Y' : 'N' ) . "\n";
+
 echo 'SEED_JSON:' . wp_json_encode(
 	array(
 		'availablePostId'    => $available_post,

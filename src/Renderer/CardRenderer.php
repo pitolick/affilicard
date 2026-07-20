@@ -448,9 +448,19 @@ final class CardRenderer {
 				}
 			}
 
+			// TEMP DEBUG: web コンテナでの鮮度ゲート実入力を DOM に可視出力（原因特定用・後で除去）。
+			$__afdbg = '<span class="afdbg">AFDBG'
+				. ' lv=' . esc_html( (string) ( $listing['last_verified_at'] ?? '(none)' ) )
+				. ' vt=' . esc_html( (string) strtotime( (string) ( $listing['last_verified_at'] ?? '' ) ) )
+				. ' now=' . esc_html( (string) $now_ts )
+				. ' ttl=' . esc_html( (string) $platform->priceTtlHours )
+				. ' price=' . esc_html( (string) ( $listing['price'] ?? '?' ) )
+				. ' disp=' . ( PriceFreshness::isPriceDisplayable( $listing, $platform, $now_ts ) ? 'Y' : 'N' )
+				. '</span>';
+
 			$rows .= '<li class="affilicard-card__row">'
 				. '<div class="affilicard-card__platform">' . esc_html( $platform->name ) . '</div>'
-				. '<div class="affilicard-card__pricing">' . $pricing . '</div>'
+				. '<div class="affilicard-card__pricing">' . $__afdbg . $pricing . '</div>'
 				. '<a class="affilicard-card__cta" href="' . esc_url( $url ) . '" target="_blank" rel="nofollow sponsored noopener" style="' . esc_attr( $btn_style ) . '">' . esc_html( $label ) . '</a>'
 				. '</li>';
 		}
