@@ -27,17 +27,15 @@ final class ProductAutoCreatorTest extends TestCase {
 		WP_Mock::userFunction( 'get_option' )->andReturn(
 			array(
 				array(
-					'code'             => 'dmm-books',
-					'name'             => 'DMM Books',
-					'provider'         => 'dmm-ebook',
-					'displayOrder'     => 1,
-					'enabled'          => true,
-					'applicableTypes'  => array( 'ebook' ),
-					'buttonLabel'      => '',
-					'brandColor'       => '',
-					'buttonTextColor'  => '',
-					'autoRefresh'      => true,
-					'refreshFrequency' => 'weekly',
+					'code'            => 'dmm-books',
+					'name'            => 'DMM Books',
+					'provider'        => 'dmm-ebook',
+					'displayOrder'    => 1,
+					'enabled'         => true,
+					'applicableTypes' => array( 'ebook' ),
+					'buttonLabel'     => '',
+					'brandColor'      => '',
+					'buttonTextColor' => '',
 				),
 			)
 		);
@@ -91,17 +89,15 @@ final class ProductAutoCreatorTest extends TestCase {
 		WP_Mock::userFunction( 'get_option' )->andReturn(
 			array(
 				array(
-					'code'             => 'manual-shop',
-					'name'             => 'Manual',
-					'provider'         => 'manual',
-					'displayOrder'     => 1,
-					'enabled'          => true,
-					'applicableTypes'  => array( 'generic' ),
-					'buttonLabel'      => '',
-					'brandColor'       => '',
-					'buttonTextColor'  => '',
-					'autoRefresh'      => false,
-					'refreshFrequency' => 'weekly',
+					'code'            => 'manual-shop',
+					'name'            => 'Manual',
+					'provider'        => 'manual',
+					'displayOrder'    => 1,
+					'enabled'         => true,
+					'applicableTypes' => array( 'generic' ),
+					'buttonLabel'     => '',
+					'brandColor'      => '',
+					'buttonTextColor' => '',
 				),
 			)
 		);

@@ -171,17 +171,15 @@ final class BlockTest extends TestCase {
 		WP_Mock::userFunction( 'get_option' )->andReturn(
 			array(
 				array(
-					'code'             => 'dmm-books',
-					'name'             => 'DMM',
-					'provider'         => 'dmm-ebook',
-					'displayOrder'     => 1,
-					'enabled'          => true,
-					'applicableTypes'  => array( 'ebook' ),
-					'buttonLabel'      => '',
-					'brandColor'       => '',
-					'buttonTextColor'  => '',
-					'autoRefresh'      => true,
-					'refreshFrequency' => 'weekly',
+					'code'            => 'dmm-books',
+					'name'            => 'DMM',
+					'provider'        => 'dmm-ebook',
+					'displayOrder'    => 1,
+					'enabled'         => true,
+					'applicableTypes' => array( 'ebook' ),
+					'buttonLabel'     => '',
+					'brandColor'      => '',
+					'buttonTextColor' => '',
 				),
 			)
 		);

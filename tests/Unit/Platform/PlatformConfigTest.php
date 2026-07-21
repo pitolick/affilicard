@@ -203,10 +203,11 @@ final class PlatformConfigTest extends TestCase {
 		}
 	}
 
-	public function test_defaults_dmm_books_has_auto_refresh_on(): void {
+	public function test_defaults_dmm_books_is_auto_provider(): void {
 		$defaults = PlatformConfig::defaults();
 		$dmm      = array_values( array_filter( $defaults, static fn( $d ) => 'dmm-books' === $d->code ) )[0];
-		$this->assertTrue( $dmm->autoRefresh );
+		$this->assertSame( 'dmm-ebook', $dmm->provider );
+		$this->assertSame( 'dmm-ebook', $dmm->eligibleProvider );
 	}
 
 	public function test_defaults_楽天Koboは自動ProviderかつeligibleProvider付き(): void {
@@ -216,16 +217,12 @@ final class PlatformConfigTest extends TestCase {
 		}
 		$kobo = $byCode['rakuten-kobo'];
 		$this->assertSame( 'rakuten-kobo', $kobo->provider );
-		$this->assertTrue( $kobo->autoRefresh );
 		$this->assertSame( 'rakuten-kobo', $kobo->eligibleProvider );
 	}
 
-	public function test_defaults_自動Providerは間隔3h_全PFのTTLは24h(): void {
+	public function test_defaults_全PFのTTLは24h(): void {
 		foreach ( PlatformConfig::defaults() as $d ) {
 			$this->assertSame( 24, $d->priceTtlHours, "priceTtlHours must be 24 for {$d->code}" );
-			if ( $d->autoRefresh ) {
-				$this->assertSame( 3, $d->refreshIntervalHours, "auto platform {$d->code} interval must be 3h" );
-			}
 		}
 	}
 }

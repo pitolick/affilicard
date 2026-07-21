@@ -102,8 +102,6 @@ final class PlatformConfig {
 				__( 'DMMブックスで読む', 'affilicard' ),
 				'#d72d65',
 				'#ffffff',
-				true,
-				3,
 				imagePriority: 10,
 				eligibleProvider: 'dmm-ebook',
 				priceTtlHours: 24
@@ -118,8 +116,6 @@ final class PlatformConfig {
 				__( 'Kindleで読む', 'affilicard' ),
 				'#ff9900',
 				'#000000',
-				false,
-				24,
 				imagePriority: 20,
 				priceTtlHours: 24
 			),
@@ -133,8 +129,6 @@ final class PlatformConfig {
 				__( '楽天Koboで読む', 'affilicard' ),
 				'#bf0000',
 				'#ffffff',
-				true,
-				3,
 				imagePriority: 30,
 				eligibleProvider: 'rakuten-kobo',
 				priceTtlHours: 24
@@ -149,8 +143,6 @@ final class PlatformConfig {
 				__( 'U-NEXTで見る', 'affilicard' ),
 				'#000000',
 				'#ffffff',
-				false,
-				24,
 				priceTtlHours: 24
 			),
 			new PlatformDefinition(
@@ -163,8 +155,6 @@ final class PlatformConfig {
 				__( 'Netflixで見る', 'affilicard' ),
 				'#e50914',
 				'#ffffff',
-				false,
-				24,
 				priceTtlHours: 24
 			),
 			new PlatformDefinition(
@@ -177,8 +167,6 @@ final class PlatformConfig {
 				__( 'Huluで見る', 'affilicard' ),
 				'#1ce783',
 				'#000000',
-				false,
-				24,
 				priceTtlHours: 24
 			),
 			new PlatformDefinition(
@@ -191,8 +179,6 @@ final class PlatformConfig {
 				__( 'Prime Videoで見る', 'affilicard' ),
 				'#00a8e1',
 				'#ffffff',
-				false,
-				24,
 				priceTtlHours: 24
 			),
 			new PlatformDefinition(
@@ -205,8 +191,6 @@ final class PlatformConfig {
 				__( 'dアニメストアで見る', 'affilicard' ),
 				'#ff6600',
 				'#ffffff',
-				false,
-				24,
 				priceTtlHours: 24
 			),
 		);
