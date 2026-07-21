@@ -78,6 +78,8 @@ final class ProductAutoCreatorTest extends TestCase {
 				$this->assertSame( '600', $data['listings'][0]['price'] );
 				$this->assertSame( 'auto', $data['listings'][0]['update_mode'] );
 				$this->assertTrue( $data['listings'][0]['auto_update'] );
+				$this->assertNotEmpty( $data['listings'][0]['last_verified_at'] );
+				$this->assertMatchesRegularExpression( '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/', $data['listings'][0]['last_verified_at'] );
 				return 123;
 			}
 		);
