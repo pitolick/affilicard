@@ -13,10 +13,11 @@ final class GeneralSettings {
 	public const OPTION_KEY = 'affilicard_general';
 
 	public const DEFAULTS = array(
-		'cache_ttl_seconds'    => 86400,
-		'default_product_type' => 'generic',
-		'cron_enabled'         => false,
-		'schema_version'       => 1,
+		'cache_ttl_seconds'      => 86400,
+		'default_product_type'   => 'generic',
+		'cron_enabled'           => false,
+		'refresh_interval_hours' => 3,
+		'schema_version'         => 2,
 	);
 
 	private const MIN_TTL = 60;
@@ -37,6 +38,11 @@ final class GeneralSettings {
 	public static function isCronEnabled(): bool {
 		$settings = self::get();
 		return ! empty( $settings['cron_enabled'] );
+	}
+
+	public static function refreshIntervalHours(): int {
+		$settings = self::get();
+		return (int) $settings['refresh_interval_hours'];
 	}
 
 	/**
@@ -89,13 +95,19 @@ final class GeneralSettings {
 
 		$cron_enabled = isset( $values['cron_enabled'] ) ? (bool) $values['cron_enabled'] : (bool) self::DEFAULTS['cron_enabled'];
 
+		$refresh_interval_hours = isset( $values['refresh_interval_hours'] ) ? (int) $values['refresh_interval_hours'] : (int) self::DEFAULTS['refresh_interval_hours'];
+		if ( $refresh_interval_hours < 1 ) {
+			$refresh_interval_hours = (int) self::DEFAULTS['refresh_interval_hours'];
+		}
+
 		$schema_version = isset( $values['schema_version'] ) ? (int) $values['schema_version'] : (int) self::DEFAULTS['schema_version'];
 
 		return array(
-			'cache_ttl_seconds'    => $ttl,
-			'default_product_type' => $type,
-			'cron_enabled'         => $cron_enabled,
-			'schema_version'       => $schema_version,
+			'cache_ttl_seconds'      => $ttl,
+			'default_product_type'   => $type,
+			'cron_enabled'           => $cron_enabled,
+			'refresh_interval_hours' => $refresh_interval_hours,
+			'schema_version'         => $schema_version,
 		);
 	}
 }
