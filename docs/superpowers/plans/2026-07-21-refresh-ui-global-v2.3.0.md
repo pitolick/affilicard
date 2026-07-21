@@ -76,6 +76,20 @@
 
 ---
 
+## Task 4b: ProductAutoCreator が fetch 成功時に last_verified_at を刻む（issue #87）
+
+**Files:** Modify `src/AutoCreate/ProductAutoCreator.php`（`buildProductData`）/ Test `tests/Unit/AutoCreate/ProductAutoCreatorTest.php`
+
+**背景:** `buildProductData` は成功 fetch（`$fetched` 非 null 到達後）から listing を組むが `last_verified_at` を刻まないため、Gutenberg ブロック自動作成の商品はカードで価格が非表示になり、次の refresh Cron まで直らない（`ListingRefresher` と非対称）。
+
+- [ ] **Step 1: 失敗テスト** — 自動作成された listing に `last_verified_at`（非空・ISO8601 形状）が入ること、`repository->save` に渡る listing にそれが含まれることを検証（既存 ProductAutoCreatorTest のモック方式に合わせる）。
+- [ ] **Step 2: RED** `--filter ProductAutoCreatorTest`。
+- [ ] **Step 3: 実装** — `buildProductData` の listing 配列に `'last_verified_at' => gmdate( 'c' ),` を追加（UTC・v2.2.0 の `ListingRefresher` 修正と同基準。`current_time('c')` は使わない）。
+- [ ] **Step 4: GREEN** ＋全体 phpunit。
+- [ ] **Step 5: commit** `fix: ProductAutoCreator が自動作成時に last_verified_at を刻む (#87)`
+
+---
+
 ## Task 5: PlatformEditor を手動/自動トグルに簡素化
 
 **Files:** Modify `src/Admin/components/PlatformEditor.jsx` / Test `tests/js/components/PlatformEditor.test.jsx`
@@ -154,6 +168,6 @@
 
 ## Self-Review
 
-- Spec カバレッジ: S1→T5、S2→T1/T2/T3、S3→T6/T7、S4→T8、S5→T4、リリース→T9、リセット→ロールアウト。✓
+- Spec カバレッジ: S1→T5、S2→T1/T2/T3、S3→T6/T7、S4→T8、S5→T4、issue #87→T4b、リリース→T9、リセット→ロールアウト。✓
 - 依存順の注意: **T2（scheduler が per-platform フィールドを読むのをやめる）→ T3（フィールド除去）** の順を厳守。T1 は T2 の前（scheduler が GeneralSettings 間隔を読むため）。
 - 型整合: `refresh_interval_hours`（GeneralSettings）、`provider`/`eligibleProvider`（PlatformDefinition・トグル）、`HOOK_ALL`（RefreshScheduler）を各 task で一貫使用。

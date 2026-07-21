@@ -41,6 +41,9 @@
 **S4. 商品一覧に「最終更新」列**
 - CPT 一覧（`ProductListColumns`）に列を追加。各商品の listing 群の**最新 `last_verified_at`**を `wp_date` で表示（無ければ「—」）。実際の更新タイミングを可視化。
 
+**S5b. ProductAutoCreator が last_verified_at を刻む（issue #87）**
+- `ProductAutoCreator::buildProductData` は成功 fetch から listing を組むが `last_verified_at` を刻まないため、Gutenberg ブロック自動作成の商品はカードで価格が非表示のまま（`ListingRefresher` と非対称）。fetch 成功時に `gmdate('c')`（UTC）で刻む。
+
 **S5. eligibleProvider バックフィル migration（汎用・非破壊）**
 - プラグイン更新時の upgrade routine で、既知 platform code → API provider を `eligibleProvider` が空の場合のみ補完（`rakuten-kobo`→`rakuten-kobo`、`dmm-books`→`dmm-ebook`）。`amazon-kindle`・VOD は空のまま（API provider 未実装）。既存 install の自動化ブロッカーを解消。
 - schema_version を bump し二重適用を防ぐ。
