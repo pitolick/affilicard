@@ -101,10 +101,10 @@ final class Plugin {
 			1
 		);
 
-		// 価格更新 Cron: platform 単位イベントのハンドラ登録 + 設定との差分調整
+		// 価格更新 Cron: 全体単一イベントのハンドラ登録 + 設定との差分調整
 		RefreshScheduler::register(
-			static function ( $platformCode ): void {
-				( new ListingRefresher( self::buildProviderRegistry(), new ProductRepository() ) )->runForPlatform( (string) $platformCode );
+			static function (): void {
+				( new ListingRefresher( self::buildProviderRegistry(), new ProductRepository() ) )->run();
 			}
 		);
 		add_action( 'init', array( RefreshScheduler::class, 'reconcile' ) );

@@ -128,8 +128,8 @@ final class PluginTest extends TestCase {
 			array( new \WP_Mock\Matcher\AnyInstance( \Affilicard\Block\Block::class ), 'register' )
 		);
 
-		// Cron: platform 単位イベントのハンドラ登録
-		WP_Mock::expectActionAdded( \Affilicard\Cron\RefreshScheduler::HOOK, \WP_Mock\Functions::type( 'callable' ) );
+		// Cron: 全体単一イベントのハンドラ登録
+		WP_Mock::expectActionAdded( \Affilicard\Cron\RefreshScheduler::HOOK_ALL, \WP_Mock\Functions::type( 'callable' ) );
 
 		// Cron: init 時の reconcile
 		WP_Mock::expectActionAdded( 'init', array( \Affilicard\Cron\RefreshScheduler::class, 'reconcile' ) );
