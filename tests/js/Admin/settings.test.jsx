@@ -21,7 +21,6 @@ import { fetchPlatforms } from '../../../src/Admin/api/platforms';
 import { fetchCredentials } from '../../../src/Admin/api/credentials';
 import { triggerRefresh } from '../../../src/Admin/api/refresh';
 import { PlatformEditor } from '../../../src/Admin/components/PlatformEditor';
-import { GeneralPanel } from '../../../src/Admin/components/GeneralPanel';
 
 beforeEach( () => {
 	fetchSettings.mockReset();
@@ -108,18 +107,5 @@ describe( 'PlatformEditor', () => {
 	} );
 } );
 
-describe( 'GeneralPanel refresh buttons', () => {
-	test( '一括更新ボタンが triggerRefresh(null,false)、強制一括更新が triggerRefresh(null,true) を呼ぶ', async () => {
-		render( <GeneralPanel /> );
-		await waitFor( () => expect( fetchSettings ).toHaveBeenCalled() );
-
-		const bulkBtn = screen.getByText( '一括更新' );
-		const forceBtn = screen.getByText( '強制一括更新（取扱終了も含む）' );
-
-		fireEvent.click( bulkBtn );
-		expect( triggerRefresh ).toHaveBeenCalledWith( null, false );
-
-		fireEvent.click( forceBtn );
-		expect( triggerRefresh ).toHaveBeenCalledWith( null, true );
-	} );
-} );
+// GeneralPanel の一括更新ボタンの feedback（disabled/ラベル切替/通知）は
+// tests/js/Admin/GeneralPanel.test.jsx で async 挙動込みで検証する。
