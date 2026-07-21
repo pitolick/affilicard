@@ -75,34 +75,36 @@ describe( 'SettingsApp', () => {
 } );
 
 describe( 'PlatformEditor', () => {
-	test( 'autoRefresh ON で頻度 select と更新ボタンが出る', () => {
+	test( 'eligibleProvider ありで自動取得トグルと更新ボタンが出る', () => {
 		const platform = {
 			code: 'dmm-books',
 			name: 'DMM',
 			provider: 'dmm-ebook',
-			autoRefresh: true,
-			refreshIntervalHours: 3,
+			eligibleProvider: 'dmm-ebook',
 		};
 		render( <PlatformEditor platform={ platform } onChange={ () => {} } /> );
 		expect(
 			screen.getByText( '今すぐこのプラットフォームを更新' )
 		).toBeInTheDocument();
-		expect(
-			screen.getByLabelText( '更新間隔（時間毎）' )
-		).toHaveValue( '3' );
+		expect( screen.getByLabelText( /自動取得/ ) ).toBeInTheDocument();
 	} );
 
-	test( 'autoRefresh OFF で頻度 select は非表示', () => {
+	test( 'eligibleProvider 無しではトグルが出ず手動入力の注記が出る', () => {
 		const platform = {
 			code: 'dmm-books',
 			name: 'DMM',
-			provider: 'dmm-ebook',
-			autoRefresh: false,
+			provider: 'manual',
+			eligibleProvider: '',
 		};
 		render( <PlatformEditor platform={ platform } onChange={ () => {} } /> );
 		expect(
-			screen.queryByLabelText( '更新間隔（時間毎）' )
+			screen.queryByLabelText( /自動取得/ )
 		).not.toBeInTheDocument();
+		expect(
+			screen.getByText(
+				'このプラットフォームは手動入力です（対応APIがありません）。'
+			)
+		).toBeInTheDocument();
 	} );
 } );
 

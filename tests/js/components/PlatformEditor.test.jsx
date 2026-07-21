@@ -24,7 +24,7 @@ describe( 'PlatformEditor', () => {
 		jest.resetModules();
 	} );
 
-	test( 'Provider ドロップダウンは manual＋現在選択中の自動 provider のみを出す', () => {
+	test( 'eligibleProvider ありのとき自動取得トグルが provider ラベル付きで表示される', () => {
 		jest.resetModules();
 		window.affilicardProviders = [
 			{
@@ -32,89 +32,6 @@ describe( 'PlatformEditor', () => {
 				label: '手動入力',
 				isAutomatic: false,
 				accountCode: null,
-			},
-			{
-				code: 'dmm-ebook',
-				label: 'DMM API',
-				isAutomatic: true,
-				accountCode: 'dmm',
-			},
-			{
-				code: 'rakuten-kobo',
-				label: '楽天Kobo API',
-				isAutomatic: true,
-				accountCode: 'rakuten',
-			},
-		];
-		// providers.js は import 時に window を読むため、fresh に読み直す。
-		const {
-			PlatformEditor: Fresh,
-		} = require( '../../../src/Admin/components/PlatformEditor' );
-		render(
-			<Fresh
-				platform={ { ...basePlatform, provider: 'manual' } }
-				onChange={ jest.fn() }
-			/>
-		);
-		const select = screen.getByLabelText( 'Provider' );
-		const values = Array.from(
-			select.querySelectorAll( 'option' )
-		).map( ( o ) => o.value );
-		expect( values ).toEqual( [ 'manual' ] );
-	} );
-
-	test( '自動 provider 選択中は manual＋その provider のみ（無関係な自動 provider は除外）', () => {
-		jest.resetModules();
-		window.affilicardProviders = [
-			{
-				code: 'manual',
-				label: '手動入力',
-				isAutomatic: false,
-				accountCode: null,
-			},
-			{
-				code: 'dmm-ebook',
-				label: 'DMM API',
-				isAutomatic: true,
-				accountCode: 'dmm',
-			},
-			{
-				code: 'rakuten-kobo',
-				label: '楽天Kobo API',
-				isAutomatic: true,
-				accountCode: 'rakuten',
-			},
-		];
-		const {
-			PlatformEditor: Fresh,
-		} = require( '../../../src/Admin/components/PlatformEditor' );
-		render(
-			<Fresh
-				platform={ { ...basePlatform, provider: 'dmm-ebook' } }
-				onChange={ jest.fn() }
-			/>
-		);
-		const select = screen.getByLabelText( 'Provider' );
-		const values = Array.from(
-			select.querySelectorAll( 'option' )
-		).map( ( o ) => o.value );
-		expect( values ).toEqual( [ 'manual', 'dmm-ebook' ] );
-	} );
-
-	test( 'eligibleProvider により provider=manual でも対応する自動 provider が候補に出る', () => {
-		jest.resetModules();
-		window.affilicardProviders = [
-			{
-				code: 'manual',
-				label: '手動入力',
-				isAutomatic: false,
-				accountCode: null,
-			},
-			{
-				code: 'dmm-ebook',
-				label: 'DMM API',
-				isAutomatic: true,
-				accountCode: 'dmm',
 			},
 			{
 				code: 'rakuten-kobo',
@@ -136,79 +53,170 @@ describe( 'PlatformEditor', () => {
 				onChange={ jest.fn() }
 			/>
 		);
-		const select = screen.getByLabelText( 'Provider' );
-		const values = Array.from(
-			select.querySelectorAll( 'option' )
-		).map( ( o ) => o.value );
-		// manual＋eligibleProvider のみ。無関係な dmm-ebook は含まれない。
-		expect( values ).toEqual( [ 'manual', 'rakuten-kobo' ] );
+		expect(
+			screen.getByLabelText( '自動取得（楽天Kobo API）' )
+		).toBeInTheDocument();
 	} );
 
-	test( '更新間隔（時間毎）入力は refreshIntervalHours の値を表示する（既定 3）', () => {
-		const onChange = jest.fn();
+	test( 'eligibleProvider ありで provider=manual のときトグルは OFF', () => {
+		jest.resetModules();
+		window.affilicardProviders = [
+			{
+				code: 'manual',
+				label: '手動入力',
+				isAutomatic: false,
+				accountCode: null,
+			},
+			{
+				code: 'rakuten-kobo',
+				label: '楽天Kobo API',
+				isAutomatic: true,
+				accountCode: 'rakuten',
+			},
+		];
+		const {
+			PlatformEditor: Fresh,
+		} = require( '../../../src/Admin/components/PlatformEditor' );
 		render(
-			<PlatformEditor
-				platform={ { ...basePlatform, autoRefresh: true, refreshIntervalHours: 6 } }
-				onChange={ onChange }
+			<Fresh
+				platform={ {
+					...basePlatform,
+					provider: 'manual',
+					eligibleProvider: 'rakuten-kobo',
+				} }
+				onChange={ jest.fn() }
 			/>
 		);
 		expect(
-			screen.getByLabelText( '更新間隔（時間毎）' )
-		).toHaveValue( '6' );
-
-		const { unmount } = render(
-			<PlatformEditor
-				platform={ { ...basePlatform, autoRefresh: true } }
-				onChange={ onChange }
-			/>
-		);
-		const selects = screen.getAllByLabelText( '更新間隔（時間毎）' );
-		expect( selects[ selects.length - 1 ] ).toHaveValue( '3' );
-		unmount();
+			screen.getByLabelText( '自動取得（楽天Kobo API）' )
+		).not.toBeChecked();
 	} );
 
-	test( '更新間隔（時間毎）が既定候補にない値（旧 weekly 移行の168等）でも選択肢に追加されて表示される', () => {
-		const onChange = jest.fn();
+	test( 'eligibleProvider ありで provider=eligibleProvider のときトグルは ON', () => {
+		jest.resetModules();
+		window.affilicardProviders = [
+			{
+				code: 'manual',
+				label: '手動入力',
+				isAutomatic: false,
+				accountCode: null,
+			},
+			{
+				code: 'rakuten-kobo',
+				label: '楽天Kobo API',
+				isAutomatic: true,
+				accountCode: 'rakuten',
+			},
+		];
+		const {
+			PlatformEditor: Fresh,
+		} = require( '../../../src/Admin/components/PlatformEditor' );
 		render(
-			<PlatformEditor
-				platform={ { ...basePlatform, autoRefresh: true, refreshIntervalHours: 168 } }
-				onChange={ onChange }
+			<Fresh
+				platform={ {
+					...basePlatform,
+					provider: 'rakuten-kobo',
+					eligibleProvider: 'rakuten-kobo',
+				} }
+				onChange={ jest.fn() }
 			/>
 		);
-		const select = screen.getByLabelText( '更新間隔（時間毎）' );
-		expect( select ).toHaveValue( '168' );
-		const values = Array.from( select.querySelectorAll( 'option' ) ).map(
-			( o ) => o.value
-		);
-		expect( values ).toEqual( [ '1', '3', '6', '12', '24', '168' ] );
+		expect(
+			screen.getByLabelText( '自動取得（楽天Kobo API）' )
+		).toBeChecked();
 	} );
 
-	test( '更新間隔（時間毎）変更で refreshIntervalHours を数値化して onChange する', () => {
+	test( '自動取得トグルを ON にすると provider に eligibleProvider を設定する', () => {
+		jest.resetModules();
+		window.affilicardProviders = [
+			{
+				code: 'manual',
+				label: '手動入力',
+				isAutomatic: false,
+				accountCode: null,
+			},
+			{
+				code: 'rakuten-kobo',
+				label: '楽天Kobo API',
+				isAutomatic: true,
+				accountCode: 'rakuten',
+			},
+		];
+		const {
+			PlatformEditor: Fresh,
+		} = require( '../../../src/Admin/components/PlatformEditor' );
 		const onChange = jest.fn();
 		render(
-			<PlatformEditor
-				platform={ { ...basePlatform, autoRefresh: true, refreshIntervalHours: 3 } }
+			<Fresh
+				platform={ {
+					...basePlatform,
+					provider: 'manual',
+					eligibleProvider: 'rakuten-kobo',
+				} }
 				onChange={ onChange }
 			/>
 		);
-		fireEvent.change( screen.getByLabelText( '更新間隔（時間毎）' ), {
-			target: { value: '12' },
-		} );
+		fireEvent.click(
+			screen.getByLabelText( '自動取得（楽天Kobo API）' )
+		);
 		expect( onChange ).toHaveBeenCalledWith(
-			expect.objectContaining( { refreshIntervalHours: 12 } )
+			expect.objectContaining( { provider: 'rakuten-kobo' } )
 		);
 	} );
 
-	test( '更新間隔（時間毎）に価格自動非表示の help を表示する', () => {
+	test( '自動取得トグルを OFF にすると provider を manual に戻す', () => {
+		jest.resetModules();
+		window.affilicardProviders = [
+			{
+				code: 'manual',
+				label: '手動入力',
+				isAutomatic: false,
+				accountCode: null,
+			},
+			{
+				code: 'rakuten-kobo',
+				label: '楽天Kobo API',
+				isAutomatic: true,
+				accountCode: 'rakuten',
+			},
+		];
+		const {
+			PlatformEditor: Fresh,
+		} = require( '../../../src/Admin/components/PlatformEditor' );
+		const onChange = jest.fn();
+		render(
+			<Fresh
+				platform={ {
+					...basePlatform,
+					provider: 'rakuten-kobo',
+					eligibleProvider: 'rakuten-kobo',
+				} }
+				onChange={ onChange }
+			/>
+		);
+		fireEvent.click(
+			screen.getByLabelText( '自動取得（楽天Kobo API）' )
+		);
+		expect( onChange ).toHaveBeenCalledWith(
+			expect.objectContaining( { provider: 'manual' } )
+		);
+	} );
+
+	test( 'eligibleProvider が空のときトグルは出ず手動入力の注記のみ表示する', () => {
 		const onChange = jest.fn();
 		render(
 			<PlatformEditor
-				platform={ { ...basePlatform, autoRefresh: true } }
+				platform={ { ...basePlatform, eligibleProvider: '' } }
 				onChange={ onChange }
 			/>
 		);
 		expect(
-			screen.getByText( /24時間で自動的に非表示になります/ )
+			screen.queryByText( /自動取得（/ )
+		).not.toBeInTheDocument();
+		expect(
+			screen.getByText(
+				'このプラットフォームは手動入力です（対応APIがありません）。'
+			)
 		).toBeInTheDocument();
 	} );
 
@@ -223,7 +231,6 @@ describe( 'PlatformEditor', () => {
 			screen.getByLabelText( 'ボタンラベル' )
 		).toBeInTheDocument();
 		expect( screen.getByLabelText( '表示順' ) ).toBeInTheDocument();
-		expect( screen.getByLabelText( 'Provider' ) ).toBeInTheDocument();
 		expect( screen.getByLabelText( 'ブランド色' ) ).toBeInTheDocument();
 		expect(
 			screen.getByLabelText( 'ボタン文字色' )
@@ -315,12 +322,19 @@ describe( 'PlatformEditor', () => {
 	test( 'groups auto-fetch fields under an API section heading', () => {
 		const onChange = jest.fn();
 		render(
-			<PlatformEditor platform={ basePlatform } onChange={ onChange } />
+			<PlatformEditor
+				platform={ { ...basePlatform, eligibleProvider: '' } }
+				onChange={ onChange }
+			/>
 		);
 		expect(
-			screen.getByText( 'API 連携（自動取得）' )
+			screen.getByText( '価格の取得方法' )
 		).toBeInTheDocument();
-		expect( screen.getByLabelText( 'Provider' ) ).toBeInTheDocument();
+		expect(
+			screen.getByText(
+				'このプラットフォームは手動入力です（対応APIがありません）。'
+			)
+		).toBeInTheDocument();
 	} );
 
 	test( 'keeps the refresh button inside the API section', () => {

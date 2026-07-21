@@ -104,4 +104,34 @@ describe( 'providers（window.affilicardProviders からの導出）', () => {
 			] );
 		} );
 	} );
+
+	describe( 'providerLabel（code → 表示ラベル）', () => {
+		it( '登録済み code はラベルを返す', () => {
+			window.affilicardProviders = [
+				{
+					code: 'rakuten-kobo',
+					label: '楽天Kobo API',
+					isAutomatic: true,
+					accountCode: 'rakuten',
+				},
+			];
+			const { providerLabel } = load();
+			expect( providerLabel( 'rakuten-kobo' ) ).toBe( '楽天Kobo API' );
+		} );
+
+		it( '未登録の code はそのまま返す（フォールバック）', () => {
+			window.affilicardProviders = [
+				{
+					code: 'rakuten-kobo',
+					label: '楽天Kobo API',
+					isAutomatic: true,
+					accountCode: 'rakuten',
+				},
+			];
+			const { providerLabel } = load();
+			expect( providerLabel( 'unknown-provider' ) ).toBe(
+				'unknown-provider'
+			);
+		} );
+	} );
 } );
