@@ -1,15 +1,38 @@
+import { useState } from '@wordpress/element';
 import {
 	TextControl,
 	ToggleControl,
 	Button,
 	PanelBody,
+	Notice,
 } from '@wordpress/components';
 import { __, sprintf } from '@wordpress/i18n';
 import { triggerRefresh } from '../api/refresh';
 import { providerLabel } from '../providers';
 
 export function PlatformEditor({ platform, onChange, initialOpen = false }) {
+	const [refreshing, setRefreshing] = useState(false);
+	const [notice, setNotice] = useState(null);
 	const update = (patch) => onChange({ ...platform, ...patch });
+
+	const onRefresh = async () => {
+		setRefreshing(true);
+		setNotice(null);
+		try {
+			await triggerRefresh(platform.code);
+			setNotice({
+				type: 'success',
+				message: __('更新しました。', 'affilicard'),
+			});
+		} catch {
+			setNotice({
+				type: 'error',
+				message: __('更新に失敗しました。', 'affilicard'),
+			});
+		} finally {
+			setRefreshing(false);
+		}
+	};
 
 	const base = sprintf(
 		/* translators: 1: platform display name, 2: platform code */
@@ -114,10 +137,21 @@ export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 				)}
 				<Button
 					variant="secondary"
-					onClick={() => triggerRefresh(platform.code)}
+					disabled={refreshing}
+					onClick={onRefresh}
 				>
-					{__('今すぐこのプラットフォームを更新', 'affilicard')}
+					{refreshing
+						? __('更新中…', 'affilicard')
+						: __('今すぐこのプラットフォームを更新', 'affilicard')}
 				</Button>
+				{notice && (
+					<Notice
+						status={notice.type}
+						onRemove={() => setNotice(null)}
+					>
+						{notice.message}
+					</Notice>
+				)}
 			</div>
 		</PanelBody>
 	);

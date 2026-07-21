@@ -2,8 +2,27 @@
  * Tests for src/Admin/components/PlatformEditor.jsx
  */
 
-import { render, screen, fireEvent } from '@testing-library/react';
+jest.mock( '../../../src/Admin/api/refresh', () => ( {
+	triggerRefresh: jest.fn(),
+} ) );
+
+// 実物の providers.js は window.affilicardProviders をモジュール読込時に
+// 一度だけスナップショットする（WP が localize したデータを起動時に固定で
+// 読む想定のため）。テストごとに window.affilicardProviders を差し替えたい
+// ので、ここでは呼び出し時に都度参照する軽量モックに置き換える。
+// PlatformEditor は useState (@wordpress/element) を使うため、
+// jest.resetModules() + フレッシュ require で本物を都度読み直す手法は
+// react インスタンスの二重化（Invalid hook call）を招き使えない。
+jest.mock( '../../../src/Admin/providers', () => ( {
+	providerLabel: ( code ) =>
+		( globalThis.affilicardProviders || [] ).find(
+			( p ) => p.code === code
+		)?.label ?? code,
+} ) );
+
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { PlatformEditor } from '../../../src/Admin/components/PlatformEditor';
+import { triggerRefresh } from '../../../src/Admin/api/refresh';
 
 const basePlatform = {
 	code: 'dmm',
@@ -21,11 +40,9 @@ const basePlatform = {
 describe( 'PlatformEditor', () => {
 	afterEach( () => {
 		delete window.affilicardProviders;
-		jest.resetModules();
 	} );
 
 	test( 'eligibleProvider ありのとき自動取得トグルが provider ラベル付きで表示される', () => {
-		jest.resetModules();
 		window.affilicardProviders = [
 			{
 				code: 'manual',
@@ -40,11 +57,8 @@ describe( 'PlatformEditor', () => {
 				accountCode: 'rakuten',
 			},
 		];
-		const {
-			PlatformEditor: Fresh,
-		} = require( '../../../src/Admin/components/PlatformEditor' );
 		render(
-			<Fresh
+			<PlatformEditor
 				platform={ {
 					...basePlatform,
 					provider: 'manual',
@@ -59,7 +73,6 @@ describe( 'PlatformEditor', () => {
 	} );
 
 	test( 'eligibleProvider ありで provider=manual のときトグルは OFF', () => {
-		jest.resetModules();
 		window.affilicardProviders = [
 			{
 				code: 'manual',
@@ -74,11 +87,8 @@ describe( 'PlatformEditor', () => {
 				accountCode: 'rakuten',
 			},
 		];
-		const {
-			PlatformEditor: Fresh,
-		} = require( '../../../src/Admin/components/PlatformEditor' );
 		render(
-			<Fresh
+			<PlatformEditor
 				platform={ {
 					...basePlatform,
 					provider: 'manual',
@@ -93,7 +103,6 @@ describe( 'PlatformEditor', () => {
 	} );
 
 	test( 'eligibleProvider ありで provider=eligibleProvider のときトグルは ON', () => {
-		jest.resetModules();
 		window.affilicardProviders = [
 			{
 				code: 'manual',
@@ -108,11 +117,8 @@ describe( 'PlatformEditor', () => {
 				accountCode: 'rakuten',
 			},
 		];
-		const {
-			PlatformEditor: Fresh,
-		} = require( '../../../src/Admin/components/PlatformEditor' );
 		render(
-			<Fresh
+			<PlatformEditor
 				platform={ {
 					...basePlatform,
 					provider: 'rakuten-kobo',
@@ -127,7 +133,6 @@ describe( 'PlatformEditor', () => {
 	} );
 
 	test( '自動取得トグルを ON にすると provider に eligibleProvider を設定する', () => {
-		jest.resetModules();
 		window.affilicardProviders = [
 			{
 				code: 'manual',
@@ -142,12 +147,9 @@ describe( 'PlatformEditor', () => {
 				accountCode: 'rakuten',
 			},
 		];
-		const {
-			PlatformEditor: Fresh,
-		} = require( '../../../src/Admin/components/PlatformEditor' );
 		const onChange = jest.fn();
 		render(
-			<Fresh
+			<PlatformEditor
 				platform={ {
 					...basePlatform,
 					provider: 'manual',
@@ -165,7 +167,6 @@ describe( 'PlatformEditor', () => {
 	} );
 
 	test( '自動取得トグルを OFF にすると provider を manual に戻す', () => {
-		jest.resetModules();
 		window.affilicardProviders = [
 			{
 				code: 'manual',
@@ -180,12 +181,9 @@ describe( 'PlatformEditor', () => {
 				accountCode: 'rakuten',
 			},
 		];
-		const {
-			PlatformEditor: Fresh,
-		} = require( '../../../src/Admin/components/PlatformEditor' );
 		const onChange = jest.fn();
 		render(
-			<Fresh
+			<PlatformEditor
 				platform={ {
 					...basePlatform,
 					provider: 'rakuten-kobo',
@@ -351,5 +349,71 @@ describe( 'PlatformEditor', () => {
 		expect( refreshButton ).toHaveTextContent(
 			'今すぐこのプラットフォームを更新'
 		);
+	} );
+
+	describe( '個別更新ボタンの feedback', () => {
+		beforeEach( () => {
+			triggerRefresh.mockReset();
+			triggerRefresh.mockResolvedValue( { ok: true } );
+		} );
+
+		test( 'クリックで triggerRefresh(platform.code) を呼び、実行中は disabled かつ「更新中…」になり、完了後に成功通知が出る', async () => {
+			let resolveRefresh;
+			triggerRefresh.mockImplementation(
+				() =>
+					new Promise( ( resolve ) => {
+						resolveRefresh = resolve;
+					} )
+			);
+			const onChange = jest.fn();
+			render(
+				<PlatformEditor
+					platform={ basePlatform }
+					onChange={ onChange }
+				/>
+			);
+
+			const button = screen.getByText(
+				'今すぐこのプラットフォームを更新'
+			);
+			fireEvent.click( button );
+			expect( triggerRefresh ).toHaveBeenCalledWith( 'dmm' );
+
+			const updatingBtn = await screen.findByText( '更新中…' );
+			expect( updatingBtn ).toBeDisabled();
+
+			resolveRefresh( { ok: true } );
+
+			expect(
+				await screen.findByText( '更新しました。' )
+			).toBeInTheDocument();
+			await waitFor( () =>
+				expect(
+					screen.getByText( '今すぐこのプラットフォームを更新' )
+				).not.toBeDisabled()
+			);
+		} );
+
+		test( '失敗時はエラー通知を表示し、ボタンの disabled が解除される', async () => {
+			triggerRefresh.mockRejectedValueOnce( new Error( 'network error' ) );
+			const onChange = jest.fn();
+			render(
+				<PlatformEditor
+					platform={ basePlatform }
+					onChange={ onChange }
+				/>
+			);
+
+			fireEvent.click(
+				screen.getByText( '今すぐこのプラットフォームを更新' )
+			);
+
+			expect(
+				await screen.findByText( '更新に失敗しました。' )
+			).toBeInTheDocument();
+			expect(
+				screen.getByText( '今すぐこのプラットフォームを更新' )
+			).not.toBeDisabled();
+		} );
 	} );
 } );
