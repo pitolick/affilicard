@@ -297,4 +297,155 @@ final class PluginTest extends TestCase {
 
 		$this->assertConditionsMet();
 	}
+
+	public function test_backfillEligibleProviders_skips_when_user_cannot_manage_options(): void {
+		WP_Mock::userFunction( 'current_user_can' )
+			->with( 'manage_options' )
+			->andReturn( false );
+		WP_Mock::userFunction( 'get_option' )->never();
+		WP_Mock::userFunction( 'update_option' )->never();
+
+		Plugin::backfillEligibleProviders();
+
+		$this->assertConditionsMet();
+	}
+
+	public function test_backfillEligibleProviders_skips_when_already_backfilled(): void {
+		WP_Mock::userFunction( 'current_user_can' )
+			->with( 'manage_options' )
+			->andReturn( true );
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_eligible_provider_backfilled' )
+			->andReturn( 1 );
+		WP_Mock::userFunction( 'update_option' )->never();
+
+		Plugin::backfillEligibleProviders();
+
+		$this->assertConditionsMet();
+	}
+
+	public function test_backfillEligibleProviders_fills_empty_known_codes_keeps_existing_and_ignores_unknown(): void {
+		WP_Mock::userFunction( 'current_user_can' )
+			->with( 'manage_options' )
+			->andReturn( true );
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_eligible_provider_backfilled' )
+			->andReturn( false );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					array(
+						'code'             => 'rakuten-kobo',
+						'name'             => '楽天Kobo',
+						'provider'         => 'rakuten-kobo',
+						'displayOrder'     => 3,
+						'enabled'          => true,
+						'applicableTypes'  => array( 'ebook' ),
+						'buttonLabel'      => '楽天Koboで読む',
+						'brandColor'       => '#bf0000',
+						'buttonTextColor'  => '#ffffff',
+						'eligibleProvider' => '', // 既存 install で空のまま保存されているケース
+					),
+					array(
+						'code'             => 'dmm-books',
+						'name'             => 'DMMブックス',
+						'provider'         => 'dmm-ebook',
+						'displayOrder'     => 1,
+						'enabled'          => true,
+						'applicableTypes'  => array( 'ebook' ),
+						'buttonLabel'      => 'DMMブックスで読む',
+						'brandColor'       => '#d72d65',
+						'buttonTextColor'  => '#ffffff',
+						'eligibleProvider' => '',
+					),
+					array(
+						'code'             => 'amazon-kindle',
+						'name'             => 'Amazon Kindle',
+						'provider'         => 'manual',
+						'displayOrder'     => 2,
+						'enabled'          => true,
+						'applicableTypes'  => array( 'ebook' ),
+						'buttonLabel'      => 'Kindleで読む',
+						'brandColor'       => '#ff9900',
+						'buttonTextColor'  => '#000000',
+						'eligibleProvider' => 'already-set', // 既に値がある → 上書きしない
+					),
+					array(
+						'code'             => 'mystery-platform',
+						'name'             => 'Mystery',
+						'provider'         => 'manual',
+						'displayOrder'     => 4,
+						'enabled'          => true,
+						'applicableTypes'  => array( 'ebook' ),
+						'buttonLabel'      => '読む',
+						'brandColor'       => '#111111',
+						'buttonTextColor'  => '#ffffff',
+						'eligibleProvider' => '', // マップに無い未知 code → 変更しない
+					),
+				)
+			);
+
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->with( PlatformConfig::OPTION_KEY, WP_Mock\Functions::type( 'array' ), false )
+			->andReturnUsing(
+				function ( $key, $value, $autoload ) {
+					$by_code = array();
+					foreach ( $value as $entry ) {
+						$by_code[ $entry['code'] ] = $entry;
+					}
+					$this->assertSame( 'rakuten-kobo', $by_code['rakuten-kobo']['eligibleProvider'] );
+					$this->assertSame( 'dmm-ebook', $by_code['dmm-books']['eligibleProvider'] );
+					$this->assertSame( 'already-set', $by_code['amazon-kindle']['eligibleProvider'] );
+					$this->assertSame( '', $by_code['mystery-platform']['eligibleProvider'] );
+					return true;
+				}
+			);
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->with( 'affilicard_eligible_provider_backfilled', 1, false )
+			->andReturn( true );
+
+		Plugin::backfillEligibleProviders();
+
+		$this->assertConditionsMet();
+	}
+
+	public function test_backfillEligibleProviders_sets_flag_even_when_nothing_changed(): void {
+		WP_Mock::userFunction( 'current_user_can' )
+			->with( 'manage_options' )
+			->andReturn( true );
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_eligible_provider_backfilled' )
+			->andReturn( false );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					array(
+						'code'             => 'amazon-kindle',
+						'name'             => 'Amazon Kindle',
+						'provider'         => 'manual',
+						'displayOrder'     => 2,
+						'enabled'          => true,
+						'applicableTypes'  => array( 'ebook' ),
+						'buttonLabel'      => 'Kindleで読む',
+						'brandColor'       => '#ff9900',
+						'buttonTextColor'  => '#000000',
+						'eligibleProvider' => '',
+					),
+				)
+			);
+
+		// 変更対象が無いので PlatformConfig::OPTION_KEY への update_option は呼ばれない。
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->with( 'affilicard_eligible_provider_backfilled', 1, false )
+			->andReturn( true );
+
+		Plugin::backfillEligibleProviders();
+
+		$this->assertConditionsMet();
+	}
 }

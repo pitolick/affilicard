@@ -66,6 +66,7 @@ final class Plugin {
 			add_action( 'admin_menu', array( self::class, 'registerSettingsPage' ) );
 			add_action( 'admin_enqueue_scripts', array( self::class, 'enqueueSettingsAssets' ) );
 			add_action( 'admin_init', array( self::class, 'purgeLegacyProviderCredentials' ) );
+			add_action( 'admin_init', array( self::class, 'backfillEligibleProviders' ) );
 		}
 
 		// ProductType レジストリ（Block の type 解決でも buildProductTypeRegistry() を参照）
@@ -176,6 +177,46 @@ final class Plugin {
 			delete_option( (string) $key );
 		}
 		update_option( 'affilicard_legacy_creds_purged', 1, false );
+	}
+
+	/**
+	 * `eligibleProvider` 追加前に保存された既存 platform（rakuten-kobo/dmm-books）へ、
+	 * 既知の code→provider を一度きり補完する。
+	 *
+	 * v2.3.0 の手動/自動トグルは eligibleProvider が空だと「自動取得」を選べないため、
+	 * seed（PlatformConfig::defaults()）は新規 install にしか効かない既存 install を
+	 * `affilicard_eligible_provider_backfilled` フラグで一度だけ補完する。
+	 * 既に値がある platform は上書きせず、マップに無い code はそのまま残す。
+	 */
+	public static function backfillEligibleProviders(): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		if ( get_option( 'affilicard_eligible_provider_backfilled' ) ) {
+			return;
+		}
+
+		$map = array(
+			'rakuten-kobo' => 'rakuten-kobo',
+			'dmm-books'    => 'dmm-ebook',
+		);
+
+		$changed = false;
+		$out     = array();
+		foreach ( PlatformConfig::all() as $definition ) {
+			$arr = $definition->toArray();
+			if ( isset( $map[ $definition->code ] ) && '' === $definition->eligibleProvider ) {
+				$arr['eligibleProvider'] = $map[ $definition->code ];
+				$changed                 = true;
+			}
+			$out[] = $arr;
+		}
+
+		if ( $changed ) {
+			PlatformConfig::save( $out );
+		}
+
+		update_option( 'affilicard_eligible_provider_backfilled', 1, false );
 	}
 
 	public static function registerSettingsPage(): void {
