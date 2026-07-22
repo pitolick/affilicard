@@ -24,6 +24,7 @@
 8. **時間分散（jitter）**：更新を間隔内に分散し一斉バーストを避ける（PA-API 対策の「spread across the day」）。
 9. **throttle を設定可能に**：provider 別（or 全体）のリクエストレートを設定値で持つ（Amazon Affiliates 系プラグインの「Request Rate」設定に相当）。
 10. **（provider 対応時）multi-item バッチ**：API が複数商品同時取得に対応する場合はまとめて 1 リクエストにする（Amazon GetItems ≤10 ASIN 等）。楽天Kobo 検索は keyword 単位のため対象外＝provider 別。
+11. **リフレッシュ・トリガーの層構造（§9）**：全件定期掃引を主役にせず、**①閲覧時（stale-while-revalidate）②公開/更新時（記事内商品を事前同期・再掲対応）③future→publish ④スケジュール掃引=保険/reconcile** を同一キューに流す。実需要（閲覧）と掲載イベントを主トリガーにし、cron を格下げ。
 
 ## 3. アーキテクチャ
 
@@ -87,12 +88,16 @@
 6. **pile-up ポリシー**: dedup のみ か、深さ上限＋TTL優先＋古い drop まで。
 7. **失敗の可視化**: 既存の商品一覧「価格非表示」赤アイコン／DashboardWidget との連携。
 8. **WP-Cron 信頼性**: 実トラフィック依存。青天井運用では **サーバ実 cron（`DISABLE_WP_CRON`＋OS cron）** 推奨をドキュメント化。
+9. **閲覧トリガーとページキャッシュ（§9-1）**: フルページ/CDN キャッシュ下で `CardRenderer` が走らない問題への対処（失効時描画で許容 vs ブロック表示時の軽量 REST ping）。
+10. **閲覧トリガーのクールダウン値（§9-1）**: `last_enqueued_at` の再投入抑止間隔・dedup 粒度。
+11. **公開/更新トリガーの同期/force（§9-2）**: 非同期・高優先・force で確定でよいか。`parse_blocks` での商品ID解決方法（ブロック属性のスキーマ）。
+12. **トリガーごとの優先度モデル**: force 系（公開/future）を先頭、閲覧 stale を通常、掃引を最後、等のキュー優先度設計。
 
 ## 6. 実装フェーズ（概略・次セッションで task 化）
 
 - **P1 キューストア**: DB テーブル＋migration＋`RefreshQueue` API（enqueue/claim/complete/fail/stats）＋unit。
 - **P2 レート制御**: `RateLimiter`（provider別 throttle＋429 backoff）＋`ProviderInterface::rateLimit*` 宣言＋unit。
-- **P3 ワーカー＆配線**: ワーカー（案B なら AS ハンドラ／案A なら チャンクド cron）＋`RefreshScheduler`/手動ボタン/publish昇格を **enqueue 化**＋coalesce/dedup＋**鮮度スキップ（TTL 内は enqueue しない・要件7）**＋**jitter（要件8）**＋unit。※鮮度スキップは最大の削減レバーなので P3 で必ず入れる。
+- **P3 ワーカー＆配線＋トリガー（§9）**: ワーカー（案B なら AS ハンドラ／案A なら チャンクド cron）。**enqueue 化した全トリガーを配線**：手動ボタン／グローバル cron 掃引／**閲覧時（`CardRenderer` から stale 投入＋dedup＋クールダウン・§9-1）**／**公開・更新時（`parse_blocks` で記事内商品を force 投入・§9-2）**／future→publish（§9-3）。coalesce/dedup＋**鮮度スキップ（TTL 内は enqueue しない・要件7）**＋**jitter（要件8）**＋unit。※鮮度スキップと閲覧トリガーは最大の削減レバーなので P3 で必ず入れる。
 - **P4 管理UI**: REST（stats/clear/retry/cancel・manage_options）＋React パネル（provider 別 pending/running/failed・深さ・throttle 設定）＋unit＋E2E。
 - **P5 バックプレッシャ**: TTL 優先度＋pile-up ガード（上限/置換/drop）＋**reconcile パス（未処理/failed 定期回収・§8-3）**＋深さメトリクス。
 - **P6 リリース準備**: build/lint/全テスト/phpcs＋CHANGELOG＋**v2.4.0**（Version 3箇所同期）＋E2E＋運用ドキュメント（サーバ cron 推奨）。
@@ -100,7 +105,7 @@
 ## 7. ハンドオフ（次セッションの最初の一手）
 
 1. `feature/v2.4.0-refresh-queue` を checkout（本 spec が commit 済み）。
-2. §5 オープン事項を brainstorm で確定（特に §5-1 キュー機構）。
+2. **本 spec を叩き台に、改めて review＋brainstorming から入る**（ユーザー方針）。この spec は「方向性・調査・トリガー戦略」を固めた設計メモであり、確定仕様ではない。§5 オープン事項（特に §5-1 キュー機構 案A/B、§9 トリガーの各種パラメータ）を brainstorm で確定してから plan 化する。
 3. `writing-plans` で task-by-task の実装計画を作成 → `subagent-driven-development` で実装（v2.3.0 と同フロー）。TDD・PHP=Docker/JS=volta・CodeRabbit CLI・auto-merge しない・Playground 視覚確認・マージ後 v2.4.0 タグ/Release。
 4. 参考: 本セッションの診断（burst→429）と実 API 再現手法（e-comi `.env` の RAKUTEN_* ＋ Origin=e-comi.pitolick.com ＋ node:https）。関連 memory: `reference_affilicard_no_auto_provider_diagnosis` / `project_affilicard_provider_toggle_role`。
 
@@ -137,3 +142,36 @@
 - Amazon PA-API 429 対策: <https://www.keywordrush.com/blog/fix-amazon-paapi-too-many-requests/> / <https://webservices.amazon.com/paapi5/documentation/troubleshooting/api-rates.html>
 - 実プラグイン: WZone/AA-Team（cron/min＋batch99＋reconcile）、Amazon Affiliates（Request Rate 設定）
 - Rinker/ポチップ: 自動更新は ON/OFF 可（PA-API 制限回避に手動 off を許容）＝過剰 fetch を避ける思想は鮮度スキップと同じ
+
+## 9. リフレッシュ・トリガー戦略（層構造・すべて同一キューへ）
+
+「全件を定期掃引」を主役にせず、**実需要（閲覧）と掲載イベント（公開/更新）を主トリガー**にし、スケジュール cron は保険に格下げする。すべて **同一キュー**（dedup＋per-provider throttle＋鮮度ポリシー）へ流し込む。青天井でも「実需要に比例して」動くのが狙い。
+
+| トリガー | 役割 | 鮮度スキップ | 同期/非同期 |
+| --- | --- | --- | --- |
+| **閲覧時**（stale-while-revalidate・§9-1） | 主：実需要ベースの継続更新 | 適用（stale 時のみ投入） | 非同期（投入のみ） |
+| **公開/更新時**（記事内の商品・§9-2） | 掲載前の事前同期・**再掲対応** | **無視＝force** | 非同期・高優先 |
+| **future→publish 遷移**（既存・§9-3） | 予約セール記事の go-live 同期 | force 相当 | 非同期・高優先 |
+| **スケジュール掃引**（cron・§9-4） | 保険・reconcile（未処理/failed 回収） | 適用（軽量に） | 非同期 |
+
+### 9-1. 閲覧駆動リフレッシュ（stale-while-revalidate）
+- `CardRenderer`（フロント描画）で、その listing が **stale（`last_verified_at` 期限切れ）かつ自動 Provider** なら**キューに投入するだけ**（**同期で API は叩かない**）。ページは現状（PriceFreshness ゲートで価格非表示＋CTA）を出し、**次の訪問者にフレッシュ価格**。
+- **自己優先度付け**：人気カード＝高頻度閲覧＝優先投入／不人気＝投入されず **TTL 切れでも更新しない**（ユーザー提案どおり）。API 予算を「実際に見られる価格」だけに使う＝pile-up/レート制限の根治。
+- **注意点（要対策）**：
+  - **エンキュー・ストーム**：人気ページの大量描画で同一商品を多重投入 → **dedup（同一 listing の pending は1件）＋ per-listing クールダウン（`last_enqueued_at` から N 分は再投入しない）**。投入は「安い DB 操作1発」に限定。
+  - **フルページ/CDN キャッシュ**：キャッシュヒット時は `CardRenderer` が走らず投入トリガーが飛ぶ。失効時描画で拾えることが多く許容可だが、厳密化するならブロックが表示時に軽量 REST を1発 ping する案（リクエスト増とのトレードオフ）＝§5 で判断。
+  - **初回訪問者は stale を見る**：期限切れ後“最初の1人”は価格非表示（＋CTA）、フレッシュ化は次の訪問者から。低流入商品ほど非表示期間が長いが、これは「稀にしか見られない物に API を割かない」設計意図であり規約（未検証価格は出さない）とも一致。
+
+### 9-2. 公開/更新時トリガー（記事内の商品を事前同期）
+- `save_post`/`transition_post_status`/`post_updated` で、**その投稿本文を `parse_blocks()` して `affilicard/product-card` ブロックの参照商品ID を解決 → その listing を enqueue**（autosave/revision はスキップ＝既存ガードに倣う）。
+- **force refresh（鮮度スキップ無視）**：目的が「掲載時点で確実にフレッシュ」。対象は「記事内の数点」に**バウンド**されるため force しても API 予算は限定的。
+- **狙い**：過去登録商品をセール等で**再掲した瞬間に掲載前同期**。
+- **e-comi 固有補足**：e-comi 投稿パイプラインは楽天を投稿時取得し `last_verified_at` を刻む（#124）ため e-comi 自身の投稿は公開時点で概ねフレッシュ。本トリガーは（a）WP 管理画面での手編集/再掲、（b）パイプライン非取得の Provider、（c）時間経過で stale 化した再掲、を拾う**保険＋汎用化**（他サイト配布時にも有効）。
+
+### 9-3. future→publish 遷移（既存の配線を流用）
+- 現行の `transition_post_status`（予約投稿の publish 昇格時 refresh）を、**enqueue（高優先・force）**に置き換えて統合。予約セール記事が go-live で同期される。
+
+### 9-4. スケジュール掃引（保険・reconcile）
+- グローバル cron（`affilicard_refresh_all`）は「全件を毎回叩く主役」から、**鮮度スキップ適用の軽量掃引＋未処理/failed の reconcile 回収**に格下げ。低流入で閲覧トリガーが発火しない商品の最終防衛線。ただし**低流入商品は本来更新不要**（見られないため）なので、掃引自体も鮮度スキップで大半が no-op になる。
+
+> WP-Cron は擬似 cron（リクエスト駆動）。**投入トリガー（閲覧）も cron 発火（閲覧）も同じトラフィックが駆動**するため、流入多＝ジョブ多だが tick も多い／流入少＝ジョブ少で低頻度 tick でも捌ける、と自己バランスする。青天井・確実運用ではサーバ実 cron 併用を推奨（§5-8）。
