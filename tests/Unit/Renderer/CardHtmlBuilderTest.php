@@ -126,17 +126,15 @@ final class CardHtmlBuilderTest extends TestCase {
 		\WP_Mock::userFunction( 'get_option' )->andReturn(
 			array(
 				array(
-					'code'             => 'dmm-books',
-					'name'             => 'DMMブックス',
-					'provider'         => 'dmm-ebook',
-					'displayOrder'     => 1,
-					'enabled'          => true,
-					'applicableTypes'  => array( 'ebook' ),
-					'buttonLabel'      => 'この値段で読む →',
-					'brandColor'       => '#d72d65',
-					'buttonTextColor'  => '#ffffff',
-					'autoRefresh'      => true,
-					'refreshFrequency' => 'weekly',
+					'code'            => 'dmm-books',
+					'name'            => 'DMMブックス',
+					'provider'        => 'dmm-ebook',
+					'displayOrder'    => 1,
+					'enabled'         => true,
+					'applicableTypes' => array( 'ebook' ),
+					'buttonLabel'     => 'この値段で読む →',
+					'brandColor'      => '#d72d65',
+					'buttonTextColor' => '#ffffff',
 				),
 			)
 		);
@@ -175,17 +173,15 @@ final class CardHtmlBuilderTest extends TestCase {
 		\WP_Mock::userFunction( 'get_option' )->andReturn(
 			array(
 				array(
-					'code'             => 'dmm-books',
-					'name'             => 'DMMブックス',
-					'provider'         => 'dmm-ebook',
-					'displayOrder'     => 1,
-					'enabled'          => true,
-					'applicableTypes'  => array( 'ebook' ),
-					'buttonLabel'      => 'この値段で読む →',
-					'brandColor'       => '#d72d65',
-					'buttonTextColor'  => '#ffffff',
-					'autoRefresh'      => true,
-					'refreshFrequency' => 'weekly',
+					'code'            => 'dmm-books',
+					'name'            => 'DMMブックス',
+					'provider'        => 'dmm-ebook',
+					'displayOrder'    => 1,
+					'enabled'         => true,
+					'applicableTypes' => array( 'ebook' ),
+					'buttonLabel'     => 'この値段で読む →',
+					'brandColor'      => '#d72d65',
+					'buttonTextColor' => '#ffffff',
 				),
 			)
 		);
@@ -204,17 +200,15 @@ final class CardHtmlBuilderTest extends TestCase {
 		\WP_Mock::userFunction( 'get_option' )->andReturn(
 			array(
 				array(
-					'code'             => 'dmm-books',
-					'name'             => 'DMMブックス',
-					'provider'         => 'dmm-ebook',
-					'displayOrder'     => 1,
-					'enabled'          => true,
-					'applicableTypes'  => array( 'ebook' ),
-					'buttonLabel'      => 'この値段で読む →',
-					'brandColor'       => '#d72d65',
-					'buttonTextColor'  => '#ffffff',
-					'autoRefresh'      => true,
-					'refreshFrequency' => 'weekly',
+					'code'            => 'dmm-books',
+					'name'            => 'DMMブックス',
+					'provider'        => 'dmm-ebook',
+					'displayOrder'    => 1,
+					'enabled'         => true,
+					'applicableTypes' => array( 'ebook' ),
+					'buttonLabel'     => 'この値段で読む →',
+					'brandColor'      => '#d72d65',
+					'buttonTextColor' => '#ffffff',
 				),
 			)
 		);

@@ -66,6 +66,7 @@ final class Plugin {
 			add_action( 'admin_menu', array( self::class, 'registerSettingsPage' ) );
 			add_action( 'admin_enqueue_scripts', array( self::class, 'enqueueSettingsAssets' ) );
 			add_action( 'admin_init', array( self::class, 'purgeLegacyProviderCredentials' ) );
+			add_action( 'admin_init', array( self::class, 'backfillEligibleProviders' ) );
 		}
 
 		// ProductType レジストリ（Block の type 解決でも buildProductTypeRegistry() を参照）
@@ -101,10 +102,10 @@ final class Plugin {
 			1
 		);
 
-		// 価格更新 Cron: platform 単位イベントのハンドラ登録 + 設定との差分調整
+		// 価格更新 Cron: 全体単一イベントのハンドラ登録 + 設定との差分調整
 		RefreshScheduler::register(
-			static function ( $platformCode ): void {
-				( new ListingRefresher( self::buildProviderRegistry(), new ProductRepository() ) )->runForPlatform( (string) $platformCode );
+			static function (): void {
+				( new ListingRefresher( self::buildProviderRegistry(), new ProductRepository() ) )->run();
 			}
 		);
 		add_action( 'init', array( RefreshScheduler::class, 'reconcile' ) );
@@ -176,6 +177,57 @@ final class Plugin {
 			delete_option( (string) $key );
 		}
 		update_option( 'affilicard_legacy_creds_purged', 1, false );
+	}
+
+	/**
+	 * `eligibleProvider` 追加前に保存された既存 platform へ、provider を一度きり補完する。
+	 *
+	 * v2.3.0 の手動/自動トグルは eligibleProvider が空だと「自動取得」を選べない一方、
+	 * ListingRefresher の自動判定（`$provider->isAutomatic()`）は `provider !== 'manual'` で行うため、
+	 * eligibleProvider が空のまま provider != 'manual' な platform は UI 上「手動固定」に見えつつ
+	 * cron では自動 refresh される、という不整合が起き得る。
+	 * seed（PlatformConfig::defaults()）は新規 install にしか効かないため、既存 install を
+	 * `affilicard_eligible_provider_backfilled` フラグで一度だけ補完する。
+	 *
+	 * 優先順位: まず既知の code→provider マップを適用し、マップに無い code でも
+	 * `provider !== 'manual'` かつ eligibleProvider が空なら `eligibleProvider = provider` を補完する
+	 * 一般則を適用する。既に値がある platform は上書きしない。
+	 */
+	public static function backfillEligibleProviders(): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		if ( get_option( 'affilicard_eligible_provider_backfilled' ) ) {
+			return;
+		}
+
+		$map = array(
+			'rakuten-kobo' => 'rakuten-kobo',
+			'dmm-books'    => 'dmm-ebook',
+		);
+
+		$changed = false;
+		$out     = array();
+		foreach ( PlatformConfig::all() as $definition ) {
+			$arr = $definition->toArray();
+			if ( '' === $definition->eligibleProvider ) {
+				if ( isset( $map[ $definition->code ] ) ) {
+					$arr['eligibleProvider'] = $map[ $definition->code ];
+					$changed                 = true;
+				} elseif ( 'manual' !== $definition->provider ) {
+					// マップ未収載でも provider が自動系なら、UI/cron の判定を一致させるため provider を補完する。
+					$arr['eligibleProvider'] = $definition->provider;
+					$changed                 = true;
+				}
+			}
+			$out[] = $arr;
+		}
+
+		if ( $changed ) {
+			PlatformConfig::save( $out );
+		}
+
+		update_option( 'affilicard_eligible_provider_backfilled', 1, false );
 	}
 
 	public static function registerSettingsPage(): void {

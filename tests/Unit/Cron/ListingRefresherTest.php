@@ -28,17 +28,15 @@ final class ListingRefresherTest extends TestCase {
 		WP_Mock::userFunction( 'get_option' )->andReturn(
 			array(
 				array(
-					'code'             => 'dmm-books',
-					'name'             => 'DMM',
-					'provider'         => 'dmm-ebook',
-					'displayOrder'     => 1,
-					'enabled'          => true,
-					'applicableTypes'  => array( 'ebook' ),
-					'buttonLabel'      => '',
-					'brandColor'       => '',
-					'buttonTextColor'  => '',
-					'autoRefresh'      => true,
-					'refreshFrequency' => 'weekly',
+					'code'            => 'dmm-books',
+					'name'            => 'DMM',
+					'provider'        => 'dmm-ebook',
+					'displayOrder'    => 1,
+					'enabled'         => true,
+					'applicableTypes' => array( 'ebook' ),
+					'buttonLabel'     => '',
+					'brandColor'      => '',
+					'buttonTextColor' => '',
 				),
 			)
 		);
@@ -57,17 +55,15 @@ final class ListingRefresherTest extends TestCase {
 		WP_Mock::userFunction( 'get_option' )->andReturn(
 			array(
 				array(
-					'code'             => 'rakuten-kobo',
-					'name'             => '楽天Kobo',
-					'provider'         => 'rakuten-kobo',
-					'displayOrder'     => 3,
-					'enabled'          => true,
-					'applicableTypes'  => array( 'ebook' ),
-					'buttonLabel'      => '',
-					'brandColor'       => '',
-					'buttonTextColor'  => '',
-					'autoRefresh'      => true,
-					'refreshFrequency' => 'weekly',
+					'code'            => 'rakuten-kobo',
+					'name'            => '楽天Kobo',
+					'provider'        => 'rakuten-kobo',
+					'displayOrder'    => 3,
+					'enabled'         => true,
+					'applicableTypes' => array( 'ebook' ),
+					'buttonLabel'     => '',
+					'brandColor'      => '',
+					'buttonTextColor' => '',
 				),
 			)
 		);

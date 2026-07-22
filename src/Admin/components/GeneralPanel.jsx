@@ -9,12 +9,15 @@ import {
 import { __ } from '@wordpress/i18n';
 import { fetchSettings, updateSettings } from '../api/settings';
 import { triggerRefresh } from '../api/refresh';
+import { refreshIntervalOptions } from '../refreshIntervals';
 import { CronHelpBox } from './CronHelpBox';
 
 export function GeneralPanel() {
 	const [settings, setSettings] = useState(null);
 	const [saving, setSaving] = useState(false);
 	const [notice, setNotice] = useState(null);
+	// false | 'normal' | 'force' — どちらの一括更新ボタンが実行中かを追跡する。
+	const [refreshing, setRefreshing] = useState(false);
 
 	useEffect(() => {
 		fetchSettings()
@@ -45,6 +48,28 @@ export function GeneralPanel() {
 			});
 		} finally {
 			setSaving(false);
+		}
+	};
+
+	const onBulkRefresh = async (force) => {
+		setRefreshing(force ? 'force' : 'normal');
+		setNotice(null);
+		try {
+			await triggerRefresh(null, force);
+			setNotice({
+				type: 'success',
+				message: __(
+					'価格更新を実行しました。反映結果は各商品の価格・「最終同期」でご確認ください。',
+					'affilicard'
+				),
+			});
+		} catch {
+			setNotice({
+				type: 'error',
+				message: __('価格更新の実行に失敗しました。', 'affilicard'),
+			});
+		} finally {
+			setRefreshing(false);
 		}
 	};
 
@@ -83,22 +108,43 @@ export function GeneralPanel() {
 					onChange={(v) => update({ cron_enabled: v })}
 				/>
 
+				<SelectControl
+					label={__('更新間隔（時間毎）', 'affilicard')}
+					value={String(settings.refresh_interval_hours ?? 3)}
+					options={refreshIntervalOptions(
+						settings.refresh_interval_hours ?? 3
+					)}
+					onChange={(v) =>
+						update({ refresh_interval_hours: parseInt(v, 10) || 3 })
+					}
+					help={__(
+						'価格の自動更新をこの間隔で行います（全プラットフォーム共通）。価格は取得から24時間で自動的に非表示になるため、24時間より短い間隔を推奨します。',
+						'affilicard'
+					)}
+				/>
+
 				{settings.cron_enabled && <CronHelpBox />}
 			</div>
 
 			<div className="affilicard-general-panel__actions">
 				<Button
 					variant="secondary"
-					onClick={() => triggerRefresh(null, false)}
+					disabled={Boolean(refreshing)}
+					onClick={() => onBulkRefresh(false)}
 				>
-					{__('一括更新', 'affilicard')}
+					{refreshing === 'normal'
+						? __('更新中…', 'affilicard')
+						: __('一括更新', 'affilicard')}
 				</Button>
 				<Button
 					variant="secondary"
 					isDestructive
-					onClick={() => triggerRefresh(null, true)}
+					disabled={Boolean(refreshing)}
+					onClick={() => onBulkRefresh(true)}
 				>
-					{__('強制一括更新（取扱終了も含む）', 'affilicard')}
+					{refreshing === 'force'
+						? __('更新中…', 'affilicard')
+						: __('強制一括更新（取扱終了も含む）', 'affilicard')}
 				</Button>
 
 				<Button variant="primary" onClick={onSave} disabled={saving}>

@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-07-21
+
+### Added
+
+- General 設定に **全体更新間隔** `refresh_interval_hours`（既定 3h）を追加し、価格自動更新を「全プラットフォーム一括・単一グローバル間隔」に変更した。`RefreshScheduler` は単一グローバル cron `affilicard_refresh_all` で動作し、自動更新の対象は各プラットフォームの `provider !== 'manual'` から導出する（per-platform の `autoRefresh`・`refreshIntervalHours` は廃止）。カード下部の更新日時表示が全プラットフォームで整合するようになった。
+- 一括更新・強制一括更新（General パネル）／プラットフォーム個別更新ボタンに実行フィードバックを追加。実行中はボタンを disabled にして「更新中…」を表示し、完了時に成功/失敗を通知する。通知文言は「価格更新を実行しました。反映結果は各商品の価格・『最終同期』でご確認ください。」とし、全商品の価格取得成功を意味しない旨を明確にした。
+- 商品一覧に「最終同期」列を追加。商品ごとに listing の最新 `last_verified_at`（API で価格を確認・同期した時刻）を `wp_date` でローカライズ表示する。手動入力のみの商品は「—」を表示する。
+- 既存インストール向けに `eligibleProvider` バックフィル migration を追加（`rakuten-kobo` → `rakuten-kobo`、`dmm-books` → `dmm-ebook`。値が空の場合のみ・専用フラグで一度きり実行）。
+
+### Changed
+
+- プラットフォーム編集の Provider UI を「手動入力 ⇄ 自動取得（対応 Provider 名を表示）」のトグル 1 つに簡素化し、見出しを「価格の取得方法」に変更した。矛盾しうる従来の複数 UI（Provider プルダウン＋更新頻度入力等）を撤廃し、`eligibleProvider` を持たないプラットフォームは手動固定にした。
+
+### Fixed
+
+- `ProductAutoCreator` が自動作成時に `last_verified_at`（UTC）を刻むようにし、`ListingRefresher` と対称になるよう修正した（#87）。
+
 ## [2.2.0] - 2026-07-21
 
 ### Added

@@ -28,3 +28,8 @@ export const providerOptionsFor = (currentProvider, eligibleProvider = '') =>
 
 export const providerAccount = (code) =>
 	injected.find((p) => p.code === code)?.accountCode ?? null;
+
+// provider コードから表示ラベルを引く（例: 'rakuten-kobo' → '楽天Kobo API'）。
+// 未登録の code はそのまま返す（フォールバック）。
+export const providerLabel = (code) =>
+	injected.find((p) => p.code === code)?.label ?? code;

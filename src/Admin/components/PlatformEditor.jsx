@@ -1,35 +1,41 @@
+import { useState } from '@wordpress/element';
 import {
 	TextControl,
 	ToggleControl,
-	SelectControl,
 	Button,
 	PanelBody,
+	Notice,
 } from '@wordpress/components';
 import { __, sprintf } from '@wordpress/i18n';
 import { triggerRefresh } from '../api/refresh';
-import { providerOptionsFor } from '../providers';
-
-const REFRESH_INTERVAL_PRESETS = [1, 3, 6, 12, 24];
-
-function refreshIntervalOptions(currentHours) {
-	const options = [
-		{ label: __('1時間毎', 'affilicard'), value: '1' },
-		{ label: __('3時間毎', 'affilicard'), value: '3' },
-		{ label: __('6時間毎', 'affilicard'), value: '6' },
-		{ label: __('12時間毎', 'affilicard'), value: '12' },
-		{ label: __('24時間毎', 'affilicard'), value: '24' },
-	];
-	if (!REFRESH_INTERVAL_PRESETS.includes(currentHours)) {
-		options.push({
-			label: `${currentHours}時間毎`,
-			value: String(currentHours),
-		});
-	}
-	return options;
-}
+import { providerLabel } from '../providers';
 
 export function PlatformEditor({ platform, onChange, initialOpen = false }) {
+	const [refreshing, setRefreshing] = useState(false);
+	const [notice, setNotice] = useState(null);
 	const update = (patch) => onChange({ ...platform, ...patch });
+
+	const onRefresh = async () => {
+		setRefreshing(true);
+		setNotice(null);
+		try {
+			await triggerRefresh(platform.code);
+			setNotice({
+				type: 'success',
+				message: __(
+					'価格更新を実行しました。反映結果はカードの価格・「最終同期」でご確認ください。',
+					'affilicard'
+				),
+			});
+		} catch {
+			setNotice({
+				type: 'error',
+				message: __('価格更新の実行に失敗しました。', 'affilicard'),
+			});
+		} finally {
+			setRefreshing(false);
+		}
+	};
 
 	const base = sprintf(
 		/* translators: 1: platform display name, 2: platform code */
@@ -100,46 +106,55 @@ export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 
 			<div className="affilicard-platform-editor__section affilicard-platform-editor__section--api">
 				<h4 className="affilicard-platform-editor__subhead">
-					{__('API 連携（自動取得）', 'affilicard')}
+					{__('価格の取得方法', 'affilicard')}
 				</h4>
-				<SelectControl
-					label={__('Provider', 'affilicard')}
-					value={platform.provider ?? 'manual'}
-					options={providerOptionsFor(
-						platform.provider ?? 'manual',
-						platform.eligibleProvider ?? ''
-					)}
-					onChange={(v) => update({ provider: v })}
-				/>
-				<ToggleControl
-					label={__('API自動更新', 'affilicard')}
-					checked={Boolean(platform.autoRefresh)}
-					onChange={(v) => update({ autoRefresh: v })}
-				/>
-				{platform.autoRefresh && (
-					<SelectControl
-						label={__('更新間隔（時間毎）', 'affilicard')}
-						value={String(platform.refreshIntervalHours ?? 3)}
-						options={refreshIntervalOptions(
-							platform.refreshIntervalHours ?? 3
+				{platform.eligibleProvider ? (
+					<ToggleControl
+						label={sprintf(
+							/* translators: %s: provider display name, e.g. "楽天Kobo API" */
+							__('自動取得（%s）', 'affilicard'),
+							providerLabel(platform.eligibleProvider)
 						)}
+						checked={(platform.provider ?? 'manual') !== 'manual'}
 						onChange={(v) =>
 							update({
-								refreshIntervalHours: parseInt(v, 10) || 24,
+								provider: v ? platform.eligibleProvider : 'manual',
 							})
 						}
-						help={__(
-							'価格は取得から24時間で自動的に非表示になります（24時間より短い間隔を推奨）。',
-							'affilicard'
+						help={sprintf(
+							/* translators: %s: provider display name, e.g. "楽天Kobo API" */
+							__(
+								'ON＝%s から価格・URLを自動取得し、全体設定の「更新間隔」で定期更新します。OFF＝手動入力（価格・URLを手で入力）。ストアの表示ON/OFFは上の「有効」、自動更新の稼働・間隔は全体設定で制御します。',
+								'affilicard'
+							),
+							providerLabel(platform.eligibleProvider)
 						)}
 					/>
+				) : (
+					<p className="affilicard-platform-editor__note">
+						{__(
+							'このプラットフォームは手動入力です（対応APIがありません）。',
+							'affilicard'
+						)}
+					</p>
 				)}
 				<Button
 					variant="secondary"
-					onClick={() => triggerRefresh(platform.code)}
+					disabled={refreshing}
+					onClick={onRefresh}
 				>
-					{__('今すぐこのプラットフォームを更新', 'affilicard')}
+					{refreshing
+						? __('更新中…', 'affilicard')
+						: __('今すぐこのプラットフォームを更新', 'affilicard')}
 				</Button>
+				{notice && (
+					<Notice
+						status={notice.type}
+						onRemove={() => setNotice(null)}
+					>
+						{notice.message}
+					</Notice>
+				)}
 			</div>
 		</PanelBody>
 	);

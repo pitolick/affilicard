@@ -21,7 +21,6 @@ import { fetchPlatforms } from '../../../src/Admin/api/platforms';
 import { fetchCredentials } from '../../../src/Admin/api/credentials';
 import { triggerRefresh } from '../../../src/Admin/api/refresh';
 import { PlatformEditor } from '../../../src/Admin/components/PlatformEditor';
-import { GeneralPanel } from '../../../src/Admin/components/GeneralPanel';
 
 beforeEach( () => {
 	fetchSettings.mockReset();
@@ -75,49 +74,38 @@ describe( 'SettingsApp', () => {
 } );
 
 describe( 'PlatformEditor', () => {
-	test( 'autoRefresh ON で頻度 select と更新ボタンが出る', () => {
+	test( 'eligibleProvider ありで自動取得トグルと更新ボタンが出る', () => {
 		const platform = {
 			code: 'dmm-books',
 			name: 'DMM',
 			provider: 'dmm-ebook',
-			autoRefresh: true,
-			refreshIntervalHours: 3,
+			eligibleProvider: 'dmm-ebook',
 		};
 		render( <PlatformEditor platform={ platform } onChange={ () => {} } /> );
 		expect(
 			screen.getByText( '今すぐこのプラットフォームを更新' )
 		).toBeInTheDocument();
-		expect(
-			screen.getByLabelText( '更新間隔（時間毎）' )
-		).toHaveValue( '3' );
+		expect( screen.getByLabelText( /自動取得/ ) ).toBeInTheDocument();
 	} );
 
-	test( 'autoRefresh OFF で頻度 select は非表示', () => {
+	test( 'eligibleProvider 無しではトグルが出ず手動入力の注記が出る', () => {
 		const platform = {
 			code: 'dmm-books',
 			name: 'DMM',
-			provider: 'dmm-ebook',
-			autoRefresh: false,
+			provider: 'manual',
+			eligibleProvider: '',
 		};
 		render( <PlatformEditor platform={ platform } onChange={ () => {} } /> );
 		expect(
-			screen.queryByLabelText( '更新間隔（時間毎）' )
+			screen.queryByLabelText( /自動取得/ )
 		).not.toBeInTheDocument();
+		expect(
+			screen.getByText(
+				'このプラットフォームは手動入力です（対応APIがありません）。'
+			)
+		).toBeInTheDocument();
 	} );
 } );
 
-describe( 'GeneralPanel refresh buttons', () => {
-	test( '一括更新ボタンが triggerRefresh(null,false)、強制一括更新が triggerRefresh(null,true) を呼ぶ', async () => {
-		render( <GeneralPanel /> );
-		await waitFor( () => expect( fetchSettings ).toHaveBeenCalled() );
-
-		const bulkBtn = screen.getByText( '一括更新' );
-		const forceBtn = screen.getByText( '強制一括更新（取扱終了も含む）' );
-
-		fireEvent.click( bulkBtn );
-		expect( triggerRefresh ).toHaveBeenCalledWith( null, false );
-
-		fireEvent.click( forceBtn );
-		expect( triggerRefresh ).toHaveBeenCalledWith( null, true );
-	} );
-} );
+// GeneralPanel の一括更新ボタンの feedback（disabled/ラベル切替/通知）は
+// tests/js/Admin/GeneralPanel.test.jsx で async 挙動込みで検証する。

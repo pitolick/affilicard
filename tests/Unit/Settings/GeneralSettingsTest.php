@@ -29,7 +29,8 @@ final class GeneralSettingsTest extends TestCase {
 		$this->assertSame( 86400, $result['cache_ttl_seconds'] );
 		$this->assertSame( 'generic', $result['default_product_type'] );
 		$this->assertFalse( $result['cron_enabled'] );
-		$this->assertSame( 1, $result['schema_version'] );
+		$this->assertSame( 3, $result['refresh_interval_hours'] );
+		$this->assertSame( 2, $result['schema_version'] );
 	}
 
 	public function test_get_merges_defaults_with_stored_values(): void {
@@ -47,7 +48,8 @@ final class GeneralSettingsTest extends TestCase {
 		$this->assertSame( 3600, $result['cache_ttl_seconds'] );
 		$this->assertTrue( $result['cron_enabled'] );
 		$this->assertSame( 'generic', $result['default_product_type'] );
-		$this->assertSame( 1, $result['schema_version'] );
+		$this->assertSame( 3, $result['refresh_interval_hours'] );
+		$this->assertSame( 2, $result['schema_version'] );
 	}
 
 	public function test_update_clamps_cache_ttl_seconds_and_validates_default_product_type(): void {
@@ -119,6 +121,78 @@ final class GeneralSettingsTest extends TestCase {
 		$this->assertSame( 'ebook', $result['default_product_type'] );
 	}
 
+	public function test_update_preserves_refresh_interval_hours(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->andReturnUsing(
+				function ( $key, $value, $autoload ) {
+					$this->assertSame( 6, $value['refresh_interval_hours'] );
+					return true;
+				}
+			);
+
+		$result = GeneralSettings::update( array( 'refresh_interval_hours' => 6 ) );
+		$this->assertSame( 6, $result['refresh_interval_hours'] );
+	}
+
+	public function test_update_forces_refresh_interval_hours_below_minimum_to_default(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->andReturnUsing(
+				function ( $key, $value, $autoload ) {
+					$this->assertSame( 3, $value['refresh_interval_hours'] );
+					return true;
+				}
+			);
+
+		$result = GeneralSettings::update( array( 'refresh_interval_hours' => 0 ) );
+		$this->assertSame( 3, $result['refresh_interval_hours'] );
+	}
+
+	public function test_update_forces_negative_refresh_interval_hours_to_default(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->andReturnUsing(
+				function ( $key, $value, $autoload ) {
+					$this->assertSame( 3, $value['refresh_interval_hours'] );
+					return true;
+				}
+			);
+
+		$result = GeneralSettings::update( array( 'refresh_interval_hours' => -5 ) );
+		$this->assertSame( 3, $result['refresh_interval_hours'] );
+	}
+
+	public function test_update_forces_non_numeric_refresh_interval_hours_to_default(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->andReturnUsing(
+				function ( $key, $value, $autoload ) {
+					$this->assertSame( 3, $value['refresh_interval_hours'] );
+					return true;
+				}
+			);
+
+		$result = GeneralSettings::update( array( 'refresh_interval_hours' => 'not-a-number' ) );
+		$this->assertSame( 3, $result['refresh_interval_hours'] );
+	}
+
 	public function test_is_cron_enabled_reflects_option(): void {
 		WP_Mock::userFunction( 'get_option' )->with( GeneralSettings::OPTION_KEY, array() )->andReturn( array( 'cron_enabled' => true ) );
 		$this->assertTrue( GeneralSettings::isCronEnabled() );
@@ -127,5 +201,15 @@ final class GeneralSettingsTest extends TestCase {
 	public function test_is_cron_enabled_defaults_false(): void {
 		WP_Mock::userFunction( 'get_option' )->with( GeneralSettings::OPTION_KEY, array() )->andReturn( array() );
 		$this->assertFalse( GeneralSettings::isCronEnabled() );
+	}
+
+	public function test_refresh_interval_hours_reflects_option(): void {
+		WP_Mock::userFunction( 'get_option' )->with( GeneralSettings::OPTION_KEY, array() )->andReturn( array( 'refresh_interval_hours' => 6 ) );
+		$this->assertSame( 6, GeneralSettings::refreshIntervalHours() );
+	}
+
+	public function test_refresh_interval_hours_defaults_to_three(): void {
+		WP_Mock::userFunction( 'get_option' )->with( GeneralSettings::OPTION_KEY, array() )->andReturn( array() );
+		$this->assertSame( 3, GeneralSettings::refreshIntervalHours() );
 	}
 }

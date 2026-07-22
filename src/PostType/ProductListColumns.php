@@ -16,7 +16,8 @@ use Affilicard\Util\JsonField;
  */
 final class ProductListColumns {
 
-	public const COLUMN_KEY = 'affilicard_fallback';
+	public const COLUMN_KEY           = 'affilicard_fallback';
+	public const COLUMN_LAST_VERIFIED = 'affilicard_last_verified';
 
 	public static function register(): void {
 		$hook_post_type = ProductPostType::POST_TYPE;
@@ -33,17 +34,27 @@ final class ProductListColumns {
 		foreach ( $columns as $key => $label ) {
 			$new[ $key ] = $label;
 			if ( 'title' === $key ) {
-				$new[ self::COLUMN_KEY ] = __( 'Fallback', 'affilicard' );
+				$new[ self::COLUMN_KEY ]           = __( 'Fallback', 'affilicard' );
+				$new[ self::COLUMN_LAST_VERIFIED ] = __( '最終同期', 'affilicard' );
 			}
 		}
 		return $new;
 	}
 
 	public static function renderColumn( string $column_key, int $post_id ): void {
-		if ( self::COLUMN_KEY !== $column_key ) {
-			return;
+		switch ( $column_key ) {
+			case self::COLUMN_KEY:
+				self::renderFallbackColumn( $post_id );
+				return;
+			case self::COLUMN_LAST_VERIFIED:
+				self::renderLastVerifiedColumn( $post_id );
+				return;
+			default:
+				return;
 		}
+	}
 
+	private static function renderFallbackColumn( int $post_id ): void {
 		$listings_raw = get_post_meta( $post_id, ProductPostType::META_LISTINGS, true );
 		$listings     = is_array( $listings_raw ) ? $listings_raw : ( is_string( $listings_raw ) ? JsonField::decode( $listings_raw, array() ) : array() );
 
@@ -78,5 +89,35 @@ final class ProductListColumns {
 		if ( ! $has_hidden_price && ! $has_fallback ) {
 			echo '<span aria-hidden="true">—</span>';
 		}
+	}
+
+	/**
+	 * 各 listing の `last_verified_at`（UTC ISO8601）のうち最新（MAX）を `wp_date()` でサイトの
+	 * タイムゾーン/ロケールに整形して表示する。1件も無ければ Fallback カラムと同じ em dash。
+	 */
+	private static function renderLastVerifiedColumn( int $post_id ): void {
+		$listings_raw = get_post_meta( $post_id, ProductPostType::META_LISTINGS, true );
+		$listings     = is_array( $listings_raw ) ? $listings_raw : ( is_string( $listings_raw ) ? JsonField::decode( $listings_raw, array() ) : array() );
+
+		$max_ts = 0;
+		foreach ( $listings as $listing ) {
+			if ( ! is_array( $listing ) ) {
+				continue;
+			}
+			$at = isset( $listing['last_verified_at'] ) ? trim( (string) $listing['last_verified_at'] ) : '';
+			if ( '' === $at ) {
+				continue;
+			}
+			$ts = strtotime( $at );
+			if ( false !== $ts && $ts > $max_ts ) {
+				$max_ts = $ts;
+			}
+		}
+
+		if ( $max_ts > 0 ) {
+			echo esc_html( wp_date( 'Y-m-d H:i', $max_ts ) );
+			return;
+		}
+		echo '<span aria-hidden="true">—</span>';
 	}
 }
