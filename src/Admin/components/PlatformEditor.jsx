@@ -22,12 +22,15 @@ export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 			await triggerRefresh(platform.code);
 			setNotice({
 				type: 'success',
-				message: __('更新しました。', 'affilicard'),
+				message: __(
+					'価格更新を実行しました。反映結果はカードの価格・「最終同期」でご確認ください。',
+					'affilicard'
+				),
 			});
 		} catch {
 			setNotice({
 				type: 'error',
-				message: __('更新に失敗しました。', 'affilicard'),
+				message: __('価格更新の実行に失敗しました。', 'affilicard'),
 			});
 		} finally {
 			setRefreshing(false);

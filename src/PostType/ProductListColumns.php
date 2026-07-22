@@ -35,7 +35,7 @@ final class ProductListColumns {
 			$new[ $key ] = $label;
 			if ( 'title' === $key ) {
 				$new[ self::COLUMN_KEY ]           = __( 'Fallback', 'affilicard' );
-				$new[ self::COLUMN_LAST_VERIFIED ] = __( '最終更新', 'affilicard' );
+				$new[ self::COLUMN_LAST_VERIFIED ] = __( '最終同期', 'affilicard' );
 			}
 		}
 		return $new;

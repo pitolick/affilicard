@@ -385,7 +385,9 @@ describe( 'PlatformEditor', () => {
 			resolveRefresh( { ok: true } );
 
 			expect(
-				await screen.findByText( '更新しました。' )
+				await screen.findByText(
+					'価格更新を実行しました。反映結果はカードの価格・「最終同期」でご確認ください。'
+				)
 			).toBeInTheDocument();
 			await waitFor( () =>
 				expect(
@@ -409,7 +411,7 @@ describe( 'PlatformEditor', () => {
 			);
 
 			expect(
-				await screen.findByText( '更新に失敗しました。' )
+				await screen.findByText( '価格更新の実行に失敗しました。' )
 			).toBeInTheDocument();
 			expect(
 				screen.getByText( '今すぐこのプラットフォームを更新' )

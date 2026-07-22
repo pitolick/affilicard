@@ -69,7 +69,7 @@ final class ProductListColumnsTest extends TestCase {
 			$keys
 		);
 		$this->assertSame( 'Fallback', $result[ ProductListColumns::COLUMN_KEY ] );
-		$this->assertSame( '最終更新', $result[ ProductListColumns::COLUMN_LAST_VERIFIED ] );
+		$this->assertSame( '最終同期', $result[ ProductListColumns::COLUMN_LAST_VERIFIED ] );
 	}
 
 	public function test_renderColumn_echoes_warning_icon_when_listings_have_fallback(): void {

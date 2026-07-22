@@ -84,7 +84,9 @@ describe( '一括更新ボタンの feedback', () => {
 		resolveRefresh( { ok: true, scope: 'all', force: false } );
 
 		expect(
-			await screen.findByText( '一括更新を実行しました。' )
+			await screen.findByText(
+				'価格更新を実行しました。反映結果は各商品の価格・「最終同期」でご確認ください。'
+			)
 		).toBeInTheDocument();
 		await waitFor( () =>
 			expect( screen.getByText( '一括更新' ) ).not.toBeDisabled()
@@ -114,7 +116,9 @@ describe( '一括更新ボタンの feedback', () => {
 
 		resolveRefresh( { ok: true, scope: 'all', force: true } );
 		expect(
-			await screen.findByText( '一括更新を実行しました。' )
+			await screen.findByText(
+				'価格更新を実行しました。反映結果は各商品の価格・「最終同期」でご確認ください。'
+			)
 		).toBeInTheDocument();
 	} );
 
@@ -127,7 +131,7 @@ describe( '一括更新ボタンの feedback', () => {
 		fireEvent.click( screen.getByText( '一括更新' ) );
 
 		expect(
-			await screen.findByText( '一括更新に失敗しました。' )
+			await screen.findByText( '価格更新の実行に失敗しました。' )
 		).toBeInTheDocument();
 		expect( screen.getByText( '一括更新' ) ).not.toBeDisabled();
 	} );

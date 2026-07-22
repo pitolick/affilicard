@@ -9,8 +9,8 @@
 ### Added
 
 - General 設定に **全体更新間隔** `refresh_interval_hours`（既定 3h）を追加し、価格自動更新を「全プラットフォーム一括・単一グローバル間隔」に変更した。`RefreshScheduler` は単一グローバル cron `affilicard_refresh_all` で動作し、自動更新の対象は各プラットフォームの `provider !== 'manual'` から導出する（per-platform の `autoRefresh`・`refreshIntervalHours` は廃止）。カード下部の更新日時表示が全プラットフォームで整合するようになった。
-- 一括更新・強制一括更新（General パネル）／プラットフォーム個別更新ボタンに実行フィードバックを追加。実行中はボタンを disabled にして「更新中…」を表示し、完了時に成功/失敗を通知する。
-- 商品一覧に「最終更新」列を追加。商品ごとに listing の最新 `last_verified_at` を `wp_date` でローカライズ表示する。
+- 一括更新・強制一括更新（General パネル）／プラットフォーム個別更新ボタンに実行フィードバックを追加。実行中はボタンを disabled にして「更新中…」を表示し、完了時に成功/失敗を通知する。通知文言は「価格更新を実行しました。反映結果は各商品の価格・『最終同期』でご確認ください。」とし、全商品の価格取得成功を意味しない旨を明確にした。
+- 商品一覧に「最終同期」列を追加。商品ごとに listing の最新 `last_verified_at`（API で価格を確認・同期した時刻）を `wp_date` でローカライズ表示する。手動入力のみの商品は「—」を表示する。
 - 既存インストール向けに `eligibleProvider` バックフィル migration を追加（`rakuten-kobo` → `rakuten-kobo`、`dmm-books` → `dmm-ebook`。値が空の場合のみ・専用フラグで一度きり実行）。
 
 ### Changed

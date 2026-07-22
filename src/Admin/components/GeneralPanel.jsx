@@ -58,12 +58,15 @@ export function GeneralPanel() {
 			await triggerRefresh(null, force);
 			setNotice({
 				type: 'success',
-				message: __('一括更新を実行しました。', 'affilicard'),
+				message: __(
+					'価格更新を実行しました。反映結果は各商品の価格・「最終同期」でご確認ください。',
+					'affilicard'
+				),
 			});
 		} catch {
 			setNotice({
 				type: 'error',
-				message: __('一括更新に失敗しました。', 'affilicard'),
+				message: __('価格更新の実行に失敗しました。', 'affilicard'),
 			});
 		} finally {
 			setRefreshing(false);
