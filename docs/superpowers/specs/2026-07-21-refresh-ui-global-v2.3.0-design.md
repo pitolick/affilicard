@@ -45,13 +45,22 @@
 - `ProductAutoCreator::buildProductData` は成功 fetch から listing を組むが `last_verified_at` を刻まないため、Gutenberg ブロック自動作成の商品はカードで価格が非表示のまま（`ListingRefresher` と非対称）。fetch 成功時に `gmdate('c')`（UTC）で刻む。
 
 **S5. eligibleProvider バックフィル migration（汎用・非破壊）**
-- プラグイン更新時の upgrade routine で、既知 platform code → API provider を `eligibleProvider` が空の場合のみ補完（`rakuten-kobo`→`rakuten-kobo`、`dmm-books`→`dmm-ebook`）。`amazon-kindle`・VOD は空のまま（API provider 未実装）。既存 install の自動化ブロッカーを解消。
-- schema_version を bump し二重適用を防ぐ。
+- プラグイン更新時の upgrade routine（`admin_init`）で、`eligibleProvider` が空の platform を一度きり補完する。適用順:
+  1. **既知 code → API provider マップ**を空時のみ適用（`rakuten-kobo`→`rakuten-kobo`、`dmm-books`→`dmm-ebook`）。DMM は現状 `provider='manual'` だが、API 解禁時にトグルで自動化できるよう `eligibleProvider` を用意する。
+  2. **汎用則**: マップ未収載の code でも `provider !== 'manual'` かつ `eligibleProvider` が空なら `eligibleProvider = provider` を補完する。これは「自動判定は `provider.isAutomatic()`（provider != manual）だが、トグル表示は `eligibleProvider` 非空を条件とする」二つの基準が食い違い、UI 上は手動固定に見えるのに cron だけ自動 refresh される不整合（CodeRabbit 指摘）を閉じるため。
+- したがって `amazon-kindle`・VOD は provider が manual のままなら空を維持するが、既存データで provider が自動系に設定されている platform は eligibleProvider が補完される（UI/cron を一致させる非破壊補正）。既に値がある platform は上書きしない。
+- 二重適用防止は **専用オプション `affilicard_eligible_provider_backfilled`** のフラグで行う（`purgeLegacyProviderCredentials` と同じ一度きりパターン）。GeneralSettings の schema_version とは独立。再実行時の no-op はユニットテストで固定する。
 
 ### スコープ外／別対応
 
 - **e-comi WP のプラットフォーム設定を v2.3.0 デフォルトに一括リセット**（1回きりの運用作業・プラグインコード変更なし）:
   - `affilicard_platforms` を v2.3.0 の `PlatformConfig::defaults()` で上書き（provider 選択・自動更新・cron/間隔・色/ラベル/表示順などを既定へ）。`affilicard_general` の cron/interval も既定へ。
+  - **非破壊手順で実施する**（`affilicard_platforms` の上書きは platform 固有の手編集値を失わせ得るため。CodeRabbit 指摘）:
+    1. **export（バックアップ）**: 実行前に現行の `affilicard_platforms`・`affilicard_general` を REST（`--env-file` の本番資格情報でローカルから）で取得し JSON 保存する。
+    2. **dry-run（差分確認）**: 上書き予定の defaults と現行を差分表示し、失われる platform 固有値（手編集の色/ラベル/表示順/provider 等）が許容範囲かを目視確認する。
+    3. **適用**: 確認後にリセットを実行する。
+    4. **実行後検証**: 設定画面と実カード描画（`content.rendered` の `do_blocks`）で楽天Kobo の自動取得・価格・単一更新日時を確認する。
+    5. **rollback**: 問題があれば手順1の JSON を書き戻して原状復帰する。
   - **BookWalker 除去はこのリセットに包含**される（defaults に BookWalker が無いため）。
   - **保持するもの**: 認証情報 `affilicard_accounts`（AccountCredentials）と登録済み商品 CPT `affilicard_product`。これらは別オプション/別ポストタイプなのでリセット対象外。
   - 汎用プラグインに platform 固有の削除やリセットを焼き込むのは不可（他 install を壊す）。あくまで未公開の e-comi WP への一度きりのデータ操作とする。実施タイミングは v2.3.0 を e-comi WP に反映した後。
@@ -71,7 +80,7 @@
 
 ## 4. UI 仕様（プラットフォーム編集・API連携セクション）
 
-```
+```text
 API 連携（自動取得）
 ┌─────────────────────────────┐
 │ ◉ 手動入力   ○ 自動取得（楽天Kobo API）   │  ← ToggleControl（eligibleProvider 有時のみ）

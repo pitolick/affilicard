@@ -66,11 +66,11 @@
 
 **Files:** Create/Modify migration 実行箇所（既存の schema_version/upgrade 機構に合わせる。無ければ `Plugin` の init で version 比較）/ Test
 
-**Interfaces:** `rakuten-kobo`→`rakuten-kobo`、`dmm-books`→`dmm-ebook` を、対象 platform の `eligibleProvider` が空のときのみ設定。適用済みは schema_version（GeneralSettings か専用オプション）で二重適用防止。
+**Interfaces:** `eligibleProvider` が空の platform を補完する。適用順は (1) 既知マップ `rakuten-kobo`→`rakuten-kobo`／`dmm-books`→`dmm-ebook` を空時のみ、(2) マップ未収載でも `provider !== 'manual'` かつ空なら `eligibleProvider = provider`（自動判定 `provider.isAutomatic()` とトグル表示条件 `eligibleProvider` 非空の食い違いを閉じる）。既に値がある platform は上書きしない。二重適用防止は専用オプション `affilicard_eligible_provider_backfilled` のフラグで行う（GeneralSettings の schema_version とは独立）。
 
-- [ ] **Step 1: 失敗テスト** — 既存 platforms（eligibleProvider 空の rakuten-kobo/dmm-books を含む）を用意し、migration 実行後に各 eligibleProvider が補完されること、既に値がある場合は上書きしないこと、未知 code は変更しないこと。
+- [ ] **Step 1: 失敗テスト** — 既存 platforms（eligibleProvider 空の rakuten-kobo/dmm-books を含む）を用意し、migration 実行後に (a) 既知マップの eligibleProvider が補完される、(b) マップ未収載でも provider が非 manual なら eligibleProvider=provider が補完される、(c) `provider='manual'` かつ空の platform は空のまま、(d) 既に値がある platform は上書きされない、を検証。フラグによる再実行 no-op も固定。
 - [ ] **Step 2: RED**。
-- [ ] **Step 3: 実装** — migration 関数を追加し、`PlatformConfig::all()` を読み該当 code の `eligibleProvider` を補完して `PlatformConfig::save()`。適用フラグ（schema_version bump）で1回のみ。プラグイン更新契機（既存機構）に配線。BookWalker 等は対象外（マップに無い）。
+- [ ] **Step 3: 実装** — migration 関数を追加し、`PlatformConfig::all()` を読み上記ルールで `eligibleProvider` を補完して `PlatformConfig::save()`。専用フラグ option で1回のみ。プラグイン更新契機（`admin_init`・`purgeLegacyProviderCredentials` と同パターン）に配線。`provider='manual'` の platform（BookWalker・VOD・API 未解禁の amazon-kindle 等）は空のまま。
 - [ ] **Step 4: GREEN** ＋全体。
 - [ ] **Step 5: commit** `feat: 既存installのeligibleProviderをバックフィルするmigrationを追加`
 
@@ -150,7 +150,7 @@
 
 **Files:** `CHANGELOG.md`、`affilicard.php`（Version ヘッダ・AFFILICARD_VERSION）、`package.json`、`tests/e2e/`（トグル自動化→カード価格/更新日時、商品一覧列の E2E 追加/更新）
 
-- [ ] **Step 1** 全ゲート: `npx wp-scripts build`／`npm run lint:js`／`npx wp-scripts test-unit-js`／Docker phpunit＋phpcs。
+- [ ] **Step 1** 全ゲート: `npm run build`（`package.json` の build は 3 entrypoint を明示するため `npx wp-scripts build` 直呼びではなく npm script を使う）／`npm run lint:js`／`npx wp-scripts test-unit-js`／Docker phpunit＋phpcs。
 - [ ] **Step 2** E2E seed/spec を新モデルに合わせて更新（provider トグル・グローバル間隔・最終更新列）。
 - [ ] **Step 3** CHANGELOG `## [2.3.0]`＋Version 3箇所を **2.2.0 → 2.3.0** に同期（PUC）。
 - [ ] **Step 4** commit `chore: v2.3.0（価格更新UI簡素化＋全PF一括更新）`。
@@ -161,7 +161,12 @@
 ## ロールアウト（マージ・リリース後の運用作業）
 
 - **e-comi WP を v2.3.0 に更新**（PUC）。
-- **e-comi WP のプラットフォーム設定を v2.3.0 デフォルトに一括リセット**（`affilicard_platforms` を defaults で上書き＋`affilicard_general` の cron/interval をデフォルトへ）。**認証情報 `affilicard_accounts` と登録商品 CPT は保持**。BookWalker 除去を包含。REST or 管理操作で実施（正確な手段はロールアウト時に確定）。
+- **e-comi WP のプラットフォーム設定を v2.3.0 デフォルトに一括リセット**（`affilicard_platforms` を defaults で上書き＋`affilicard_general` の cron/interval をデフォルトへ）。**認証情報 `affilicard_accounts` と登録商品 CPT は保持**。BookWalker 除去を包含。**非破壊手順で実施する**（platform 固有の手編集値を失わせ得るため）:
+  1. **export**: 実行前に現行 `affilicard_platforms`・`affilicard_general` を REST（`--env-file` の本番資格情報）で取得し JSON バックアップ。
+  2. **dry-run**: defaults との差分を確認し、失われる platform 固有値が許容範囲か目視。
+  3. **適用**: 確認後にリセット実行。
+  4. **検証**: 設定画面＋実カード描画（`content.rendered` の `do_blocks`）で楽天Kobo 自動取得・価格・単一更新日時を確認。
+  5. **rollback**: 問題時は手順1の JSON を書き戻して原状復帰。
 - 楽天Kobo をトグルで自動取得 ON → 認証情報設定 → 一括更新で価格反映を確認。
 
 ---
