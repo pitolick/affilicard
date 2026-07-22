@@ -70,4 +70,33 @@ final class PriceFreshnessTest extends TestCase {
 		);
 		$this->assertTrue( PriceFreshness::isPriceDisplayable( $listing, $this->platform( 24 ), $now ) );
 	}
+
+	public function test_isStale_last_verified_at欠落はstale(): void {
+		$platform = $this->platform( 24 );
+		$this->assertTrue( PriceFreshness::isStale( array( 'price' => '500' ), $platform, 1_000_000 ) );
+	}
+
+	public function test_isStale_TTL内はfresh(): void {
+		$platform = $this->platform( 24 );
+		$now      = 1_000_000;
+		$listing  = array(
+			'price'            => '500',
+			'last_verified_at' => gmdate( 'c', $now - 3600 ),
+		); // 1h 前
+		$this->assertFalse( PriceFreshness::isStale( $listing, $platform, $now ) );
+	}
+
+	public function test_isStale_TTL超過はstale(): void {
+		$platform = $this->platform( 24 );
+		$now      = 1_000_000 + 25 * 3600;
+		$listing  = array(
+			'price'            => '500',
+			'last_verified_at' => gmdate( 'c', 1_000_000 ),
+		);
+		$this->assertTrue( PriceFreshness::isStale( $listing, $platform, $now ) );
+	}
+
+	public function test_isStale_platformなしはstale扱い(): void {
+		$this->assertTrue( PriceFreshness::isStale( array( 'price' => '500' ), null, 1_000_000 ) );
+	}
 }

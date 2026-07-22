@@ -40,4 +40,25 @@ final class PriceFreshness {
 		$age = $nowTs - $verifiedTs;
 		return $age <= $ttl;
 	}
+
+	/**
+	 * 再取得が必要か（stale か）を判定する。フレッシュな価格の再 fetch を避けるための鮮度スキップ用。
+	 *
+	 * @param array<string, mixed> $listing
+	 */
+	public static function isStale( array $listing, ?PlatformDefinition $platform, int $nowTs ): bool {
+		if ( null === $platform ) {
+			return true;
+		}
+		$verified = isset( $listing['last_verified_at'] ) ? trim( (string) $listing['last_verified_at'] ) : '';
+		if ( '' === $verified ) {
+			return true;
+		}
+		$verifiedTs = strtotime( $verified );
+		if ( false === $verifiedTs ) {
+			return true;
+		}
+		$ttl = $platform->priceTtlHours * 3600;
+		return ( $nowTs - $verifiedTs ) > $ttl;
+	}
 }
