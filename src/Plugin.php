@@ -180,13 +180,18 @@ final class Plugin {
 	}
 
 	/**
-	 * `eligibleProvider` 追加前に保存された既存 platform（rakuten-kobo/dmm-books）へ、
-	 * 既知の code→provider を一度きり補完する。
+	 * `eligibleProvider` 追加前に保存された既存 platform へ、provider を一度きり補完する。
 	 *
-	 * v2.3.0 の手動/自動トグルは eligibleProvider が空だと「自動取得」を選べないため、
-	 * seed（PlatformConfig::defaults()）は新規 install にしか効かない既存 install を
+	 * v2.3.0 の手動/自動トグルは eligibleProvider が空だと「自動取得」を選べない一方、
+	 * ListingRefresher の自動判定（`$provider->isAutomatic()`）は `provider !== 'manual'` で行うため、
+	 * eligibleProvider が空のまま provider != 'manual' な platform は UI 上「手動固定」に見えつつ
+	 * cron では自動 refresh される、という不整合が起き得る。
+	 * seed（PlatformConfig::defaults()）は新規 install にしか効かないため、既存 install を
 	 * `affilicard_eligible_provider_backfilled` フラグで一度だけ補完する。
-	 * 既に値がある platform は上書きせず、マップに無い code はそのまま残す。
+	 *
+	 * 優先順位: まず既知の code→provider マップを適用し、マップに無い code でも
+	 * `provider !== 'manual'` かつ eligibleProvider が空なら `eligibleProvider = provider` を補完する
+	 * 一般則を適用する。既に値がある platform は上書きしない。
 	 */
 	public static function backfillEligibleProviders(): void {
 		if ( ! current_user_can( 'manage_options' ) ) {
@@ -205,9 +210,15 @@ final class Plugin {
 		$out     = array();
 		foreach ( PlatformConfig::all() as $definition ) {
 			$arr = $definition->toArray();
-			if ( isset( $map[ $definition->code ] ) && '' === $definition->eligibleProvider ) {
-				$arr['eligibleProvider'] = $map[ $definition->code ];
-				$changed                 = true;
+			if ( '' === $definition->eligibleProvider ) {
+				if ( isset( $map[ $definition->code ] ) ) {
+					$arr['eligibleProvider'] = $map[ $definition->code ];
+					$changed                 = true;
+				} elseif ( 'manual' !== $definition->provider ) {
+					// マップ未収載でも provider が自動系なら、UI/cron の判定を一致させるため provider を補完する。
+					$arr['eligibleProvider'] = $definition->provider;
+					$changed                 = true;
+				}
 			}
 			$out[] = $arr;
 		}

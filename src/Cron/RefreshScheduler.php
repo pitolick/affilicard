@@ -70,6 +70,12 @@ final class RefreshScheduler {
 		$desired = $master ? self::scheduleName( GeneralSettings::refreshIntervalHours() ) : null;
 		$current = wp_get_schedule( self::HOOK_ALL, array() );
 
+		// 既知の check-then-act 競合（容認済み）: 同時期の複数 init リクエストが
+		// どちらも「未スケジュール」を見て、それぞれ異なる時刻で wp_schedule_event() を
+		// 呼び得る（重複イベント登録）。ウィンドウは同一サブ秒内の init 同時実行のみと極小で、
+		// 影響も次回 interval 変更までの余分な refresh 実行に留まる（データ破壊なし）。
+		// デフォルト構成（永続オブジェクトキャッシュ無し）では wp_cache_add() ロックは
+		// リクエスト間で共有されず無効なため、対症療法として追加しない。
 		if ( null === $desired ) {
 			if ( false !== $current ) {
 				wp_clear_scheduled_hook( self::HOOK_ALL, array() );

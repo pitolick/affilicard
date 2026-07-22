@@ -448,4 +448,71 @@ final class PluginTest extends TestCase {
 
 		$this->assertConditionsMet();
 	}
+
+	/**
+	 * F3: eligibleProvider が空で provider が 'manual' 以外（マップ未収載の code を含む）の platform は、
+	 * 一般則で eligibleProvider = provider に補完される（既知 code マップと同様に一度だけ）。
+	 * provider === 'manual' の platform は eligibleProvider が空のままでも変更しない。
+	 */
+	public function test_backfillEligibleProviders_fills_general_fallback_for_unmapped_automatic_provider(): void {
+		WP_Mock::userFunction( 'current_user_can' )
+			->with( 'manage_options' )
+			->andReturn( true );
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_eligible_provider_backfilled' )
+			->andReturn( false );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					array(
+						'code'             => 'bookwalker',
+						'name'             => 'BOOK☆WALKER',
+						'provider'         => 'rakuten-kobo', // マップ未収載の code だが provider は 'manual' 以外
+						'displayOrder'     => 5,
+						'enabled'          => true,
+						'applicableTypes'  => array( 'ebook' ),
+						'buttonLabel'      => 'BOOK☆WALKERで読む',
+						'brandColor'       => '#00a1e9',
+						'buttonTextColor'  => '#ffffff',
+						'eligibleProvider' => '', // 空 → 一般則で provider にフォールバックすべき
+					),
+					array(
+						'code'             => 'mystery-platform',
+						'name'             => 'Mystery',
+						'provider'         => 'manual',
+						'displayOrder'     => 4,
+						'enabled'          => true,
+						'applicableTypes'  => array( 'ebook' ),
+						'buttonLabel'      => '読む',
+						'brandColor'       => '#111111',
+						'buttonTextColor'  => '#ffffff',
+						'eligibleProvider' => '', // provider が 'manual' → 空のまま不変
+					),
+				)
+			);
+
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->with( PlatformConfig::OPTION_KEY, WP_Mock\Functions::type( 'array' ), false )
+			->andReturnUsing(
+				function ( $key, $value, $autoload ) {
+					$by_code = array();
+					foreach ( $value as $entry ) {
+						$by_code[ $entry['code'] ] = $entry;
+					}
+					$this->assertSame( 'rakuten-kobo', $by_code['bookwalker']['eligibleProvider'] );
+					$this->assertSame( '', $by_code['mystery-platform']['eligibleProvider'] );
+					return true;
+				}
+			);
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->with( 'affilicard_eligible_provider_backfilled', 1, false )
+			->andReturn( true );
+
+		Plugin::backfillEligibleProviders();
+
+		$this->assertConditionsMet();
+	}
 }
