@@ -1,0 +1,116 @@
+<?php
+declare(strict_types=1);
+
+namespace Affilicard\Queue;
+
+use Affilicard\Platform\PlatformDefinition;
+use Affilicard\Pricing\PriceFreshness;
+
+/**
+ * Action Scheduler へのジョブ投入を一元化するラッパー。
+ *
+ * すべてのトリガー（手動更新・強制更新・自動作成・掃引 Cron）はこのクラス経由で
+ * AS にジョブを積む。dedup は AS ネイティブの $unique=true、順序は $priority
+ * （force=0 > manual=10 > sweep=20）、provider 別に group を分けてレート制御・
+ * 監視をしやすくする。掃引専用の鮮度スキップと depth cap・jitter もここに集約する。
+ */
+final class Enqueuer {
+
+	public const HOOK_REFRESH    = 'affilicard_refresh_listing';
+	public const HOOK_AUTOCREATE = 'affilicard_autocreate';
+	public const PRIORITY_FORCE  = 0;
+	public const PRIORITY_MANUAL = 10;
+	public const PRIORITY_SWEEP  = 20;
+
+	public function __construct(
+		private int $depthCap = 500,
+		private int $maxJitterSeconds = 300
+	) {}
+
+	public function group( string $provider ): string {
+		return 'affilicard-' . $provider;
+	}
+
+	/**
+	 * 強制更新（ユーザーが「今すぐ更新」を明示的に押した場合）。
+	 *
+	 * 既存の同一ジョブを unschedule してから即時 priority 0 で積み直す。
+	 */
+	public function enqueueForced( int $postId, string $platform, string $provider ): void {
+		$args  = array(
+			'post_id'  => $postId,
+			'platform' => $platform,
+		);
+		$group = $this->group( $provider );
+
+		as_unschedule_all_actions( self::HOOK_REFRESH, $args, $group );
+		as_schedule_single_action( time(), self::HOOK_REFRESH, $args, $group, true, self::PRIORITY_FORCE );
+	}
+
+	/**
+	 * 手動更新（画面操作起点だが強制ではない通常トリガー）。
+	 */
+	public function enqueueManual( int $postId, string $platform, string $provider ): void {
+		$args = array(
+			'post_id'  => $postId,
+			'platform' => $platform,
+		);
+
+		as_schedule_single_action( time(), self::HOOK_REFRESH, $args, $this->group( $provider ), true, self::PRIORITY_MANUAL );
+	}
+
+	/**
+	 * 掃引 Cron 起点の更新。鮮度内（fresh）ならスキップし、depth cap 到達時も
+	 * スキップする（force/manual はこのガードの対象外）。積んだら true を返す。
+	 *
+	 * @param array<string, mixed> $listing
+	 */
+	public function enqueueSweep( int $postId, string $platform, string $provider, ?PlatformDefinition $def, array $listing, int $nowTs ): bool {
+		if ( ! PriceFreshness::isStale( $listing, $def, $nowTs ) ) {
+			return false;
+		}
+		if ( $this->queueDepth() >= $this->depthCap ) {
+			return false;
+		}
+
+		$args = array(
+			'post_id'  => $postId,
+			'platform' => $platform,
+		);
+		$when = time() + wp_rand( 0, $this->maxJitterSeconds );
+
+		as_schedule_single_action( $when, self::HOOK_REFRESH, $args, $this->group( $provider ), true, self::PRIORITY_SWEEP );
+		return true;
+	}
+
+	/**
+	 * 自動作成（未登録商品の初回作成）。即時 priority 0 で積む。
+	 */
+	public function enqueueAutoCreate( string $platform, string $provider, string $externalId ): void {
+		$args = array(
+			'platform'    => $platform,
+			'external_id' => $externalId,
+		);
+
+		as_schedule_single_action( time(), self::HOOK_AUTOCREATE, $args, $this->group( $provider ), true, self::PRIORITY_FORCE );
+	}
+
+	/**
+	 * pending 状態の AS ジョブ件数（provider 横断）。depth cap 判定に使う。
+	 *
+	 * MVP は group を絞らず全 pending 件数で代用する。provider 別 group に
+	 * 限定した集計が必要になったら QueueStats へ委譲する。
+	 */
+	public function queueDepth(): int {
+		$ids = as_get_scheduled_actions(
+			array(
+				'status'   => 'pending',
+				'per_page' => $this->depthCap + 1,
+				'group'    => '',
+			),
+			'ids'
+		);
+
+		return is_array( $ids ) ? count( $ids ) : 0;
+	}
+}
