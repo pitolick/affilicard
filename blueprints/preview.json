@@ -4,6 +4,18 @@
 	"landingPage": "/",
 	"steps": [
 		{
+			"step": "setSiteLanguage",
+			"language": "ja"
+		},
+		{
+			"step": "setSiteOptions",
+			"options": {
+				"timezone_string": "Asia/Tokyo",
+				"gmt_offset": "",
+				"start_of_week": "0"
+			}
+		},
+		{
 			"step": "installPlugin",
 			"pluginZipFile": { "resource": "url", "url": "{{ARTIFACT_URL:affilicard}}" },
 			"options": { "activate": true }
