@@ -19,6 +19,7 @@ use Affilicard\Provider\ManualProvider;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Provider\ProviderUiList;
 use Affilicard\Provider\Rakuten\RakutenProvider;
+use Affilicard\Queue\ActionSchedulerLoader;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Rest\CardPreviewController;
 use Affilicard\Rest\CredentialsController;
@@ -49,6 +50,9 @@ final class Plugin {
 	}
 
 	private function bootInstance(): void {
+		// bundle した Action Scheduler をロード（plugins_loaded 優先度 0）
+		ActionSchedulerLoader::register();
+
 		// CPT 登録
 		add_action( 'init', array( ProductPostType::class, 'register' ) );
 		add_action( 'init', array( \Affilicard\PostType\ProductMeta::class, 'register' ) );
