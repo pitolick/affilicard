@@ -9,6 +9,14 @@
  *   RefreshScheduler / RefreshController / Plugin::onTransitionPostStatus / settings.test.jsx）。
  *   対話的な最終確認は Phase 4a 終了時に seed 済み Playground プレビュー上で実施する。
  *   （既存 product-metabox.spec.js と同じく、未確定分は理由付きで test.skip する慣習に倣う）
+ *
+ * 追記（v2.4.0 更新キュー非同期化）: AutoCreate・手動更新ボタン・future→publish 昇格時の
+ * 反映は、いずれも v2.4.0 で同期実行から Action Scheduler 経由の非同期 enqueue に変更された
+ * （AutoCreateHandler / RefreshHandler / Plugin::onTransitionPostStatus 内の Enqueuer 呼び出し）。
+ * ProductAutoCreator・ListingRefresher 自体の判定ロジックは変わらず上記ハンドラから呼ばれ
+ * 続けるため、本ファイルの skip 対象・skip 理由・実行中テスト（future 非表示）は引き続き有効。
+ * enqueue 投入と Scheduled Actions への反映は tests/e2e/refresh-queue.spec.js（Task 17）で
+ * 別途カバーする。
  */
 
 'use strict';
