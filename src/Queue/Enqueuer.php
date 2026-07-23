@@ -96,6 +96,27 @@ final class Enqueuer {
 	}
 
 	/**
+	 * throttle/backoff によるハンドラの自己再投入。
+	 *
+	 * unique=false: ハンドラ実行中の自分自身が in-progress として重複判定されるため、
+	 * unique=true だと backoff/throttle の再投入が必ずスキップされてしまう。単一ワーカー
+	 * （AS claim による single-flight）実行中の 1 回だけ呼ばれるので false でも増殖しない。
+	 */
+	public function rescheduleRefresh( int $whenSec, int $postId, string $platform, string $provider ): void {
+		as_schedule_single_action(
+			$whenSec,
+			self::HOOK_REFRESH,
+			array(
+				'post_id'  => $postId,
+				'platform' => $platform,
+			),
+			$this->group( $provider ),
+			false,
+			self::PRIORITY_MANUAL
+		);
+	}
+
+	/**
 	 * pending 状態の AS ジョブ件数（provider 横断）。depth cap 判定に使う。
 	 *
 	 * MVP は group を絞らず全 pending 件数で代用する。provider 別 group に
