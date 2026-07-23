@@ -147,7 +147,8 @@ final class PluginTest extends TestCase {
 			'ID'        => 77,
 			'post_type' => 'affilicard_product',
 		);
-		WP_Mock::userFunction( 'get_post' )->with( 77 )->andReturn( null ); // find→null → save 不発
+		WP_Mock::userFunction( 'get_post' )->with( 77 )->andReturn( null ); // find→null → enqueue 不発
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
 		\Affilicard\Plugin::onTransitionPostStatus( 'publish', 'future', $post );
 		$this->assertConditionsMet();
 	}
@@ -167,6 +168,106 @@ final class PluginTest extends TestCase {
 			'post_type' => 'affilicard_product',
 		);
 		\Affilicard\Plugin::onTransitionPostStatus( 'publish', 'draft', $post ); // draft→publish は対象外
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * D（v2.4.0）: 予約投稿 future→publish 昇格時、v2.4.0 以前は ListingRefresher::refreshProduct
+	 * で同期 fetch していたが、AS 非同期キュー化により商品の ELIGIBLE な auto listing を
+	 * Enqueuer::enqueueProductListings 経由で force enqueue する（同期 fetch はしない）。
+	 */
+	public function test_on_transition_enqueues_eligible_auto_listing_on_future_to_publish(): void {
+		$postId = 80;
+		$post   = (object) array(
+			'ID'            => $postId,
+			'post_type'     => \Affilicard\PostType\ProductPostType::POST_TYPE,
+			'post_title'    => '対象作品',
+			'post_content'  => '',
+			'post_status'   => 'publish',
+			'post_modified' => '2026-07-23 00:00:00',
+		);
+
+		WP_Mock::userFunction( 'get_post' )->with( $postId )->andReturn( $post );
+
+		$listing = array(
+			'platform'    => 'rakuten-kobo',
+			'enabled'     => true,
+			'update_mode' => 'auto',
+			'auto_update' => true,
+			'external_id' => 'deadbeef01',
+			'price'       => '500',
+		);
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_EXTRAS, true )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_LISTINGS, true )
+			->andReturn( array( $listing ) );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_PRODUCT_TYPE, true )
+			->andReturn( 'ebook' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_STOCK_STATUS, true )
+			->andReturn( 'available' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_SCHEMA_VERSION, true )
+			->andReturn( '2' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_RELEASE_DATE, true )
+			->andReturn( '' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_MASK_BLUR, true )
+			->andReturn( '' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_MASK_R18, true )
+			->andReturn( '' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_MASK_LABEL, true )
+			->andReturn( '' );
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( \Affilicard\Settings\GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					array(
+						'code'         => 'rakuten-kobo',
+						'name'         => '楽天Kobo',
+						'provider'     => 'rakuten-kobo',
+						'displayOrder' => 3,
+						'enabled'      => true,
+					),
+				)
+			);
+
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once()
+			->with(
+				\Affilicard\Queue\Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => $postId,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten-kobo'
+			);
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::type( 'int' ),
+				\Affilicard\Queue\Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => $postId,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten-kobo',
+				true,
+				\Affilicard\Queue\Enqueuer::PRIORITY_FORCE
+			)
+			->andReturn( 900 );
+
+		\Affilicard\Plugin::onTransitionPostStatus( 'publish', 'future', $post );
+
 		$this->assertConditionsMet();
 	}
 

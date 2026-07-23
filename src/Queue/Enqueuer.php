@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Queue;
 
+use Affilicard\Platform\PlatformConfig;
 use Affilicard\Platform\PlatformDefinition;
 use Affilicard\Pricing\PriceFreshness;
 
@@ -134,6 +135,51 @@ final class Enqueuer {
 			false,
 			self::PRIORITY_FORCE
 		);
+	}
+
+	/**
+	 * 商品の ELIGIBLE な auto listing を enqueue する共通ヘルパー。
+	 *
+	 * ELIGIBLE 判定は QueueMaintenance::sweep()/PublishTrigger と同一
+	 * （update_mode=auto && enabled(既定true) && auto_update(既定true) && platform 定義が既知）。
+	 * `$manual` は積み方の選択のみを表す: false は force（enqueueForced・priority 0。
+	 * 予約投稿の future→publish 昇格や記事公開/更新等のイベント駆動）、true は手動ボタン
+	 * （enqueueManual・priority 10）。掃引（sweep）はここでは扱わない（鮮度スキップ・depth cap・
+	 * jitter を伴う別経路のため enqueueSweep を直接使う）。
+	 *
+	 * @param array<string, mixed> $product Repository::find() の戻り
+	 * @return int enqueue した listing 件数
+	 */
+	public function enqueueProductListings( int $postId, array $product, bool $manual ): int {
+		$listings = is_array( $product['listings'] ?? null ) ? $product['listings'] : array();
+
+		$count = 0;
+		foreach ( $listings as $listing ) {
+			if ( ! is_array( $listing ) ) {
+				continue;
+			}
+			$platform = (string) ( $listing['platform'] ?? '' );
+			$def      = PlatformConfig::find( $platform );
+			if ( null === $def ) {
+				continue;
+			}
+
+			$mode    = (string) ( $listing['update_mode'] ?? 'auto' );
+			$enabled = ! isset( $listing['enabled'] ) || (bool) $listing['enabled'];
+			$auto    = ! isset( $listing['auto_update'] ) || (bool) $listing['auto_update'];
+			if ( 'auto' !== $mode || ! $enabled || ! $auto ) {
+				continue;
+			}
+
+			if ( $manual ) {
+				$this->enqueueManual( $postId, $platform, $def->provider );
+			} else {
+				$this->enqueueForced( $postId, $platform, $def->provider );
+			}
+			++$count;
+		}
+
+		return $count;
 	}
 
 	/**

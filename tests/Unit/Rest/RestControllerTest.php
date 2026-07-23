@@ -4,8 +4,8 @@ declare(strict_types=1);
 namespace Affilicard\Tests\Unit\Rest;
 
 use Affilicard\Account\AccountRegistry;
-use Affilicard\Cron\ListingRefresher;
 use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Queue\Enqueuer;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Rest\CardPreviewController;
 use Affilicard\Rest\CredentialsController;
@@ -32,13 +32,12 @@ final class RestControllerTest extends TestCase {
 	}
 
 	public function test_register_hooks_rest_api_init_and_register_routes_dispatches_to_each_sub_controller(): void {
-		$refresher  = Mockery::mock( ListingRefresher::class );
 		$controller = new RestController(
 			new ProductsController( new ProductRepository() ),
 			new SettingsController(),
 			new PlatformsController(),
 			new CredentialsController( new ProviderRegistry(), new AccountRegistry() ),
-			new RefreshController( $refresher ),
+			new RefreshController( new ProductRepository(), new Enqueuer() ),
 			new CardPreviewController( new ProductRepository() )
 		);
 

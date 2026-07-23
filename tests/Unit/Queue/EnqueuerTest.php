@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Tests\Unit\Queue;
 
+use Affilicard\Platform\PlatformConfig;
 use Affilicard\Platform\PlatformDefinition;
 use Affilicard\Queue\Enqueuer;
 use WP_Mock;
@@ -27,6 +28,38 @@ final class EnqueuerTest extends TestCase {
 				'code'          => $code,
 				'priceTtlHours' => $ttl,
 			)
+		);
+	}
+
+	/** affilicard_platforms option を rakuten-kobo 1件で stub する。 */
+	private function stubRakutenPlatform(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					array(
+						'code'         => 'rakuten-kobo',
+						'name'         => '楽天Kobo',
+						'provider'     => 'rakuten-kobo',
+						'displayOrder' => 3,
+						'enabled'      => true,
+					),
+				)
+			);
+	}
+
+	/** @param array<string, mixed> $overrides */
+	private function eligibleListing( array $overrides = array() ): array {
+		return array_merge(
+			array(
+				'platform'    => 'rakuten-kobo',
+				'enabled'     => true,
+				'update_mode' => 'auto',
+				'auto_update' => true,
+				'external_id' => 'deadbeef01',
+				'price'       => '500',
+			),
+			$overrides
 		);
 	}
 
@@ -185,6 +218,119 @@ final class EnqueuerTest extends TestCase {
 
 		( new Enqueuer() )->rescheduleAutoCreate( 6000, 'rakuten-kobo', 'rakuten', 'ext-001' );
 		$this->assertConditionsMet();
+	}
+
+	/**
+	 * enqueueProductListings のテスト（onTransitionPostStatus/RefreshController 共用ヘルパー）。
+	 */
+	public function test_enqueueProductListings_manualfalse時はeligibleなauto_listingをenqueueForcedで積む(): void {
+		$this->stubRakutenPlatform();
+		$product = array( 'listings' => array( $this->eligibleListing() ) );
+
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once()
+			->with(
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 12,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten-kobo'
+			);
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				\Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 12,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten-kobo',
+				true,
+				Enqueuer::PRIORITY_FORCE
+			)
+			->andReturn( 500 );
+
+		$count = ( new Enqueuer() )->enqueueProductListings( 12, $product, false );
+
+		$this->assertSame( 1, $count );
+	}
+
+	public function test_enqueueProductListings_manualtrue時はeligibleなauto_listingをenqueueManualで積む(): void {
+		$this->stubRakutenPlatform();
+		$product = array( 'listings' => array( $this->eligibleListing() ) );
+
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				\Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 12,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten-kobo',
+				true,
+				Enqueuer::PRIORITY_MANUAL
+			)
+			->andReturn( 501 );
+
+		$count = ( new Enqueuer() )->enqueueProductListings( 12, $product, true );
+
+		$this->assertSame( 1, $count );
+	}
+
+	public function test_enqueueProductListings_manualかdisabledかauto_update無効のlistingは積まない(): void {
+		$this->stubRakutenPlatform();
+		$product = array(
+			'listings' => array(
+				$this->eligibleListing( array( 'update_mode' => 'manual' ) ),
+				$this->eligibleListing( array( 'enabled' => false ) ),
+				$this->eligibleListing( array( 'auto_update' => false ) ),
+			),
+		);
+
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$count = ( new Enqueuer() )->enqueueProductListings( 12, $product, false );
+
+		$this->assertSame( 0, $count );
+	}
+
+	public function test_enqueueProductListings_未知platformのlistingは積まない(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->andReturn( array() ); // platform 定義なし → find() は null
+
+		$product = array( 'listings' => array( $this->eligibleListing( array( 'platform' => 'unknown-platform' ) ) ) );
+
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$count = ( new Enqueuer() )->enqueueProductListings( 12, $product, false );
+
+		$this->assertSame( 0, $count );
+	}
+
+	public function test_enqueueProductListings_listingsが無い場合は0を返す(): void {
+		$count = ( new Enqueuer() )->enqueueProductListings( 12, array(), false );
+
+		$this->assertSame( 0, $count );
+	}
+
+	public function test_enqueueProductListings_複数listingsのうちeligible件数のみ返す(): void {
+		$this->stubRakutenPlatform();
+		$product = array(
+			'listings' => array(
+				$this->eligibleListing(),
+				$this->eligibleListing( array( 'update_mode' => 'manual' ) ),
+			),
+		);
+
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 502 );
+
+		$count = ( new Enqueuer() )->enqueueProductListings( 12, $product, false );
+
+		$this->assertSame( 1, $count );
 	}
 
 	public function test_queueDepth_pendingのids件数を返す(): void {

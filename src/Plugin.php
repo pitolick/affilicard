@@ -7,6 +7,7 @@ use Affilicard\Account\AccountRegistry;
 use Affilicard\Account\AccountUiList;
 use Affilicard\Account\DmmAccount;
 use Affilicard\Account\RakutenAccount;
+use Affilicard\AutoCreate\ProductAutoCreator;
 use Affilicard\Block\Block;
 use Affilicard\Cron\ListingRefresher;
 use Affilicard\Cron\RefreshScheduler;
@@ -20,8 +21,12 @@ use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Provider\ProviderUiList;
 use Affilicard\Provider\Rakuten\RakutenProvider;
 use Affilicard\Queue\ActionSchedulerLoader;
+use Affilicard\Queue\AutoCreateHandler;
 use Affilicard\Queue\Enqueuer;
+use Affilicard\Queue\PublishTrigger;
 use Affilicard\Queue\QueueMaintenance;
+use Affilicard\Queue\RateLimiter;
+use Affilicard\Queue\RefreshHandler;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Rest\CardPreviewController;
 use Affilicard\Rest\CredentialsController;
@@ -80,14 +85,18 @@ final class Plugin {
 		$providers = self::buildProviderRegistry();
 		self::buildProductTypeRegistry();
 
-		// REST API
+		// キュー: REST/AS ハンドラ/トリガー間で共有する Repository/Enqueuer
+		// （depth cap は enqueueForced/enqueueManual では未使用だが、掃引と同じ構築パターンに揃える）。
 		$repository = new ProductRepository();
-		$rest       = new RestController(
+		$enqueuer   = new Enqueuer( GeneralSettings::queueDepthCap() );
+
+		// REST API
+		$rest = new RestController(
 			new ProductsController( $repository ),
 			new SettingsController(),
 			new PlatformsController(),
 			new CredentialsController( $providers, self::buildAccountRegistry() ),
-			new RefreshController( new ListingRefresher( $providers, new ProductRepository() ) ),
+			new RefreshController( $repository, $enqueuer ),
 			new CardPreviewController( $repository )
 		);
 		$rest->register();
@@ -120,7 +129,36 @@ final class Plugin {
 		);
 		add_action( 'init', array( RefreshScheduler::class, 'reconcile' ) );
 
-		// 予約投稿（future）→ publish 昇格時に最新価格へ refresh
+		// キュー: AS アクション（Enqueuer::HOOK_REFRESH/HOOK_AUTOCREATE）のハンドラ配線。
+		// これが無いと Enqueuer が積んだジョブは AS 上に滞留したまま一切実行されない。
+		$refreshHandler = new RefreshHandler(
+			$enqueuer,
+			new RateLimiter(),
+			new ListingRefresher( $providers, $repository ),
+			$providers
+		);
+		add_action( Enqueuer::HOOK_REFRESH, array( $refreshHandler, 'handle' ), 10, 2 );
+
+		$autoCreateHandler = new AutoCreateHandler(
+			$enqueuer,
+			new RateLimiter(),
+			new ProductAutoCreator( $providers, $repository ),
+			$providers
+		);
+		add_action( Enqueuer::HOOK_AUTOCREATE, array( $autoCreateHandler, 'handle' ), 10, 2 );
+
+		// キュー: 記事（投稿）の公開時に、本文中の affilicard/product-card ブロックが参照する
+		// 既存商品の ELIGIBLE な auto listing を force enqueue するトリガー。
+		// これは商品 CPT 自身の future→publish（下の onTransitionPostStatus）とは独立した第 2 の
+		// transition_post_status ハンドラであり、両方を配線する（onUpdated は意図的に配線しない。
+		// transition_post_status は publish→publish の再保存も含め毎回発火するため、
+		// onTransition 側のガード（newStatus==='publish'）だけで全 publish ケースを既にカバーする。
+		// onUpdated も配線すると二重発火するため配線しない）。
+		$publishTrigger = new PublishTrigger( $repository, $enqueuer );
+		add_action( 'transition_post_status', array( $publishTrigger, 'onTransition' ), 10, 3 );
+
+		// 予約投稿（product CPT・future）→ publish 昇格時に、対象商品の ELIGIBLE な auto listing を
+		// force enqueue する（PublishTrigger とは別系統・商品 CPT 自身の遷移を扱う）。
 		add_action( 'transition_post_status', array( self::class, 'onTransitionPostStatus' ), 10, 3 );
 
 		// 有効化フック: デフォルト platform を idempotent に seed
@@ -257,7 +295,9 @@ final class Plugin {
 	}
 
 	/**
-	 * 予約投稿（future）が publish に昇格した瞬間に listing を最新価格へ refresh する。
+	 * 予約投稿（future）が publish に昇格した瞬間に、対象商品の ELIGIBLE な auto listing を
+	 * Enqueuer 経由で force enqueue する（v2.4.0: 同期 fetch から AS 非同期キュー化。実際の
+	 * fetch/保存は RefreshHandler が Enqueuer::HOOK_REFRESH ハンドラとして担う）。
 	 *
 	 * @param object $post
 	 */
@@ -268,7 +308,14 @@ final class Plugin {
 		if ( ! is_object( $post ) || ! isset( $post->post_type ) || ProductPostType::POST_TYPE !== $post->post_type ) {
 			return;
 		}
-		( new ListingRefresher( self::buildProviderRegistry(), new ProductRepository() ) )->refreshProduct( (int) $post->ID );
+
+		$postId  = (int) $post->ID;
+		$product = ( new ProductRepository() )->find( $postId );
+		if ( null === $product ) {
+			return;
+		}
+
+		( new Enqueuer( GeneralSettings::queueDepthCap() ) )->enqueueProductListings( $postId, $product, false );
 	}
 
 	public static function enqueueSettingsAssets( string $hook ): void {
