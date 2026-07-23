@@ -226,4 +226,8 @@ final class DmmProvider implements ProviderInterface {
 		}
 		return $value instanceof \WP_Error;
 	}
+
+	public function minRequestIntervalMs(): int {
+		return 1000; // 暫定・公式/実測で確定
+	}
 }

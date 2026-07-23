@@ -45,4 +45,10 @@ interface ProviderInterface {
 	 * @return array{ok: bool, message: string}
 	 */
 	public function testConnection( array $credentials ): array;
+
+	/**
+	 * この provider の安全な最小リクエスト間隔（ミリ秒）。手動入力は 0。
+	 * RateLimiter が provider 別 throttle の下限として使う。
+	 */
+	public function minRequestIntervalMs(): int;
 }

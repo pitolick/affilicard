@@ -241,4 +241,8 @@ final class RakutenProvider implements ProviderInterface {
 		}
 		return '';
 	}
+
+	public function minRequestIntervalMs(): int {
+		return 1100; // 楽天 openapi ≈ 1 req/sec/app ＋余裕
+	}
 }

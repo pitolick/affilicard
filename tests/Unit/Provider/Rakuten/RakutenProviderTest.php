@@ -491,4 +491,8 @@ final class RakutenProviderTest extends TestCase {
 		$result = ( new RakutenProvider() )->fetch( '123', array() );
 		$this->assertSame( '', $result['platform_extras']['release_date'] );
 	}
+
+	public function test_minRequestIntervalMs_楽天は1100(): void {
+		$this->assertSame( 1100, ( new RakutenProvider() )->minRequestIntervalMs() );
+	}
 }

@@ -42,4 +42,8 @@ final class ManualProvider implements ProviderInterface {
 			'message' => __( '手動入力 Provider です（疎通確認不要）', 'affilicard' ),
 		);
 	}
+
+	public function minRequestIntervalMs(): int {
+		return 0;
+	}
 }

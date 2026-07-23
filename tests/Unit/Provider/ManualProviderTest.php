@@ -44,4 +44,8 @@ final class ManualProviderTest extends TestCase {
 		$provider = new ManualProvider();
 		$this->assertNull( $provider->fetch( 'product-123', array() ) );
 	}
+
+	public function test_minRequestIntervalMs_手動入力は0(): void {
+		$this->assertSame( 0, ( new ManualProvider() )->minRequestIntervalMs() );
+	}
 }

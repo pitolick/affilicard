@@ -130,6 +130,9 @@ final class CredentialsControllerTest extends TestCase {
 						'message' => 'pub=' . ( $credentials['pub'] ?? '' ) . ';sec=' . ( $credentials['sec'] ?? '' ),
 					);
 				}
+				public function minRequestIntervalMs(): int {
+					return 0;
+				}
 			}
 		);
 		return $reg;
@@ -162,6 +165,9 @@ final class CredentialsControllerTest extends TestCase {
 						'ok'      => true,
 						'message' => 'keys=' . implode( ',', array_keys( $credentials ) ),
 					);
+				}
+				public function minRequestIntervalMs(): int {
+					return 0;
 				}
 			}
 		);

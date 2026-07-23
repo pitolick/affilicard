@@ -39,6 +39,9 @@ final class ProviderUiListTest extends TestCase {
 					'message' => '',
 				);
 			}
+			public function minRequestIntervalMs(): int {
+				return 0;
+			}
 		};
 	}
 

@@ -70,6 +70,9 @@ final class ProviderRegistryTest extends TestCase {
 					'message' => '',
 				);
 			}
+			public function minRequestIntervalMs(): int {
+				return 0;
+			}
 		};
 	}
 }

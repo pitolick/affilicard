@@ -161,4 +161,8 @@ final class DmmProviderTest extends TestCase {
 		$result = ( new DmmProvider() )->fetch( 'ext-123', array() );
 		$this->assertSame( 'サンプル商品タイトル', $result['title'] );
 	}
+
+	public function test_minRequestIntervalMs_DMMは1000(): void {
+		$this->assertSame( 1000, ( new DmmProvider() )->minRequestIntervalMs() );
+	}
 }
