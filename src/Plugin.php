@@ -20,6 +20,8 @@ use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Provider\ProviderUiList;
 use Affilicard\Provider\Rakuten\RakutenProvider;
 use Affilicard\Queue\ActionSchedulerLoader;
+use Affilicard\Queue\Enqueuer;
+use Affilicard\Queue\QueueMaintenance;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Rest\CardPreviewController;
 use Affilicard\Rest\CredentialsController;
@@ -29,6 +31,7 @@ use Affilicard\Rest\RefreshController;
 use Affilicard\Rest\RestController;
 use Affilicard\Rest\SettingsController;
 use Affilicard\Settings\DashboardWidget;
+use Affilicard\Settings\GeneralSettings;
 use Affilicard\Types\EbookType;
 use Affilicard\Types\GenericType;
 use Affilicard\Types\ProductTypeRegistry;
@@ -107,9 +110,12 @@ final class Plugin {
 		);
 
 		// 価格更新 Cron: 全体単一イベントのハンドラ登録 + 設定との差分調整
+		// v2.4.0 でハンドラを同期一括更新（ListingRefresher::run）から掃引（QueueMaintenance::sweep）へ
+		// 差し替え。実際の fetch/保存は Action Scheduler ハンドラ（RefreshHandler）側に移る。
 		RefreshScheduler::register(
 			static function (): void {
-				( new ListingRefresher( self::buildProviderRegistry(), new ProductRepository() ) )->run();
+				$enqueuer = new Enqueuer( GeneralSettings::queueDepthCap() );
+				( new QueueMaintenance( new ProductRepository(), $enqueuer ) )->sweep();
 			}
 		);
 		add_action( 'init', array( RefreshScheduler::class, 'reconcile' ) );
