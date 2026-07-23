@@ -18,6 +18,12 @@ if ( ! defined( 'AFFILICARD_PLUGIN_FILE' ) ) {
 if ( ! defined( 'MINUTE_IN_SECONDS' ) ) {
 	define( 'MINUTE_IN_SECONDS', 60 );
 }
+if ( ! defined( 'HOUR_IN_SECONDS' ) ) {
+	define( 'HOUR_IN_SECONDS', 3600 );
+}
+if ( ! defined( 'DAY_IN_SECONDS' ) ) {
+	define( 'DAY_IN_SECONDS', 86400 );
+}
 
 // WP_Mock は did_action()/doing_action() を提供しないため、bundle した Action Scheduler の
 // synchronous require（Plugin::bootInstance() → ActionSchedulerLoader::boot()）が正しく動くよう

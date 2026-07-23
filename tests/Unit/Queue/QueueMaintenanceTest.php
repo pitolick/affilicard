@@ -7,12 +7,13 @@ use Affilicard\PostType\ProductPostType;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\QueueMaintenance;
 use Affilicard\Repository\ProductRepositoryInterface;
+use Affilicard\Settings\GeneralSettings;
 use Mockery;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
 
 /**
- * QueueMaintenance::sweep() のテスト。
+ * QueueMaintenance::sweep() / registerRetentionFilters() のテスト。
  *
  * Enqueuer は final class のため Mockery でモックできず、他の Queue テスト
  * （RefreshHandlerTest/AutoCreateHandlerTest）と同様に実 Enqueuer を使い、
@@ -254,5 +255,44 @@ final class QueueMaintenanceTest extends TestCase {
 		( new QueueMaintenance( $repo, new Enqueuer() ) )->sweep();
 
 		$this->assertConditionsMet();
+	}
+
+	/** affilicard_general option を retention 値でスタブする。 */
+	private function stubRetention( int $doneHours, int $failedDays ): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					'retention_done_hours'  => $doneHours,
+					'retention_failed_days' => $failedDays,
+				)
+			);
+	}
+
+	public function test_registerRetentionFilters_completedとfailedの両フィルタを登録する(): void {
+		WP_Mock::expectFilterAdded(
+			'action_scheduler_retention_period',
+			array( QueueMaintenance::class, 'doneRetentionSeconds' )
+		);
+		WP_Mock::expectFilterAdded(
+			'action_scheduler_retention_period_for_failed',
+			array( QueueMaintenance::class, 'failedRetentionSeconds' )
+		);
+
+		QueueMaintenance::registerRetentionFilters();
+
+		$this->assertConditionsMet();
+	}
+
+	public function test_doneRetentionSeconds_retention_done_hoursを秒に変換して返す(): void {
+		$this->stubRetention( 48, 7 );
+
+		$this->assertSame( 48 * HOUR_IN_SECONDS, QueueMaintenance::doneRetentionSeconds() );
+	}
+
+	public function test_failedRetentionSeconds_retention_failed_daysを秒に変換して返す(): void {
+		$this->stubRetention( 24, 10 );
+
+		$this->assertSame( 10 * DAY_IN_SECONDS, QueueMaintenance::failedRetentionSeconds() );
 	}
 }

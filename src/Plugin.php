@@ -144,6 +144,9 @@ final class Plugin {
 		);
 		add_action( 'init', array( RefreshScheduler::class, 'reconcile' ) );
 
+		// キュー: AS の completed/failed アクション保持期間を GeneralSettings に連動。
+		QueueMaintenance::registerRetentionFilters();
+
 		// キュー: AS アクション（Enqueuer::HOOK_REFRESH/HOOK_AUTOCREATE）のハンドラ配線。
 		// これが無いと Enqueuer が積んだジョブは AS 上に滞留したまま一切実行されない。
 		$refreshHandler = new RefreshHandler(

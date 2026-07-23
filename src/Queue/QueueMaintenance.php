@@ -6,6 +6,7 @@ namespace Affilicard\Queue;
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Repository\ProductRepositoryInterface;
+use Affilicard\Settings\GeneralSettings;
 
 /**
  * 掃引（sweep）: 公開中の全商品を走査し、自動更新対象 listing を Enqueuer 経由で
@@ -18,6 +19,13 @@ use Affilicard\Repository\ProductRepositoryInterface;
  *
  * 注意: ListingRefresher::refreshOne()（ハンドラが実行時に呼ぶ）はこの対象フィルタを
  * 再チェックしないため、enqueue 時点でのフィルタリングがここで担保する唯一のゲートになる。
+ *
+ * registerRetentionFilters(): Action Scheduler の完了/失敗アクション保持期間を
+ * GeneralSettings（管理画面で設定した done 時間 / failed 日数）へ連動させる。
+ * AS 自身の掃除 cron（action_scheduler_run_canceller 等）がこのフィルタ値を使って
+ * 古い completed/failed アクションを purge するため、reconcile（取りこぼし回収）は
+ * sweep（stale listing の再 enqueue）と AS 自身の recurring-action 安全策で実質的に
+ * カバーされる。
  */
 final class QueueMaintenance {
 
@@ -68,5 +76,24 @@ final class QueueMaintenance {
 				$this->enqueuer->enqueueSweep( (int) $id, $platform, $def->provider, $def, $listing, $now );
 			}
 		}
+	}
+
+	/**
+	 * Action Scheduler の completed/failed アクション保持期間フィルタを
+	 * GeneralSettings の値に連動させる。
+	 */
+	public static function registerRetentionFilters(): void {
+		add_filter( 'action_scheduler_retention_period', array( self::class, 'doneRetentionSeconds' ) );
+		add_filter( 'action_scheduler_retention_period_for_failed', array( self::class, 'failedRetentionSeconds' ) );
+	}
+
+	/** completed アクションの保持期間（秒）。 */
+	public static function doneRetentionSeconds(): int {
+		return GeneralSettings::retentionDoneHours() * HOUR_IN_SECONDS;
+	}
+
+	/** failed アクションの保持期間（秒）。 */
+	public static function failedRetentionSeconds(): int {
+		return GeneralSettings::retentionFailedDays() * DAY_IN_SECONDS;
 	}
 }
