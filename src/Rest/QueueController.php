@@ -201,7 +201,14 @@ final class QueueController {
 				$args = $action->get_args();
 				$args = is_array( $args ) ? $args : array();
 
-				as_schedule_single_action( time(), $hook, $args, $group, true, Enqueuer::PRIORITY_MANUAL );
+				// $unique=true のため、同一 hook/args の pending が既に存在すると 0（no-op）が返る。
+				// その場合は再試行が実質行われていないので、元の failed action は削除せず残す
+				// （次回の retry 対象・表示のどちらからも失われないようにする）。
+				$scheduledId = as_schedule_single_action( time(), $hook, $args, $group, true, Enqueuer::PRIORITY_MANUAL );
+				if ( empty( $scheduledId ) ) {
+					continue;
+				}
+
 				$this->actionStore->deleteAction( (int) $id );
 				++$retried;
 			}

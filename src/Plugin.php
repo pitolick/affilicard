@@ -91,14 +91,15 @@ final class Plugin {
 		$providers = self::buildProviderRegistry();
 		self::buildProductTypeRegistry();
 
+		// キューパネル（Task 15/16）・depth cap 集計（I1）共通: 自動更新対象 provider コード
+		// （'manual' を除く）を ProviderRegistry から都度導出する。QueueStats/QueueController/
+		// Enqueuer にハードコードしない。
+		$automaticProviderCodes = self::automaticProviderCodes( $providers );
+
 		// キュー: REST/AS ハンドラ/トリガー間で共有する Repository/Enqueuer
 		// （depth cap は enqueueForced/enqueueManual では未使用だが、掃引と同じ構築パターンに揃える）。
 		$repository = new ProductRepository();
 		$enqueuer   = new Enqueuer( GeneralSettings::queueDepthCap() );
-
-		// キューパネル（Task 15/16）: 自動更新対象 provider コード（'manual' を除く）を
-		// ProviderRegistry から都度導出する。QueueStats/QueueController にハードコードしない。
-		$automaticProviderCodes = self::automaticProviderCodes( $providers );
 
 		// REST API
 		$rest = new RestController(
@@ -137,8 +138,10 @@ final class Plugin {
 		// v2.4.0 でハンドラを同期一括更新（ListingRefresher::run）から掃引（QueueMaintenance::sweep）へ
 		// 差し替え。実際の fetch/保存は Action Scheduler ハンドラ（RefreshHandler）側に移る。
 		RefreshScheduler::register(
-			static function (): void {
-				$enqueuer = new Enqueuer( GeneralSettings::queueDepthCap() );
+			static function () use ( $automaticProviderCodes ): void {
+				// I1: depth cap backstop が affilicard 以外の pending action（WooCommerce 等）に
+				// 誤反応しないよう、provider group 別集計に限定する providerCodes を渡す。
+				$enqueuer = new Enqueuer( GeneralSettings::queueDepthCap(), 300, $automaticProviderCodes );
 				( new QueueMaintenance( new ProductRepository(), $enqueuer ) )->sweep();
 			}
 		);

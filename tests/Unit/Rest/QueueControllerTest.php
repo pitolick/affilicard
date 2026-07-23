@@ -331,4 +331,67 @@ final class QueueControllerTest extends TestCase {
 
 		$this->assertSame( 0, $res->get_data()['retried'] );
 	}
+
+	/**
+	 * as_schedule_single_action は $unique=true で同一 hook/args の pending が既に存在すると
+	 * 0（no-op）を返す。この場合、元の failed action を削除してはならない（再試行が実質
+	 * 行われていないため、削除すると失敗記録もキュー表示件数も失われる）。
+	 */
+	public function test_retryFailed_scheduleが0を返すno_opの場合は元のfailedを削除せずretriedにも数えない(): void {
+		$action = new class() {
+			public function get_hook(): string {
+				return Enqueuer::HOOK_REFRESH;
+			}
+
+			/** @return array<string, mixed> */
+			public function get_args(): array {
+				return array(
+					'post_id'  => 7,
+					'platform' => 'rakuten-kobo',
+				);
+			}
+		};
+
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->with(
+				array(
+					'group'    => self::RAKUTEN_GROUP,
+					'status'   => 'failed',
+					'per_page' => -1,
+				)
+			)
+			->andReturn( array( 40 => $action ) );
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->with(
+				array(
+					'group'    => self::DMM_GROUP,
+					'status'   => 'failed',
+					'per_page' => -1,
+				)
+			)
+			->andReturn( array() );
+
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 7,
+					'platform' => 'rakuten-kobo',
+				),
+				self::RAKUTEN_GROUP,
+				true,
+				Enqueuer::PRIORITY_MANUAL
+			)
+			->andReturn( 0 );
+
+		$actionStore = Mockery::mock( ActionStoreInterface::class );
+		$actionStore->shouldNotReceive( 'deleteAction' );
+
+		$res = $this->controller( $actionStore )->retryFailed( new WP_REST_Request() );
+
+		$this->assertTrue( $res->get_data()['ok'] );
+		$this->assertSame( 0, $res->get_data()['retried'] );
+	}
 }

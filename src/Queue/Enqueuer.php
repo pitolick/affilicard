@@ -23,9 +23,17 @@ final class Enqueuer {
 	public const PRIORITY_MANUAL = 10;
 	public const PRIORITY_SWEEP  = 20;
 
+	/**
+	 * @param list<string> $providerCodes 深さ集計を affilicard-{provider} group 別に限定する
+	 *        provider コード（例: ['rakuten-kobo', 'dmm-ebook']）。空配列（既定）の場合は
+	 *        後方互換のため queueDepth() が group='' の全 pending 件数にフォールバックする
+	 *        （I1: 他プラグインの pending も巻き込む旧挙動。呼び出し側が provider を渡せない
+	 *        既存インスタンス化を壊さないための互換パス）。
+	 */
 	public function __construct(
 		private int $depthCap = 500,
-		private int $maxJitterSeconds = 300
+		private int $maxJitterSeconds = 300,
+		private array $providerCodes = array()
 	) {}
 
 	public function group( string $provider ): string {
@@ -187,21 +195,41 @@ final class Enqueuer {
 	}
 
 	/**
-	 * pending 状態の AS ジョブ件数（provider 横断）。depth cap 判定に使う。
+	 * pending 状態の AS ジョブ件数。depth cap 判定に使う。
 	 *
-	 * MVP は group を絞らず全 pending 件数で代用する。provider 別 group に
-	 * 限定した集計が必要になったら QueueStats へ委譲する。
+	 * providerCodes が渡されていれば affilicard-{provider} group 別に集計して合算する
+	 * （I1: WooCommerce 等、無関係な他プラグインの pending action を depth cap
+	 * backstop に巻き込まない）。providerCodes が空（既定）の場合のみ、後方互換として
+	 * group='' の全 pending 件数にフォールバックする。
 	 */
 	public function queueDepth(): int {
-		$ids = as_get_scheduled_actions(
-			array(
-				'status'   => 'pending',
-				'per_page' => $this->depthCap + 1,
-				'group'    => '',
-			),
-			'ids'
-		);
+		if ( array() === $this->providerCodes ) {
+			$ids = as_get_scheduled_actions(
+				array(
+					'status'   => 'pending',
+					'per_page' => $this->depthCap + 1,
+					'group'    => '',
+				),
+				'ids'
+			);
 
-		return is_array( $ids ) ? count( $ids ) : 0;
+			return is_array( $ids ) ? count( $ids ) : 0;
+		}
+
+		$total = 0;
+		foreach ( $this->providerCodes as $providerCode ) {
+			$ids = as_get_scheduled_actions(
+				array(
+					'status'   => 'pending',
+					'per_page' => -1,
+					'group'    => $this->group( $providerCode ),
+				),
+				'ids'
+			);
+
+			$total += is_array( $ids ) ? count( $ids ) : 0;
+		}
+
+		return $total;
 	}
 }

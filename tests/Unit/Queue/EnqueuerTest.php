@@ -386,4 +386,57 @@ final class EnqueuerTest extends TestCase {
 
 		$this->assertSame( 3, ( new Enqueuer() )->queueDepth() );
 	}
+
+	/**
+	 * providerCodes を渡した場合は affilicard-{provider} group 別に pending 件数を集計して
+	 * 合算する（他プラグイン等の group='' 全体件数は数えない。I1: depth cap backstop が
+	 * 無関係な pending action に誤反応しないようにするための per-group 化）。
+	 */
+	public function test_queueDepth_providerCodes指定時はprovider別groupのpending件数を合算する(): void {
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->once()
+			->with(
+				array(
+					'status'   => 'pending',
+					'per_page' => -1,
+					'group'    => 'affilicard-rakuten-kobo',
+				),
+				'ids'
+			)
+			->andReturn( array( 1, 2 ) );
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->once()
+			->with(
+				array(
+					'status'   => 'pending',
+					'per_page' => -1,
+					'group'    => 'affilicard-dmm-ebook',
+				),
+				'ids'
+			)
+			->andReturn( array( 3 ) );
+
+		$enqueuer = new Enqueuer( 500, 300, array( 'rakuten-kobo', 'dmm-ebook' ) );
+
+		$this->assertSame( 3, $enqueuer->queueDepth() );
+	}
+
+	/**
+	 * providerCodes 未指定（既定 array()）の場合は後方互換のため従来通り group='' の
+	 * 全 pending 件数にフォールバックする。
+	 */
+	public function test_queueDepth_providerCodes未指定時はglobalpending件数にフォールバックする(): void {
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )->once()
+			->with(
+				array(
+					'status'   => 'pending',
+					'per_page' => 501,
+					'group'    => '',
+				),
+				'ids'
+			)
+			->andReturn( array( 1, 2, 3, 4 ) );
+
+		$this->assertSame( 4, ( new Enqueuer() )->queueDepth() );
+	}
 }
