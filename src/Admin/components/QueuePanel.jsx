@@ -107,7 +107,12 @@ export function QueuePanel() {
 		setSaving(true);
 		setNotice(null);
 		try {
-			const next = await updateSettings(settings);
+			// queue_paused は /pause 専用エンドポイント（setPaused）が単独で所有する。
+			// settings フォームの保存に含めると、mount 時に取得した古い
+			// queue_paused がサーバー側の array_merge で勝ってしまい、
+			// pause 状態を意図せず revert させてしまうため除外する。
+			const { queue_paused, ...payload } = settings;
+			const next = await updateSettings(payload);
 			setSettings(next);
 			setNotice({
 				type: 'success',

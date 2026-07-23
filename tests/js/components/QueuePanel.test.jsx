@@ -34,6 +34,7 @@ const baseStats = {
 };
 
 const baseSettings = {
+	queue_paused: false,
 	throttle_overrides: { 'rakuten-kobo': 1500 },
 	retention_done_hours: 24,
 	retention_failed_days: 7,
@@ -143,6 +144,25 @@ describe('QueuePanel', () => {
 				expect.objectContaining({ retention_failed_days: 14 })
 			)
 		);
+	});
+
+	test('saving settings after toggling pause does not send queue_paused (pause stays server-owned)', async () => {
+		render(<QueuePanel />);
+
+		const toggle = await screen.findByLabelText(/一時停止/);
+		fireEvent.click(toggle);
+		await waitFor(() => expect(setPaused).toHaveBeenCalledWith(true));
+
+		const saveButton = screen.getByRole('button', { name: '保存' });
+		fireEvent.click(saveButton);
+
+		await waitFor(() => expect(updateSettings).toHaveBeenCalled());
+		const payload = updateSettings.mock.calls[0][0];
+		expect(payload).not.toHaveProperty('queue_paused');
+
+		// pause の切り替え結果（stats.paused）は保存後も維持される
+		// （loadStats は onSaveSettings から呼ばれないため revert されない）。
+		expect(screen.getByLabelText(/一時停止/)).toBeChecked();
 	});
 
 	test('links to the Scheduled Actions tools page', async () => {
