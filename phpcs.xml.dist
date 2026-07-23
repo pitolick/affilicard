@@ -81,6 +81,12 @@
         <exclude-pattern>tests/bootstrap\.php</exclude-pattern>
     </rule>
 
+    <!-- tests/bootstrap.php は WP コアクラス stub と did_action()/doing_action() 等の関数 stub を
+         同一ファイルに一括宣言するため、function/OO 混在禁止規約を除外 -->
+    <rule ref="Universal.Files.SeparateFunctionsFromOO">
+        <exclude-pattern>tests/bootstrap\.php</exclude-pattern>
+    </rule>
+
     <!-- テストコードは $GLOBALS['wpdb'] への代入で wpdb をモックする -->
     <rule ref="WordPress.WP.GlobalVariablesOverride.Prohibited">
         <exclude-pattern>tests/</exclude-pattern>

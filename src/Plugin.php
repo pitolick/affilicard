@@ -61,8 +61,11 @@ final class Plugin {
 	}
 
 	private function bootInstance(): void {
-		// bundle した Action Scheduler をロード（plugins_loaded 優先度 0）
-		ActionSchedulerLoader::register();
+		// bundle した Action Scheduler を同期ロード（プラグインファイル require 時点）。
+		// plugins_loaded へ延期すると、AS 自身が plugins_loaded@0 で登録する init コールバックが
+		// 現在イテレート中の plugins_loaded@0 バケットに追加され得ず（PHP/WP の do_action は
+		// イテレート中のバケットへの追加コールバックを拾わない）、AS が一切初期化されない不具合がある。
+		ActionSchedulerLoader::boot();
 
 		// CPT 登録
 		add_action( 'init', array( ProductPostType::class, 'register' ) );

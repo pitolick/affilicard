@@ -19,6 +19,21 @@ if ( ! defined( 'MINUTE_IN_SECONDS' ) ) {
 	define( 'MINUTE_IN_SECONDS', 60 );
 }
 
+// WP_Mock は did_action()/doing_action() を提供しないため、bundle した Action Scheduler の
+// synchronous require（Plugin::bootInstance() → ActionSchedulerLoader::boot()）が正しく動くよう
+// 最小スタブを用意する。plugins_loaded は本テストスイートでは一度も do_action() されないため、
+// 「まだ発火していない」という実 WP 環境（プラグイン require 時点）と同じ状態を返す。
+if ( ! function_exists( 'did_action' ) ) {
+	function did_action( string $tag ): int { // phpcs:ignore WordPress.NamingConventions.ValidFunctionName.MethodNameInvalid
+		return 0;
+	}
+}
+if ( ! function_exists( 'doing_action' ) ) {
+	function doing_action( ?string $tag = null ): bool { // phpcs:ignore WordPress.NamingConventions.ValidFunctionName.MethodNameInvalid
+		return false;
+	}
+}
+
 if ( ! class_exists( 'WP_Error' ) ) {
 	class WP_Error {} // @phpstan-ignore-line
 }
