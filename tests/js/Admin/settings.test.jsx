@@ -13,6 +13,7 @@ jest.mock( '../../../src/Admin/api/refresh', () => ( {
 		Promise.resolve( { ok: true, scope: 'all', force: false } )
 	),
 } ) );
+jest.mock( '../../../src/Admin/api/queue' );
 
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SettingsApp } from '../../../src/Admin/settings';
@@ -20,6 +21,7 @@ import { fetchSettings } from '../../../src/Admin/api/settings';
 import { fetchPlatforms } from '../../../src/Admin/api/platforms';
 import { fetchCredentials } from '../../../src/Admin/api/credentials';
 import { triggerRefresh } from '../../../src/Admin/api/refresh';
+import { fetchQueueStats } from '../../../src/Admin/api/queue';
 import { PlatformEditor } from '../../../src/Admin/components/PlatformEditor';
 
 beforeEach( () => {
@@ -27,6 +29,7 @@ beforeEach( () => {
 	fetchPlatforms.mockReset();
 	fetchCredentials.mockReset();
 	triggerRefresh.mockReset();
+	fetchQueueStats.mockReset();
 	fetchSettings.mockResolvedValue( {
 		cache_ttl_seconds: 86400,
 		default_product_type: 'generic',
@@ -35,14 +38,15 @@ beforeEach( () => {
 	fetchPlatforms.mockResolvedValue( [] );
 	fetchCredentials.mockResolvedValue( {} );
 	triggerRefresh.mockResolvedValue( { ok: true, scope: 'all', force: false } );
+	fetchQueueStats.mockResolvedValue( { summary: {}, depth: 0, paused: false } );
 } );
 
 describe( 'SettingsApp', () => {
-	test( 'renders the two tabs (general / platforms)', async () => {
+	test( 'renders the three tabs (general / platforms / queue)', async () => {
 		render( <SettingsApp /> );
 		const tabs = screen.getAllByRole( 'tab' );
 		const titles = tabs.map( ( t ) => t.textContent );
-		expect( titles ).toEqual( [ '一般', 'プラットフォーム' ] );
+		expect( titles ).toEqual( [ '一般', 'プラットフォーム', '更新キュー' ] );
 		// Wait for the auto-mounted GeneralPanel's effect to flush so React
 		// doesn't emit an act(…) warning during test teardown.
 		await waitFor( () =>
@@ -69,6 +73,18 @@ describe( 'SettingsApp', () => {
 		fireEvent.click( platformsTab );
 		await waitFor( () =>
 			expect( fetchPlatforms ).toHaveBeenCalled()
+		);
+	} );
+
+	test( 'switches to queue tab when its tab is clicked', async () => {
+		render( <SettingsApp /> );
+		await waitFor( () =>
+			expect( fetchSettings ).toHaveBeenCalled()
+		);
+		const queueTab = screen.getByRole( 'tab', { name: '更新キュー' } );
+		fireEvent.click( queueTab );
+		await waitFor( () =>
+			expect( fetchQueueStats ).toHaveBeenCalled()
 		);
 	} );
 } );
