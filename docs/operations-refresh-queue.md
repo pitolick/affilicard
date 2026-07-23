@@ -137,7 +137,7 @@ WordPress 管理画面の affilicard 設定から「更新キュー」セクシ�
 
 ```bash
 # Action Scheduler ストアの pending 件数
-cd /path/to/wp && /usr/bin/wp db query "SELECT COUNT(*) FROM {$wpdb->prefix}actionscheduler_actions WHERE status='pending';"
+cd /path/to/wp && /usr/bin/wp db query "SELECT COUNT(*) FROM $(wp db prefix)actionscheduler_actions WHERE status='pending';"
 ```
 
 **対処**:
@@ -174,7 +174,7 @@ Tools → Scheduled Actions で failed をフィルタ。詳細確認：
 **一括再試行**:
 
 ```bash
-cd /path/to/wp && /usr/bin/wp db query "UPDATE {$wpdb->prefix}actionscheduler_actions SET status='pending' WHERE status='failed' AND hook LIKE 'affilicard_%';"
+cd /path/to/wp && /usr/bin/wp db query "UPDATE $(wp db prefix)actionscheduler_actions SET status='pending' WHERE status='failed' AND hook LIKE 'affilicard_%';"
 ```
 
 または管理画面 → 更新キュー → **失敗を再試行** ボタン。

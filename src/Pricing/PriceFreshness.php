@@ -50,6 +50,10 @@ final class PriceFreshness {
 		if ( null === $platform ) {
 			return true;
 		}
+		$price = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
+		if ( '' === $price ) {
+			return true;
+		}
 		$verified = isset( $listing['last_verified_at'] ) ? trim( (string) $listing['last_verified_at'] ) : '';
 		if ( '' === $verified ) {
 			return true;

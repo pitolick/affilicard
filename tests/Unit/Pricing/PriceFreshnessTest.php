@@ -99,4 +99,24 @@ final class PriceFreshnessTest extends TestCase {
 	public function test_isStale_platformなしはstale扱い(): void {
 		$this->assertTrue( PriceFreshness::isStale( array( 'price' => '500' ), null, 1_000_000 ) );
 	}
+
+	public function test_isStale_TTL内でもprice空はstale(): void {
+		// last_verified_at は TTL 内（fresh）だが price が空のケース。
+		// isPriceDisplayable は price 空を非表示にするため、isStale が false（fresh扱い）だと
+		// TTL 内はずっと再取得されず、カードは価格非表示のまま自己修復しない。
+		$platform = $this->platform( 24 );
+		$now      = 1_000_000;
+		$listing  = array(
+			'price'            => '',
+			'last_verified_at' => gmdate( 'c', $now - 3600 ), // 1時間前（TTL内）
+		);
+		$this->assertTrue( PriceFreshness::isStale( $listing, $platform, $now ) );
+	}
+
+	public function test_isStale_TTL内でもprice未設定はstale(): void {
+		$platform = $this->platform( 24 );
+		$now      = 1_000_000;
+		$listing  = array( 'last_verified_at' => gmdate( 'c', $now - 3600 ) ); // price キー自体が無い
+		$this->assertTrue( PriceFreshness::isStale( $listing, $platform, $now ) );
+	}
 }

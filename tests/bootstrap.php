@@ -197,6 +197,7 @@ if ( ! class_exists( 'WP_Post' ) ) {
 	 *
 	 * @phpstan-ignore-next-line
 	 */
+	#[\AllowDynamicProperties]
 	class WP_Post {
 
 		public int $ID = 0;
