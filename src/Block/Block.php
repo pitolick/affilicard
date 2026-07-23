@@ -3,7 +3,8 @@ declare(strict_types=1);
 
 namespace Affilicard\Block;
 
-use Affilicard\AutoCreate\ProductAutoCreator;
+use Affilicard\Platform\PlatformConfig;
+use Affilicard\Queue\Enqueuer;
 use Affilicard\Renderer\CardHtmlBuilder;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Repository\ProductRepositoryInterface;
@@ -22,15 +23,11 @@ final class Block {
 
 	public function __construct(
 		private ProductRepositoryInterface $repository,
-		private ProductAutoCreator $autoCreator
+		private Enqueuer $enqueuer
 	) {}
 
 	public static function register_hook(): void {
-		$repository = new ProductRepository();
-		$instance   = new self(
-			$repository,
-			new ProductAutoCreator( \Affilicard\Plugin::buildProviderRegistry(), $repository )
-		);
+		$instance = new self( new ProductRepository(), new Enqueuer() );
 		add_action( 'init', array( $instance, 'register' ) );
 	}
 
@@ -125,6 +122,13 @@ final class Block {
 		return null;
 	}
 
+	/**
+	 * 未登録の externalId+platform を非同期 AutoCreate ジョブとして enqueue する。
+	 *
+	 * フロント render 中の同期 HTTP 呼び出しを避けるため、ここでは商品を作らず
+	 * ジョブを積むだけに留める（実際の生成は AutoCreateHandler が担う）。
+	 * カードは今回のビューでは描画されず、次回以降のビューで生成済み商品として解決される。
+	 */
 	private function autoCreate( string $platform, string $externalId ): ?array {
 		$lock_key = 'affilicard_autocreate_' . $platform . '_' . $externalId;
 		if ( false !== get_transient( $lock_key ) ) {
@@ -132,13 +136,15 @@ final class Block {
 		}
 		set_transient( $lock_key, 1, 5 * MINUTE_IN_SECONDS );
 
-		$post_id = $this->autoCreator->create( $platform, $externalId );
-		if ( null === $post_id ) {
-			// 失敗時はロックを即解放し、次回リクエストで再試行できるようにする
+		$definition = PlatformConfig::find( $platform );
+		if ( null === $definition ) {
+			// 未知の platform code は enqueue できないため、ロックを即解放し次回リクエストで再試行できるようにする
 			// （解放しないと 5 分間リトライ不能になる）。
 			delete_transient( $lock_key );
 			return null;
 		}
-		return $this->repository->find( $post_id );
+
+		$this->enqueuer->enqueueAutoCreate( $platform, $definition->provider, $externalId );
+		return null;
 	}
 }
