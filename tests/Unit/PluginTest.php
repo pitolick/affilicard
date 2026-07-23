@@ -142,6 +142,47 @@ final class PluginTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	public function test_boot_registers_queue_handlers_and_publish_trigger_hooks(): void {
+		// v2.4.0 で追加された 3 配線（RefreshHandler/AutoCreateHandler/PublishTrigger）が
+		// Plugin::boot() から確実に登録されることを検証する。これが欠けると Enqueuer が積んだ
+		// ジョブが Action Scheduler 上に滞留したまま一切実行されなくなる、キュー機能の生命線。
+		WP_Mock::userFunction( 'is_admin', array( 'return' => false ) );
+		WP_Mock::userFunction( 'register_activation_hook', array( 'return' => true ) );
+		WP_Mock::userFunction( 'register_deactivation_hook', array( 'return' => true ) );
+
+		// RefreshHandler::handle / AutoCreateHandler::handle は bootInstance() 内で生成される
+		// インスタンスメソッド配列コールバックのため、インスタンス自体は特定できない。
+		// block init hook のテストと同じ手法（AnyInstance マッチャー）でクラス型のみ厳密に検査する。
+		WP_Mock::expectActionAdded(
+			\Affilicard\Queue\Enqueuer::HOOK_REFRESH,
+			array( new \WP_Mock\Matcher\AnyInstance( \Affilicard\Queue\RefreshHandler::class ), 'handle' ),
+			10,
+			2
+		);
+		WP_Mock::expectActionAdded(
+			\Affilicard\Queue\Enqueuer::HOOK_AUTOCREATE,
+			array( new \WP_Mock\Matcher\AnyInstance( \Affilicard\Queue\AutoCreateHandler::class ), 'handle' ),
+			10,
+			2
+		);
+
+		// transition_post_status は本テストで 2 系統登録される：
+		// 1) 既存の静的 [Plugin::class, 'onTransitionPostStatus']（商品 CPT 自身の future→publish）
+		// 2) 新規の PublishTrigger インスタンスコールバック（記事公開時に本文中の商品を force enqueue）
+		// 両方を expect しないと、片方が削除されてももう一方の一致だけでテストが緑のままになる。
+		WP_Mock::expectActionAdded( 'transition_post_status', array( Plugin::class, 'onTransitionPostStatus' ), 10, 3 );
+		WP_Mock::expectActionAdded(
+			'transition_post_status',
+			array( new \WP_Mock\Matcher\AnyInstance( \Affilicard\Queue\PublishTrigger::class ), 'onTransition' ),
+			10,
+			3
+		);
+
+		Plugin::boot();
+
+		$this->assertConditionsMet();
+	}
+
 	public function test_on_transition_refreshes_on_future_to_publish(): void {
 		$post = (object) array(
 			'ID'        => 77,
