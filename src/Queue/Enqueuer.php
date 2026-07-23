@@ -117,6 +117,26 @@ final class Enqueuer {
 	}
 
 	/**
+	 * throttle/backoff による AutoCreateHandler の自己再投入。
+	 *
+	 * unique=false: rescheduleRefresh と同様、実行中の自分自身が in-progress として
+	 * 重複判定されてしまうため false（単一ワーカー実行中の 1 回だけ呼ばれるので増殖しない）。
+	 */
+	public function rescheduleAutoCreate( int $whenSec, string $platform, string $provider, string $externalId ): void {
+		as_schedule_single_action(
+			$whenSec,
+			self::HOOK_AUTOCREATE,
+			array(
+				'platform'    => $platform,
+				'external_id' => $externalId,
+			),
+			$this->group( $provider ),
+			false,
+			self::PRIORITY_FORCE
+		);
+	}
+
+	/**
 	 * pending 状態の AS ジョブ件数（provider 横断）。depth cap 判定に使う。
 	 *
 	 * MVP は group を絞らず全 pending 件数で代用する。provider 別 group に

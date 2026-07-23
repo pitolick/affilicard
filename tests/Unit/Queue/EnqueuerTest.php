@@ -168,6 +168,25 @@ final class EnqueuerTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	public function test_rescheduleAutoCreate_指定時刻にpriority0で再投入する_uniqueはfalse(): void {
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				6000,
+				Enqueuer::HOOK_AUTOCREATE,
+				array(
+					'platform'    => 'rakuten-kobo',
+					'external_id' => 'ext-001',
+				),
+				'affilicard-rakuten',
+				false, // $unique: 自己再投入は実行中の自分自身が in-progress 重複となるため false
+				Enqueuer::PRIORITY_FORCE
+			)
+			->andReturn( 1 );
+
+		( new Enqueuer() )->rescheduleAutoCreate( 6000, 'rakuten-kobo', 'rakuten', 'ext-001' );
+		$this->assertConditionsMet();
+	}
+
 	public function test_queueDepth_pendingのids件数を返す(): void {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )->once()
 			->with(
