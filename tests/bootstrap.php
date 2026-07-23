@@ -170,4 +170,31 @@ if ( ! class_exists( 'WP_REST_Response' ) ) {
 	}
 }
 
+if ( ! class_exists( 'WP_Post' ) ) {
+	/**
+	 * Minimal WP_Post stub for unit tests.
+	 *
+	 * @phpstan-ignore-next-line
+	 */
+	class WP_Post {
+
+		public int $ID = 0;
+
+		public string $post_type = 'post';
+
+		public string $post_status = 'publish';
+
+		public string $post_content = '';
+
+		/**
+		 * @param array<string, mixed> $data
+		 */
+		public function __construct( array $data = array() ) {
+			foreach ( $data as $key => $value ) {
+				$this->$key = $value;
+			}
+		}
+	}
+}
+
 WP_Mock::bootstrap();
