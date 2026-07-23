@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-07-24
+
+### Added
+
+- **価格更新を Action Scheduler ベースの非同期キューに移行**した。手動一括更新・cron・公開/更新イベントは「更新ジョブをキューに投入」するだけで即座に返し、実際の価格取得はバックグラウンドの Action Scheduler ランナーが順次処理する。Action Scheduler はプラグインに bundle し、プラグイン読み込み時に同期 require する。
+- **per-provider レート制限耐性**（`RateLimiter`）を追加。Provider ごとの最小リクエスト間隔（`ProviderInterface::minRequestIntervalMs()`／楽天 Kobo=1100ms・DMM=1000ms・手動=0）をクロスプロセスで厳守し、間隔未経過のジョブはワーカーをブロックせず後ろ倒し再スケジュールする。間隔は 429 バックオフ（指数・上限 1h クランプ）でも延長する。管理画面から Provider 別に上書き可能。
+- **鮮度スキップ**（`PriceFreshness::isStale()`）: `last_verified_at` が TTL 内の listing はキューに投入しない。cron 掃引（`affilicard_refresh_all`）が継続更新の主役となり、stale な auto listing のみを jitter 付きで投入する。
+- **トリガーの層構造**: 公開/更新時に記事内商品を force 投入（`PublishTrigger`・`parse_blocks` で解決）、future→publish 昇格・手動更新も enqueue 化。dedup は Action Scheduler ネイティブの `$unique`、優先度は `$priority`（force=0/手動=10/掃引=20）で表現する。
+- **AutoCreate の非同期化**: 未登録ブロックのフロント描画時に同期 API を叩く従来動作を廃し、生成ジョブを enqueue するだけにした（描画の同期 HTTP を除去）。
+- **キュー管理 UI**（設定→更新キュー）: Provider 別 pending/in-progress/failed 集計・キュー深さ・pause トグル・Provider 別スロットル/保持期間設定・一括操作（全削除/failed 削除/failed 再試行/pending キャンセル）。per-job 明細は Action Scheduler の Tools→Scheduled Actions（group `affilicard-{provider}`）を活用する。REST は `manage_options`。
+- ログ保持期間を Action Scheduler の retention フィルタに連動（完了=時間・失敗=日数、既定 24h/7日）。商品一覧の Fallback 列にキュー待ち/失敗理由を連携（provider エラー文字列は `wp_strip_all_tags`＋`esc_attr` の二重防御）。
+- 運用ドキュメント `docs/operations-refresh-queue.md`（サーバ実 cron＋`wp action-scheduler run` 推奨）を追加。
+
+### Changed
+
+- 手動更新 REST（`/affilicard/v1/refresh`）・product CPT の future→publish 昇格を、同期処理から Action Scheduler enqueue に変更した（`force` パラメータの「auto_update=false も対象」挙動は維持）。
+
 ## [2.3.0] - 2026-07-21
 
 ### Added
