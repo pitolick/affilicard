@@ -141,16 +141,20 @@ final class Enqueuer {
 	 * 商品の ELIGIBLE な auto listing を enqueue する共通ヘルパー。
 	 *
 	 * ELIGIBLE 判定は QueueMaintenance::sweep()/PublishTrigger と同一
-	 * （update_mode=auto && enabled(既定true) && auto_update(既定true) && platform 定義が既知）。
+	 * （update_mode=auto && enabled(既定true) && ( $force || auto_update(既定true) ) &&
+	 * platform 定義が既知）。`$force` は auto_update=false（ユーザーが手動上書き中）の
+	 * listing も対象に含めるかどうかのみを制御する（管理画面「強制更新」ボタン用。旧
+	 * ListingRefresher::run($force) の force 挙動を踏襲）。
 	 * `$manual` は積み方の選択のみを表す: false は force（enqueueForced・priority 0。
 	 * 予約投稿の future→publish 昇格や記事公開/更新等のイベント駆動）、true は手動ボタン
-	 * （enqueueManual・priority 10）。掃引（sweep）はここでは扱わない（鮮度スキップ・depth cap・
+	 * （enqueueManual・priority 10）。$force と $manual は直交する（$force は対象の広さ、
+	 * $manual は積み方）。掃引（sweep）はここでは扱わない（鮮度スキップ・depth cap・
 	 * jitter を伴う別経路のため enqueueSweep を直接使う）。
 	 *
 	 * @param array<string, mixed> $product Repository::find() の戻り
 	 * @return int enqueue した listing 件数
 	 */
-	public function enqueueProductListings( int $postId, array $product, bool $manual ): int {
+	public function enqueueProductListings( int $postId, array $product, bool $manual, bool $force = false ): int {
 		$listings = is_array( $product['listings'] ?? null ) ? $product['listings'] : array();
 
 		$count = 0;
@@ -167,7 +171,7 @@ final class Enqueuer {
 			$mode    = (string) ( $listing['update_mode'] ?? 'auto' );
 			$enabled = ! isset( $listing['enabled'] ) || (bool) $listing['enabled'];
 			$auto    = ! isset( $listing['auto_update'] ) || (bool) $listing['auto_update'];
-			if ( 'auto' !== $mode || ! $enabled || ! $auto ) {
+			if ( 'auto' !== $mode || ! $enabled || ! ( $force || $auto ) ) {
 				continue;
 			}
 

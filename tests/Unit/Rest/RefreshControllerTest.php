@@ -207,6 +207,70 @@ final class RefreshControllerTest extends TestCase {
 		$this->assertSame( 0, $res->get_data()['queued'] );
 	}
 
+	/**
+	 * force=true リクエストは auto_update=false の listing も enqueue し、
+	 * レスポンスに force=true を含める（強制更新ボタンの既存挙動の復元）。
+	 */
+	public function test_handle_forcetrue時はauto_updatefalseのlistingもenqueueしforcetrueを返す(): void {
+		$this->stubRakutenPlatform();
+
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 22 ) );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->once()->with( 22 )->andReturn(
+			$this->product( 22, array( $this->eligibleListing( array( 'auto_update' => false ) ) ) )
+		);
+
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 22,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten-kobo',
+				true,
+				Enqueuer::PRIORITY_MANUAL
+			)
+			->andReturn( 702 );
+
+		$req = new WP_REST_Request();
+		$req->set_param( 'platform', '' );
+		$req->set_param( 'force', true );
+
+		$res = ( new RefreshController( $repo, new Enqueuer() ) )->handle( $req );
+
+		$this->assertSame( 1, $res->get_data()['queued'] );
+		$this->assertTrue( $res->get_data()['force'] );
+	}
+
+	/**
+	 * force を省略（=false）した場合は auto_update=false の listing は enqueue されず、
+	 * レスポンスの force も false になる。
+	 */
+	public function test_handle_forceを省略した場合はauto_updatefalseのlistingを積まずforcefalseを返す(): void {
+		$this->stubRakutenPlatform();
+
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 23 ) );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->once()->with( 23 )->andReturn(
+			$this->product( 23, array( $this->eligibleListing( array( 'auto_update' => false ) ) ) )
+		);
+
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$req = new WP_REST_Request();
+		$req->set_param( 'platform', '' );
+
+		$res = ( new RefreshController( $repo, new Enqueuer() ) )->handle( $req );
+
+		$this->assertSame( 0, $res->get_data()['queued'] );
+		$this->assertFalse( $res->get_data()['force'] );
+	}
+
 	public function test_permission_requires_manage_options(): void {
 		WP_Mock::userFunction( 'current_user_can' )->with( 'manage_options' )->andReturn( false );
 		$repo = Mockery::mock( ProductRepositoryInterface::class );

@@ -18,8 +18,10 @@ use WP_REST_Response;
  * RefreshHandler（Enqueuer::HOOK_REFRESH）が担う。ここでは enqueue 件数を即座に返すのみ。
  *
  * platform 未指定なら全公開商品、指定なら該当 platform の listing のみ enqueue する。
- * enqueue 対象は ELIGIBLE listing（update_mode=auto && enabled && auto_update）のみ
- * （Enqueuer::enqueueProductListings と同一の判定）。
+ * enqueue 対象は ELIGIBLE listing（update_mode=auto && enabled && ( force || auto_update )）
+ * のみ（Enqueuer::enqueueProductListings と同一の判定）。`force` request param は旧
+ * ListingRefresher::run($force) 由来の挙動（管理画面「強制更新」ボタン）で、
+ * auto_update=false（手動上書き中）の listing も対象に含める。
  */
 final class RefreshController {
 
@@ -49,14 +51,16 @@ final class RefreshController {
 	public function handle( WP_REST_Request $request ): WP_REST_Response {
 		$platform = (string) $request->get_param( 'platform' );
 		$scope    = '' === $platform ? 'all' : $platform;
+		$force    = (bool) $request->get_param( 'force' );
 
-		$queued = $this->enqueueEligibleListings( '' !== $platform ? $platform : null );
+		$queued = $this->enqueueEligibleListings( '' !== $platform ? $platform : null, $force );
 
 		return new WP_REST_Response(
 			array(
 				'ok'     => true,
 				'scope'  => $scope,
 				'queued' => $queued,
+				'force'  => $force,
 			),
 			200
 		);
@@ -65,8 +69,10 @@ final class RefreshController {
 	/**
 	 * 公開中の全商品を走査し、ELIGIBLE な auto listing を manual enqueue する。
 	 * $onlyPlatform が指定されていれば、その platform の listing のみを対象にする。
+	 * $force=true の場合は auto_update=false の listing も対象に含める
+	 * （管理画面「強制更新」ボタン用。旧 ListingRefresher::run($force) の挙動を踏襲）。
 	 */
-	private function enqueueEligibleListings( ?string $onlyPlatform ): int {
+	private function enqueueEligibleListings( ?string $onlyPlatform, bool $force ): int {
 		$ids = get_posts(
 			array(
 				'post_type'      => ProductPostType::POST_TYPE,
@@ -97,7 +103,7 @@ final class RefreshController {
 				);
 			}
 
-			$queued += $this->enqueuer->enqueueProductListings( (int) $id, $product, true );
+			$queued += $this->enqueuer->enqueueProductListings( (int) $id, $product, true, $force );
 		}
 
 		return $queued;

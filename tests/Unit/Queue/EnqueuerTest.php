@@ -333,6 +333,45 @@ final class EnqueuerTest extends TestCase {
 		$this->assertSame( 1, $count );
 	}
 
+	/**
+	 * force=true は auto_update=false の listing も eligible として積む（強制更新ボタンの既存挙動）。
+	 * force=false（デフォルト）では従来通りスキップされることも併せて確認する。
+	 */
+	public function test_enqueueProductListings_forcetrue時はauto_updatefalseのlistingもenqueueForcedで積む(): void {
+		$this->stubRakutenPlatform();
+		$product = array( 'listings' => array( $this->eligibleListing( array( 'auto_update' => false ) ) ) );
+
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				\Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 12,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten-kobo',
+				true,
+				Enqueuer::PRIORITY_FORCE
+			)
+			->andReturn( 503 );
+
+		$count = ( new Enqueuer() )->enqueueProductListings( 12, $product, false, true );
+
+		$this->assertSame( 1, $count );
+	}
+
+	public function test_enqueueProductListings_forceデフォルトfalseではauto_updatefalseのlistingは積まない(): void {
+		$this->stubRakutenPlatform();
+		$product = array( 'listings' => array( $this->eligibleListing( array( 'auto_update' => false ) ) ) );
+
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$count = ( new Enqueuer() )->enqueueProductListings( 12, $product, false );
+
+		$this->assertSame( 0, $count );
+	}
+
 	public function test_queueDepth_pendingのids件数を返す(): void {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )->once()
 			->with(
