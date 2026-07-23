@@ -21,10 +21,12 @@ use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Provider\ProviderUiList;
 use Affilicard\Provider\Rakuten\RakutenProvider;
 use Affilicard\Queue\ActionSchedulerLoader;
+use Affilicard\Queue\ActionSchedulerStore;
 use Affilicard\Queue\AutoCreateHandler;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\PublishTrigger;
 use Affilicard\Queue\QueueMaintenance;
+use Affilicard\Queue\QueueStats;
 use Affilicard\Queue\RateLimiter;
 use Affilicard\Queue\RefreshHandler;
 use Affilicard\Repository\ProductRepository;
@@ -32,6 +34,7 @@ use Affilicard\Rest\CardPreviewController;
 use Affilicard\Rest\CredentialsController;
 use Affilicard\Rest\PlatformsController;
 use Affilicard\Rest\ProductsController;
+use Affilicard\Rest\QueueController;
 use Affilicard\Rest\RefreshController;
 use Affilicard\Rest\RestController;
 use Affilicard\Rest\SettingsController;
@@ -90,6 +93,10 @@ final class Plugin {
 		$repository = new ProductRepository();
 		$enqueuer   = new Enqueuer( GeneralSettings::queueDepthCap() );
 
+		// キューパネル（Task 15/16）: 自動更新対象 provider コード（'manual' を除く）を
+		// ProviderRegistry から都度導出する。QueueStats/QueueController にハードコードしない。
+		$automaticProviderCodes = self::automaticProviderCodes( $providers );
+
 		// REST API
 		$rest = new RestController(
 			new ProductsController( $repository ),
@@ -97,7 +104,12 @@ final class Plugin {
 			new PlatformsController(),
 			new CredentialsController( $providers, self::buildAccountRegistry() ),
 			new RefreshController( $repository, $enqueuer ),
-			new CardPreviewController( $repository )
+			new CardPreviewController( $repository ),
+			new QueueController(
+				new QueueStats( $automaticProviderCodes ),
+				$automaticProviderCodes,
+				new ActionSchedulerStore()
+			)
 		);
 		$rest->register();
 
@@ -173,6 +185,23 @@ final class Plugin {
 		$registry->register( new DmmProvider() );
 		$registry->register( new RakutenProvider() );
 		return $registry;
+	}
+
+	/**
+	 * 自動更新対象 provider のコード一覧（'manual' 等 isAutomatic()===false は除く）。
+	 * QueueStats/QueueController がキューの provider group（`affilicard-{provider}`）を
+	 * 走査する対象として使う。
+	 *
+	 * @return list<string>
+	 */
+	public static function automaticProviderCodes( ProviderRegistry $providers ): array {
+		$codes = array();
+		foreach ( $providers->all() as $provider ) {
+			if ( $provider->isAutomatic() ) {
+				$codes[] = $provider->code();
+			}
+		}
+		return $codes;
 	}
 
 	public static function buildAccountRegistry(): AccountRegistry {

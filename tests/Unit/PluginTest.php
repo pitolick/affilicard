@@ -41,6 +41,25 @@ final class PluginTest extends TestCase {
 		$this->assertContains( 'dmm-ebook', $codes );
 	}
 
+	/**
+	 * QueueStats/QueueController に渡す provider コードは isAutomatic()===true のみ
+	 * （'manual' を含まない）。楽天/DMM をハードコードせず ProviderRegistry から導出することを
+	 * 固定する（Task 15 要件）。
+	 */
+	public function test_automaticProviderCodes_isAutomaticなproviderのみを含みmanualを除く(): void {
+		$registry = Plugin::buildProviderRegistry();
+
+		$codes = Plugin::automaticProviderCodes( $registry );
+
+		$this->assertContains( 'rakuten-kobo', $codes );
+		$this->assertContains( 'dmm-ebook', $codes );
+		$this->assertNotContains( 'manual', $codes );
+
+		foreach ( $registry->all() as $provider ) {
+			$this->assertSame( $provider->isAutomatic(), in_array( $provider->code(), $codes, true ) );
+		}
+	}
+
 	public function test_buildProductTypeRegistry_includes_generic_and_ebook(): void {
 		$registry = Plugin::buildProductTypeRegistry();
 
