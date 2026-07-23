@@ -70,19 +70,53 @@ class ListingRefresher {
 		}
 
 		if ( $changed ) {
-			$this->repository->save(
-				array(
-					'id'           => $postId,
-					'title'        => (string) $product['title'],
-					'content'      => (string) $product['content'],
-					'status'       => (string) $product['status'],
-					'product_type' => (string) $product['product_type'],
-					'stock_status' => (string) $product['stock_status'],
-					'extras'       => $product['extras'],
-					'listings'     => array_values( $listings ),
-				)
-			);
+			$this->saveProduct( $postId, $product, $listings );
 		}
+	}
+
+	/**
+	 * 指定 platform の listing を1件 fetch→反映し保存する。
+	 *
+	 * 既存 refreshListing() を再利用（force 相当・throttle はハンドラ側で担保済みの前提）。
+	 * 商品または該当 platform の listing が見つからない場合は false。
+	 */
+	public function refreshOne( int $postId, string $platform ): bool {
+		$product = $this->repository->find( $postId );
+		if ( null === $product || ! is_array( $product['listings'] ?? null ) ) {
+			return false;
+		}
+		$listings = $product['listings'];
+		foreach ( $listings as $index => $listing ) {
+			if ( ! is_array( $listing ) || ( $listing['platform'] ?? '' ) !== $platform ) {
+				continue;
+			}
+			$refreshed          = $this->refreshListing( $listing, (string) $product['title'] );
+			$listings[ $index ] = $refreshed;
+			$this->saveProduct( $postId, $product, $listings );
+			return '' === (string) ( $refreshed['fetch_error'] ?? '' );
+		}
+		return false;
+	}
+
+	/**
+	 * 商品と更新後 listings を Repository 形に組んで保存する（refreshProduct/refreshOne 共用）。
+	 *
+	 * @param array<string, mixed>       $product  Repository::find() の戻り
+	 * @param list<array<string, mixed>> $listings 更新後 listing 群
+	 */
+	private function saveProduct( int $postId, array $product, array $listings ): void {
+		$this->repository->save(
+			array(
+				'id'           => $postId,
+				'title'        => (string) $product['title'],
+				'content'      => (string) $product['content'],
+				'status'       => (string) $product['status'],
+				'product_type' => (string) $product['product_type'],
+				'stock_status' => (string) $product['stock_status'],
+				'extras'       => $product['extras'],
+				'listings'     => array_values( $listings ),
+			)
+		);
 	}
 
 	/**

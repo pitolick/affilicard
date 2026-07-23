@@ -426,4 +426,115 @@ final class ListingRefresherTest extends TestCase {
 
 		( new ListingRefresher( $registry, $repo ) )->refreshProduct( 21 );
 	}
+
+	public function test_refreshOne_fetch成功でtrueを返し保存する(): void {
+		$this->stubRakutenPlatform();
+
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$provider->shouldReceive( 'fetch' )->once()->andReturn( array( 'price' => '693' ) );
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 12 )->andReturn(
+			$this->product(
+				12,
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'external_id' => 'deadbeef01',
+						'price'       => '',
+						'fetch_error' => '',
+					),
+				)
+			)
+		);
+		$repo->shouldReceive( 'save' )->once()->andReturnUsing(
+			function ( array $d ) {
+				$this->assertSame( 12, $d['id'] );
+				$this->assertSame( '693', $d['listings'][0]['price'] );
+				$this->assertSame( '', $d['listings'][0]['fetch_error'] );
+				return 12;
+			}
+		);
+
+		$refresher = new ListingRefresher( $registry, $repo );
+		$this->assertTrue( $refresher->refreshOne( 12, 'rakuten-kobo' ) );
+	}
+
+	public function test_refreshOne_fetch失敗でfalse(): void {
+		$this->stubRakutenPlatform();
+
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$provider->shouldReceive( 'fetch' )->once()->andReturn( null );
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 12 )->andReturn(
+			$this->product(
+				12,
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'external_id' => 'deadbeef01',
+						'price'       => '500',
+						'fetch_error' => '',
+					),
+				)
+			)
+		);
+		$repo->shouldReceive( 'save' )->once()->andReturnUsing(
+			function ( array $d ) {
+				// fetch 失敗でも保存はされる（fetch_error を記録するため）が price は維持される。
+				$this->assertSame( '500', $d['listings'][0]['price'] );
+				$this->assertNotSame( '', $d['listings'][0]['fetch_error'] );
+				return 12;
+			}
+		);
+
+		$refresher = new ListingRefresher( $registry, $repo );
+		$this->assertFalse( $refresher->refreshOne( 12, 'rakuten-kobo' ) );
+	}
+
+	public function test_refreshOne_platformが見つからなければfalseを返し保存しない(): void {
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 12 )->andReturn(
+			$this->product(
+				12,
+				array(
+					array(
+						'platform'    => 'other-platform',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'external_id' => 'ext-1',
+					),
+				)
+			)
+		);
+		$repo->shouldNotReceive( 'save' );
+
+		$refresher = new ListingRefresher( new ProviderRegistry(), $repo );
+		$this->assertFalse( $refresher->refreshOne( 12, 'rakuten-kobo' ) );
+	}
+
+	public function test_refreshOne_商品が見つからなければfalseを返す(): void {
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 999 )->andReturn( null );
+		$repo->shouldNotReceive( 'save' );
+
+		$refresher = new ListingRefresher( new ProviderRegistry(), $repo );
+		$this->assertFalse( $refresher->refreshOne( 999, 'rakuten-kobo' ) );
+	}
 }
