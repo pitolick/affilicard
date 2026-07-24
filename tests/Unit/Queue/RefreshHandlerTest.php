@@ -154,12 +154,13 @@ final class RefreshHandlerTest extends TestCase {
 	}
 
 	/**
-	 * throttle 未獲得（account contention）で cap（MAX_THROTTLE_WAITS）到達時: これ以上
-	 * 再投入せず（as_schedule_single_action は呼ばれない）、待ちカウンタを削除して
-	 * そのまま complete させる（cron sweep の needsRefetch cooldown 経過後に再度拾わせる）。
-	 * 競合は fetch 失敗ではないため例外は投げない（failed 化しない）。
+	 * throttle 未獲得（account contention）で cap（MAX_THROTTLE_WAITS）到達時: rapid な
+	 * 再投入は止める（チャーン抑制）が、ジョブは失わず長い遅延（+1h）で再投入して保持する。
+	 * bare complete させると AutoCreate は掃引回復が無く作成要求が永久ロストするため、共通基底
+	 * では保持する（refresh も同一挙動）。カウンタは上限のまま維持し、競合は fetch 失敗では
+	 * ないため例外は投げない（failed 化しない）。
 	 */
-	public function test_handle_throttle未経過かつcap到達なら再投入せずカウンタを削除して終了する(): void {
+	public function test_handle_cap到達時は長い遅延で再投入して保持しジョブを失わない(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array() );
@@ -173,18 +174,20 @@ final class RefreshHandlerTest extends TestCase {
 			->once()
 			->with( 'affilicard_throttle_waits_12_rakuten-kobo' )
 			->andReturn( 29 );
-		WP_Mock::userFunction( 'delete_transient' )
+		// 上限維持でカウンタを 30 に据え置き（TTL 更新）。
+		WP_Mock::userFunction( 'set_transient' )
 			->once()
-			->with( 'affilicard_throttle_waits_12_rakuten-kobo' )
+			->with( 'affilicard_throttle_waits_12_rakuten-kobo', 30, DAY_IN_SECONDS )
 			->andReturn( true );
-		WP_Mock::userFunction( 'set_transient' )->never();
-		WP_Mock::userFunction( 'as_schedule_single_action' )->never(); // reschedule されない（打ち切り）
+		WP_Mock::userFunction( 'delete_transient' )->never();
+		// 打ち切らず、長い遅延で再投入して保持する（reschedule=as_schedule_single_action 1回）。
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 888 );
 
 		$refresher = Mockery::mock( ListingRefresher::class );
 		$refresher->shouldNotReceive( 'refreshOne' );
 
 		$handler = new RefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry() );
-		$handler->handle( 12, 'rakuten-kobo' ); // 例外を投げず正常終了する（complete 扱い）
+		$handler->handle( 12, 'rakuten-kobo' ); // 例外を投げず、長い遅延で再投入して保持する
 
 		$this->assertConditionsMet();
 	}

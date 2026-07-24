@@ -134,12 +134,18 @@ abstract class ThrottledActionHandler {
 	}
 
 	/**
-	 * throttle 未獲得（account contention）での再投入。同一 account を奪い合う listing が
-	 * 勝者以外いつまでも performWork に到達できず、attempts が増えない＝backoff/failed 化
-	 * が機能しない（症状2）ことへの安全弁。待ち回数が MAX_THROTTLE_WAITS に達したら、
-	 * これ以上再投入せず打ち切る（＝このアクションはそのまま complete する。cron sweep が
-	 * needsRefetch のクールダウン経過後に改めて拾う）。競合は fetch 失敗ではないため、
-	 * backoff() と異なり例外は投げない（failed 化しない）。
+	 * throttle 未獲得（account contention）での再投入。同一 account を奪い合うジョブが
+	 * 短時間に密集すると rapid な再投入（completed アクションのチャーン。症状1）や、勝者以外
+	 * が performWork に到達できない状況が起こり得る。掃引ジョブは Enqueuer の決定的
+	 * スタガリングで実効レート間隔ぶん分散させて衝突自体を根本回避しているため、この待機は
+	 * 稀にしか発生しない安全弁。
+	 *
+	 * MAX_THROTTLE_WAITS に達したら rapid な再投入は止める（チャーン抑制）が、**ジョブは
+	 * 失わない**。ここで bare return すると AS がアクションを complete 扱いにしてジョブが消滅し、
+	 * 特に AutoCreate は掃引による回復経路が無いため作成要求が永久ロストする。よって上限到達時は
+	 * 長い遅延（+1h）で低頻度に再投入して保持する。カウンタは上限のまま維持（TTL 更新）し、
+	 * 混雑が続く限り 1h 毎の再投入に留める。account 獲得成功時に run() がカウンタを消すので、
+	 * 混雑解消後は通常の処理へ戻る。競合は fetch 失敗ではないため例外は投げない（failed 化しない）。
 	 *
 	 * @param array<string, mixed> $args
 	 */
@@ -147,7 +153,10 @@ abstract class ThrottledActionHandler {
 		$key   = $this->throttleWaitKey( $args );
 		$waits = (int) get_transient( $key ) + 1;
 		if ( $waits >= self::MAX_THROTTLE_WAITS ) {
-			delete_transient( $key );
+			// rapid な再投入は打ち切るが、ジョブは失わず長い遅延で保持する（AutoCreate は
+			// 掃引回復が無いため complete させると永久ロストする）。カウンタは上限維持。
+			set_transient( $key, self::MAX_THROTTLE_WAITS, DAY_IN_SECONDS );
+			$this->reschedule( max( $whenSec, time() + HOUR_IN_SECONDS ), $args );
 			return;
 		}
 		set_transient( $key, $waits, DAY_IN_SECONDS );

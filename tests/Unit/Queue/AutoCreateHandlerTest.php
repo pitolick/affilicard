@@ -181,11 +181,12 @@ final class AutoCreateHandlerTest extends TestCase {
 	}
 
 	/**
-	 * throttle 未獲得（account contention）で cap（MAX_THROTTLE_WAITS）到達時: これ以上
-	 * 再投入せず（as_schedule_single_action は呼ばれない）、待ちカウンタを削除して
-	 * そのまま complete させる（競合は fetch 失敗ではないため例外は投げない）。
+	 * throttle 未獲得（account contention）で cap（MAX_THROTTLE_WAITS）到達時: rapid な
+	 * 再投入は止める（チャーン抑制）が、**ジョブは失わない**。bare complete させると
+	 * AutoCreate は掃引回復が無く作成要求が永久ロストするため、長い遅延（+1h）で再投入して
+	 * 保持し、カウンタは上限のまま維持する（競合は fetch 失敗ではないため例外は投げない）。
 	 */
-	public function test_handle_throttle未経過かつcap到達なら再投入せずカウンタを削除して終了する(): void {
+	public function test_handle_cap到達時は長い遅延で再投入して保持しジョブを失わない(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array() );
@@ -199,12 +200,14 @@ final class AutoCreateHandlerTest extends TestCase {
 			->once()
 			->with( 'affilicard_throttle_waits_rakuten-kobo_ext-001' )
 			->andReturn( 29 );
-		WP_Mock::userFunction( 'delete_transient' )
+		// 上限維持でカウンタを 30 に据え置き（TTL 更新）。
+		WP_Mock::userFunction( 'set_transient' )
 			->once()
-			->with( 'affilicard_throttle_waits_rakuten-kobo_ext-001' )
+			->with( 'affilicard_throttle_waits_rakuten-kobo_ext-001', 30, DAY_IN_SECONDS )
 			->andReturn( true );
-		WP_Mock::userFunction( 'set_transient' )->never();
-		WP_Mock::userFunction( 'as_schedule_single_action' )->never(); // reschedule されない（打ち切り）
+		WP_Mock::userFunction( 'delete_transient' )->never();
+		// 打ち切らず、長い遅延で再投入して保持する（reschedule=as_schedule_single_action 1回）。
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 777 );
 
 		$provider = $this->provider();
 		$provider->shouldNotReceive( 'fetch' );
@@ -215,7 +218,7 @@ final class AutoCreateHandlerTest extends TestCase {
 		$creator = new ProductAutoCreator( $registry, $repo );
 
 		$handler = new AutoCreateHandler( new Enqueuer(), new RateLimiter(), $creator, $registry );
-		$handler->handle( 'rakuten-kobo', 'ext-001' ); // 例外を投げず正常終了する（complete 扱い）
+		$handler->handle( 'rakuten-kobo', 'ext-001' ); // 例外を投げず、長い遅延で再投入して保持する
 
 		$this->assertConditionsMet();
 	}
