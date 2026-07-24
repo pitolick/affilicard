@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Queue;
 
 use Affilicard\Platform\PlatformConfig;
+use Affilicard\Pricing\ListingEligibility;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Repository\ProductRepositoryInterface;
 
@@ -80,10 +81,7 @@ final class PublishTrigger {
 
 			// auto listing のみ force 投入する（update_mode=auto・enabled・auto_update）。
 			// QueueMaintenance::sweep() の対象フィルタと同一の判定。
-			$mode    = (string) ( $listing['update_mode'] ?? 'auto' );
-			$enabled = ! isset( $listing['enabled'] ) || (bool) $listing['enabled'];
-			$auto    = ! isset( $listing['auto_update'] ) || (bool) $listing['auto_update'];
-			if ( 'auto' !== $mode || ! $enabled || ! $auto ) {
+			if ( ! ListingEligibility::isAutoEligible( $listing ) ) {
 				continue;
 			}
 

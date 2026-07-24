@@ -5,6 +5,7 @@ namespace Affilicard\Queue;
 
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductPostType;
+use Affilicard\Pricing\ListingEligibility;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Repository\ProductRepositoryInterface;
 use Affilicard\Settings\GeneralSettings;
@@ -68,10 +69,7 @@ final class QueueMaintenance {
 				}
 
 				// auto listing のみ（update_mode=auto・enabled・auto_update）。
-				$mode    = (string) ( $listing['update_mode'] ?? 'auto' );
-				$enabled = ! isset( $listing['enabled'] ) || (bool) $listing['enabled'];
-				$auto    = ! isset( $listing['auto_update'] ) || (bool) $listing['auto_update'];
-				if ( 'auto' !== $mode || ! $enabled || ! $auto ) {
+				if ( ! ListingEligibility::isAutoEligible( $listing ) ) {
 					continue;
 				}
 

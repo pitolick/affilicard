@@ -5,6 +5,7 @@ namespace Affilicard\Queue;
 
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\Platform\PlatformDefinition;
+use Affilicard\Pricing\ListingEligibility;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Provider\ProviderRegistry;
 
@@ -204,10 +205,7 @@ final class Enqueuer {
 				continue;
 			}
 
-			$mode    = (string) ( $listing['update_mode'] ?? 'auto' );
-			$enabled = ! isset( $listing['enabled'] ) || (bool) $listing['enabled'];
-			$auto    = ! isset( $listing['auto_update'] ) || (bool) $listing['auto_update'];
-			if ( 'auto' !== $mode || ! $enabled || ! ( $force || $auto ) ) {
+			if ( ! ListingEligibility::isAutoEligible( $listing, $force ) ) {
 				continue;
 			}
 
