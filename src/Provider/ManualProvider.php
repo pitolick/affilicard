@@ -25,11 +25,14 @@ final class ManualProvider implements ProviderInterface {
 	}
 
 	/**
+	 * 手動入力 Provider は自動取得経路（isAutomatic=false のため通常呼ばれない）に乗らない。
+	 * 万一到達しても give-up させないよう、安全側で一時失敗（error/transient）を返す
+	 * （miss を返すと terminal 扱いで give-up マーカーが立ってしまうため使わない）。
+	 *
 	 * @param array<string, mixed> $platformConfig
-	 * @return array<string, mixed>|null
 	 */
-	public function fetch( string $externalId, array $platformConfig ): ?array {
-		return null;
+	public function fetch( string $externalId, array $platformConfig ): FetchResult {
+		return FetchResult::error();
 	}
 
 	/**

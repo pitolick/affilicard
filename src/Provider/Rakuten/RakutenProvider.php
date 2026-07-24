@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Provider\Rakuten;
 
 use Affilicard\Account\AccountCredentials;
+use Affilicard\Provider\FetchResult;
 use Affilicard\Provider\ProviderInterface;
 
 /**
@@ -34,23 +35,28 @@ final class RakutenProvider implements ProviderInterface {
 	/**
 	 * 楽天Kobo 検索 API は商品 ID 直引きができないため、keyword（search_key もしくは
 	 * legacy な external_id）で検索し、各ヒットの itemUrl に含まれる `rk/<hash>` を
-	 * external_id と突き合わせて厳密同定する。ハッシュ一致が 0 件・複数件の場合は
-	 * 誤上書きを避けるため null を返す（非破壊）。
+	 * external_id と突き合わせて厳密同定する。
+	 *
+	 * 結果は FetchResult の3値で分類する:
+	 * - credentials 未設定 = error()（transient・後で設定され得る）
+	 * - search_key と external_id が両方空 = miss()（terminal・データ不備。リトライで解決しない）
+	 * - API 到達不可・エラー応答（error/非200/errors/非JSON）= error()（transient）
+	 * - 200 だが Items 空・ハッシュ一致 0 件・曖昧（複数一致）・該当なし = miss()（terminal・非破壊）
+	 * - ハッシュ一致 1 件 / 数字 external_id の先頭ヒット = hit()
 	 *
 	 * @param array<string, mixed> $platformConfig
-	 * @return array<string, mixed>|null
 	 */
-	public function fetch( string $externalId, array $platformConfig ): ?array {
+	public function fetch( string $externalId, array $platformConfig ): FetchResult {
 		$credentials = AccountCredentials::get( (string) $this->accountCode() );
 		if ( ! self::hasRequiredCredentials( $credentials ) ) {
-			return null;
+			return FetchResult::error();
 		}
 
 		$search_key = isset( $platformConfig['search_key'] ) ? trim( (string) $platformConfig['search_key'] ) : '';
 		$is_numeric = ( '' === $search_key ) && 1 === preg_match( '/^\d+$/', $externalId );
 
 		if ( '' === $search_key && '' === $externalId ) {
-			return null;
+			return FetchResult::miss();
 		}
 
 		$query = array(
@@ -71,11 +77,13 @@ final class RakutenProvider implements ProviderInterface {
 
 		$res = $this->client()->request( $query, $credentials );
 		if ( $res['error'] || 200 !== $res['code'] || null === $res['decoded'] || isset( $res['decoded']['errors'] ) ) {
-			return null;
+			// API 到達不可・エラー応答は一時失敗（transient）。後で回復し得るため give-up しない。
+			return FetchResult::error();
 		}
 		$items = ( isset( $res['decoded']['Items'] ) && is_array( $res['decoded']['Items'] ) ) ? $res['decoded']['Items'] : array();
 		if ( array() === $items ) {
-			return null;
+			// 200 で応答したが該当なし＝恒久失敗（terminal）。
+			return FetchResult::miss();
 		}
 
 		// URLハッシュ一致で厳密同定（誤上書き防止）。
@@ -91,19 +99,21 @@ final class RakutenProvider implements ProviderInterface {
 				}
 			}
 			if ( 1 === count( $matches ) ) {
-				return self::normalizeItem( $matches[0] );
+				return FetchResult::hit( self::normalizeItem( $matches[0] ) );
 			}
 			if ( count( $matches ) > 1 ) {
-				return null; // 曖昧 → 非破壊
+				// 曖昧（複数一致）→ 非破壊。リトライしても曖昧さは解消しないため恒久失敗（terminal）。
+				return FetchResult::miss();
 			}
 		}
 
-		// ハッシュ一致なし: 数字 external_id（itemNumber 検索）は先頭ヒットを採用。それ以外は非破壊 null。
+		// ハッシュ一致なし: 数字 external_id（itemNumber 検索）は先頭ヒットを採用。
 		if ( $is_numeric ) {
 			$first = self::firstItem( $res['decoded'] );
-			return null === $first ? null : self::normalizeItem( $first );
+			return null === $first ? FetchResult::miss() : FetchResult::hit( self::normalizeItem( $first ) );
 		}
-		return null;
+		// 該当なし（非数字・ハッシュ不一致）＝恒久失敗（terminal・非破壊）。
+		return FetchResult::miss();
 	}
 
 	/**

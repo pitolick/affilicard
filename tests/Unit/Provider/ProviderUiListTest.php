@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Tests\Unit\Provider;
 
+use Affilicard\Provider\FetchResult;
 use Affilicard\Provider\ProviderInterface;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Provider\ProviderUiList;
@@ -30,8 +31,8 @@ final class ProviderUiListTest extends TestCase {
 			public function accountCode(): ?string {
 				return $this->account;
 			}
-			public function fetch( string $externalId, array $platformConfig ): ?array {
-				return null;
+			public function fetch( string $externalId, array $platformConfig ): FetchResult {
+				return FetchResult::error();
 			}
 			public function testConnection( array $credentials ): array {
 				return array(

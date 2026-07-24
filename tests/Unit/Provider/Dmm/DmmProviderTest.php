@@ -159,7 +159,67 @@ final class DmmProviderTest extends TestCase {
 			->andReturn( $item_json );
 
 		$result = ( new DmmProvider() )->fetch( 'ext-123', array() );
-		$this->assertSame( 'サンプル商品タイトル', $result['title'] );
+		$this->assertTrue( $result->isHit() );
+		$this->assertSame( 'サンプル商品タイトル', $result->data['title'] );
+	}
+
+	public function test_fetch_credentials未設定はerror_transient(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_account_dmm_credentials', '' )
+			->andReturn( '' );
+
+		$result = ( new DmmProvider() )->fetch( 'ext-123', array() );
+		// creds 未設定は一時失敗（transient）。後で設定されれば成功し得るため give-up しない。
+		$this->assertFalse( $result->isHit() );
+		$this->assertFalse( $result->isTerminalMiss() );
+	}
+
+	public function test_fetch_API到達不可はerror_transient(): void {
+		$credentials = array(
+			'api_id'       => 'test-api-id',
+			'affiliate_id' => 'test-aff-id',
+		);
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_account_dmm_credentials', '' )
+			->andReturn( Crypto::encrypt( JsonField::encode( $credentials ) ) );
+		WP_Mock::userFunction( 'wp_remote_get' )->once()->andReturn( new \WP_Error() );
+		WP_Mock::userFunction( 'wp_remote_retrieve_response_code' )->andReturn( 0 );
+		WP_Mock::userFunction( 'wp_remote_retrieve_body' )->andReturn( '' );
+
+		$result = ( new DmmProvider() )->fetch( 'ext-123', array() );
+		$this->assertFalse( $result->isHit() );
+		$this->assertFalse( $result->isTerminalMiss() );
+	}
+
+	public function test_fetch_該当商品なしはmiss_terminal(): void {
+		$credentials = array(
+			'api_id'       => 'test-api-id',
+			'affiliate_id' => 'test-aff-id',
+		);
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_account_dmm_credentials', '' )
+			->andReturn( Crypto::encrypt( JsonField::encode( $credentials ) ) );
+		WP_Mock::userFunction( 'wp_remote_get' )->once()->andReturn( array( 'response' => array( 'code' => 200 ) ) );
+		WP_Mock::userFunction( 'wp_remote_retrieve_response_code' )->andReturn( 200 );
+		WP_Mock::userFunction( 'wp_remote_retrieve_body' )->andReturn(
+			json_encode( array( 'result' => array( 'items' => array() ) ) )
+		);
+
+		// 該当商品なしは恒久失敗（terminal）。同じ ID で再取得しても現れないため give-up してよい。
+		$this->assertTrue( ( new DmmProvider() )->fetch( 'ext-123', array() )->isTerminalMiss() );
+	}
+
+	public function test_fetch_external_id空はmiss_terminal(): void {
+		$credentials = array(
+			'api_id'       => 'test-api-id',
+			'affiliate_id' => 'test-aff-id',
+		);
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_account_dmm_credentials', '' )
+			->andReturn( Crypto::encrypt( JsonField::encode( $credentials ) ) );
+
+		// external_id 空はデータ不備（無効）＝リトライで解決しない恒久失敗。
+		$this->assertTrue( ( new DmmProvider() )->fetch( '', array() )->isTerminalMiss() );
 	}
 
 	public function test_minRequestIntervalMs_DMMは1000(): void {
