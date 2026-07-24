@@ -1,0 +1,29 @@
+Affilicard — 汎用アフィリエイト商品カード WordPress プラグイン
+Copyright (C) 2026 pitolick
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation; either version 2 of the License, or (at your
+option) any later version.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with this program; if not, see <https://www.gnu.org/licenses/gpl-2.0.html>.
+
+The full text of the GNU General Public License version 2 is available at:
+https://www.gnu.org/licenses/gpl-2.0.html
+
+---
+
+Bundled third-party software / 同梱するサードパーティソフトウェア
+
+- Action Scheduler (woocommerce/action-scheduler), located under
+  vendor/woocommerce/action-scheduler/, is licensed under the
+  GNU General Public License v3.0 or later (GPL-3.0-or-later).
+  Copyright (C) Automattic and contributors.
+  See vendor/woocommerce/action-scheduler/ for its license and notices.
+  GPL-3.0: https://www.gnu.org/licenses/gpl-3.0.html
