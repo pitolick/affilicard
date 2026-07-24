@@ -81,7 +81,16 @@ abstract class ThrottledActionHandler {
 		$attempts = (int) get_transient( $key ) + 1;
 		if ( $attempts >= self::MAX_ATTEMPTS ) {
 			delete_transient( $key );
-			return; // 打ち切り（failed）。fetch_error は listing に記録済み・Fallback 列で可視化。
+			// 打ち切り。bare return だと AS がこのアクションを complete 扱いにしてしまい、
+			// 失敗が可視化されない・パネルの failed 件数/「失敗を再試行」が機能しなくなる。
+			// AS のランナーはアクションコールバックを try/catch しており、投げられた例外を
+			// failed アクションとして記録する（catch した Throwable のメッセージ付きで記録）
+			// ため、例外を投げて意図的に failed 化する。fetch_error は listing 側に
+			// refreshOne が既に記録済み（Fallback 列で可視化）で、こちらは AS 側の記録。
+			throw new \RuntimeException(
+				// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- HTML 出力ではなく AS の内部ログ（action_scheduler_logs.message）に保存される例外メッセージ。$args は post_id（int）/platform（既知 platform コード）のみで外部入力を含まない。
+				'affilicard: 価格更新のリトライ上限に達しました (' . implode( ',', array_map( 'strval', $args ) ) . ')'
+			);
 		}
 		set_transient( $key, $attempts, DAY_IN_SECONDS );
 		$delay = min( 3600, (int) pow( 2, $attempts ) * 60 ); // 指数バックオフ・上限 1h クランプ
