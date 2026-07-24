@@ -113,12 +113,17 @@
 	min-width: 180px;
 }
 
+/* 一括操作ボタン群。上の設定セクションと詰まって見える（余白がない）という目視指摘に
+   対応し、区切り線＋上下の余白で分離する。 */
 #affilicard-settings-root .affilicard-queue-panel__actions {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 8px;
 	align-items: center;
-	padding-top: 12px;
+	margin-top: 8px;
+	padding-top: 16px;
+	padding-bottom: 8px;
+	border-top: 1px solid #e0e0e0;
 }
 
 /* 型タブ内の保存ボタンをアコーディオンから離す */

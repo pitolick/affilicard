@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from '@wordpress/element';
+import { useCallback, useEffect, useRef, useState } from '@wordpress/element';
 import { Button, Notice, TextControl, ToggleControl } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import {
@@ -24,6 +24,10 @@ export function QueuePanel() {
 	const [busy, setBusy] = useState(false);
 	const [notice, setNotice] = useState(null);
 	const [statsError, setStatsError] = useState(false);
+	// 操作ボタン（未処理をキャンセル／失敗分を再試行 等）はパネル下部にあるが、結果通知は
+	// パネル上部に表示される。下部のボタンを押すとスクロールしないと通知が見えない、という
+	// 目視レビュー指摘に対応するため、通知が更新されたら通知要素をビューへスクロールする。
+	const noticeRef = useRef(null);
 
 	// loadStats は失敗を握り潰さない。以前は catch で空 stats（summary:{},depth:0）へ
 	// 差し替えていたため、統計の再取得に失敗しても「成功／空キュー」に見え、runAction が
@@ -57,6 +61,18 @@ export function QueuePanel() {
 			.then(setSettings)
 			.catch(() => setSettings({}));
 	}, [loadStats]);
+
+	// 通知が出たら、その要素をビューへスクロールして必ず視認できるようにする
+	// （下部の操作ボタンを押したときに上部通知を見逃す問題への対応）。
+	useEffect(() => {
+		if (notice && noticeRef.current) {
+			// jsdom（テスト環境）等では scrollIntoView 未実装なので optional call。
+			noticeRef.current.scrollIntoView?.({
+				behavior: 'smooth',
+				block: 'center',
+			});
+		}
+	}, [notice]);
 
 	if (stats === null || settings === null) {
 		return <p>{__('読み込み中…', 'affilicard')}</p>;
@@ -189,9 +205,14 @@ export function QueuePanel() {
 				</Notice>
 			)}
 			{notice && (
-				<Notice status={notice.type} onRemove={() => setNotice(null)}>
-					{notice.message}
-				</Notice>
+				<div ref={noticeRef}>
+					<Notice
+						status={notice.type}
+						onRemove={() => setNotice(null)}
+					>
+						{notice.message}
+					</Notice>
+				</div>
 			)}
 
 			<div className="affilicard-queue-panel__section">

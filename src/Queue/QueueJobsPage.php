@@ -82,6 +82,12 @@ final class QueueJobsPage {
 			'価格更新・商品自動作成のバックグラウンドジョブ（Action Scheduler）の一覧です。既定では検索欄に「affilicard」を入れ、affilicard のジョブ（フック名 affilicard_ 始まり）に絞り込んで表示します。検索欄を空にすると全プラグインのジョブを表示できます。',
 			'affilicard'
 		) . '</p>';
+		// 日時カラムは Action Scheduler 本体が常に UTC（+0000）で描画する仕様で、サイトの
+		// タイムゾーン設定には追従しない（埋め込み表示側からは制御不可）。誤読を避けるため明記する。
+		echo '<p class="description">' . esc_html__(
+			'※ 実行予定日時・ログの日時は UTC（協定世界時・+0000）で表示されます。これは Action Scheduler の仕様で、WordPress のタイムゾーン設定には追従しません（日本時間 = UTC + 9時間）。',
+			'affilicard'
+		) . '</p>';
 
 		if ( ! class_exists( 'ActionScheduler_AdminView' ) ) {
 			self::renderFallback();
