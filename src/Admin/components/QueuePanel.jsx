@@ -142,11 +142,23 @@ export function QueuePanel() {
 			<div className="affilicard-queue-panel__section">
 				<ToggleControl
 					label={__('キューを一時停止する', 'affilicard')}
+					help={__(
+						'オンにすると価格更新の処理（ワーカー）を止めます。新規ジョブはキューに積まれ続け、解除すると溜まった分から処理を再開します。API 障害・レート制限の一時回避に使います。',
+						'affilicard'
+					)}
 					checked={Boolean(stats.paused)}
 					disabled={busy}
 					onChange={onTogglePause}
 				/>
-				<p>{__('キューの深さ', 'affilicard')}: {stats.depth ?? 0}</p>
+				<p>
+					{__('キューの深さ', 'affilicard')}: {stats.depth ?? 0}
+				</p>
+				<p className="description">
+					{__(
+						'キューに溜まっている未処理（pending）ジョブの総数です。実処理はサーバの cron / Action Scheduler ランナーが順次進めます。',
+						'affilicard'
+					)}
+				</p>
 
 				{accountCodes.length === 0 && (
 					<p className="description">
@@ -174,6 +186,10 @@ export function QueuePanel() {
 									'throttle上書き (ms)',
 									'affilicard'
 								)}`}
+								help={__(
+									'このアカウントの API への最小リクエスト間隔（ミリ秒）。0 で既定値。429（レート制限）が出る場合に大きくすると失敗が減りますが、全体の更新は遅くなります。',
+									'affilicard'
+								)}
 								type="number"
 								value={String(
 									(settings.throttle_overrides ?? {})[code] ?? 0
@@ -188,6 +204,10 @@ export function QueuePanel() {
 			<div className="affilicard-queue-panel__section">
 				<TextControl
 					label={__('完了保持時間 (時間)', 'affilicard')}
+					help={__(
+						'完了したジョブ履歴を Action Scheduler に残す時間。超過分は自動削除されます（既定 24 時間）。',
+						'affilicard'
+					)}
 					type="number"
 					value={String(settings.retention_done_hours ?? 24)}
 					onChange={(v) =>
@@ -198,6 +218,10 @@ export function QueuePanel() {
 				/>
 				<TextControl
 					label={__('失敗保持日数 (日)', 'affilicard')}
+					help={__(
+						'失敗したジョブ履歴を残す日数。超過分は自動削除されます（既定 7 日）。原因調査のため完了より長めに保持します。',
+						'affilicard'
+					)}
 					type="number"
 					value={String(settings.retention_failed_days ?? 7)}
 					onChange={(v) =>
