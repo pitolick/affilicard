@@ -188,6 +188,11 @@ final class BlockTest extends TestCase {
 			)
 		);
 
+		// give-up マーカー（恒久失敗）が無い → 通常の enqueue フローに進む。
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_autocreate_failed_rakuten-kobo_X123' )
+			->andReturn( false );
 		WP_Mock::userFunction( 'get_transient' )
 			->once()
 			->with( 'affilicard_autocreate_rakuten-kobo_X123' )
@@ -257,6 +262,32 @@ final class BlockTest extends TestCase {
 			array(
 				'externalId' => 'ext-1',
 				'platform'   => 'amazon-kindle',
+			)
+		);
+
+		$this->assertSame( '', $html );
+	}
+
+	public function test_render_giveupマーカーが立っていればenqueueせずロックも取らない(): void {
+		// AutoCreateHandler が terminal failure で立てた give-up マーカーが残っている間は、
+		// 恒久的に無効な externalId をビューごとに再 enqueue しない（5分ロックも取らない）。
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'findByExternalId' )->with( 'rakuten-kobo', 'X123' )->andReturn( null );
+		$repo->shouldNotReceive( 'save' );
+
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_autocreate_failed_rakuten-kobo_X123' )
+			->andReturn( 1 );
+		// give-up で即 return するため、ロック set も enqueue も起きない。
+		WP_Mock::userFunction( 'set_transient' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$block = new Block( $repo, new Enqueuer(), $this->registryWithRakuten() );
+		$html  = $block->render(
+			array(
+				'externalId' => 'X123',
+				'platform'   => 'rakuten-kobo',
 			)
 		);
 

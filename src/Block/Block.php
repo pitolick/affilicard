@@ -132,6 +132,14 @@ final class Block {
 	 * カードは今回のビューでは描画されず、次回以降のビューで生成済み商品として解決される。
 	 */
 	private function autoCreate( string $platform, string $externalId ): ?array {
+		// terminal failure（AutoCreateHandler が MAX_ATTEMPTS 到達で立てた give-up マーカー）が
+		// 残っている間は、恒久的に無効な externalId をビューごとに永久再 enqueue するのを止める。
+		// 24h TTL なので、ID が後で有効化されればマーカー失効後に再試行される。
+		$giveup_key = 'affilicard_autocreate_failed_' . $platform . '_' . $externalId;
+		if ( false !== get_transient( $giveup_key ) ) {
+			return null;
+		}
+
 		$lock_key = 'affilicard_autocreate_' . $platform . '_' . $externalId;
 		if ( false !== get_transient( $lock_key ) ) {
 			return null;

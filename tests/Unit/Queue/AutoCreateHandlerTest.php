@@ -262,4 +262,51 @@ final class AutoCreateHandlerTest extends TestCase {
 
 		$this->assertConditionsMet();
 	}
+
+	/**
+	 * terminal failure（MAX_ATTEMPTS 到達）時、AutoCreateHandler::onGivenUp が give-up マーカー
+	 * （affilicard_autocreate_failed_{platform}_{externalId}）を 24h TTL で永続化し、例外を投げて
+	 * AS を failed 記録にする。Block::autoCreate はこのマーカーを見て恒久失敗 ID の再 enqueue を止める。
+	 */
+	public function test_handle_terminal_failure時はgiveupマーカーを立てて例外を投げる(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		$this->stubPlatform();
+		$this->mockRateLimiterWpdb( 1 ); // throttle 獲得成功（経過済）→ performWork に到達
+		// throttle 獲得で待機カウンタはリセットされる。
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_throttle_waits_rakuten-kobo_ext-001' )
+			->andReturn( true );
+
+		// fetch が null → create が null → performWork 失敗 → backoff。
+		$provider = $this->provider();
+		$provider->shouldReceive( 'fetch' )->once()->andReturn( null );
+		$registry = $this->registry( $provider );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldNotReceive( 'save' );
+		$creator = new ProductAutoCreator( $registry, $repo );
+
+		// attempts が既に MAX_ATTEMPTS-1(=4) → 今回で 5 に達し打ち切り。
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_autocreate_attempts_rakuten-kobo_ext-001' )
+			->andReturn( 4 );
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_autocreate_attempts_rakuten-kobo_ext-001' )
+			->andReturn( true );
+		// onGivenUp が give-up マーカーを 24h TTL で立てる。
+		WP_Mock::userFunction( 'set_transient' )
+			->once()
+			->with( 'affilicard_autocreate_failed_rakuten-kobo_ext-001', 1, DAY_IN_SECONDS )
+			->andReturn( true );
+
+		$handler = new AutoCreateHandler( new Enqueuer(), new RateLimiter(), $creator, $registry );
+
+		$this->expectException( \RuntimeException::class );
+		$handler->handle( 'rakuten-kobo', 'ext-001' );
+	}
 }

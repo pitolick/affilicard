@@ -50,6 +50,17 @@ abstract class ThrottledActionHandler {
 	abstract protected function throttleWaitKey( array $args ): string;
 
 	/**
+	 * terminal failure（MAX_ATTEMPTS 到達＝これ以上リトライしない確定失敗）時に 1 度だけ呼ぶフック。
+	 * base は no-op。サブクラスが override して give-up マーカーの永続化等を行う
+	 * （override しなければ挙動不変＝RefreshHandler 等は従来通り）。
+	 *
+	 * @param array<string, mixed> $args
+	 */
+	protected function onGivenUp( array $args ): void {
+		// no-op（サブクラスが override する）。
+	}
+
+	/**
 	 * @param array<string, mixed> $args
 	 */
 	protected function run( array $args ): void {
@@ -123,6 +134,8 @@ abstract class ThrottledActionHandler {
 		$attempts = (int) get_transient( $key ) + 1;
 		if ( $attempts >= self::MAX_ATTEMPTS ) {
 			delete_transient( $key );
+			// terminal failure フック（サブクラスが give-up マーカー永続化等に使う）。
+			$this->onGivenUp( $args );
 			// 打ち切り。bare return だと AS がこのアクションを complete 扱いにしてしまい、
 			// 失敗が可視化されない・パネルの failed 件数/「失敗を再試行」が機能しなくなる。
 			// AS のランナーはアクションコールバックを try/catch しており、投げられた例外を

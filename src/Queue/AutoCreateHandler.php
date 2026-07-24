@@ -54,6 +54,25 @@ final class AutoCreateHandler extends ThrottledActionHandler {
 		return 'affilicard_autocreate_attempts_' . $args['platform'] . '_' . $args['external_id'];
 	}
 
+	/**
+	 * terminal failure（MAX_ATTEMPTS 到達）時に give-up マーカーを永続化する。
+	 *
+	 * externalId が恒久的に無効（AutoCreate が必ず失敗する ID）だと、Block::autoCreate は
+	 * 5 分 transient ロックが切れるたびにビューで永久に再 enqueue し続ける。確定失敗を
+	 * マーカーとして残し、Block::autoCreate 側でこれを見て再 enqueue を止める。
+	 * option ではなく 24h TTL の transient にして、ID が後で有効化された場合に自動で再試行余地を残す。
+	 *
+	 * @param array<string, mixed> $args
+	 */
+	protected function onGivenUp( array $args ): void {
+		$platform   = isset( $args['platform'] ) ? (string) $args['platform'] : '';
+		$externalId = isset( $args['external_id'] ) ? (string) $args['external_id'] : '';
+		if ( '' === $platform || '' === $externalId ) {
+			return;
+		}
+		set_transient( 'affilicard_autocreate_failed_' . $platform . '_' . $externalId, 1, DAY_IN_SECONDS );
+	}
+
 	protected function throttleWaitKey( array $args ): string {
 		return 'affilicard_throttle_waits_' . $args['platform'] . '_' . $args['external_id'];
 	}
