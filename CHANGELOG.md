@@ -9,11 +9,12 @@
 ### Added
 
 - **価格更新を Action Scheduler ベースの非同期キューに移行**した。手動一括更新・cron・公開/更新イベントは「更新ジョブをキューに投入」するだけで即座に返し、実際の価格取得はバックグラウンドの Action Scheduler ランナーが順次処理する。Action Scheduler はプラグインに bundle し、プラグイン読み込み時に同期 require する。
-- **per-provider レート制限耐性**（`RateLimiter`）を追加。Provider ごとの最小リクエスト間隔（`ProviderInterface::minRequestIntervalMs()`／楽天 Kobo=1100ms・DMM=1000ms・手動=0）を option に記録してプロセスを跨いで反映する（AS 既定の単一ワーカー実行を前提とした read-modify-write。並行ワーカー下での厳密なアトミック性は保証しない）。間隔未経過のジョブはワーカーをブロックせず後ろ倒し再スケジュールする。間隔は 429 バックオフ（指数・上限 1h クランプ）でも延長する。管理画面から Provider 別に上書き可能。
-- **鮮度スキップ**（`PriceFreshness::isStale()`）: `last_verified_at` が TTL 内の listing はキューに投入しない。cron 掃引（`affilicard_refresh_all`）が継続更新の主役となり、stale な auto listing のみを jitter 付きで投入する。
+- **アカウント別レート制限耐性**（`RateLimiter`）を追加。共有 API（アカウント）ごとの最小リクエスト間隔（`ProviderInterface::minRequestIntervalMs()`／楽天=1100ms・DMM=1000ms・手動=0）を **options テーブルの条件付き UPDATE（compare-and-set）でプロセス間アトミックに acquire** し、並行ワーカーでも 1 呼び出しだけが取得する。間隔未経過のジョブはワーカーをブロックせず後ろ倒し再スケジュールする。間隔は 429 バックオフ（指数・上限 1h クランプ）でも延長する。管理画面からアカウント別に上書き可能。
+- **鮮度スキップ／再取得クールダウン**: cron 掃引は listing の **`last_fetched_at`（最終試行時刻・成功/失敗問わず記録）が TTL 内なら再投入しない**（`PriceFreshness::needsRefetch()`）。成功 listing は TTL 毎に更新、**恒久的に失敗する listing も TTL 毎に1回だけ再試行**され、毎掃引の連打・キュー肥大を防ぐ（競合の「24h キャッシュ／数時間待つ」に整合）。表示鮮度（`isPriceDisplayable`＝last_verified_at）は不変。
 - **トリガーの層構造**: 公開/更新時に記事内商品を force 投入（`PublishTrigger`・`parse_blocks` で解決）、future→publish 昇格・手動更新も enqueue 化。dedup は Action Scheduler ネイティブの `$unique`、優先度は `$priority`（force=0/手動=10/掃引=20）で表現する。
 - **AutoCreate の非同期化**: 未登録ブロックのフロント描画時に同期 API を叩く従来動作を廃し、生成ジョブを enqueue するだけにした（描画の同期 HTTP を除去）。
-- **キュー管理 UI**（設定→更新キュー）: Provider 別 pending/in-progress/failed 集計・キュー深さ・pause トグル・Provider 別スロットル/保持期間設定・一括操作（全削除/failed 削除/failed 再試行/pending キャンセル）。per-job 明細は Action Scheduler の Tools→Scheduled Actions（group `affilicard-{provider}`）を活用する。REST は `manage_options`。
+- **キュー管理 UI**（設定→更新キュー）: **アカウント別**（DMM／楽天。認証画面と単位を統一）の pending/in-progress/failed 集計・キュー深さ・pause トグル・アカウント別スロットル/保持期間設定・一括操作（全削除/failed 削除/failed 再試行/pending キャンセル）。AS group は `affilicard-{account}`。各設定に説明文を付け、一般設定と同じスタイルに揃えた。REST は `manage_options`。
+- **失敗ハンドリング**: リトライ上限（既定 5 回・指数バックオフ）到達時に**例外を送出して Action Scheduler の "failed" として記録**する（従来は complete 扱いで失敗が不可視だった）。これによりキューパネルの失敗件数・「失敗を再試行」・Scheduled Actions の失敗フィルタが機能する。
 - **更新キュー（ジョブ一覧）を affilicard 自身のメニューに埋め込み**（Phase2 §11-3）。商品一覧の子メニューに「更新キュー（ジョブ一覧）」を追加し、Action Scheduler の一覧（Tools→Scheduled Actions と同じ描画・`ActionScheduler_AdminView::render_admin_ui()` を再利用）をそのまま表示する。検索欄を既定で `affilicard` に絞り込み、Tools に移動しなくても affilicard のジョブを確認できるようにした。AS 自体は同梱パッケージに翻訳を含まないため、affilicard 側で用意した限定的な日本語 .mo（`languages/action-scheduler-ja.mo`。プレースホルダ・複数形を含む文字列は誤翻訳リスクのため対象外）を ja ロケール時のみ明示ロードする。AS 管理ビューが読み込めない環境では Tools 側へのリンクにフォールバックする。
 - ログ保持期間を Action Scheduler の retention フィルタに連動（完了=時間・失敗=日数、既定 24h/7日）。商品一覧の Fallback 列にキュー待ち/失敗理由を連携（provider エラー文字列は `wp_strip_all_tags`＋`esc_attr` の二重防御）。
 - 運用ドキュメント `docs/operations-refresh-queue.md`（サーバ実 cron＋`wp action-scheduler run` 推奨）を追加。
@@ -21,6 +22,7 @@
 ### Changed
 
 - 手動更新 REST（`/affilicard/v1/refresh`）・product CPT の future→publish 昇格を、同期処理から Action Scheduler enqueue に変更した（`force` パラメータの「auto_update=false も対象」挙動は維持）。
+- 内部整理: listing の適格性判定（`update_mode`/`enabled`/`auto_update`）を共有ヘルパ `ListingEligibility` に集約。`RefreshHandler` が worker 実行時に `update_mode`/`enabled` を再チェックし、enqueue 後に無効化・手動化された listing を取りこぼさない（TOCTOU 対策。`force` 用に `auto_update` は見ない）。`last_fetched_at` を実 UTC（`gmdate`）で記録。同期スイープ時代の死コード（`ListingRefresher::run()`/`refreshProduct()` 等）を削除。
 
 ## [2.3.0] - 2026-07-21
 
