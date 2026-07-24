@@ -85,6 +85,13 @@
 	margin-bottom: 0;
 }
 
+/* section は flex-column のため、そのままだと子の <Button> が幅・高さいっぱいに
+   引き伸ばされる（保存ボタンが巨大化する）。一般パネルのボタンと同じ自然サイズに
+   戻すため、行方向の伸長を止めて左寄せにする。 */
+#affilicard-settings-root .affilicard-queue-panel__section .components-button {
+	align-self: flex-start;
+}
+
 /* account ごとの集計＋throttle 上書き行 */
 #affilicard-settings-root .affilicard-queue-panel__provider-row {
 	display: flex;

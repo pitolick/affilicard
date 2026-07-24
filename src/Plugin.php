@@ -84,6 +84,10 @@ final class Plugin {
 
 			add_action( 'admin_menu', array( self::class, 'registerSettingsPage' ) );
 			add_action( 'admin_menu', array( QueueJobsPage::class, 'registerMenu' ) );
+			// affilicard 独自の「更新キュー（ジョブ一覧）」を持つため、Tools > Scheduled Actions の
+			// 重複サブメニューを（affilicard が実質 AS のオーナーである純 affilicard サイトに限り）隠す。
+			// 遅い優先度で走らせて AS 本体がサブメニューを登録し終えた後に remove する。
+			add_action( 'admin_menu', array( self::class, 'hideActionSchedulerToolsMenu' ), 99 );
 			add_action( 'admin_enqueue_scripts', array( self::class, 'enqueueSettingsAssets' ) );
 			add_action( 'admin_init', array( self::class, 'purgeLegacyProviderCredentials' ) );
 			add_action( 'admin_init', array( self::class, 'backfillEligibleProviders' ) );
@@ -339,6 +343,30 @@ final class Plugin {
 			'affilicard-settings',
 			array( self::class, 'renderSettingsPage' )
 		);
+	}
+
+	/**
+	 * Tools > Scheduled Actions のサブメニューを条件付きで隠す。
+	 *
+	 * affilicard は独自の「更新キュー（ジョブ一覧）」を管理画面に埋め込んでいるため、
+	 * 純 affilicard サイトでは Tools 側の重複リンクを隠したい。ただし Action Scheduler は
+	 * WooCommerce をはじめ多くのプラグインが共有する共通基盤であり、それらの利用者は
+	 * Tools > Scheduled Actions に依存するため、無条件に消してはならない。
+	 *
+	 * ガード:
+	 * - 既定では WooCommerce（AS の代表的な大口消費者）が存在しない場合のみ隠す。
+	 * - 全体を `affilicard_hide_action_scheduler_tools_menu` フィルタで上書き可能にし、
+	 *   他の AS 消費プラグインを持つサイトが明示的に無効化（または強制有効化）できるようにする。
+	 */
+	public static function hideActionSchedulerToolsMenu(): void {
+		$shouldHide = apply_filters(
+			'affilicard_hide_action_scheduler_tools_menu',
+			! class_exists( 'WooCommerce' )
+		);
+
+		if ( $shouldHide ) {
+			remove_submenu_page( 'tools.php', 'action-scheduler' );
+		}
 	}
 
 	public static function renderSettingsPage(): void {

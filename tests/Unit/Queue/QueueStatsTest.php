@@ -51,6 +51,16 @@ final class QueueStatsTest extends TestCase {
 				'ids'
 			)
 			->andReturn( array() );
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->with(
+				array(
+					'group'    => 'affilicard-rakuten',
+					'status'   => 'complete',
+					'per_page' => -1,
+				),
+				'ids'
+			)
+			->andReturn( array( 100, 101, 102, 103, 104 ) );
 
 		$out = ( new QueueStats( array( 'rakuten' ) ) )->forAccount( 'rakuten' );
 		$this->assertSame(
@@ -58,6 +68,7 @@ final class QueueStatsTest extends TestCase {
 				'pending'     => 3,
 				'in_progress' => 1,
 				'failed'      => 0,
+				'complete'    => 5,
 			),
 			$out
 		);
@@ -94,6 +105,16 @@ final class QueueStatsTest extends TestCase {
 				'ids'
 			)
 			->andReturn( array( 9 ) );
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->with(
+				array(
+					'group'    => 'affilicard-rakuten',
+					'status'   => 'complete',
+					'per_page' => -1,
+				),
+				'ids'
+			)
+			->andReturn( array( 200, 201, 202 ) );
 
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
@@ -125,6 +146,16 @@ final class QueueStatsTest extends TestCase {
 				'ids'
 			)
 			->andReturn( array() );
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->with(
+				array(
+					'group'    => 'affilicard-dmm',
+					'status'   => 'complete',
+					'per_page' => -1,
+				),
+				'ids'
+			)
+			->andReturn( array() );
 
 		$out = ( new QueueStats( array( 'rakuten', 'dmm' ) ) )->summary();
 		$this->assertSame(
@@ -133,11 +164,13 @@ final class QueueStatsTest extends TestCase {
 					'pending'     => 2,
 					'in_progress' => 0,
 					'failed'      => 1,
+					'complete'    => 3,
 				),
 				'dmm'     => array(
 					'pending'     => 4,
 					'in_progress' => 1,
 					'failed'      => 0,
+					'complete'    => 0,
 				),
 			),
 			$out
@@ -175,6 +208,16 @@ final class QueueStatsTest extends TestCase {
 				'ids'
 			)
 			->andReturn( array() );
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->with(
+				array(
+					'group'    => 'affilicard-rakuten',
+					'status'   => 'complete',
+					'per_page' => -1,
+				),
+				'ids'
+			)
+			->andReturn( array() );
 
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
@@ -201,6 +244,16 @@ final class QueueStatsTest extends TestCase {
 				array(
 					'group'    => 'affilicard-dmm',
 					'status'   => 'failed',
+					'per_page' => -1,
+				),
+				'ids'
+			)
+			->andReturn( array() );
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->with(
+				array(
+					'group'    => 'affilicard-dmm',
+					'status'   => 'complete',
 					'per_page' => -1,
 				),
 				'ids'
@@ -242,6 +295,16 @@ final class QueueStatsTest extends TestCase {
 				'ids'
 			)
 			->andReturn( array() );
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->with(
+				array(
+					'group'    => 'affilicard-unknown',
+					'status'   => 'complete',
+					'per_page' => -1,
+				),
+				'ids'
+			)
+			->andReturn( array() );
 
 		$out = ( new QueueStats( array() ) )->forAccount( 'unknown' );
 		$this->assertSame(
@@ -249,6 +312,7 @@ final class QueueStatsTest extends TestCase {
 				'pending'     => 0,
 				'in_progress' => 0,
 				'failed'      => 0,
+				'complete'    => 0,
 			),
 			$out
 		);

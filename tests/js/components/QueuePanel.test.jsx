@@ -26,8 +26,22 @@ import { fetchSettings, updateSettings } from '../../../src/Admin/api/settings';
 
 const baseStats = {
 	summary: {
-		rakuten: { code: 'rakuten', label: '楽天', pending: 3, in_progress: 1, failed: 2 },
-		dmm: { code: 'dmm', label: 'DMM', pending: 0, in_progress: 0, failed: 0 },
+		rakuten: {
+			code: 'rakuten',
+			label: '楽天',
+			pending: 3,
+			in_progress: 1,
+			failed: 2,
+			complete: 42,
+		},
+		dmm: {
+			code: 'dmm',
+			label: 'DMM',
+			pending: 0,
+			in_progress: 0,
+			failed: 0,
+			complete: 0,
+		},
 	},
 	depth: 4,
 	paused: false,
@@ -81,6 +95,8 @@ describe('QueuePanel', () => {
 		expect(screen.getByText('未処理: 3')).toBeInTheDocument();
 		expect(screen.getByText('処理中: 1')).toBeInTheDocument();
 		expect(screen.getByText('失敗: 2')).toBeInTheDocument();
+		// 完了件数（症状4 の可視化ギャップ対応）も account 行に表示する。
+		expect(screen.getByText('完了: 42')).toBeInTheDocument();
 		expect(screen.getByText('キューの深さ: 4')).toBeInTheDocument();
 	});
 
@@ -99,6 +115,65 @@ describe('QueuePanel', () => {
 		fireEvent.click(button);
 		await waitFor(() => expect(clearQueue).toHaveBeenCalled());
 		await waitFor(() => expect(deleteFailed).toHaveBeenCalled());
+	});
+
+	test('"キューを全て削除" shows an accurate success message that excludes in-progress jobs', async () => {
+		render(<QueuePanel />);
+		const button = await screen.findByRole('button', {
+			name: 'キューを全て削除',
+		});
+		fireEvent.click(button);
+		// 実行中のジョブは止められないため、成功通知は「全て削除」ではなく
+		// 未処理と失敗のみを削除した旨・実行中は残る旨を明示する（CodeRabbit 指摘）。
+		await waitFor(() =>
+			expect(
+				screen.getByText(
+					'未処理と失敗のジョブを削除しました（実行中のジョブは完了まで動きます）'
+				)
+			).toBeInTheDocument()
+		);
+	});
+
+	test('when the post-action stats reload fails, it shows an error (not a false success)', async () => {
+		// 初回ロードは成功、操作後の再取得だけ失敗させる。
+		fetchQueueStats
+			.mockResolvedValueOnce(baseStats)
+			.mockRejectedValueOnce(new Error('stats reload failed'));
+
+		render(<QueuePanel />);
+		const button = await screen.findByRole('button', {
+			name: '失敗分を削除',
+		});
+		fireEvent.click(button);
+
+		await waitFor(() => expect(deleteFailed).toHaveBeenCalled());
+		// 操作自体は走っても、統計の再取得に失敗したら成功と言い切らない。
+		await waitFor(() =>
+			expect(
+				screen.getByText(
+					'操作は実行しましたが、最新のキュー状態の取得に失敗しました。画面を再読み込みしてください。'
+				)
+			).toBeInTheDocument()
+		);
+		expect(
+			screen.queryByText('失敗分を削除しました')
+		).not.toBeInTheDocument();
+	});
+
+	test('initial stats load failure surfaces an error notice instead of a silent empty queue', async () => {
+		fetchQueueStats.mockReset();
+		fetchQueueStats.mockRejectedValue(new Error('boom'));
+
+		render(<QueuePanel />);
+
+		// 空 stats へ黙って差し替えて「成功／空」に見せず、取得失敗の Notice を出す。
+		await waitFor(() =>
+			expect(
+				screen.getByText(
+					'キュー状態の取得に失敗しました。表示が最新でない可能性があります。'
+				)
+			).toBeInTheDocument()
+		);
 	});
 
 	test('"失敗分を削除" calls only deleteFailed', async () => {

@@ -136,6 +136,59 @@ final class PluginTest extends TestCase {
 		$this->assertTrue( $seeded_recorded, 'affilicard_seeded_at オプションが記録されるべき' );
 	}
 
+	/**
+	 * Fix 3: 純 affilicard サイト（WooCommerce 不在 → フィルタ既定 true）では
+	 * Tools > Scheduled Actions の重複サブメニューを remove_submenu_page で隠す。
+	 */
+	public function test_hideActionSchedulerToolsMenu_removes_submenu_when_filter_true(): void {
+		WP_Mock::onFilter( 'affilicard_hide_action_scheduler_tools_menu' )
+			->with( true )
+			->reply( true );
+		WP_Mock::userFunction( 'remove_submenu_page' )
+			->once()
+			->with( 'tools.php', 'action-scheduler' );
+
+		Plugin::hideActionSchedulerToolsMenu();
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * Fix 3: フィルタで false を返すサイト（例: 他の AS 消費プラグインを持つ）では
+	 * Tools > Scheduled Actions を隠さない（remove_submenu_page を呼ばない）。
+	 * これにより WooCommerce 等の AS 利用者の管理画面を壊さない。
+	 */
+	public function test_hideActionSchedulerToolsMenu_keeps_submenu_when_filter_false(): void {
+		WP_Mock::onFilter( 'affilicard_hide_action_scheduler_tools_menu' )
+			->with( true )
+			->reply( false );
+		WP_Mock::userFunction( 'remove_submenu_page' )->never();
+
+		Plugin::hideActionSchedulerToolsMenu();
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * Fix 3: 管理画面では admin_menu に priority 99（AS 本体のサブメニュー登録より後）で
+	 * hideActionSchedulerToolsMenu を配線する。
+	 */
+	public function test_boot_registers_hide_action_scheduler_tools_menu_hook_in_admin(): void {
+		WP_Mock::userFunction( 'is_admin', array( 'return' => true ) );
+		WP_Mock::userFunction( 'register_activation_hook', array( 'return' => true ) );
+		WP_Mock::userFunction( 'register_deactivation_hook', array( 'return' => true ) );
+
+		WP_Mock::expectActionAdded(
+			'admin_menu',
+			array( Plugin::class, 'hideActionSchedulerToolsMenu' ),
+			99
+		);
+
+		Plugin::boot();
+
+		$this->assertConditionsMet();
+	}
+
 	public function test_registerSettingsPage_calls_add_submenu_page_under_cpt(): void {
 		WP_Mock::userFunction( 'add_submenu_page' )
 			->once()

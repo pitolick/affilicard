@@ -87,7 +87,7 @@ final class QueueControllerTest extends TestCase {
 	/** provider 別 status 別件数を 0 件で固定する共通スタブ（stats/clearAll/cancelPending の前提）。 */
 	private function stubEmptyQueueForAllProviders(): void {
 		foreach ( array( self::RAKUTEN_GROUP, self::DMM_GROUP ) as $group ) {
-			foreach ( array( 'pending', 'in-progress', 'failed' ) as $status ) {
+			foreach ( array( 'pending', 'in-progress', 'failed', 'complete' ) as $status ) {
 				WP_Mock::userFunction( 'as_get_scheduled_actions' )
 					->with(
 						array(
@@ -122,6 +122,9 @@ final class QueueControllerTest extends TestCase {
 		$this->assertSame( '楽天', $data['summary']['rakuten']['label'] );
 		$this->assertSame( 'dmm', $data['summary']['dmm']['code'] );
 		$this->assertSame( 'DMM', $data['summary']['dmm']['label'] );
+		// complete 件数（症状4 の可視化ギャップ対応）も summary payload に含まれる。
+		$this->assertSame( 0, $data['summary']['rakuten']['complete'] );
+		$this->assertSame( 0, $data['summary']['dmm']['complete'] );
 		$this->assertSame( 0, $data['depth'] );
 		$this->assertTrue( $data['paused'] );
 	}
