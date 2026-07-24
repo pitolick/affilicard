@@ -5,6 +5,7 @@ namespace Affilicard\Cron;
 
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductPostType;
+use Affilicard\Pricing\ListingEligibility;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Repository\ProductRepositoryInterface;
 
@@ -79,6 +80,12 @@ class ListingRefresher {
 	 *
 	 * 既存 refreshListing() を再利用（force 相当・throttle はハンドラ側で担保済みの前提）。
 	 * 商品または該当 platform の listing が見つからない場合は false。
+	 *
+	 * v2.4.0: enqueue から worker 実行までの間に listing が DISABLED / manual へ切り替わる
+	 * TOCTOU（Time-Of-Check-Time-Of-Use）を防ぐため、実行時に update_mode/enabled を
+	 * 再チェックする（ListingEligibility::isEnabledAuto()）。auto_update はここでは見ない
+	 * ――force enqueue（管理画面「強制更新」）は auto_update=false の listing も対象に
+	 * 含める契約のため、実行時に auto_update だけを理由に取りこぼすと force 機能が壊れる。
 	 */
 	public function refreshOne( int $postId, string $platform ): bool {
 		$product = $this->repository->find( $postId );
@@ -89,6 +96,9 @@ class ListingRefresher {
 		foreach ( $listings as $index => $listing ) {
 			if ( ! is_array( $listing ) || ( $listing['platform'] ?? '' ) !== $platform ) {
 				continue;
+			}
+			if ( ! ListingEligibility::isEnabledAuto( $listing ) ) {
+				return false;
 			}
 			$refreshed          = $this->refreshListing( $listing, (string) $product['title'] );
 			$listings[ $index ] = $refreshed;

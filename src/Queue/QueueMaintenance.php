@@ -19,8 +19,10 @@ use Affilicard\Settings\GeneralSettings;
  * && platform 定義が既知）のみ。鮮度スキップ（fresh は積まない）・depth cap・jitter は
  * Enqueuer::enqueueSweep() 側の責務。
  *
- * 注意: ListingRefresher::refreshOne()（ハンドラが実行時に呼ぶ）はこの対象フィルタを
- * 再チェックしないため、enqueue 時点でのフィルタリングがここで担保する唯一のゲートになる。
+ * 注意: ListingRefresher::refreshOne()（ハンドラが実行時に呼ぶ）は v2.4.0 で
+ * update_mode/enabled のみを再チェックするが、auto_update は見ない（force enqueue との
+ * 両立のため）。よって auto_update=false の listing を積まないことは、enqueue 時点の
+ * このフィルタが引き続き唯一のゲートになる。
  *
  * registerRetentionFilters(): Action Scheduler の完了/失敗アクション保持期間を
  * GeneralSettings（管理画面で設定した done 時間 / failed 日数）へ連動させる。

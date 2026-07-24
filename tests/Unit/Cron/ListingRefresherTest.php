@@ -537,4 +537,110 @@ final class ListingRefresherTest extends TestCase {
 		$refresher = new ListingRefresher( new ProviderRegistry(), $repo );
 		$this->assertFalse( $refresher->refreshOne( 999, 'rakuten-kobo' ) );
 	}
+
+	/**
+	 * v2.4.0: enqueue から worker 実行までの間に listing が disabled/manual へ切り替わる
+	 * TOCTOU（Time-Of-Check-Time-Of-Use）を防ぐため、refreshOne は実行時に
+	 * update_mode/enabled を再チェックする（force と両立するため auto_update は見ない）。
+	 */
+	public function test_refreshOne_disabledなlistingはfalseでfetchも保存もしない(): void {
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$provider->shouldNotReceive( 'isAutomatic' );
+		$provider->shouldNotReceive( 'fetch' );
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 12 )->andReturn(
+			$this->product(
+				12,
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => false, // enqueue 後に無効化された
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'external_id' => 'deadbeef01',
+					),
+				)
+			)
+		);
+		$repo->shouldNotReceive( 'save' );
+
+		$refresher = new ListingRefresher( $registry, $repo );
+		$this->assertFalse( $refresher->refreshOne( 12, 'rakuten-kobo' ) );
+	}
+
+	public function test_refreshOne_manualモードに切り替わったlistingはfalseでfetchも保存もしない(): void {
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$provider->shouldNotReceive( 'isAutomatic' );
+		$provider->shouldNotReceive( 'fetch' );
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 12 )->andReturn(
+			$this->product(
+				12,
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'manual', // enqueue 後に手動へ切り替わった
+						'auto_update' => true,
+						'external_id' => 'deadbeef01',
+					),
+				)
+			)
+		);
+		$repo->shouldNotReceive( 'save' );
+
+		$refresher = new ListingRefresher( $registry, $repo );
+		$this->assertFalse( $refresher->refreshOne( 12, 'rakuten-kobo' ) );
+	}
+
+	/**
+	 * force enqueue（管理画面「強制更新」）で積まれた auto_update=false の listing は、
+	 * eligibility 再チェックで auto_update を見ないため refreshOne でも引き続き fetch される
+	 * （force 機能を壊さないことの確認）。
+	 */
+	public function test_refreshOne_auto_updateがfalseでもenabledなautoならfetchする(): void {
+		$this->stubRakutenPlatform();
+
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$provider->shouldReceive( 'fetch' )->once()->andReturn( array( 'price' => '693' ) );
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 12 )->andReturn(
+			$this->product(
+				12,
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => false, // 手動上書き中でも force enqueue 経路では対象
+						'external_id' => 'deadbeef01',
+						'price'       => '500',
+						'fetch_error' => '',
+					),
+				)
+			)
+		);
+		$repo->shouldReceive( 'save' )->once()->andReturnUsing(
+			function ( array $d ) {
+				$this->assertSame( '693', $d['listings'][0]['price'] );
+				return 12;
+			}
+		);
+
+		$refresher = new ListingRefresher( $registry, $repo );
+		$this->assertTrue( $refresher->refreshOne( 12, 'rakuten-kobo' ) );
+	}
 }

@@ -17,8 +17,10 @@ use Affilicard\Repository\ProductRepositoryInterface;
  * から既存商品を特定するところまでで、AutoCreate は行わない（未登録商品は無視する）。
  *
  * enqueue 対象フィルタ（update_mode=auto && enabled && auto_update && platform 定義が
- * 既知）は QueueMaintenance::sweep() と同じ判定をここでも独立して行う
- * （ListingRefresher::refreshOne() は再チェックしないため、enqueue 側が唯一のゲート）。
+ * 既知）は QueueMaintenance::sweep() と同じ判定をここでも独立して行う。
+ * ListingRefresher::refreshOne() は v2.4.0 で update_mode/enabled のみ実行時に再チェック
+ * するが auto_update は見ないため、auto_update=false の listing を積まないことについては
+ * enqueue 側のこのフィルタが引き続き唯一のゲートになる。
  */
 final class PublishTrigger {
 
