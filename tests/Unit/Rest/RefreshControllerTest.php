@@ -98,7 +98,9 @@ final class RefreshControllerTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->once()->with( 12 )->andReturn( $this->product( 12, array( $this->eligibleListing() ) ) );
 
-		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+		// enqueueManual は base args の pending sweep を一度解除してから積み直す（pending sweep を
+		// 手動更新が確実に上書き・即時実行するため）ので as_unschedule_all_actions が 1 回呼ばれる。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(
 				Mockery::type( 'int' ),
@@ -234,7 +236,9 @@ final class RefreshControllerTest extends TestCase {
 			$this->product( 22, array( $this->eligibleListing( array( 'auto_update' => false ) ) ) )
 		);
 
-		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+		// enqueueManual は base args の pending sweep を一度解除してから積み直す（pending sweep を
+		// 手動更新が確実に上書き・即時実行するため）ので as_unschedule_all_actions が 1 回呼ばれる。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(
 				Mockery::type( 'int' ),
