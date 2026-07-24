@@ -53,4 +53,8 @@ final class RefreshHandler extends ThrottledActionHandler {
 	protected function attemptKey( array $args ): string {
 		return 'affilicard_refresh_attempts_' . $args['post_id'] . '_' . $args['platform'];
 	}
+
+	protected function throttleWaitKey( array $args ): string {
+		return 'affilicard_throttle_waits_' . $args['post_id'] . '_' . $args['platform'];
+	}
 }

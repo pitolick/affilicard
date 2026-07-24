@@ -278,10 +278,20 @@ final class EnqueuerTest extends TestCase {
 		$this->assertFalse( $result );
 	}
 
-	public function test_rescheduleRefresh_指定時刻にpriority10で再投入する_uniqueはfalse(): void {
+	/**
+	 * v2.4.0 症状1/3（thundering herd）対策: 自己再投入は jitter 無しだと同一 account を
+	 * 奪い合う listing 群が寸分違わず同一タイムスタンプへ再集結してしまうため、
+	 * enqueueSweep と同様に wp_rand(0, RESCHEDULE_JITTER_SECONDS) を $whenSec に加算する。
+	 * wp_rand を固定値にモックし、加算後の時刻で呼ばれることを厳密に検証する。
+	 */
+	public function test_rescheduleRefresh_jitterを加算した時刻にpriority10で再投入する_uniqueはfalse(): void {
+		WP_Mock::userFunction( 'wp_rand' )
+			->once()
+			->with( 0, Enqueuer::RESCHEDULE_JITTER_SECONDS )
+			->andReturn( 37 );
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(
-				5000,
+				5000 + 37,
 				Enqueuer::HOOK_REFRESH,
 				array(
 					'post_id'  => 12,
@@ -297,10 +307,14 @@ final class EnqueuerTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
-	public function test_rescheduleAutoCreate_指定時刻にpriority0で再投入する_uniqueはfalse(): void {
+	public function test_rescheduleAutoCreate_jitterを加算した時刻にpriority0で再投入する_uniqueはfalse(): void {
+		WP_Mock::userFunction( 'wp_rand' )
+			->once()
+			->with( 0, Enqueuer::RESCHEDULE_JITTER_SECONDS )
+			->andReturn( 12 );
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(
-				6000,
+				6000 + 12,
 				Enqueuer::HOOK_AUTOCREATE,
 				array(
 					'platform'    => 'rakuten-kobo',

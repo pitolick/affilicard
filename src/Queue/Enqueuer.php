@@ -35,6 +35,16 @@ final class Enqueuer {
 	public const PRIORITY_SWEEP  = 20;
 
 	/**
+	 * throttle/backoff の自己再投入（rescheduleRefresh/rescheduleAutoCreate）に加える
+	 * jitter の最大秒数。同一 account を奪い合う listing 群が jitter 無しだと寸分違わず
+	 * 同一タイムスタンプへ再集結し、thundering herd（症状1: ignored 誘発）＋ claim 順
+	 * （action_id ASC）による先着 listing の恒久的な独占（症状2: 他の listing が
+	 * performWork に到達できず failed に絶対到達しない）を招く。enqueueSweep の
+	 * jitter と同じ考え方を自己再投入にも適用し、負けた listing を時間分散させる。
+	 */
+	public const RESCHEDULE_JITTER_SECONDS = 60;
+
+	/**
 	 * enqueueSweep() が listing 毎に as_get_scheduled_actions を叩かないための
 	 * インスタンス内 memo。sweep 1 回（＝この Enqueuer インスタンスの生存期間）の
 	 * 間だけ有効で、null は「未クエリ」を表す。
@@ -135,10 +145,16 @@ final class Enqueuer {
 	 * unique=false: ハンドラ実行中の自分自身が in-progress として重複判定されるため、
 	 * unique=true だと backoff/throttle の再投入が必ずスキップされてしまう。単一ワーカー
 	 * （AS claim による single-flight）実行中の 1 回だけ呼ばれるので false でも増殖しない。
+	 *
+	 * jitter: $whenSec に wp_rand(0, RESCHEDULE_JITTER_SECONDS) を加算する。同一 account を
+	 * 奪い合う listing が jitter 無しだと寸分違わず同一タイムスタンプへ再集結し、claim 順
+	 * （action_id ASC）で先着 listing が account throttle を独占し続けてしまう（他の listing
+	 * が performWork に到達できず backoff/failed 化が機能しない）ため、負けた listing を
+	 * 時間分散させて全員が順にスロットを獲得できるようにする。
 	 */
 	public function rescheduleRefresh( int $whenSec, int $postId, string $platform, string $account ): void {
 		as_schedule_single_action(
-			$whenSec,
+			$whenSec + wp_rand( 0, self::RESCHEDULE_JITTER_SECONDS ),
 			self::HOOK_REFRESH,
 			array(
 				'post_id'  => $postId,
@@ -155,10 +171,11 @@ final class Enqueuer {
 	 *
 	 * unique=false: rescheduleRefresh と同様、実行中の自分自身が in-progress として
 	 * 重複判定されてしまうため false（単一ワーカー実行中の 1 回だけ呼ばれるので増殖しない）。
+	 * jitter は rescheduleRefresh と同じ理由・同じ定数を使う。
 	 */
 	public function rescheduleAutoCreate( int $whenSec, string $platform, string $account, string $externalId ): void {
 		as_schedule_single_action(
-			$whenSec,
+			$whenSec + wp_rand( 0, self::RESCHEDULE_JITTER_SECONDS ),
 			self::HOOK_AUTOCREATE,
 			array(
 				'platform'    => $platform,

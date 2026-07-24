@@ -104,6 +104,7 @@ final class AutoCreateHandlerTest extends TestCase {
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array( 'queue_paused' => true ) );
 		$this->stubPlatform();
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 ); // rescheduleAutoCreate の jitter
 
 		$provider = $this->provider();
 		$provider->shouldNotReceive( 'fetch' );
@@ -138,7 +139,12 @@ final class AutoCreateHandlerTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
-	public function test_handle_throttle未経過なら再投入してcreateしない(): void {
+	/**
+	 * throttle 未獲得（account contention）で cap 未満の場合: 待ちカウンタ
+	 * （affilicard_throttle_waits_*）をインクリメントしつつ、従来通り reschedule で
+	 * 再投入する。performWork（create/fetch）は呼ばれない。
+	 */
+	public function test_handle_throttle未経過かつcap未満なら待機カウンタを増やして再投入しcreateしない(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array() );
@@ -148,6 +154,15 @@ final class AutoCreateHandlerTest extends TestCase {
 		WP_Mock::userFunction( 'get_option' )
 			->with( 'affilicard_ratelimit_rakuten', 0 )
 			->andReturn( 9999999999999 );
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_throttle_waits_rakuten-kobo_ext-001' )
+			->andReturn( 5 ); // 5回待たされ済み → 今回で6回目、MAX_THROTTLE_WAITS(30)未満
+		WP_Mock::userFunction( 'set_transient' )
+			->once()
+			->with( 'affilicard_throttle_waits_rakuten-kobo_ext-001', 6, DAY_IN_SECONDS )
+			->andReturn( true );
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 ); // rescheduleAutoCreate の jitter
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once(); // rescheduleAutoCreate
 
 		$provider = $this->provider();
@@ -164,12 +179,57 @@ final class AutoCreateHandlerTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	/**
+	 * throttle 未獲得（account contention）で cap（MAX_THROTTLE_WAITS）到達時: これ以上
+	 * 再投入せず（as_schedule_single_action は呼ばれない）、待ちカウンタを削除して
+	 * そのまま complete させる（競合は fetch 失敗ではないため例外は投げない）。
+	 */
+	public function test_handle_throttle未経過かつcap到達なら再投入せずカウンタを削除して終了する(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		$this->stubPlatform();
+		$this->mockRateLimiterWpdb( 0 ); // CAS の UPDATE が 0 行 = 未獲得
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_ratelimit_rakuten', 0 )
+			->andReturn( 9999999999999 );
+		// MAX_THROTTLE_WAITS(30) - 1 = 29 が記録済み → 今回の待機で 30 回目 = 上限到達。
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_throttle_waits_rakuten-kobo_ext-001' )
+			->andReturn( 29 );
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_throttle_waits_rakuten-kobo_ext-001' )
+			->andReturn( true );
+		WP_Mock::userFunction( 'set_transient' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never(); // reschedule されない（打ち切り）
+
+		$provider = $this->provider();
+		$provider->shouldNotReceive( 'fetch' );
+		$registry = $this->registry( $provider );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldNotReceive( 'save' );
+		$creator = new ProductAutoCreator( $registry, $repo );
+
+		$handler = new AutoCreateHandler( new Enqueuer(), new RateLimiter(), $creator, $registry );
+		$handler->handle( 'rakuten-kobo', 'ext-001' ); // 例外を投げず正常終了する（complete 扱い）
+
+		$this->assertConditionsMet();
+	}
+
 	public function test_handle_取得できればcreateを呼ぶ(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array() );
 		$this->stubPlatform();
 		$this->mockRateLimiterWpdb( 1 ); // CAS の UPDATE が 1 行 = 獲得成功（経過済）
+		// throttle 獲得成功 → 待機カウンタはリセットされる（listing が進捗したため）。
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_throttle_waits_rakuten-kobo_ext-001' )
+			->andReturn( true );
 		WP_Mock::userFunction( 'delete_transient' )
 			->once()
 			->with( 'affilicard_autocreate_attempts_rakuten-kobo_ext-001' )

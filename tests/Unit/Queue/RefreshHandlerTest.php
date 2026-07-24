@@ -90,6 +90,7 @@ final class RefreshHandlerTest extends TestCase {
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array( 'queue_paused' => true ) );
 		$this->stubPlatform();
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 ); // rescheduleRefresh の jitter
 
 		// fetch は呼ばれない（消費しない）が、ジョブは reschedule で温存される
 		// （不再投入だと AS がアクションを complete 扱いにしてジョブが消滅してしまう）。
@@ -116,7 +117,12 @@ final class RefreshHandlerTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
-	public function test_handle_throttle未経過なら再投入してfetchしない(): void {
+	/**
+	 * throttle 未獲得（account contention）で cap 未満の場合: 待ちカウンタ
+	 * （affilicard_throttle_waits_*）をインクリメントしつつ、従来通り reschedule で
+	 * 再投入する。performWork（refreshOne）は呼ばれない。
+	 */
+	public function test_handle_throttle未経過かつcap未満なら待機カウンタを増やして再投入しfetchしない(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array() );
@@ -126,6 +132,15 @@ final class RefreshHandlerTest extends TestCase {
 		WP_Mock::userFunction( 'get_option' )
 			->with( 'affilicard_ratelimit_rakuten', 0 )
 			->andReturn( 9999999999999 );
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_throttle_waits_12_rakuten-kobo' )
+			->andReturn( 5 ); // 5回待たされ済み → 今回で6回目、MAX_THROTTLE_WAITS(30)未満
+		WP_Mock::userFunction( 'set_transient' )
+			->once()
+			->with( 'affilicard_throttle_waits_12_rakuten-kobo', 6, DAY_IN_SECONDS )
+			->andReturn( true );
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 ); // rescheduleRefresh の jitter
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once(); // rescheduleRefresh
 
 		$refresher = Mockery::mock( ListingRefresher::class );
@@ -133,6 +148,42 @@ final class RefreshHandlerTest extends TestCase {
 
 		$handler = new RefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry() );
 		$handler->handle( 12, 'rakuten-kobo' );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * throttle 未獲得（account contention）で cap（MAX_THROTTLE_WAITS）到達時: これ以上
+	 * 再投入せず（as_schedule_single_action は呼ばれない）、待ちカウンタを削除して
+	 * そのまま complete させる（cron sweep の needsRefetch cooldown 経過後に再度拾わせる）。
+	 * 競合は fetch 失敗ではないため例外は投げない（failed 化しない）。
+	 */
+	public function test_handle_throttle未経過かつcap到達なら再投入せずカウンタを削除して終了する(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		$this->stubPlatform();
+		$this->mockRateLimiterWpdb( 0 ); // CAS の UPDATE が 0 行 = 未獲得
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_ratelimit_rakuten', 0 )
+			->andReturn( 9999999999999 );
+		// MAX_THROTTLE_WAITS(30) - 1 = 29 が記録済み → 今回の待機で 30 回目 = 上限到達。
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_throttle_waits_12_rakuten-kobo' )
+			->andReturn( 29 );
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_throttle_waits_12_rakuten-kobo' )
+			->andReturn( true );
+		WP_Mock::userFunction( 'set_transient' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never(); // reschedule されない（打ち切り）
+
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldNotReceive( 'refreshOne' );
+
+		$handler = new RefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry() );
+		$handler->handle( 12, 'rakuten-kobo' ); // 例外を投げず正常終了する（complete 扱い）
 
 		$this->assertConditionsMet();
 	}
@@ -155,6 +206,11 @@ final class RefreshHandlerTest extends TestCase {
 		$refresher = Mockery::mock( ListingRefresher::class );
 		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( false );
 
+		// throttle 獲得成功 → 待機カウンタはリセットされる（listing が進捗したため）。
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_throttle_waits_12_rakuten-kobo' )
+			->andReturn( true );
 		// MAX_ATTEMPTS(5) - 1 = 4 が記録済み → 今回の試行で 5 回目 = 上限到達。
 		WP_Mock::userFunction( 'get_transient' )
 			->once()
@@ -194,6 +250,11 @@ final class RefreshHandlerTest extends TestCase {
 		$refresher = Mockery::mock( ListingRefresher::class );
 		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( false );
 
+		// throttle 獲得成功 → 待機カウンタはリセットされる（listing が進捗したため）。
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_throttle_waits_12_rakuten-kobo' )
+			->andReturn( true );
 		WP_Mock::userFunction( 'get_transient' )
 			->once()
 			->with( 'affilicard_refresh_attempts_12_rakuten-kobo' )
@@ -202,7 +263,8 @@ final class RefreshHandlerTest extends TestCase {
 			->once()
 			->with( 'affilicard_refresh_attempts_12_rakuten-kobo', 2, DAY_IN_SECONDS )
 			->andReturn( true );
-		WP_Mock::userFunction( 'delete_transient' )->never();
+		WP_Mock::userFunction( 'delete_transient' )->with( 'affilicard_refresh_attempts_12_rakuten-kobo' )->never();
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 ); // rescheduleRefresh の jitter
 		WP_Mock::userFunction( 'as_schedule_single_action' )
 			->once()
 			->with(
@@ -230,6 +292,11 @@ final class RefreshHandlerTest extends TestCase {
 			->andReturn( array() );
 		$this->stubPlatform();
 		$this->mockRateLimiterWpdb( 1 ); // CAS の UPDATE が 1 行 = 獲得成功（経過済）
+		// throttle 獲得成功 → 待機カウンタはリセットされる（listing が進捗したため）。
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_throttle_waits_12_rakuten-kobo' )
+			->andReturn( true );
 		WP_Mock::userFunction( 'delete_transient' )
 			->once()
 			->with( 'affilicard_refresh_attempts_12_rakuten-kobo' )

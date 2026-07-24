@@ -53,4 +53,8 @@ final class AutoCreateHandler extends ThrottledActionHandler {
 	protected function attemptKey( array $args ): string {
 		return 'affilicard_autocreate_attempts_' . $args['platform'] . '_' . $args['external_id'];
 	}
+
+	protected function throttleWaitKey( array $args ): string {
+		return 'affilicard_throttle_waits_' . $args['platform'] . '_' . $args['external_id'];
+	}
 }
