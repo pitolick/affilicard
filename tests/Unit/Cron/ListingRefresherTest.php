@@ -297,6 +297,46 @@ final class ListingRefresherTest extends TestCase {
 		$this->assertTrue( $refresher->refreshOne( 12, 'rakuten-kobo' ) );
 	}
 
+	/**
+	 * fetch は成功したが updateListing() が false（find→再読込の間に対象 listing が
+	 * 削除・変更され保存できなかった）場合、refreshOne() は false を返す。ここで true を
+	 * 返すとハンドラが成功と判断し、取得済みの新価格が保存されないまま再試行もされない
+	 * サイレントなデータロスになる（CodeRabbit 指摘の回帰防止）。
+	 */
+	public function test_refreshOne_updateListingがfalseなら成功fetchでもfalseを返す(): void {
+		$this->stubRakutenPlatform();
+
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$provider->shouldReceive( 'fetch' )->once()->andReturn( array( 'price' => '693' ) );
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 12 )->andReturn(
+			$this->product(
+				12,
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'external_id' => 'deadbeef01',
+						'price'       => '',
+						'fetch_error' => '',
+					),
+				)
+			)
+		);
+		// 保存に失敗（対象 listing が消えた等）を模して false を返す。
+		$repo->shouldReceive( 'updateListing' )->once()->andReturn( false );
+
+		$refresher = new ListingRefresher( $registry, $repo );
+		$this->assertFalse( $refresher->refreshOne( 12, 'rakuten-kobo' ) );
+	}
+
 	public function test_refreshOne_fetch失敗でfalse(): void {
 		$this->stubRakutenPlatform();
 

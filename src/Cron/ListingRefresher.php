@@ -55,8 +55,13 @@ class ListingRefresher {
 				return false;
 			}
 			$refreshed = $this->refreshListing( $listing, (string) $product['title'] );
-			$this->repository->updateListing( $postId, $platform, $refreshed );
-			return '' === (string) ( $refreshed['fetch_error'] ?? '' );
+			// updateListing() の戻り値を必ず反映する。find() から updateListing() の再読込
+			// までの間（外部 API fetch 中）に対象 platform の listing が削除・変更されると
+			// updateListing() は false（未保存）を返す。ここで false を握り潰すと、取得済みの
+			// 新しい価格が保存されないまま refreshOne() が true（成功）を返し、ハンドラが成功と
+			// 判断して再試行もされない＝サイレントなデータロスになる。$saved を戻り値に含める。
+			$saved = $this->repository->updateListing( $postId, $platform, $refreshed );
+			return $saved && '' === (string) ( $refreshed['fetch_error'] ?? '' );
 		}
 		return false;
 	}

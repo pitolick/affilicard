@@ -110,7 +110,7 @@ describe('QueuePanel', () => {
 	test('"キューを全て削除" calls both clearQueue and deleteFailed', async () => {
 		render(<QueuePanel />);
 		const button = await screen.findByRole('button', {
-			name: 'キューを全て削除',
+			name: '未処理と失敗を削除',
 		});
 		fireEvent.click(button);
 		await waitFor(() => expect(clearQueue).toHaveBeenCalled());
@@ -120,7 +120,7 @@ describe('QueuePanel', () => {
 	test('"キューを全て削除" shows an accurate success message that excludes in-progress jobs', async () => {
 		render(<QueuePanel />);
 		const button = await screen.findByRole('button', {
-			name: 'キューを全て削除',
+			name: '未処理と失敗を削除',
 		});
 		fireEvent.click(button);
 		// 実行中のジョブは止められないため、成功通知は「全て削除」ではなく

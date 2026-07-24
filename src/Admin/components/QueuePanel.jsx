@@ -326,7 +326,7 @@ export function QueuePanel() {
 					disabled={busy}
 					onClick={onClearAll}
 				>
-					{__('キューを全て削除', 'affilicard')}
+					{__('未処理と失敗を削除', 'affilicard')}
 				</Button>
 			</div>
 
