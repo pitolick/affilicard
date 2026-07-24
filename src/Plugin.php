@@ -154,11 +154,31 @@ final class Plugin {
 				// 誤反応しないよう、account group 別集計に限定する accountCodes を渡す。
 				// 再取得リード: 表示期限（priceTtlHours=24h＝規約上の表示上限）を変えず、掃引間隔
 				// ぶんだけ前倒しで needsRefetch を発火させ、価格が期限に達する前に再確認を終わらせる。
+				// A（決定的スタガリング）: account ごとの実効レート間隔（floor=minRequestIntervalMs と
+				// 管理画面 override の大きい方）を秒に丸めて Enqueuer に渡す。enqueueSweep が同一
+				// account の sweep ジョブを間隔ぶんずつ確定的にずらして積み、レート衝突→throttle
+				// 再投入（completed アクションのチャーン）を根本回避する。override を上げた account
+				// （インシデント対策で間隔を広げたケース）でもチャーンが出ない。
+				$rateLimiter            = new RateLimiter();
+				$accountIntervalSeconds = array();
+				foreach ( $automaticAccountCodes as $account ) {
+					$floorMs = 0;
+					foreach ( $providers->all() as $p ) {
+						if ( $p->accountCode() === $account ) {
+							$floorMs = $p->minRequestIntervalMs();
+							break;
+						}
+					}
+					$effMs                              = $rateLimiter->effectiveIntervalMs( $floorMs, GeneralSettings::throttleOverrideMs( $account ) );
+					$accountIntervalSeconds[ $account ] = (int) ceil( $effMs / 1000 );
+				}
+
 				$enqueuer = new Enqueuer(
 					GeneralSettings::queueDepthCap(),
 					300,
 					$automaticAccountCodes,
-					sweepLeadSeconds: PriceFreshness::sweepLeadSeconds( GeneralSettings::refreshIntervalHours() )
+					sweepLeadSeconds: PriceFreshness::sweepLeadSeconds( GeneralSettings::refreshIntervalHours() ),
+					accountIntervalSeconds: $accountIntervalSeconds
 				);
 				( new QueueMaintenance( new ProductRepository(), $enqueuer, $providers ) )->sweep();
 			}

@@ -54,25 +54,42 @@ final class Enqueuer {
 	private ?int $depthMemo = null;
 
 	/**
-	 * @param list<string>     $accountCodes 深さ集計を affilicard-{account} group 別に限定する
-	 *            account コード（例: ['rakuten', 'dmm']）。空配列（既定）の場合は
-	 *            後方互換のため queueDepth() が group='' の全 pending 件数にフォールバックする
-	 *            （I1: 他プラグインの pending も巻き込む旧挙動。呼び出し側が account を渡せない
-	 *            既存インスタンス化を壊さないための互換パス）。
-	 * @param ProviderRegistry $providerRegistry enqueueProductListings() が platform の
-	 *        provider コードから account コードを解決するために使う（v2.4.0）。他の
-	 *        enqueue 系・reschedule 系メソッドは呼び出し側解決済みの account を受け取るため使わない。
-	 * @param int              $sweepLeadSeconds enqueueSweep() の再取得判定（needsRefetch）を表示期限
-	 *                     （priceTtlHours=24h）より前倒しで発火させるリード秒数。PriceFreshness::sweepLeadSeconds
-	 *                     （掃引間隔 + バッファ）で算出して Plugin の掃引配線から渡す。表示 TTL は変えず再取得
-	 *                     だけ早め、価格が期限に達する前に再確認を終わらせる。既定 0 は前倒しなし（従来挙動）。
+	 * A（決定的スタガリング）用の account 別カーソル。account コード→次に sweep ジョブを
+	 * 積む unix 秒。enqueueSweep が積むたびに accountIntervalSeconds ぶん前進させる。
+	 * depthMemo と同様 sweep 1 回（＝この Enqueuer インスタンスの生存期間）だけ有効。
+	 *
+	 * @var array<string, int>
+	 */
+	private array $accountCursor = array();
+
+	/**
+	 * @param list<string>       $accountCodes 深さ集計を affilicard-{account} group 別に限定する
+	 *              account コード（例: ['rakuten', 'dmm']）。空配列（既定）の場合は
+	 *              後方互換のため queueDepth() が group='' の全 pending 件数にフォールバックする
+	 *              （I1: 他プラグインの pending も巻き込む旧挙動。呼び出し側が account を渡せない
+	 *              既存インスタンス化を壊さないための互換パス）。
+	 * @param ProviderRegistry   $providerRegistry enqueueProductListings() が platform の
+	 *          provider コードから account コードを解決するために使う（v2.4.0）。他の
+	 *          enqueue 系・reschedule 系メソッドは呼び出し側解決済みの account を受け取るため使わない。
+	 * @param int                $sweepLeadSeconds enqueueSweep() の再取得判定（needsRefetch）を表示期限
+	 *                       （priceTtlHours=24h）より前倒しで発火させるリード秒数。PriceFreshness::sweepLeadSeconds
+	 *                       （掃引間隔 + バッファ）で算出して Plugin の掃引配線から渡す。表示 TTL は変えず再取得
+	 *                       だけ早め、価格が期限に達する前に再確認を終わらせる。既定 0 は前倒しなし（従来挙動）。
+	 * @param array<string, int> $accountIntervalSeconds account コード→sweep ジョブ間の最小秒数
+	 *                     （実効レート間隔 = ceil(effectiveIntervalMs/1000)）。値 > 0 の account は
+	 *                     enqueueSweep が sweep ジョブを間隔ぶんずつ確定的にずらして積む（A: 決定的
+	 *                     スタガリング）。ランダム jitter だと複数ジョブが同一レート窓に落ちて RateLimiter に
+	 *                     弾かれ throttle 再投入（completed アクションのチャーン。Playground「1商品33回」）
+	 *                     を招くため、予め間隔分だけ離してレート衝突を根本回避する。既定 空配列＝間隔不明で
+	 *                     従来 jitter にフォールバック。
 	 */
 	public function __construct(
 		private int $depthCap = 500,
 		private int $maxJitterSeconds = 300,
 		private array $accountCodes = array(),
 		private ProviderRegistry $providerRegistry = new ProviderRegistry(),
-		private int $sweepLeadSeconds = 0
+		private int $sweepLeadSeconds = 0,
+		private array $accountIntervalSeconds = array()
 	) {}
 
 	public function group( string $account ): string {
@@ -134,6 +151,12 @@ final class Enqueuer {
 	 * 発火させるリード）を渡す。表示 TTL（priceTtlHours=24h＝規約上の表示上限）は変えず
 	 * 再取得だけ早め、価格が期限に達する前に再確認を終わらせて正常運用での途切れを防ぐ。
 	 *
+	 * スケジュール時刻（$when）: $accountIntervalSeconds にその account の実効レート間隔が
+	 * 与えられている場合は決定的スタガリングを行い、同一 account の sweep ジョブを間隔ぶんずつ
+	 * 確定的にずらして積む。ランダム jitter だと複数ジョブが同一レート窓に落ちて RateLimiter に
+	 * 弾かれ throttle 再投入（completed アクションのチャーン。Playground「1商品33回」）を招くため、
+	 * 予め間隔分だけ離してレート衝突を根本回避する。間隔が不明（未指定・0）な account は従来 jitter。
+	 *
 	 * @param array<string, mixed> $listing
 	 */
 	public function enqueueSweep( int $postId, string $platform, string $account, ?PlatformDefinition $def, array $listing, int $nowTs ): bool {
@@ -148,7 +171,19 @@ final class Enqueuer {
 			'post_id'  => $postId,
 			'platform' => $platform,
 		);
-		$when = time() + wp_rand( 0, $this->maxJitterSeconds );
+
+		$intervalSec = (int) ( $this->accountIntervalSeconds[ $account ] ?? 0 );
+		if ( $intervalSec > 0 ) {
+			// 決定的スタガリング: 同一 account の sweep ジョブを実効レート間隔ぶんずつ確定的に
+			// ずらして積む。ランダム jitter だと複数が同一レート窓に落ちて RateLimiter に弾かれ
+			// throttle 再投入（completed アクションのチャーン。Playground「1商品33回」）を招くため、
+			// 予め間隔分だけ離してレート衝突を根本回避する。
+			$base                            = max( time(), $this->accountCursor[ $account ] ?? 0 );
+			$when                            = $base;
+			$this->accountCursor[ $account ] = $base + $intervalSec;
+		} else {
+			$when = time() + wp_rand( 0, $this->maxJitterSeconds ); // 間隔不明時は従来 jitter
+		}
 
 		as_schedule_single_action( $when, self::HOOK_REFRESH, $args, $this->group( $account ), true, self::PRIORITY_SWEEP );
 		++$this->depthMemo;

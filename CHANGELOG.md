@@ -25,6 +25,10 @@
 - 手動更新 REST（`/affilicard/v1/refresh`）・product CPT の future→publish 昇格を、同期処理から Action Scheduler enqueue に変更した（`force` パラメータの「auto_update=false も対象」挙動は維持）。
 - 内部整理: listing の適格性判定（`update_mode`/`enabled`/`auto_update`）を共有ヘルパ `ListingEligibility` に集約。`RefreshHandler` が worker 実行時に `update_mode`/`enabled` を再チェックし、enqueue 後に無効化・手動化された listing を取りこぼさない（TOCTOU 対策。`force` 用に `auto_update` は見ない）。`last_fetched_at` を実 UTC（`gmdate`）で記録。同期スイープ時代の死コード（`ListingRefresher::run()`/`refreshProduct()` 等）を削除。
 
+### Fixed
+
+- **掃引ジョブの決定的スタガリング**でキュー・チャーンを根本抑制。同一 account の sweep ジョブをランダム jitter ではなく実効レート間隔（`minRequestIntervalMs` と管理画面 override の大きい方）ぶんずつ確定的にずらして積むようにし、複数ジョブが同一レート窓へ集中→`RateLimiter` に弾かれ throttle 再投入される completed アクションのチャーン（Playground 実測「1商品に33回」）を回避する。
+
 ## [2.3.0] - 2026-07-21
 
 ### Added

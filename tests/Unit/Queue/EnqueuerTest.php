@@ -316,6 +316,51 @@ final class EnqueuerTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	/**
+	 * A: 決定的スタガリング。accountIntervalSeconds を渡した Enqueuer は、同一 account の
+	 * sweep ジョブを実効レート間隔（ここでは 2 秒）ぶんずつ確定的にずらして積む。ランダム
+	 * jitter（wp_rand）は使わない。$when が base, base+2, base+4 と 2 秒刻みになることを
+	 * 相対差で厳密に検証する（絶対値は time() 依存のため差分で確認）。
+	 */
+	public function test_enqueueSweep_accountIntervalSeconds指定時は間隔ぶん確定スタガリングしwp_randを使わない(): void {
+		$def     = $this->platform( 'rakuten-kobo', 24 );
+		$now     = 1_000_000;
+		$listing = array(
+			'price'           => '500',
+			'last_fetched_at' => gmdate( 'c', $now - 25 * 3600 ), // 直近の試行が TTL 超過
+		);
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )->once()->andReturn( array() ); // depth 0（memo）
+		WP_Mock::userFunction( 'wp_rand' )->never(); // 決定的スタガリングは jitter を使わない
+
+		$whens = array();
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->times( 3 )
+			->andReturnUsing(
+				function ( $when ) use ( &$whens ) {
+					$whens[] = $when;
+					return 100 + count( $whens );
+				}
+			);
+
+		$enqueuer = new Enqueuer(
+			500,
+			300,
+			array(),
+			$this->registryWithRakuten(),
+			0,
+			array( 'rakuten' => 2 )
+		);
+
+		$this->assertTrue( $enqueuer->enqueueSweep( 1, 'rakuten-kobo', 'rakuten', $def, $listing, $now ) );
+		$this->assertTrue( $enqueuer->enqueueSweep( 2, 'rakuten-kobo', 'rakuten', $def, $listing, $now ) );
+		$this->assertTrue( $enqueuer->enqueueSweep( 3, 'rakuten-kobo', 'rakuten', $def, $listing, $now ) );
+
+		$this->assertCount( 3, $whens );
+		$this->assertSame( 2, $whens[1] - $whens[0], '2件目は base+2 に積まれる' );
+		$this->assertSame( 2, $whens[2] - $whens[1], '3件目は base+4 に積まれる' );
+		$this->assertConditionsMet();
+	}
+
 	public function test_enqueueSweep_depthCap到達でスキップしfalse(): void {
 		$def     = $this->platform( 'rakuten-kobo', 24 );
 		$now     = 1_000_000;
