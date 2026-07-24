@@ -23,6 +23,7 @@ use Affilicard\Provider\Rakuten\RakutenProvider;
 use Affilicard\Queue\ActionSchedulerLoader;
 use Affilicard\Queue\ActionSchedulerStore;
 use Affilicard\Queue\AutoCreateHandler;
+use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\PublishTrigger;
 use Affilicard\Queue\QueueJobsPage;
@@ -151,7 +152,14 @@ final class Plugin {
 			static function () use ( $automaticAccountCodes, $providers ): void {
 				// I1: depth cap backstop が affilicard 以外の pending action（WooCommerce 等）に
 				// 誤反応しないよう、account group 別集計に限定する accountCodes を渡す。
-				$enqueuer = new Enqueuer( GeneralSettings::queueDepthCap(), 300, $automaticAccountCodes );
+				// 再取得リード: 表示期限（priceTtlHours=24h＝規約上の表示上限）を変えず、掃引間隔
+				// ぶんだけ前倒しで needsRefetch を発火させ、価格が期限に達する前に再確認を終わらせる。
+				$enqueuer = new Enqueuer(
+					GeneralSettings::queueDepthCap(),
+					300,
+					$automaticAccountCodes,
+					sweepLeadSeconds: PriceFreshness::sweepLeadSeconds( GeneralSettings::refreshIntervalHours() )
+				);
 				( new QueueMaintenance( new ProductRepository(), $enqueuer, $providers ) )->sweep();
 			}
 		);

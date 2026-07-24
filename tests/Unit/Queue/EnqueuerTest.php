@@ -207,6 +207,41 @@ final class EnqueuerTest extends TestCase {
 		$this->assertFalse( $result );
 	}
 
+	/**
+	 * 掃引リード（sweepLeadSeconds）を持つ Enqueuer は、表示 TTL（24h）内でも期限より手前で
+	 * 再取得を発火する。20h 前の listing は lead=5h（しきい値 24-5=19h）なら投入対象になる
+	 * （リード無しなら 20h < 24h でスキップ＝別テストで担保）。表示 TTL は変えず、価格が期限に
+	 * 達する前に再確認を終わらせるための機構。
+	 */
+	public function test_enqueueSweep_リード付きは表示TTL内でも期限前に再取得投入する(): void {
+		$def     = $this->platform( 'rakuten-kobo', 24 );
+		$now     = 1_000_000;
+		$listing = array(
+			'price'            => '500',
+			'last_verified_at' => gmdate( 'c', $now - 20 * 3600 ),
+			'last_fetched_at'  => gmdate( 'c', $now - 20 * 3600 ), // 20h 前（TTL 24h 内だが lead しきい値 19h 超）
+		);
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )->andReturn( array() );
+		WP_Mock::userFunction( 'wp_rand' )->with( 0, 300 )->andReturn( 0 );
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				\Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 12,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten',
+				true,
+				Enqueuer::PRIORITY_SWEEP
+			)->andReturn( 202 );
+
+		$enqueuer = new Enqueuer( 500, 300, array(), $this->registryWithRakuten(), 5 * 3600 );
+		$this->assertTrue(
+			$enqueuer->enqueueSweep( 12, 'rakuten-kobo', 'rakuten', $def, $listing, $now )
+		);
+	}
+
 	public function test_enqueueSweep_last_fetched_atがTTL超過は深さ内でjitter付priority20投入しtrue(): void {
 		$def     = $this->platform( 'rakuten-kobo', 24 );
 		$now     = 1_000_000;

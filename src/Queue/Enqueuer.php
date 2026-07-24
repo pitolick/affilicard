@@ -62,12 +62,17 @@ final class Enqueuer {
 	 * @param ProviderRegistry $providerRegistry enqueueProductListings() が platform の
 	 *        provider コードから account コードを解決するために使う（v2.4.0）。他の
 	 *        enqueue 系・reschedule 系メソッドは呼び出し側解決済みの account を受け取るため使わない。
+	 * @param int              $sweepLeadSeconds enqueueSweep() の再取得判定（needsRefetch）を表示期限
+	 *                     （priceTtlHours=24h）より前倒しで発火させるリード秒数。PriceFreshness::sweepLeadSeconds
+	 *                     （掃引間隔 + バッファ）で算出して Plugin の掃引配線から渡す。表示 TTL は変えず再取得
+	 *                     だけ早め、価格が期限に達する前に再確認を終わらせる。既定 0 は前倒しなし（従来挙動）。
 	 */
 	public function __construct(
 		private int $depthCap = 500,
 		private int $maxJitterSeconds = 300,
 		private array $accountCodes = array(),
-		private ProviderRegistry $providerRegistry = new ProviderRegistry()
+		private ProviderRegistry $providerRegistry = new ProviderRegistry(),
+		private int $sweepLeadSeconds = 0
 	) {}
 
 	public function group( string $account ): string {
@@ -125,10 +130,14 @@ final class Enqueuer {
 	 * 掃引 Cron 起点の更新。鮮度内（fresh）ならスキップし、depth cap 到達時も
 	 * スキップする（force/manual はこのガードの対象外）。積んだら true を返す。
 	 *
+	 * 再取得判定にはコンストラクタの $sweepLeadSeconds（表示期限より前倒しで再取得を
+	 * 発火させるリード）を渡す。表示 TTL（priceTtlHours=24h＝規約上の表示上限）は変えず
+	 * 再取得だけ早め、価格が期限に達する前に再確認を終わらせて正常運用での途切れを防ぐ。
+	 *
 	 * @param array<string, mixed> $listing
 	 */
 	public function enqueueSweep( int $postId, string $platform, string $account, ?PlatformDefinition $def, array $listing, int $nowTs ): bool {
-		if ( ! PriceFreshness::needsRefetch( $listing, $def, $nowTs ) ) {
+		if ( ! PriceFreshness::needsRefetch( $listing, $def, $nowTs, $this->sweepLeadSeconds ) ) {
 			return false;
 		}
 		if ( $this->currentDepth() >= $this->depthCap ) {
