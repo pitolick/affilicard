@@ -42,7 +42,7 @@ final class RestControllerTest extends TestCase {
 			new CredentialsController( new ProviderRegistry(), new AccountRegistry() ),
 			new RefreshController( new ProductRepository(), new Enqueuer() ),
 			new CardPreviewController( new ProductRepository() ),
-			new QueueController( new QueueStats( array() ), array(), new ActionSchedulerStore() )
+			new QueueController( new QueueStats( array() ), array(), new ActionSchedulerStore(), new AccountRegistry() )
 		);
 
 		WP_Mock::expectActionAdded( 'rest_api_init', array( $controller, 'registerRoutes' ) );

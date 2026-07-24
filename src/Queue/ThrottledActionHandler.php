@@ -8,7 +8,9 @@ use Affilicard\Settings\GeneralSettings;
 
 /**
  * throttle 付き AS ハンドラの共通骨格。
- * pause ゲート → provider 解決 → RateLimiter（未経過なら本処理せず後ろ倒し）→ performWork → 失敗は backoff 再投入。
+ * pause ゲート → provider 解決 → account 解決（v2.4.0: RateLimiter/throttle は provider
+ * ではなく共有 API＝account 単位）→ RateLimiter（未経過なら本処理せず後ろ倒し）→
+ * performWork → 失敗は backoff 再投入。
  * サブクラスは providerCodeFor / performWork / reschedule / attemptKey を実装する。
  */
 abstract class ThrottledActionHandler {
@@ -54,13 +56,17 @@ abstract class ThrottledActionHandler {
 		if ( null === $provider || ! $provider->isAutomatic() ) {
 			return;
 		}
+		// v2.4.0: RateLimiter/throttle は provider ではなく共有 API＝account 単位でかける
+		// （認証画面と一致）。accountCode() が null（理論上は手動系のみだが isAutomatic()
+		// で既に弾いているため通常到達しない）の場合は provider コードへフォールバックする。
+		$account = $provider->accountCode() ?? $providerCode;
 
 		$interval = $this->limiter->effectiveIntervalMs(
 			$provider->minRequestIntervalMs(),
-			GeneralSettings::throttleOverrideMs( $providerCode )
+			GeneralSettings::throttleOverrideMs( $account )
 		);
 		$nowMs    = (int) round( microtime( true ) * 1000 );
-		$acquire  = $this->limiter->tryAcquire( $providerCode, $interval, $nowMs );
+		$acquire  = $this->limiter->tryAcquire( $account, $interval, $nowMs );
 		if ( ! $acquire['ok'] ) {
 			$this->reschedule( (int) ceil( $acquire['next_ms'] / 1000 ), $args );
 			return;

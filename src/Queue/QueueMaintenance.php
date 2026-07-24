@@ -5,6 +5,7 @@ namespace Affilicard\Queue;
 
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductPostType;
+use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Repository\ProductRepositoryInterface;
 use Affilicard\Settings\GeneralSettings;
 
@@ -31,7 +32,8 @@ final class QueueMaintenance {
 
 	public function __construct(
 		private ProductRepositoryInterface $repository,
-		private Enqueuer $enqueuer
+		private Enqueuer $enqueuer,
+		private ProviderRegistry $providerRegistry
 	) {}
 
 	public function sweep(): void {
@@ -73,7 +75,14 @@ final class QueueMaintenance {
 					continue;
 				}
 
-				$this->enqueuer->enqueueSweep( (int) $id, $platform, $def->provider, $def, $listing, $now );
+				// v2.4.0: enqueueSweep の group も account コード単位。account が解決できない
+				// （provider 未登録、または手動系で accountCode() が null）listing は積まない。
+				$account = $this->providerRegistry->get( $def->provider )?->accountCode();
+				if ( null === $account ) {
+					continue;
+				}
+
+				$this->enqueuer->enqueueSweep( (int) $id, $platform, $account, $def, $listing, $now );
 			}
 		}
 	}

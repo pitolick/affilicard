@@ -61,7 +61,7 @@ test.describe('手動投入 / pause 永続化（対話確認・Phase P5 終了�
 		// 1. /wp-admin/edit.php?post_type=affilicard_product&page=affilicard-settings を開く
 		// 2. 一般パネルの「一括更新」ボタンをクリック
 		//    （POST /affilicard/v1/refresh → Enqueuer::enqueueProductListings が
-		//     ELIGIBLE listing を affilicard-{provider} group で pending schedule する）
+		//     ELIGIBLE listing を affilicard-{account} group で pending schedule する）
 		// 3. /wp-admin/tools.php?page=action-scheduler&s=affilicard を開き、
 		//    group=affilicard-* の pending 行が表示されることを確認する
 	});

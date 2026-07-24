@@ -10,7 +10,6 @@ import {
 	cancelPending,
 } from '../api/queue';
 import { fetchSettings, updateSettings } from '../api/settings';
-import { providerLabel } from '../providers';
 
 const SCHEDULED_ACTIONS_URL = 'tools.php?page=action-scheduler&s=affilicard';
 
@@ -40,7 +39,10 @@ export function QueuePanel() {
 		return <p>{__('読み込み中…', 'affilicard')}</p>;
 	}
 
-	const providerCodes = Object.keys(stats.summary ?? {});
+	// v2.4.0: サマリは account コード（'rakuten'/'dmm' 等）単位で REST から返る。
+	// 各 account の表示ラベルも REST payload（summary[code].label）に含まれるため、
+	// JS 側で account コード→ラベルの対応表をハードコードする必要はない。
+	const accountCodes = Object.keys(stats.summary ?? {});
 
 	const runAction = async (action, successMessage) => {
 		setBusy(true);
@@ -146,7 +148,7 @@ export function QueuePanel() {
 				/>
 				<p>{__('キューの深さ', 'affilicard')}: {stats.depth ?? 0}</p>
 
-				{providerCodes.length === 0 && (
+				{accountCodes.length === 0 && (
 					<p className="description">
 						{__(
 							'自動更新中のプラットフォームはありません。',
@@ -155,19 +157,20 @@ export function QueuePanel() {
 					</p>
 				)}
 
-				{providerCodes.map((code) => {
+				{accountCodes.map((code) => {
 					const row = stats.summary[code] ?? {};
+					const label = row.label ?? code;
 					return (
 						<div
 							className="affilicard-queue-panel__provider-row"
 							key={code}
 						>
-							<strong>{providerLabel(code)}</strong>
+							<strong>{label}</strong>
 							<span>{__('未処理', 'affilicard')}: {row.pending ?? 0}</span>
 							<span>{__('処理中', 'affilicard')}: {row.in_progress ?? 0}</span>
 							<span>{__('失敗', 'affilicard')}: {row.failed ?? 0}</span>
 							<TextControl
-								label={`${providerLabel(code)} ${__(
+								label={`${label} ${__(
 									'throttle上書き (ms)',
 									'affilicard'
 								)}`}

@@ -172,11 +172,11 @@ final class UninstallTest extends TestCase {
 	}
 
 	/**
-	 * spec §9-7: uninstall は provider 別 group（`affilicard-{provider}`）の pending
-	 * スケジュールを as_unschedule_all_actions で解除する。AS 自身のテーブルは
-	 * 他プラグイン共有のため drop しない（unschedule のみ）。
+	 * spec §9-7 / v2.4.0: uninstall は account 別 group（`affilicard-{account}`）の pending
+	 * スケジュールを as_unschedule_all_actions で解除する（provider コード単位から account
+	 * コード単位へ統一）。AS 自身のテーブルは他プラグイン共有のため drop しない（unschedule のみ）。
 	 */
-	public function test_run_はprovider別groupのpendingスケジュールをunscheduleする(): void {
+	public function test_run_はaccount別groupのpendingスケジュールをunscheduleする(): void {
 		$captured = array();
 		$this->mockWpdb( $captured );
 
@@ -186,11 +186,11 @@ final class UninstallTest extends TestCase {
 
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )
 			->once()
-			->with( '', array(), 'affilicard-dmm-ebook' )
+			->with( '', array(), 'affilicard-dmm' )
 			->andReturn( null );
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )
 			->once()
-			->with( '', array(), 'affilicard-rakuten-kobo' )
+			->with( '', array(), 'affilicard-rakuten' )
 			->andReturn( null );
 
 		Uninstall::run();
@@ -199,10 +199,11 @@ final class UninstallTest extends TestCase {
 	}
 
 	/**
-	 * spec §9-7: uninstall は自前オプション（throttle 設定）も削除する対象に含む。
-	 * RateLimiter が provider 別に書き込む `affilicard_ratelimit_{provider}` option を削除する。
+	 * spec §9-7 / v2.4.0: uninstall は自前オプション（throttle 設定）も削除する対象に含む。
+	 * RateLimiter が account 別に書き込む `affilicard_ratelimit_{account}` option を削除する
+	 * （provider コード単位から account コード単位へ統一）。
 	 */
-	public function test_run_はprovider別のratelimitオプションを削除する(): void {
+	public function test_run_はaccount別のratelimitオプションを削除する(): void {
 		$captured = array();
 		$this->mockWpdb( $captured );
 
@@ -212,11 +213,11 @@ final class UninstallTest extends TestCase {
 
 		WP_Mock::userFunction( 'delete_option' )
 			->once()
-			->with( 'affilicard_ratelimit_dmm-ebook' )
+			->with( 'affilicard_ratelimit_dmm' )
 			->andReturn( true );
 		WP_Mock::userFunction( 'delete_option' )
 			->once()
-			->with( 'affilicard_ratelimit_rakuten-kobo' )
+			->with( 'affilicard_ratelimit_rakuten' )
 			->andReturn( true );
 		// 'manual' provider は isAutomatic()===false のため ratelimit option を持たず対象外。
 		WP_Mock::userFunction( 'delete_option' )

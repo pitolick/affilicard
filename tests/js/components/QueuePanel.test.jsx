@@ -4,9 +4,9 @@
  * @wordpress/components is mocked globally via jest.config.js moduleNameMapper
  * (see tests/js/__mocks__/wordpress-components.js).
  *
- * providerLabel() falls back to returning the raw provider code when
- * window.affilicardProviders is not set, which we rely on here to keep the
- * fixtures simple (no need to inject window.affilicardProviders).
+ * v2.4.0: the queue summary is keyed by account code ('rakuten'/'dmm') rather than
+ * provider code, and each row carries its own `label` (from the REST payload via
+ * AccountRegistry) so the component never needs a client-side code→label map.
  */
 
 jest.mock('../../../src/Admin/api/queue');
@@ -26,8 +26,8 @@ import { fetchSettings, updateSettings } from '../../../src/Admin/api/settings';
 
 const baseStats = {
 	summary: {
-		'rakuten-kobo': { pending: 3, in_progress: 1, failed: 2 },
-		'dmm-ebook': { pending: 0, in_progress: 0, failed: 0 },
+		rakuten: { code: 'rakuten', label: '楽天', pending: 3, in_progress: 1, failed: 2 },
+		dmm: { code: 'dmm', label: 'DMM', pending: 0, in_progress: 0, failed: 0 },
 	},
 	depth: 4,
 	paused: false,
@@ -35,7 +35,7 @@ const baseStats = {
 
 const baseSettings = {
 	queue_paused: false,
-	throttle_overrides: { 'rakuten-kobo': 1500 },
+	throttle_overrides: { rakuten: 1500 },
 	retention_done_hours: 24,
 	retention_failed_days: 7,
 };
@@ -68,12 +68,12 @@ describe('QueuePanel', () => {
 		expect(screen.getByText('読み込み中…')).toBeInTheDocument();
 	});
 
-	test('renders provider-wise summary counts and the queue depth', async () => {
+	test('renders account-wise summary counts and the queue depth', async () => {
 		render(<QueuePanel />);
 		await waitFor(() =>
-			expect(screen.getByText('rakuten-kobo')).toBeInTheDocument()
+			expect(screen.getByText('楽天')).toBeInTheDocument()
 		);
-		expect(screen.getByText('dmm-ebook')).toBeInTheDocument();
+		expect(screen.getByText('DMM')).toBeInTheDocument();
 		// exact-string matches (not substring regex) so the assertion targets
 		// only the leaf <span>, not an ancestor whose aggregated textContent
 		// happens to contain the same substring (which would make

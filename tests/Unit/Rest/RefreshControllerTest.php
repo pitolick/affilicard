@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace Affilicard\Tests\Unit\Rest;
 
 use Affilicard\Platform\PlatformConfig;
+use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Provider\Rakuten\RakutenProvider;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Repository\ProductRepositoryInterface;
 use Affilicard\Rest\RefreshController;
@@ -19,6 +21,10 @@ use WP_REST_Request;
  * Enqueuer は final class のため Mockery でモックできず、他の Queue テストと同様に
  * 実 Enqueuer を使い、Action Scheduler 関数（as_schedule_single_action 等）呼び出しの
  * 有無で enqueue が実質的に呼ばれたかどうかを観測する。
+ *
+ * enqueueProductListings は platform の provider→account コードを ProviderRegistry で
+ * 解決するため（v2.4.0）、以下のテストは Enqueuer に rakuten-kobo→rakuten を含む実
+ * ProviderRegistry を注入する。
  */
 final class RefreshControllerTest extends TestCase {
 	public function setUp(): void {
@@ -46,6 +52,13 @@ final class RefreshControllerTest extends TestCase {
 					),
 				)
 			);
+	}
+
+	/** RakutenProvider（code='rakuten-kobo', accountCode='rakuten'）を登録した Enqueuer。 */
+	private function enqueuer(): Enqueuer {
+		$registry = new ProviderRegistry();
+		$registry->register( new RakutenProvider() );
+		return new Enqueuer( 500, 300, array(), $registry );
 	}
 
 	/** @param list<array<string, mixed>> $listings */
@@ -94,7 +107,7 @@ final class RefreshControllerTest extends TestCase {
 					'post_id'  => 12,
 					'platform' => 'rakuten-kobo',
 				),
-				'affilicard-rakuten-kobo',
+				'affilicard-rakuten',
 				true,
 				Enqueuer::PRIORITY_MANUAL
 			)
@@ -103,7 +116,7 @@ final class RefreshControllerTest extends TestCase {
 		$req = new WP_REST_Request();
 		$req->set_param( 'platform', '' );
 
-		$res = ( new RefreshController( $repo, new Enqueuer() ) )->handle( $req );
+		$res = ( new RefreshController( $repo, $this->enqueuer() ) )->handle( $req );
 
 		$this->assertSame( 200, $res->get_status() );
 		$this->assertTrue( $res->get_data()['ok'] );
@@ -135,7 +148,7 @@ final class RefreshControllerTest extends TestCase {
 					'post_id'  => 20,
 					'platform' => 'rakuten-kobo',
 				),
-				'affilicard-rakuten-kobo',
+				'affilicard-rakuten',
 				true,
 				Enqueuer::PRIORITY_MANUAL
 			)
@@ -144,7 +157,7 @@ final class RefreshControllerTest extends TestCase {
 		$req = new WP_REST_Request();
 		$req->set_param( 'platform', 'rakuten-kobo' );
 
-		$res = ( new RefreshController( $repo, new Enqueuer() ) )->handle( $req );
+		$res = ( new RefreshController( $repo, $this->enqueuer() ) )->handle( $req );
 
 		$this->assertSame( 'rakuten-kobo', $res->get_data()['scope'] );
 		$this->assertSame( 1, $res->get_data()['queued'] );
@@ -172,7 +185,7 @@ final class RefreshControllerTest extends TestCase {
 		$req = new WP_REST_Request();
 		$req->set_param( 'platform', '' );
 
-		$res = ( new RefreshController( $repo, new Enqueuer() ) )->handle( $req );
+		$res = ( new RefreshController( $repo, $this->enqueuer() ) )->handle( $req );
 
 		$this->assertSame( 0, $res->get_data()['queued'] );
 	}
@@ -188,7 +201,7 @@ final class RefreshControllerTest extends TestCase {
 		$req = new WP_REST_Request();
 		$req->set_param( 'platform', '' );
 
-		$res = ( new RefreshController( $repo, new Enqueuer() ) )->handle( $req );
+		$res = ( new RefreshController( $repo, $this->enqueuer() ) )->handle( $req );
 
 		$this->assertSame( 0, $res->get_data()['queued'] );
 	}
@@ -202,7 +215,7 @@ final class RefreshControllerTest extends TestCase {
 		$req = new WP_REST_Request();
 		$req->set_param( 'platform', '' );
 
-		$res = ( new RefreshController( $repo, new Enqueuer() ) )->handle( $req );
+		$res = ( new RefreshController( $repo, $this->enqueuer() ) )->handle( $req );
 
 		$this->assertSame( 0, $res->get_data()['queued'] );
 	}
@@ -230,7 +243,7 @@ final class RefreshControllerTest extends TestCase {
 					'post_id'  => 22,
 					'platform' => 'rakuten-kobo',
 				),
-				'affilicard-rakuten-kobo',
+				'affilicard-rakuten',
 				true,
 				Enqueuer::PRIORITY_MANUAL
 			)
@@ -240,7 +253,7 @@ final class RefreshControllerTest extends TestCase {
 		$req->set_param( 'platform', '' );
 		$req->set_param( 'force', true );
 
-		$res = ( new RefreshController( $repo, new Enqueuer() ) )->handle( $req );
+		$res = ( new RefreshController( $repo, $this->enqueuer() ) )->handle( $req );
 
 		$this->assertSame( 1, $res->get_data()['queued'] );
 		$this->assertTrue( $res->get_data()['force'] );
@@ -265,7 +278,7 @@ final class RefreshControllerTest extends TestCase {
 		$req = new WP_REST_Request();
 		$req->set_param( 'platform', '' );
 
-		$res = ( new RefreshController( $repo, new Enqueuer() ) )->handle( $req );
+		$res = ( new RefreshController( $repo, $this->enqueuer() ) )->handle( $req );
 
 		$this->assertSame( 0, $res->get_data()['queued'] );
 		$this->assertFalse( $res->get_data()['force'] );
@@ -274,6 +287,6 @@ final class RefreshControllerTest extends TestCase {
 	public function test_permission_requires_manage_options(): void {
 		WP_Mock::userFunction( 'current_user_can' )->with( 'manage_options' )->andReturn( false );
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
-		$this->assertFalse( ( new RefreshController( $repo, new Enqueuer() ) )->canManageOptions() );
+		$this->assertFalse( ( new RefreshController( $repo, $this->enqueuer() ) )->canManageOptions() );
 	}
 }

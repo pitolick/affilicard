@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 namespace Affilicard\Tests\Unit\Rest;
 
+use Affilicard\Account\AccountRegistry;
+use Affilicard\Account\DmmAccount;
+use Affilicard\Account\RakutenAccount;
 use Affilicard\Queue\ActionStoreInterface;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\QueueStats;
@@ -22,18 +25,27 @@ use WP_REST_Request;
  *
  * failed 系（deleteFailed/retryFailed）は ActionStoreInterface（このタスクで新設した境界）
  * を Mockery でモックして検証する。
+ *
+ * v2.4.0: provider コード単位から account コード単位へ統一。group/summary キーは
+ * account コード（'rakuten'/'dmm'）。
  */
 final class QueueControllerTest extends TestCase {
 
-	private const RAKUTEN_GROUP = 'affilicard-rakuten-kobo';
-	private const DMM_GROUP     = 'affilicard-dmm-ebook';
+	private const RAKUTEN_GROUP = 'affilicard-rakuten';
+	private const DMM_GROUP     = 'affilicard-dmm';
 
 	/** @var list<string> */
-	private array $providers = array( 'rakuten-kobo', 'dmm-ebook' );
+	private array $accounts = array( 'rakuten', 'dmm' );
 
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		WP_Mock::userFunction( '__' )
+			->andReturnUsing(
+				static function ( $text ) {
+					return $text;
+				}
+			);
 	}
 
 	public function tearDown(): void {
@@ -43,14 +55,22 @@ final class QueueControllerTest extends TestCase {
 	}
 
 	private function stats(): QueueStats {
-		return new QueueStats( $this->providers );
+		return new QueueStats( $this->accounts );
+	}
+
+	private function accountRegistry(): AccountRegistry {
+		$registry = new AccountRegistry();
+		$registry->register( new RakutenAccount() );
+		$registry->register( new DmmAccount() );
+		return $registry;
 	}
 
 	private function controller( ?ActionStoreInterface $actionStore = null ): QueueController {
 		return new QueueController(
 			$this->stats(),
-			$this->providers,
-			$actionStore ?? Mockery::mock( ActionStoreInterface::class )
+			$this->accounts,
+			$actionStore ?? Mockery::mock( ActionStoreInterface::class ),
+			$this->accountRegistry()
 		);
 	}
 
@@ -95,7 +115,13 @@ final class QueueControllerTest extends TestCase {
 		$this->assertArrayHasKey( 'summary', $data );
 		$this->assertArrayHasKey( 'depth', $data );
 		$this->assertArrayHasKey( 'paused', $data );
-		$this->assertSame( array( 'rakuten-kobo', 'dmm-ebook' ), array_keys( $data['summary'] ) );
+		$this->assertSame( array( 'rakuten', 'dmm' ), array_keys( $data['summary'] ) );
+		// summary の各 account 行には code/label（AccountRegistry 由来）が埋め込まれ、
+		// JS が account コード→表示ラベルの対応表をハードコードしなくて済む（v2.4.0）。
+		$this->assertSame( 'rakuten', $data['summary']['rakuten']['code'] );
+		$this->assertSame( '楽天', $data['summary']['rakuten']['label'] );
+		$this->assertSame( 'dmm', $data['summary']['dmm']['code'] );
+		$this->assertSame( 'DMM', $data['summary']['dmm']['label'] );
 		$this->assertSame( 0, $data['depth'] );
 		$this->assertTrue( $data['paused'] );
 	}

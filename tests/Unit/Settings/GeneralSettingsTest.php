@@ -222,7 +222,7 @@ final class GeneralSettingsTest extends TestCase {
 		$this->assertSame( 0, GeneralSettings::throttleOverrideMs( 'rakuten' ) );
 	}
 
-	public function test_throttleOverrideMs_provider別に返す(): void {
+	public function test_throttleOverrideMs_account別に返す(): void {
 		WP_Mock::userFunction( 'get_option' )->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array( 'throttle_overrides' => array( 'rakuten' => 2000 ) ) );
 		$this->assertSame( 2000, GeneralSettings::throttleOverrideMs( 'rakuten' ) );

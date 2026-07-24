@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Block;
 
 use Affilicard\Platform\PlatformConfig;
+use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Renderer\CardHtmlBuilder;
 use Affilicard\Repository\ProductRepository;
@@ -23,11 +24,12 @@ final class Block {
 
 	public function __construct(
 		private ProductRepositoryInterface $repository,
-		private Enqueuer $enqueuer
+		private Enqueuer $enqueuer,
+		private ProviderRegistry $providerRegistry
 	) {}
 
 	public static function register_hook(): void {
-		$instance = new self( new ProductRepository(), new Enqueuer() );
+		$instance = new self( new ProductRepository(), new Enqueuer(), \Affilicard\Plugin::buildProviderRegistry() );
 		add_action( 'init', array( $instance, 'register' ) );
 	}
 
@@ -144,7 +146,16 @@ final class Block {
 			return null;
 		}
 
-		$this->enqueuer->enqueueAutoCreate( $platform, $definition->provider, $externalId );
+		// v2.4.0: enqueueAutoCreate の group も account コード単位。account が解決できない
+		// （provider 未登録、または手動系で accountCode() が null）場合は enqueue できないため
+		// ロックを即解放する（未知 platform と同様の理由）。
+		$account = $this->providerRegistry->get( $definition->provider )?->accountCode();
+		if ( null === $account ) {
+			delete_transient( $lock_key );
+			return null;
+		}
+
+		$this->enqueuer->enqueueAutoCreate( $platform, $account, $externalId );
 		return null;
 	}
 }

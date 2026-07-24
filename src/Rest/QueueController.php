@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Rest;
 
+use Affilicard\Account\AccountRegistry;
 use Affilicard\Queue\ActionStoreInterface;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\QueueStats;
@@ -13,8 +14,10 @@ use WP_REST_Response;
 /**
  * `/affilicard/v1/refresh-queue` — キュー管理パネル（Task 16）向け REST（manage_options）。
  *
- * $providerCodes は自動更新対象 provider コード（'rakuten-kobo','dmm-ebook' 等・'manual' を除く）。
- * Plugin 側で ProviderRegistry::all() を isAutomatic() でフィルタして注入する（ハードコード禁止）。
+ * v2.4.0: provider コード単位から account コード単位へ統一（レート制限は共有 API＝account
+ * 単位でかかり、認証画面（楽天/DMM）と一致させるため）。$accountCodes は自動更新対象
+ * account コード（'rakuten','dmm' 等）。Plugin 側で ProviderRegistry::all() を
+ * isAutomatic() でフィルタし、accountCode() を重複排除して注入する（ハードコード禁止）。
  *
  * pending の取消（clearAll/cancelPending）は AS の公開関数 `as_unschedule_all_actions('', [], $group)`
  * のみで完結する（内部的に status=pending のみが対象）。failed action の削除・再投入
@@ -24,12 +27,13 @@ use WP_REST_Response;
 final class QueueController {
 
 	/**
-	 * @param list<string> $providerCodes 自動更新対象 provider コード（例: ['rakuten-kobo', 'dmm-ebook']）。
+	 * @param list<string> $accountCodes 自動更新対象 account コード（例: ['rakuten', 'dmm']）。
 	 */
 	public function __construct(
 		private QueueStats $queueStats,
-		private array $providerCodes,
-		private ActionStoreInterface $actionStore
+		private array $accountCodes,
+		private ActionStoreInterface $actionStore,
+		private AccountRegistry $accountRegistry
 	) {}
 
 	public function registerRoutes( string $namespace ): void {
@@ -103,10 +107,27 @@ final class QueueController {
 		return (bool) current_user_can( 'manage_options' );
 	}
 
+	/**
+	 * summary は account コード => { code, label, pending, in_progress, failed } を返す。
+	 * code/label を REST 側で埋め込むことで、JS が account コード→表示ラベルの対応表を
+	 * ハードコードせずに済む（QueuePanel.jsx はこの label をそのまま描画する）。
+	 */
 	public function stats( WP_REST_Request $request ): WP_REST_Response {
+		$summary = array();
+		foreach ( $this->queueStats->summary() as $account => $counts ) {
+			$accountDefinition   = $this->accountRegistry->get( $account );
+			$summary[ $account ] = array_merge(
+				array(
+					'code'  => $account,
+					'label' => null !== $accountDefinition ? $accountDefinition->label() : $account,
+				),
+				$counts
+			);
+		}
+
 		return new WP_REST_Response(
 			array(
-				'summary' => $this->queueStats->summary(),
+				'summary' => $summary,
 				'depth'   => $this->queueStats->depth(),
 				'paused'  => GeneralSettings::isQueuePaused(),
 			),
@@ -128,7 +149,7 @@ final class QueueController {
 	}
 
 	/**
-	 * 全 provider group の pending action を取り消す（「キューを空にする」操作）。
+	 * 全 account group の pending action を取り消す（「キューを空にする」操作）。
 	 */
 	public function clearAll( WP_REST_Request $request ): WP_REST_Response {
 		return new WP_REST_Response(
@@ -141,7 +162,7 @@ final class QueueController {
 	}
 
 	/**
-	 * 全 provider group の pending action を取り消す（clearAll と同じ操作をパネルの
+	 * 全 account group の pending action を取り消す（clearAll と同じ操作をパネルの
 	 * 「pending をキャンセル」ボタン向けに別エンドポイントとして公開する）。
 	 */
 	public function cancelPending( WP_REST_Request $request ): WP_REST_Response {
@@ -156,8 +177,8 @@ final class QueueController {
 
 	public function deleteFailed( WP_REST_Request $request ): WP_REST_Response {
 		$deleted = 0;
-		foreach ( $this->providerCodes as $provider ) {
-			$ids = $this->failedActionIds( $this->group( $provider ) );
+		foreach ( $this->accountCodes as $account ) {
+			$ids = $this->failedActionIds( $this->group( $account ) );
 			foreach ( $ids as $id ) {
 				$this->actionStore->deleteAction( (int) $id );
 				++$deleted;
@@ -179,8 +200,8 @@ final class QueueController {
 	 */
 	public function retryFailed( WP_REST_Request $request ): WP_REST_Response {
 		$retried = 0;
-		foreach ( $this->providerCodes as $provider ) {
-			$group   = $this->group( $provider );
+		foreach ( $this->accountCodes as $account ) {
+			$group   = $this->group( $account );
 			$actions = as_get_scheduled_actions(
 				array(
 					'group'    => $group,
@@ -223,8 +244,8 @@ final class QueueController {
 		);
 	}
 
-	private function group( string $provider ): string {
-		return 'affilicard-' . $provider;
+	private function group( string $account ): string {
+		return 'affilicard-' . $account;
 	}
 
 	/**
@@ -244,8 +265,8 @@ final class QueueController {
 
 	private function cancelPendingActionsForAllGroups(): int {
 		$count = 0;
-		foreach ( $this->providerCodes as $provider ) {
-			$group  = $this->group( $provider );
+		foreach ( $this->accountCodes as $account ) {
+			$group  = $this->group( $account );
 			$ids    = as_get_scheduled_actions(
 				array(
 					'group'    => $group,

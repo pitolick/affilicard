@@ -36,6 +36,10 @@ final class RefreshHandlerTest extends TestCase {
 		$provider->shouldReceive( 'code' )->andReturn( 'rakuten' );
 		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
 		$provider->shouldReceive( 'minRequestIntervalMs' )->andReturn( 1100 );
+		// v2.4.0: RateLimiter/throttle は account コード単位。accountCode()==='rakuten' なので
+		// RateLimiter option キー（affilicard_ratelimit_rakuten）・AS group（affilicard-rakuten）は
+		// この registry() の provider コードと同じ文字列のまま変わらない。
+		$provider->shouldReceive( 'accountCode' )->andReturn( 'rakuten' );
 
 		$registry = new ProviderRegistry();
 		$registry->register( $provider );

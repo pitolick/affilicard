@@ -104,8 +104,12 @@ final class ProductListColumns {
 					$definition = PlatformConfig::find( $platform_code );
 				}
 				$provider = null !== $definition ? $definition->provider : 'manual';
-				$group    = 'affilicard-' . $provider;
-				$args     = array(
+				// v2.4.0: キューの group も account コード単位（Enqueuer と揃える）。
+				// account が解決できない（provider 未登録・手動系）場合は provider コードへ
+				// フォールバックする（該当 group には実際のジョブが積まれないため常に false になる）。
+				$account = \Affilicard\Plugin::buildProviderRegistry()->get( $provider )?->accountCode() ?? $provider;
+				$group   = 'affilicard-' . $account;
+				$args    = array(
 					'post_id'  => $post_id,
 					'platform' => $platform_code,
 				);

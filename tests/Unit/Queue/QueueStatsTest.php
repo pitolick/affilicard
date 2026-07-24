@@ -20,11 +20,11 @@ final class QueueStatsTest extends TestCase {
 		parent::tearDown();
 	}
 
-	public function test_forProvider_status別件数を返す(): void {
+	public function test_forAccount_status別件数を返す(): void {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
 				array(
-					'group'    => 'affilicard-rakuten-kobo',
+					'group'    => 'affilicard-rakuten',
 					'status'   => 'pending',
 					'per_page' => -1,
 				),
@@ -34,7 +34,7 @@ final class QueueStatsTest extends TestCase {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
 				array(
-					'group'    => 'affilicard-rakuten-kobo',
+					'group'    => 'affilicard-rakuten',
 					'status'   => 'in-progress',
 					'per_page' => -1,
 				),
@@ -44,7 +44,7 @@ final class QueueStatsTest extends TestCase {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
 				array(
-					'group'    => 'affilicard-rakuten-kobo',
+					'group'    => 'affilicard-rakuten',
 					'status'   => 'failed',
 					'per_page' => -1,
 				),
@@ -52,7 +52,7 @@ final class QueueStatsTest extends TestCase {
 			)
 			->andReturn( array() );
 
-		$out = ( new QueueStats( array( 'rakuten-kobo' ) ) )->forProvider( 'rakuten-kobo' );
+		$out = ( new QueueStats( array( 'rakuten' ) ) )->forAccount( 'rakuten' );
 		$this->assertSame(
 			array(
 				'pending'     => 3,
@@ -63,11 +63,11 @@ final class QueueStatsTest extends TestCase {
 		);
 	}
 
-	public function test_summary_全providerのstatus別件数を返す(): void {
+	public function test_summary_全accountのstatus別件数を返す(): void {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
 				array(
-					'group'    => 'affilicard-rakuten-kobo',
+					'group'    => 'affilicard-rakuten',
 					'status'   => 'pending',
 					'per_page' => -1,
 				),
@@ -77,7 +77,7 @@ final class QueueStatsTest extends TestCase {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
 				array(
-					'group'    => 'affilicard-rakuten-kobo',
+					'group'    => 'affilicard-rakuten',
 					'status'   => 'in-progress',
 					'per_page' => -1,
 				),
@@ -87,7 +87,7 @@ final class QueueStatsTest extends TestCase {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
 				array(
-					'group'    => 'affilicard-rakuten-kobo',
+					'group'    => 'affilicard-rakuten',
 					'status'   => 'failed',
 					'per_page' => -1,
 				),
@@ -98,7 +98,7 @@ final class QueueStatsTest extends TestCase {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
 				array(
-					'group'    => 'affilicard-dmm-ebook',
+					'group'    => 'affilicard-dmm',
 					'status'   => 'pending',
 					'per_page' => -1,
 				),
@@ -108,7 +108,7 @@ final class QueueStatsTest extends TestCase {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
 				array(
-					'group'    => 'affilicard-dmm-ebook',
+					'group'    => 'affilicard-dmm',
 					'status'   => 'in-progress',
 					'per_page' => -1,
 				),
@@ -118,7 +118,7 @@ final class QueueStatsTest extends TestCase {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
 				array(
-					'group'    => 'affilicard-dmm-ebook',
+					'group'    => 'affilicard-dmm',
 					'status'   => 'failed',
 					'per_page' => -1,
 				),
@@ -126,15 +126,15 @@ final class QueueStatsTest extends TestCase {
 			)
 			->andReturn( array() );
 
-		$out = ( new QueueStats( array( 'rakuten-kobo', 'dmm-ebook' ) ) )->summary();
+		$out = ( new QueueStats( array( 'rakuten', 'dmm' ) ) )->summary();
 		$this->assertSame(
 			array(
-				'rakuten-kobo' => array(
+				'rakuten' => array(
 					'pending'     => 2,
 					'in_progress' => 0,
 					'failed'      => 1,
 				),
-				'dmm-ebook'    => array(
+				'dmm'     => array(
 					'pending'     => 4,
 					'in_progress' => 1,
 					'failed'      => 0,
@@ -144,11 +144,11 @@ final class QueueStatsTest extends TestCase {
 		);
 	}
 
-	public function test_depth_全providerのpending合算を返す(): void {
+	public function test_depth_全accountのpending合算を返す(): void {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
 				array(
-					'group'    => 'affilicard-rakuten-kobo',
+					'group'    => 'affilicard-rakuten',
 					'status'   => 'pending',
 					'per_page' => -1,
 				),
@@ -158,7 +158,7 @@ final class QueueStatsTest extends TestCase {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
 				array(
-					'group'    => 'affilicard-rakuten-kobo',
+					'group'    => 'affilicard-rakuten',
 					'status'   => 'in-progress',
 					'per_page' => -1,
 				),
@@ -168,7 +168,7 @@ final class QueueStatsTest extends TestCase {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
 				array(
-					'group'    => 'affilicard-rakuten-kobo',
+					'group'    => 'affilicard-rakuten',
 					'status'   => 'failed',
 					'per_page' => -1,
 				),
@@ -179,7 +179,7 @@ final class QueueStatsTest extends TestCase {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
 				array(
-					'group'    => 'affilicard-dmm-ebook',
+					'group'    => 'affilicard-dmm',
 					'status'   => 'pending',
 					'per_page' => -1,
 				),
@@ -189,7 +189,7 @@ final class QueueStatsTest extends TestCase {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
 				array(
-					'group'    => 'affilicard-dmm-ebook',
+					'group'    => 'affilicard-dmm',
 					'status'   => 'in-progress',
 					'per_page' => -1,
 				),
@@ -199,7 +199,7 @@ final class QueueStatsTest extends TestCase {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
 				array(
-					'group'    => 'affilicard-dmm-ebook',
+					'group'    => 'affilicard-dmm',
 					'status'   => 'failed',
 					'per_page' => -1,
 				),
@@ -207,11 +207,11 @@ final class QueueStatsTest extends TestCase {
 			)
 			->andReturn( array() );
 
-		$depth = ( new QueueStats( array( 'rakuten-kobo', 'dmm-ebook' ) ) )->depth();
+		$depth = ( new QueueStats( array( 'rakuten', 'dmm' ) ) )->depth();
 		$this->assertSame( 6, $depth );
 	}
 
-	public function test_forProvider_未知のproviderでもgroup名を組み立てて問い合わせる(): void {
+	public function test_forAccount_未知のaccountでもgroup名を組み立てて問い合わせる(): void {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->with(
 				array(
@@ -243,7 +243,7 @@ final class QueueStatsTest extends TestCase {
 			)
 			->andReturn( array() );
 
-		$out = ( new QueueStats( array() ) )->forProvider( 'unknown' );
+		$out = ( new QueueStats( array() ) )->forAccount( 'unknown' );
 		$this->assertSame(
 			array(
 				'pending'     => 0,

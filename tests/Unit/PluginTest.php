@@ -42,22 +42,41 @@ final class PluginTest extends TestCase {
 	}
 
 	/**
-	 * QueueStats/QueueController に渡す provider コードは isAutomatic()===true のみ
-	 * （'manual' を含まない）。楽天/DMM をハードコードせず ProviderRegistry から導出することを
-	 * 固定する（Task 15 要件）。
+	 * QueueStats/QueueController に渡すのは isAutomatic()===true な provider の
+	 * accountCode()（'manual' 等・accountCode()===null の provider を含まない）。
+	 * v2.4.0: provider コード単位から account コード単位へ統一（レート制限は共有 API＝
+	 * account 単位でかかり、認証画面（楽天/DMM）と一致させるため）。楽天/DMM をハードコード
+	 * せず ProviderRegistry から導出することを固定する（Task 15 要件・v2.4.0 で account 化）。
 	 */
-	public function test_automaticProviderCodes_isAutomaticなproviderのみを含みmanualを除く(): void {
+	public function test_automaticAccountCodes_isAutomaticなproviderのaccountCodeのみを含みmanualを除く(): void {
 		$registry = Plugin::buildProviderRegistry();
 
-		$codes = Plugin::automaticProviderCodes( $registry );
+		$codes = Plugin::automaticAccountCodes( $registry );
 
-		$this->assertContains( 'rakuten-kobo', $codes );
-		$this->assertContains( 'dmm-ebook', $codes );
+		$this->assertContains( 'rakuten', $codes );
+		$this->assertContains( 'dmm', $codes );
 		$this->assertNotContains( 'manual', $codes );
+		$this->assertNotContains( 'rakuten-kobo', $codes );
+		$this->assertNotContains( 'dmm-ebook', $codes );
 
 		foreach ( $registry->all() as $provider ) {
-			$this->assertSame( $provider->isAutomatic(), in_array( $provider->code(), $codes, true ) );
+			if ( ! $provider->isAutomatic() ) {
+				continue;
+			}
+			$this->assertContains( $provider->accountCode(), $codes );
 		}
+	}
+
+	/**
+	 * 現状 1 account = 1 自動 provider だが、将来複数 provider が同じ account を共有しても
+	 * accountCode 一覧に重複が出ないことを固定する。
+	 */
+	public function test_automaticAccountCodes_accountCodeは重複排除される(): void {
+		$registry = Plugin::buildProviderRegistry();
+
+		$codes = Plugin::automaticAccountCodes( $registry );
+
+		$this->assertSame( array_values( array_unique( $codes ) ), array_values( $codes ) );
 	}
 
 	public function test_buildProductTypeRegistry_includes_generic_and_ebook(): void {
@@ -310,7 +329,7 @@ final class PluginTest extends TestCase {
 					'post_id'  => $postId,
 					'platform' => 'rakuten-kobo',
 				),
-				'affilicard-rakuten-kobo'
+				'affilicard-rakuten'
 			);
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(
@@ -320,7 +339,7 @@ final class PluginTest extends TestCase {
 					'post_id'  => $postId,
 					'platform' => 'rakuten-kobo',
 				),
-				'affilicard-rakuten-kobo',
+				'affilicard-rakuten',
 				true,
 				\Affilicard\Queue\Enqueuer::PRIORITY_FORCE
 			)

@@ -89,30 +89,34 @@ final class Plugin {
 
 		// ProductType レジストリ（Block の type 解決でも buildProductTypeRegistry() を参照）
 		$providers = self::buildProviderRegistry();
+		$accounts  = self::buildAccountRegistry();
 		self::buildProductTypeRegistry();
 
-		// キューパネル（Task 15/16）・depth cap 集計（I1）共通: 自動更新対象 provider コード
-		// （'manual' を除く）を ProviderRegistry から都度導出する。QueueStats/QueueController/
-		// Enqueuer にハードコードしない。
-		$automaticProviderCodes = self::automaticProviderCodes( $providers );
+		// キューパネル（Task 15/16）・depth cap 集計（I1）共通: 自動更新対象 account コード
+		// （'manual' 等の非自動 provider を除く。v2.4.0: provider コードから account コードへ
+		// 統一。レート制限は共有 API＝account 単位でかかり、認証画面（楽天/DMM）と一致する）を
+		// ProviderRegistry から都度導出する。QueueStats/QueueController/Enqueuer にハードコードしない。
+		$automaticAccountCodes = self::automaticAccountCodes( $providers );
 
 		// キュー: REST/AS ハンドラ/トリガー間で共有する Repository/Enqueuer
-		// （depth cap は enqueueForced/enqueueManual では未使用だが、掃引と同じ構築パターンに揃える）。
+		// （depth cap は enqueueForced/enqueueManual では未使用だが、掃引と同じ構築パターンに揃える。
+		// ProviderRegistry は enqueueProductListings が platform の provider→account を解決するために渡す）。
 		$repository = new ProductRepository();
-		$enqueuer   = new Enqueuer( GeneralSettings::queueDepthCap() );
+		$enqueuer   = new Enqueuer( GeneralSettings::queueDepthCap(), 300, array(), $providers );
 
 		// REST API
 		$rest = new RestController(
 			new ProductsController( $repository ),
 			new SettingsController(),
 			new PlatformsController(),
-			new CredentialsController( $providers, self::buildAccountRegistry() ),
+			new CredentialsController( $providers, $accounts ),
 			new RefreshController( $repository, $enqueuer ),
 			new CardPreviewController( $repository ),
 			new QueueController(
-				new QueueStats( $automaticProviderCodes ),
-				$automaticProviderCodes,
-				new ActionSchedulerStore()
+				new QueueStats( $automaticAccountCodes ),
+				$automaticAccountCodes,
+				new ActionSchedulerStore(),
+				$accounts
 			)
 		);
 		$rest->register();
@@ -138,11 +142,11 @@ final class Plugin {
 		// v2.4.0 でハンドラを同期一括更新（ListingRefresher::run）から掃引（QueueMaintenance::sweep）へ
 		// 差し替え。実際の fetch/保存は Action Scheduler ハンドラ（RefreshHandler）側に移る。
 		RefreshScheduler::register(
-			static function () use ( $automaticProviderCodes ): void {
+			static function () use ( $automaticAccountCodes, $providers ): void {
 				// I1: depth cap backstop が affilicard 以外の pending action（WooCommerce 等）に
-				// 誤反応しないよう、provider group 別集計に限定する providerCodes を渡す。
-				$enqueuer = new Enqueuer( GeneralSettings::queueDepthCap(), 300, $automaticProviderCodes );
-				( new QueueMaintenance( new ProductRepository(), $enqueuer ) )->sweep();
+				// 誤反応しないよう、account group 別集計に限定する accountCodes を渡す。
+				$enqueuer = new Enqueuer( GeneralSettings::queueDepthCap(), 300, $automaticAccountCodes );
+				( new QueueMaintenance( new ProductRepository(), $enqueuer, $providers ) )->sweep();
 			}
 		);
 		add_action( 'init', array( RefreshScheduler::class, 'reconcile' ) );
@@ -175,7 +179,7 @@ final class Plugin {
 		// transition_post_status は publish→publish の再保存も含め毎回発火するため、
 		// onTransition 側のガード（newStatus==='publish'）だけで全 publish ケースを既にカバーする。
 		// onUpdated も配線すると二重発火するため配線しない）。
-		$publishTrigger = new PublishTrigger( $repository, $enqueuer );
+		$publishTrigger = new PublishTrigger( $repository, $enqueuer, $providers );
 		add_action( 'transition_post_status', array( $publishTrigger, 'onTransition' ), 10, 3 );
 
 		// 予約投稿（product CPT・future）→ publish 昇格時に、対象商品の ELIGIBLE な auto listing を
@@ -197,17 +201,25 @@ final class Plugin {
 	}
 
 	/**
-	 * 自動更新対象 provider のコード一覧（'manual' 等 isAutomatic()===false は除く）。
-	 * QueueStats/QueueController がキューの provider group（`affilicard-{provider}`）を
-	 * 走査する対象として使う。
+	 * 自動更新対象 provider の accountCode 一覧（重複排除・'manual' 等 isAutomatic()===false
+	 * や accountCode()===null の provider は除く）。
+	 *
+	 * v2.4.0: provider コード単位から account コード単位へ統一した（レート制限は provider
+	 * ではなく共有 API＝account 単位でかかり、認証画面（楽天/DMM）と一致させるため）。
+	 * QueueStats/QueueController/Enqueuer/Uninstall がキューの account group
+	 * （`affilicard-{account}`）を走査する対象として使う。
 	 *
 	 * @return list<string>
 	 */
-	public static function automaticProviderCodes( ProviderRegistry $providers ): array {
+	public static function automaticAccountCodes( ProviderRegistry $providers ): array {
 		$codes = array();
 		foreach ( $providers->all() as $provider ) {
-			if ( $provider->isAutomatic() ) {
-				$codes[] = $provider->code();
+			if ( ! $provider->isAutomatic() ) {
+				continue;
+			}
+			$account = $provider->accountCode();
+			if ( null !== $account && ! in_array( $account, $codes, true ) ) {
+				$codes[] = $account;
 			}
 		}
 		return $codes;
@@ -353,7 +365,8 @@ final class Plugin {
 			return;
 		}
 
-		( new Enqueuer( GeneralSettings::queueDepthCap() ) )->enqueueProductListings( $postId, $product, false );
+		( new Enqueuer( GeneralSettings::queueDepthCap(), 300, array(), self::buildProviderRegistry() ) )
+			->enqueueProductListings( $postId, $product, false );
 	}
 
 	public static function enqueueSettingsAssets( string $hook ): void {

@@ -4,26 +4,28 @@ declare(strict_types=1);
 namespace Affilicard\Queue;
 
 /**
- * Action Scheduler のジョブ件数を provider（`affilicard-{provider}` group）別に
+ * Action Scheduler のジョブ件数を account（`affilicard-{account}` group）別に
  * pending / in-progress / failed 集計する。管理画面のキューパネル（Task 15/16）が
  * 表示状態の取得に使う。
  *
- * $providers は自動更新対象 provider コードの配列（呼び出し側 = Plugin が
- * ProviderRegistry::isAutomatic() でフィルタして注入する想定）。QueueStats 自身は
- * provider コードをハードコードしない。
+ * v2.4.0: レート制限・キュー監視は provider 単位ではなく共有 API＝account 単位
+ * （認証画面の楽天/DMM と一致）で行う。$accounts は自動更新対象 account コードの配列
+ * （呼び出し側 = Plugin が ProviderRegistry から isAutomatic() な provider の
+ * accountCode() を重複排除して注入する想定）。QueueStats 自身は account コードを
+ * ハードコードしない。
  */
 final class QueueStats {
 
 	/**
-	 * @param string[] $providers provider コード配列（例: ['rakuten-kobo', 'dmm-ebook']）。
+	 * @param string[] $accounts account コード配列（例: ['rakuten', 'dmm']）。
 	 */
-	public function __construct( private array $providers ) {}
+	public function __construct( private array $accounts ) {}
 
 	/**
 	 * @return array{pending: int, in_progress: int, failed: int}
 	 */
-	public function forProvider( string $provider ): array {
-		$group = 'affilicard-' . $provider;
+	public function forAccount( string $account ): array {
+		$group = 'affilicard-' . $account;
 
 		return array(
 			'pending'     => $this->countByStatus( $group, 'pending' ),
@@ -37,16 +39,16 @@ final class QueueStats {
 	 */
 	public function summary(): array {
 		$out = array();
-		foreach ( $this->providers as $provider ) {
-			$out[ $provider ] = $this->forProvider( $provider );
+		foreach ( $this->accounts as $account ) {
+			$out[ $account ] = $this->forAccount( $account );
 		}
 		return $out;
 	}
 
 	public function depth(): int {
 		$total = 0;
-		foreach ( $this->providers as $provider ) {
-			$total += $this->forProvider( $provider )['pending'];
+		foreach ( $this->accounts as $account ) {
+			$total += $this->forAccount( $account )['pending'];
 		}
 		return $total;
 	}

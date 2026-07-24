@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace Affilicard\Tests\Unit\Queue;
 
 use Affilicard\PostType\ProductPostType;
+use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Provider\Rakuten\RakutenProvider;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\QueueMaintenance;
 use Affilicard\Repository\ProductRepositoryInterface;
@@ -51,6 +53,13 @@ final class QueueMaintenanceTest extends TestCase {
 			);
 	}
 
+	/** RakutenProvider（code='rakuten-kobo', accountCode='rakuten'）を登録した ProviderRegistry。 */
+	private function registry(): ProviderRegistry {
+		$registry = new ProviderRegistry();
+		$registry->register( new RakutenProvider() );
+		return $registry;
+	}
+
 	/** @param list<array<string, mixed>> $listings */
 	private function product( int $id, array $listings ): array {
 		return array(
@@ -81,7 +90,7 @@ final class QueueMaintenanceTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldNotReceive( 'find' );
 
-		( new QueueMaintenance( $repo, new Enqueuer() ) )->sweep();
+		( new QueueMaintenance( $repo, new Enqueuer(), $this->registry() ) )->sweep();
 
 		$this->assertConditionsMet();
 	}
@@ -92,7 +101,7 @@ final class QueueMaintenanceTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldNotReceive( 'find' );
 
-		( new QueueMaintenance( $repo, new Enqueuer() ) )->sweep();
+		( new QueueMaintenance( $repo, new Enqueuer(), $this->registry() ) )->sweep();
 
 		$this->assertConditionsMet();
 	}
@@ -103,7 +112,7 @@ final class QueueMaintenanceTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->once()->with( 99 )->andReturn( null );
 
-		( new QueueMaintenance( $repo, new Enqueuer() ) )->sweep();
+		( new QueueMaintenance( $repo, new Enqueuer(), $this->registry() ) )->sweep();
 
 		$this->assertConditionsMet();
 	}
@@ -140,13 +149,13 @@ final class QueueMaintenanceTest extends TestCase {
 					'post_id'  => 12,
 					'platform' => 'rakuten-kobo',
 				),
-				'affilicard-rakuten-kobo', // group = affilicard-{def->provider}
+				'affilicard-rakuten', // group = affilicard-{account}（v2.4.0）
 				true,
 				Enqueuer::PRIORITY_SWEEP
 			)
 			->andReturn( 200 );
 
-		( new QueueMaintenance( $repo, new Enqueuer() ) )->sweep();
+		( new QueueMaintenance( $repo, new Enqueuer(), $this->registry() ) )->sweep();
 
 		$this->assertConditionsMet();
 	}
@@ -181,7 +190,7 @@ final class QueueMaintenanceTest extends TestCase {
 
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
 
-		( new QueueMaintenance( $repo, new Enqueuer() ) )->sweep();
+		( new QueueMaintenance( $repo, new Enqueuer(), $this->registry() ) )->sweep();
 
 		$this->assertConditionsMet();
 	}
@@ -228,7 +237,7 @@ final class QueueMaintenanceTest extends TestCase {
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )->never();
 
-		( new QueueMaintenance( $repo, new Enqueuer() ) )->sweep();
+		( new QueueMaintenance( $repo, new Enqueuer(), $this->registry() ) )->sweep();
 
 		$this->assertConditionsMet();
 	}
@@ -258,7 +267,7 @@ final class QueueMaintenanceTest extends TestCase {
 
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
 
-		( new QueueMaintenance( $repo, new Enqueuer() ) )->sweep();
+		( new QueueMaintenance( $repo, new Enqueuer(), $this->registry() ) )->sweep();
 
 		$this->assertConditionsMet();
 	}

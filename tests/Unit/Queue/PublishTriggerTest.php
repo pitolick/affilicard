@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace Affilicard\Tests\Unit\Queue;
 
 use Affilicard\Platform\PlatformConfig;
+use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Provider\Rakuten\RakutenProvider;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\PublishTrigger;
 use Affilicard\Repository\ProductRepositoryInterface;
@@ -48,6 +50,13 @@ final class PublishTriggerTest extends TestCase {
 					),
 				)
 			);
+	}
+
+	/** RakutenProvider（code='rakuten-kobo', accountCode='rakuten'）を登録した ProviderRegistry。 */
+	private function registry(): ProviderRegistry {
+		$registry = new ProviderRegistry();
+		$registry->register( new RakutenProvider() );
+		return $registry;
 	}
 
 	/** @param list<array<string, mixed>> $listings */
@@ -105,7 +114,7 @@ final class PublishTriggerTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->once()->with( 12 )->andReturn( $this->product( 12 ) );
 
-		$ids = ( new PublishTrigger( $repo, new Enqueuer() ) )->resolveProductIds( '<!-- wp:affilicard/product-card /-->' );
+		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->resolveProductIds( '<!-- wp:affilicard/product-card /-->' );
 
 		$this->assertSame( array( 12 ), $ids );
 	}
@@ -124,7 +133,7 @@ final class PublishTriggerTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'findBySlug' )->once()->with( 'sample-manga' )->andReturn( $this->product( 21 ) );
 
-		$ids = ( new PublishTrigger( $repo, new Enqueuer() ) )->resolveProductIds( '<!-- wp:affilicard/product-card /-->' );
+		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->resolveProductIds( '<!-- wp:affilicard/product-card /-->' );
 
 		$this->assertSame( array( 21 ), $ids );
 	}
@@ -146,7 +155,7 @@ final class PublishTriggerTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'findByExternalId' )->once()->with( 'rakuten-kobo', 'deadbeef01' )->andReturn( $this->product( 33 ) );
 
-		$ids = ( new PublishTrigger( $repo, new Enqueuer() ) )->resolveProductIds( '<!-- wp:affilicard/product-card /-->' );
+		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->resolveProductIds( '<!-- wp:affilicard/product-card /-->' );
 
 		$this->assertSame( array( 33 ), $ids );
 	}
@@ -171,7 +180,7 @@ final class PublishTriggerTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->once()->with( 44 )->andReturn( $this->product( 44 ) );
 
-		$ids = ( new PublishTrigger( $repo, new Enqueuer() ) )->resolveProductIds( '<!-- wp:core/group -->...<!-- /wp:core/group -->' );
+		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->resolveProductIds( '<!-- wp:core/group -->...<!-- /wp:core/group -->' );
 
 		$this->assertSame( array( 44 ), $ids );
 	}
@@ -190,7 +199,7 @@ final class PublishTriggerTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->once()->with( 999 )->andReturn( null );
 
-		$ids = ( new PublishTrigger( $repo, new Enqueuer() ) )->resolveProductIds( '<!-- wp:affilicard/product-card /-->' );
+		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->resolveProductIds( '<!-- wp:affilicard/product-card /-->' );
 
 		$this->assertSame( array(), $ids );
 	}
@@ -201,7 +210,7 @@ final class PublishTriggerTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldNotReceive( 'find' );
 
-		$ids = ( new PublishTrigger( $repo, new Enqueuer() ) )->resolveProductIds( '' );
+		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->resolveProductIds( '' );
 
 		$this->assertSame( array(), $ids );
 	}
@@ -222,7 +231,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer() ) )->onTransition( 'draft', 'auto-draft', $post );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onTransition( 'draft', 'auto-draft', $post );
 
 		$this->assertConditionsMet();
 	}
@@ -242,7 +251,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer() ) )->onTransition( 'publish', 'draft', $post );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onTransition( 'publish', 'draft', $post );
 
 		$this->assertConditionsMet();
 	}
@@ -263,7 +272,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer() ) )->onTransition( 'publish', 'draft', $post );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onTransition( 'publish', 'draft', $post );
 
 		$this->assertConditionsMet();
 	}
@@ -292,7 +301,7 @@ final class PublishTriggerTest extends TestCase {
 					'post_id'  => 12,
 					'platform' => 'rakuten-kobo',
 				),
-				'affilicard-rakuten-kobo'
+				'affilicard-rakuten'
 			);
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(
@@ -302,7 +311,7 @@ final class PublishTriggerTest extends TestCase {
 					'post_id'  => 12,
 					'platform' => 'rakuten-kobo',
 				),
-				'affilicard-rakuten-kobo',
+				'affilicard-rakuten',
 				true,
 				Enqueuer::PRIORITY_FORCE
 			)
@@ -317,7 +326,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer() ) )->onTransition( 'publish', 'draft', $post );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onTransition( 'publish', 'draft', $post );
 
 		$this->assertConditionsMet();
 	}
@@ -360,7 +369,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer() ) )->onTransition( 'publish', 'draft', $post );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onTransition( 'publish', 'draft', $post );
 
 		$this->assertConditionsMet();
 	}
@@ -397,7 +406,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer() ) )->onTransition( 'publish', 'draft', $post );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onTransition( 'publish', 'draft', $post );
 
 		$this->assertConditionsMet();
 	}
@@ -429,7 +438,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer() ) )->onTransition( 'publish', 'draft', $post );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onTransition( 'publish', 'draft', $post );
 
 		$this->assertConditionsMet();
 	}
@@ -474,7 +483,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer() ) )->onUpdated( 200, $after, $before );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onUpdated( 200, $after, $before );
 
 		$this->assertConditionsMet();
 	}
@@ -500,7 +509,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer() ) )->onUpdated( 201, $after, $before );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onUpdated( 201, $after, $before );
 
 		$this->assertConditionsMet();
 	}
@@ -528,7 +537,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer() ) )->onUpdated( 202, $after, $before );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onUpdated( 202, $after, $before );
 
 		$this->assertConditionsMet();
 	}

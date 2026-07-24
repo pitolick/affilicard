@@ -5,6 +5,9 @@ namespace Affilicard\Tests\Unit\Queue;
 
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\Platform\PlatformDefinition;
+use Affilicard\Provider\ManualProvider;
+use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Provider\Rakuten\RakutenProvider;
 use Affilicard\Queue\Enqueuer;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
@@ -46,6 +49,45 @@ final class EnqueuerTest extends TestCase {
 					),
 				)
 			);
+	}
+
+	/** affilicard_platforms option を provider='manual' の platform 1件で stub する。 */
+	private function stubManualPlatform(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					array(
+						'code'         => 'amazon-kindle',
+						'name'         => 'Amazon Kindle',
+						'provider'     => 'manual',
+						'displayOrder' => 5,
+						'enabled'      => true,
+					),
+				)
+			);
+	}
+
+	/** RakutenProvider（code='rakuten-kobo', accountCode='rakuten'）を登録した ProviderRegistry。 */
+	private function registryWithRakuten(): ProviderRegistry {
+		$registry = new ProviderRegistry();
+		$registry->register( new RakutenProvider() );
+		return $registry;
+	}
+
+	/** ManualProvider（accountCode=null）を登録した ProviderRegistry。 */
+	private function registryWithManual(): ProviderRegistry {
+		$registry = new ProviderRegistry();
+		$registry->register( new ManualProvider() );
+		return $registry;
+	}
+
+	/**
+	 * enqueueProductListings のテスト用: 実 provider レジストリ（rakuten-kobo→rakuten）を
+	 * 注入した Enqueuer。account 解決を伴う本番の enqueueProductListings 経路を再現する。
+	 */
+	private function enqueuerWithRakuten(): Enqueuer {
+		return new Enqueuer( 500, 300, array(), $this->registryWithRakuten() );
 	}
 
 	/** @param array<string, mixed> $overrides */
@@ -288,7 +330,7 @@ final class EnqueuerTest extends TestCase {
 					'post_id'  => 12,
 					'platform' => 'rakuten-kobo',
 				),
-				'affilicard-rakuten-kobo'
+				'affilicard-rakuten'
 			);
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(
@@ -298,13 +340,13 @@ final class EnqueuerTest extends TestCase {
 					'post_id'  => 12,
 					'platform' => 'rakuten-kobo',
 				),
-				'affilicard-rakuten-kobo',
+				'affilicard-rakuten',
 				true,
 				Enqueuer::PRIORITY_FORCE
 			)
 			->andReturn( 500 );
 
-		$count = ( new Enqueuer() )->enqueueProductListings( 12, $product, false );
+		$count = $this->enqueuerWithRakuten()->enqueueProductListings( 12, $product, false );
 
 		$this->assertSame( 1, $count );
 	}
@@ -322,13 +364,13 @@ final class EnqueuerTest extends TestCase {
 					'post_id'  => 12,
 					'platform' => 'rakuten-kobo',
 				),
-				'affilicard-rakuten-kobo',
+				'affilicard-rakuten',
 				true,
 				Enqueuer::PRIORITY_MANUAL
 			)
 			->andReturn( 501 );
 
-		$count = ( new Enqueuer() )->enqueueProductListings( 12, $product, true );
+		$count = $this->enqueuerWithRakuten()->enqueueProductListings( 12, $product, true );
 
 		$this->assertSame( 1, $count );
 	}
@@ -364,6 +406,21 @@ final class EnqueuerTest extends TestCase {
 		$this->assertSame( 0, $count );
 	}
 
+	/**
+	 * v2.4.0: provider→account 解決に失敗する（provider が手動系で accountCode()===null）
+	 * listing は enqueue できないため積まない（「対応する自動 Provider が無い」ケース）。
+	 */
+	public function test_enqueueProductListings_accountが解決できないmanual系listingは積まない(): void {
+		$this->stubManualPlatform();
+		$product = array( 'listings' => array( $this->eligibleListing( array( 'platform' => 'amazon-kindle' ) ) ) );
+
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$count = ( new Enqueuer( 500, 300, array(), $this->registryWithManual() ) )->enqueueProductListings( 12, $product, false );
+
+		$this->assertSame( 0, $count );
+	}
+
 	public function test_enqueueProductListings_listingsが無い場合は0を返す(): void {
 		$count = ( new Enqueuer() )->enqueueProductListings( 12, array(), false );
 
@@ -382,7 +439,7 @@ final class EnqueuerTest extends TestCase {
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 502 );
 
-		$count = ( new Enqueuer() )->enqueueProductListings( 12, $product, false );
+		$count = $this->enqueuerWithRakuten()->enqueueProductListings( 12, $product, false );
 
 		$this->assertSame( 1, $count );
 	}
@@ -404,13 +461,13 @@ final class EnqueuerTest extends TestCase {
 					'post_id'  => 12,
 					'platform' => 'rakuten-kobo',
 				),
-				'affilicard-rakuten-kobo',
+				'affilicard-rakuten',
 				true,
 				Enqueuer::PRIORITY_FORCE
 			)
 			->andReturn( 503 );
 
-		$count = ( new Enqueuer() )->enqueueProductListings( 12, $product, false, true );
+		$count = $this->enqueuerWithRakuten()->enqueueProductListings( 12, $product, false, true );
 
 		$this->assertSame( 1, $count );
 	}
@@ -442,18 +499,18 @@ final class EnqueuerTest extends TestCase {
 	}
 
 	/**
-	 * providerCodes を渡した場合は affilicard-{provider} group 別に pending 件数を集計して
+	 * accountCodes を渡した場合は affilicard-{account} group 別に pending 件数を集計して
 	 * 合算する（他プラグイン等の group='' 全体件数は数えない。I1: depth cap backstop が
 	 * 無関係な pending action に誤反応しないようにするための per-group 化）。
 	 */
-	public function test_queueDepth_providerCodes指定時はprovider別groupのpending件数を合算する(): void {
+	public function test_queueDepth_accountCodes指定時はaccount別groupのpending件数を合算する(): void {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )
 			->once()
 			->with(
 				array(
 					'status'   => 'pending',
 					'per_page' => -1,
-					'group'    => 'affilicard-rakuten-kobo',
+					'group'    => 'affilicard-rakuten',
 				),
 				'ids'
 			)
@@ -464,22 +521,22 @@ final class EnqueuerTest extends TestCase {
 				array(
 					'status'   => 'pending',
 					'per_page' => -1,
-					'group'    => 'affilicard-dmm-ebook',
+					'group'    => 'affilicard-dmm',
 				),
 				'ids'
 			)
 			->andReturn( array( 3 ) );
 
-		$enqueuer = new Enqueuer( 500, 300, array( 'rakuten-kobo', 'dmm-ebook' ) );
+		$enqueuer = new Enqueuer( 500, 300, array( 'rakuten', 'dmm' ) );
 
 		$this->assertSame( 3, $enqueuer->queueDepth() );
 	}
 
 	/**
-	 * providerCodes 未指定（既定 array()）の場合は後方互換のため従来通り group='' の
+	 * accountCodes 未指定（既定 array()）の場合は後方互換のため従来通り group='' の
 	 * 全 pending 件数にフォールバックする。
 	 */
-	public function test_queueDepth_providerCodes未指定時はglobalpending件数にフォールバックする(): void {
+	public function test_queueDepth_accountCodes未指定時はglobalpending件数にフォールバックする(): void {
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )->once()
 			->with(
 				array(

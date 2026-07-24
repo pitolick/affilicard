@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Queue;
 
 use Affilicard\Platform\PlatformConfig;
+use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Repository\ProductRepositoryInterface;
 
 /**
@@ -22,7 +23,8 @@ final class PublishTrigger {
 
 	public function __construct(
 		private ProductRepositoryInterface $repository,
-		private Enqueuer $enqueuer
+		private Enqueuer $enqueuer,
+		private ProviderRegistry $providerRegistry
 	) {}
 
 	/**
@@ -85,7 +87,14 @@ final class PublishTrigger {
 				continue;
 			}
 
-			$this->enqueuer->enqueueForced( $productId, $platform, $def->provider );
+			// v2.4.0: enqueueForced の group も account コード単位。account が解決できない
+			// （provider 未登録、または手動系で accountCode() が null）listing は積まない。
+			$account = $this->providerRegistry->get( $def->provider )?->accountCode();
+			if ( null === $account ) {
+				continue;
+			}
+
+			$this->enqueuer->enqueueForced( $productId, $platform, $account );
 		}
 	}
 

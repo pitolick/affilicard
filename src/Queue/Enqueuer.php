@@ -6,14 +6,24 @@ namespace Affilicard\Queue;
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\Platform\PlatformDefinition;
 use Affilicard\Pricing\PriceFreshness;
+use Affilicard\Provider\ProviderRegistry;
 
 /**
  * Action Scheduler へのジョブ投入を一元化するラッパー。
  *
  * すべてのトリガー（手動更新・強制更新・自動作成・掃引 Cron）はこのクラス経由で
  * AS にジョブを積む。dedup は AS ネイティブの $unique=true、順序は $priority
- * （force=0 > manual=10 > sweep=20）、provider 別に group を分けてレート制御・
- * 監視をしやすくする。掃引専用の鮮度スキップと depth cap・jitter もここに集約する。
+ * （force=0 > manual=10 > sweep=20）、account（認証情報の共有単位。楽天/DMM 等。
+ * 認証画面と一致）別に group を分けてレート制御・監視をしやすくする（v2.4.0:
+ * provider コード単位から account コード単位へ統一。レート制限は provider ではなく
+ * 共有 API＝account 単位でかかるため）。掃引専用の鮮度スキップと depth cap・jitter も
+ * ここに集約する。
+ *
+ * enqueueForced/enqueueManual/enqueueSweep/enqueueAutoCreate/reschedule* は、呼び出し側が
+ * 既に provider→account を解決済みの account コードを渡す契約（このクラス自身は
+ * provider/account の対応表を持たない）。唯一の例外は enqueueProductListings() で、
+ * platform 一覧を横断して provider→account を解決する必要があるため、コンストラクタで
+ * 受け取る ProviderRegistry を内部で使う。
  */
 final class Enqueuer {
 
@@ -33,20 +43,24 @@ final class Enqueuer {
 	private ?int $depthMemo = null;
 
 	/**
-	 * @param list<string> $providerCodes 深さ集計を affilicard-{provider} group 別に限定する
-	 *        provider コード（例: ['rakuten-kobo', 'dmm-ebook']）。空配列（既定）の場合は
-	 *        後方互換のため queueDepth() が group='' の全 pending 件数にフォールバックする
-	 *        （I1: 他プラグインの pending も巻き込む旧挙動。呼び出し側が provider を渡せない
-	 *        既存インスタンス化を壊さないための互換パス）。
+	 * @param list<string>     $accountCodes 深さ集計を affilicard-{account} group 別に限定する
+	 *            account コード（例: ['rakuten', 'dmm']）。空配列（既定）の場合は
+	 *            後方互換のため queueDepth() が group='' の全 pending 件数にフォールバックする
+	 *            （I1: 他プラグインの pending も巻き込む旧挙動。呼び出し側が account を渡せない
+	 *            既存インスタンス化を壊さないための互換パス）。
+	 * @param ProviderRegistry $providerRegistry enqueueProductListings() が platform の
+	 *        provider コードから account コードを解決するために使う（v2.4.0）。他の
+	 *        enqueue 系・reschedule 系メソッドは呼び出し側解決済みの account を受け取るため使わない。
 	 */
 	public function __construct(
 		private int $depthCap = 500,
 		private int $maxJitterSeconds = 300,
-		private array $providerCodes = array()
+		private array $accountCodes = array(),
+		private ProviderRegistry $providerRegistry = new ProviderRegistry()
 	) {}
 
-	public function group( string $provider ): string {
-		return 'affilicard-' . $provider;
+	public function group( string $account ): string {
+		return 'affilicard-' . $account;
 	}
 
 	/**
@@ -54,12 +68,12 @@ final class Enqueuer {
 	 *
 	 * 既存の同一ジョブを unschedule してから即時 priority 0 で積み直す。
 	 */
-	public function enqueueForced( int $postId, string $platform, string $provider ): void {
+	public function enqueueForced( int $postId, string $platform, string $account ): void {
 		$args  = array(
 			'post_id'  => $postId,
 			'platform' => $platform,
 		);
-		$group = $this->group( $provider );
+		$group = $this->group( $account );
 
 		as_unschedule_all_actions( self::HOOK_REFRESH, $args, $group );
 		as_schedule_single_action( time(), self::HOOK_REFRESH, $args, $group, true, self::PRIORITY_FORCE );
@@ -68,13 +82,13 @@ final class Enqueuer {
 	/**
 	 * 手動更新（画面操作起点だが強制ではない通常トリガー）。
 	 */
-	public function enqueueManual( int $postId, string $platform, string $provider ): void {
+	public function enqueueManual( int $postId, string $platform, string $account ): void {
 		$args = array(
 			'post_id'  => $postId,
 			'platform' => $platform,
 		);
 
-		as_schedule_single_action( time(), self::HOOK_REFRESH, $args, $this->group( $provider ), true, self::PRIORITY_MANUAL );
+		as_schedule_single_action( time(), self::HOOK_REFRESH, $args, $this->group( $account ), true, self::PRIORITY_MANUAL );
 	}
 
 	/**
@@ -83,7 +97,7 @@ final class Enqueuer {
 	 *
 	 * @param array<string, mixed> $listing
 	 */
-	public function enqueueSweep( int $postId, string $platform, string $provider, ?PlatformDefinition $def, array $listing, int $nowTs ): bool {
+	public function enqueueSweep( int $postId, string $platform, string $account, ?PlatformDefinition $def, array $listing, int $nowTs ): bool {
 		if ( ! PriceFreshness::needsRefetch( $listing, $def, $nowTs ) ) {
 			return false;
 		}
@@ -97,7 +111,7 @@ final class Enqueuer {
 		);
 		$when = time() + wp_rand( 0, $this->maxJitterSeconds );
 
-		as_schedule_single_action( $when, self::HOOK_REFRESH, $args, $this->group( $provider ), true, self::PRIORITY_SWEEP );
+		as_schedule_single_action( $when, self::HOOK_REFRESH, $args, $this->group( $account ), true, self::PRIORITY_SWEEP );
 		++$this->depthMemo;
 		return true;
 	}
@@ -105,13 +119,13 @@ final class Enqueuer {
 	/**
 	 * 自動作成（未登録商品の初回作成）。即時 priority 0 で積む。
 	 */
-	public function enqueueAutoCreate( string $platform, string $provider, string $externalId ): void {
+	public function enqueueAutoCreate( string $platform, string $account, string $externalId ): void {
 		$args = array(
 			'platform'    => $platform,
 			'external_id' => $externalId,
 		);
 
-		as_schedule_single_action( time(), self::HOOK_AUTOCREATE, $args, $this->group( $provider ), true, self::PRIORITY_FORCE );
+		as_schedule_single_action( time(), self::HOOK_AUTOCREATE, $args, $this->group( $account ), true, self::PRIORITY_FORCE );
 	}
 
 	/**
@@ -121,7 +135,7 @@ final class Enqueuer {
 	 * unique=true だと backoff/throttle の再投入が必ずスキップされてしまう。単一ワーカー
 	 * （AS claim による single-flight）実行中の 1 回だけ呼ばれるので false でも増殖しない。
 	 */
-	public function rescheduleRefresh( int $whenSec, int $postId, string $platform, string $provider ): void {
+	public function rescheduleRefresh( int $whenSec, int $postId, string $platform, string $account ): void {
 		as_schedule_single_action(
 			$whenSec,
 			self::HOOK_REFRESH,
@@ -129,7 +143,7 @@ final class Enqueuer {
 				'post_id'  => $postId,
 				'platform' => $platform,
 			),
-			$this->group( $provider ),
+			$this->group( $account ),
 			false,
 			self::PRIORITY_MANUAL
 		);
@@ -141,7 +155,7 @@ final class Enqueuer {
 	 * unique=false: rescheduleRefresh と同様、実行中の自分自身が in-progress として
 	 * 重複判定されてしまうため false（単一ワーカー実行中の 1 回だけ呼ばれるので増殖しない）。
 	 */
-	public function rescheduleAutoCreate( int $whenSec, string $platform, string $provider, string $externalId ): void {
+	public function rescheduleAutoCreate( int $whenSec, string $platform, string $account, string $externalId ): void {
 		as_schedule_single_action(
 			$whenSec,
 			self::HOOK_AUTOCREATE,
@@ -149,7 +163,7 @@ final class Enqueuer {
 				'platform'    => $platform,
 				'external_id' => $externalId,
 			),
-			$this->group( $provider ),
+			$this->group( $account ),
 			false,
 			self::PRIORITY_FORCE
 		);
@@ -168,6 +182,10 @@ final class Enqueuer {
 	 * （enqueueManual・priority 10）。$force と $manual は直交する（$force は対象の広さ、
 	 * $manual は積み方）。掃引（sweep）はここでは扱わない（鮮度スキップ・depth cap・
 	 * jitter を伴う別経路のため enqueueSweep を直接使う）。
+	 *
+	 * platform の provider コードはコンストラクタで受け取った ProviderRegistry で account
+	 * コードへ解決する。account が解決できない（provider が未登録、または accountCode()
+	 * が null＝手動系）listing は enqueue できないためスキップする。
 	 *
 	 * @param array<string, mixed> $product Repository::find() の戻り
 	 * @return int enqueue した listing 件数
@@ -193,10 +211,15 @@ final class Enqueuer {
 				continue;
 			}
 
+			$account = $this->providerRegistry->get( $def->provider )?->accountCode();
+			if ( null === $account ) {
+				continue;
+			}
+
 			if ( $manual ) {
-				$this->enqueueManual( $postId, $platform, $def->provider );
+				$this->enqueueManual( $postId, $platform, $account );
 			} else {
-				$this->enqueueForced( $postId, $platform, $def->provider );
+				$this->enqueueForced( $postId, $platform, $account );
 			}
 			++$count;
 		}
@@ -222,13 +245,13 @@ final class Enqueuer {
 	/**
 	 * pending 状態の AS ジョブ件数。depth cap 判定に使う。
 	 *
-	 * providerCodes が渡されていれば affilicard-{provider} group 別に集計して合算する
+	 * accountCodes が渡されていれば affilicard-{account} group 別に集計して合算する
 	 * （I1: WooCommerce 等、無関係な他プラグインの pending action を depth cap
-	 * backstop に巻き込まない）。providerCodes が空（既定）の場合のみ、後方互換として
+	 * backstop に巻き込まない）。accountCodes が空（既定）の場合のみ、後方互換として
 	 * group='' の全 pending 件数にフォールバックする。
 	 */
 	public function queueDepth(): int {
-		if ( array() === $this->providerCodes ) {
+		if ( array() === $this->accountCodes ) {
 			$ids = as_get_scheduled_actions(
 				array(
 					'status'   => 'pending',
@@ -242,12 +265,12 @@ final class Enqueuer {
 		}
 
 		$total = 0;
-		foreach ( $this->providerCodes as $providerCode ) {
+		foreach ( $this->accountCodes as $accountCode ) {
 			$ids = as_get_scheduled_actions(
 				array(
 					'status'   => 'pending',
 					'per_page' => -1,
-					'group'    => $this->group( $providerCode ),
+					'group'    => $this->group( $accountCode ),
 				),
 				'ids'
 			);

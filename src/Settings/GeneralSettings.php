@@ -58,9 +58,13 @@ final class GeneralSettings {
 		return (int) self::get()['queue_depth_cap'];
 	}
 
-	public static function throttleOverrideMs( string $provider ): int {
+	/**
+	 * v2.4.0: throttle_overrides は account コード（例: 'rakuten', 'dmm'）で引く
+	 * （レート制限は provider ではなく共有 API＝account 単位でかかるため）。
+	 */
+	public static function throttleOverrideMs( string $account ): int {
 		$ov = self::get()['throttle_overrides'];
-		return is_array( $ov ) && isset( $ov[ $provider ] ) ? max( 0, (int) $ov[ $provider ] ) : 0;
+		return is_array( $ov ) && isset( $ov[ $account ] ) ? max( 0, (int) $ov[ $account ] ) : 0;
 	}
 
 	public static function retentionDoneHours(): int {
@@ -133,8 +137,8 @@ final class GeneralSettings {
 
 		$overrides_raw      = isset( $values['throttle_overrides'] ) && is_array( $values['throttle_overrides'] ) ? $values['throttle_overrides'] : array();
 		$throttle_overrides = array();
-		foreach ( $overrides_raw as $prov => $ms ) {
-			$throttle_overrides[ (string) $prov ] = max( 0, (int) $ms );
+		foreach ( $overrides_raw as $account => $ms ) {
+			$throttle_overrides[ (string) $account ] = max( 0, (int) $ms );
 		}
 
 		$retention_done_hours  = isset( $values['retention_done_hours'] ) ? max( 1, (int) $values['retention_done_hours'] ) : self::DEFAULTS['retention_done_hours'];

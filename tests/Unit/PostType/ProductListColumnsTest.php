@@ -110,7 +110,7 @@ final class ProductListColumnsTest extends TestCase {
 					'post_id'  => 123,
 					'platform' => 'dmm-books',
 				),
-				'affilicard-dmm-ebook'
+				'affilicard-dmm'
 			)
 			->andReturn( false );
 
@@ -244,7 +244,7 @@ final class ProductListColumnsTest extends TestCase {
 	 * Task 18: Fallback 列にキュー状態を連携。
 	 *
 	 * as_has_scheduled_action が true（pending なジョブが Enqueuer::HOOK_REFRESH /
-	 * post_id・platform / "affilicard-{provider}" group で見つかる）場合、警告アイコンの
+	 * post_id・platform / "affilicard-{account}" group で見つかる）場合、警告アイコンの
 	 * title に「更新待ち」が含まれること。呼び出し引数（hook・args・group）も検証する。
 	 */
 	public function test_renderColumn_fallback_title_includes_pending_note_when_queue_job_scheduled(): void {
@@ -277,7 +277,7 @@ final class ProductListColumnsTest extends TestCase {
 					'post_id'  => 555,
 					'platform' => 'dmm-books',
 				),
-				'affilicard-dmm-ebook'
+				'affilicard-dmm'
 			)
 			->andReturn( true );
 
@@ -328,7 +328,7 @@ final class ProductListColumnsTest extends TestCase {
 					'post_id'  => 666,
 					'platform' => 'dmm-books',
 				),
-				'affilicard-dmm-ebook'
+				'affilicard-dmm'
 			)
 			->andReturn( false );
 
@@ -380,7 +380,7 @@ final class ProductListColumnsTest extends TestCase {
 					'post_id'  => 777,
 					'platform' => 'dmm-books',
 				),
-				'affilicard-dmm-ebook'
+				'affilicard-dmm'
 			)
 			->andReturn( false );
 

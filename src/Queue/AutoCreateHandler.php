@@ -42,9 +42,12 @@ final class AutoCreateHandler extends ThrottledActionHandler {
 
 	protected function reschedule( int $whenSec, array $args ): void {
 		$providerCode = $this->providerCodeFor( $args );
-		if ( null !== $providerCode ) {
-			$this->enqueuer->rescheduleAutoCreate( $whenSec, (string) $args['platform'], $providerCode, (string) $args['external_id'] );
+		if ( null === $providerCode ) {
+			return;
 		}
+		// v2.4.0: 再投入の group も account コード単位（run() の throttle キーと揃える）。
+		$account = $this->registry->get( $providerCode )?->accountCode() ?? $providerCode;
+		$this->enqueuer->rescheduleAutoCreate( $whenSec, (string) $args['platform'], $account, (string) $args['external_id'] );
 	}
 
 	protected function attemptKey( array $args ): string {
