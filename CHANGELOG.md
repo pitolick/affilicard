@@ -28,6 +28,7 @@
 ### Fixed
 
 - **掃引ジョブの決定的スタガリング**でキュー・チャーンを根本抑制。同一 account の sweep ジョブをランダム jitter ではなく実効レート間隔（`minRequestIntervalMs` と管理画面 override の大きい方）ぶんずつ確定的にずらして積むようにし、複数ジョブが同一レート窓へ集中→`RateLimiter` に弾かれ throttle 再投入される completed アクションのチャーン（Playground 実測「1商品に33回」）を回避する。
+- **恒久失敗 listing の give-up マーカー**を追加。外部 ID が恒久的に解決できない（廃盤/無効 ID）listing は terminal failure（リトライ上限到達）後 3 日間（`GIVEUP_COOLDOWN`）掃引でスキップし、再取得 TTL 毎の毎周回リトライ（API レート予算の浪費・チャーン）を抑える。fetch 成功でマーカーを消し、復旧した listing は通常周期に戻す。
 
 ## [2.3.0] - 2026-07-21
 

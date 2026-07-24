@@ -120,6 +120,8 @@ final class QueueMaintenanceTest extends TestCase {
 	public function test_sweep_公開商品のstaleな自動listingをenqueueSweepする(): void {
 		WP_Mock::userFunction( 'get_posts' )->andReturn( array( 12 ) );
 		$this->stubRakutenPlatform();
+		// B: give-up マーカー無し（get_transient=false）→ 通常通り enqueueSweep する。
+		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
 
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->once()->with( 12 )->andReturn(
@@ -168,6 +170,8 @@ final class QueueMaintenanceTest extends TestCase {
 	public function test_sweep_last_fetched_atがTTL内のlistingはenqueueSweepでスキップされAS未呼び出し(): void {
 		WP_Mock::userFunction( 'get_posts' )->andReturn( array( 15 ) );
 		$this->stubRakutenPlatform();
+		// B: give-up マーカー無し（get_transient=false）。鮮度スキップの前に give-up 判定が走る。
+		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
 
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->once()->with( 15 )->andReturn(
@@ -189,6 +193,46 @@ final class QueueMaintenanceTest extends TestCase {
 		);
 
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		( new QueueMaintenance( $repo, new Enqueuer(), $this->registry() ) )->sweep();
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * B: give-up マーカー（RefreshHandler::giveUpTransientKey）が立っている listing は、
+	 * eligibility・account 解決を満たし stale であっても enqueueSweep せずスキップする。
+	 * 恒久失敗（廃盤/無効 ID）listing の再取得 TTL 毎の毎周回リトライを COOLDOWN 中は抑える。
+	 */
+	public function test_sweep_giveup済みlistingはenqueueSweepせずAS未呼び出し(): void {
+		WP_Mock::userFunction( 'get_posts' )->andReturn( array( 16 ) );
+		$this->stubRakutenPlatform();
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->once()->with( 16 )->andReturn(
+			$this->product(
+				16,
+				array(
+					array(
+						'platform'        => 'rakuten-kobo',
+						'enabled'         => true,
+						'update_mode'     => 'auto',
+						'auto_update'     => true,
+						'external_id'     => 'deadbeef03',
+						'price'           => '',
+						'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ), // stale だが give-up 中
+					),
+				)
+			)
+		);
+
+		// give-up マーカーが立っている（truthy）→ 掃引はこの listing をスキップする。
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_refresh_gaveup_16_rakuten-kobo' )
+			->andReturn( 1 );
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )->never();
 
 		( new QueueMaintenance( $repo, new Enqueuer(), $this->registry() ) )->sweep();
 

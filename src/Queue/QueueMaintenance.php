@@ -82,6 +82,13 @@ final class QueueMaintenance {
 					continue;
 				}
 
+				// B: give-up マーカーが立つ listing（terminal failure 済み＝廃盤/無効 ID）は
+				// GIVEUP_COOLDOWN の間スキップし、再取得 TTL 毎の毎周回リトライ（API 浪費・
+				// completed チャーン）を抑える。復旧すれば RefreshHandler::performWork がマーカーを消す。
+				if ( get_transient( RefreshHandler::giveUpTransientKey( (int) $id, $platform ) ) ) {
+					continue;
+				}
+
 				$this->enqueuer->enqueueSweep( (int) $id, $platform, $account, $def, $listing, $now );
 			}
 		}
