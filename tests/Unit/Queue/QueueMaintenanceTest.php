@@ -118,13 +118,13 @@ final class QueueMaintenanceTest extends TestCase {
 				12,
 				array(
 					array(
-						'platform'         => 'rakuten-kobo',
-						'enabled'          => true,
-						'update_mode'      => 'auto',
-						'auto_update'      => true,
-						'external_id'      => 'deadbeef01',
-						'price'            => '500',
-						'last_verified_at' => gmdate( 'c', time() - 25 * 3600 ), // stale（TTL=24h超）
+						'platform'        => 'rakuten-kobo',
+						'enabled'         => true,
+						'update_mode'     => 'auto',
+						'auto_update'     => true,
+						'external_id'     => 'deadbeef01',
+						'price'           => '500',
+						'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ), // 直近の試行がTTL超過（TTL=24h）
 					),
 				)
 			)
@@ -151,7 +151,12 @@ final class QueueMaintenanceTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
-	public function test_sweep_fresh_listingはenqueueSweepでスキップされAS未呼び出し(): void {
+	/**
+	 * last_fetched_at（最終試行時刻）が TTL 内なら、last_verified_at（成功時刻）が
+	 * 古い/空・price が空（＝失敗が続いている listing）でもスキップする。
+	 * これにより毎掃引で際限なく再エンキューされる perpetual retry を防ぐ。
+	 */
+	public function test_sweep_last_fetched_atがTTL内のlistingはenqueueSweepでスキップされAS未呼び出し(): void {
 		WP_Mock::userFunction( 'get_posts' )->andReturn( array( 15 ) );
 		$this->stubRakutenPlatform();
 
@@ -166,8 +171,9 @@ final class QueueMaintenanceTest extends TestCase {
 						'update_mode'      => 'auto',
 						'auto_update'      => true,
 						'external_id'      => 'deadbeef02',
-						'price'            => '500',
-						'last_verified_at' => gmdate( 'c', time() - 3600 ), // fresh（TTL=24h以内）
+						'price'            => '',
+						'last_verified_at' => '',
+						'last_fetched_at'  => gmdate( 'c', time() - 3600 ), // 直近の試行はTTL内（TTL=24h）
 					),
 				)
 			)

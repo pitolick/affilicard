@@ -84,7 +84,7 @@ final class Enqueuer {
 	 * @param array<string, mixed> $listing
 	 */
 	public function enqueueSweep( int $postId, string $platform, string $provider, ?PlatformDefinition $def, array $listing, int $nowTs ): bool {
-		if ( ! PriceFreshness::isStale( $listing, $def, $nowTs ) ) {
+		if ( ! PriceFreshness::needsRefetch( $listing, $def, $nowTs ) ) {
 			return false;
 		}
 		if ( $this->currentDepth() >= $this->depthCap ) {

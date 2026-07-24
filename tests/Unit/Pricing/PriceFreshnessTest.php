@@ -71,52 +71,53 @@ final class PriceFreshnessTest extends TestCase {
 		$this->assertTrue( PriceFreshness::isPriceDisplayable( $listing, $this->platform( 24 ), $now ) );
 	}
 
-	public function test_isStale_last_verified_at欠落はstale(): void {
+	/**
+	 * needsRefetch(): 掃引（sweep）の再取得判定。last_fetched_at（最終試行時刻・
+	 * 成功/失敗問わず記録される）＋ platform priceTtlHours のクールダウンで判定する。
+	 * last_verified_at（成功時刻）ベースの isPriceDisplayable とは独立。
+	 */
+	public function test_needsRefetch_last_fetched_at欠落は再取得が必要(): void {
 		$platform = $this->platform( 24 );
-		$this->assertTrue( PriceFreshness::isStale( array( 'price' => '500' ), $platform, 1_000_000 ) );
+		$this->assertTrue( PriceFreshness::needsRefetch( array(), $platform, 1_000_000 ) );
 	}
 
-	public function test_isStale_TTL内はfresh(): void {
+	public function test_needsRefetch_TTL内は再取得不要(): void {
 		$platform = $this->platform( 24 );
 		$now      = 1_000_000;
-		$listing  = array(
-			'price'            => '500',
-			'last_verified_at' => gmdate( 'c', $now - 3600 ),
-		); // 1h 前
-		$this->assertFalse( PriceFreshness::isStale( $listing, $platform, $now ) );
+		$listing  = array( 'last_fetched_at' => gmdate( 'c', $now - 3600 ) ); // 1h 前
+		$this->assertFalse( PriceFreshness::needsRefetch( $listing, $platform, $now ) );
 	}
 
-	public function test_isStale_TTL超過はstale(): void {
+	public function test_needsRefetch_TTL超過は再取得が必要(): void {
 		$platform = $this->platform( 24 );
-		$now      = 1_000_000 + 25 * 3600;
-		$listing  = array(
-			'price'            => '500',
-			'last_verified_at' => gmdate( 'c', 1_000_000 ),
-		);
-		$this->assertTrue( PriceFreshness::isStale( $listing, $platform, $now ) );
+		$now      = 1_000_000;
+		$listing  = array( 'last_fetched_at' => gmdate( 'c', $now - 25 * 3600 ) ); // 25h 前
+		$this->assertTrue( PriceFreshness::needsRefetch( $listing, $platform, $now ) );
 	}
 
-	public function test_isStale_platformなしはstale扱い(): void {
-		$this->assertTrue( PriceFreshness::isStale( array( 'price' => '500' ), null, 1_000_000 ) );
+	public function test_needsRefetch_platformがnullは再取得が必要(): void {
+		$listing = array( 'last_fetched_at' => gmdate( 'c', 1_000_000 ) );
+		$this->assertTrue( PriceFreshness::needsRefetch( $listing, null, 1_000_000 ) );
 	}
 
-	public function test_isStale_TTL内でもprice空はstale(): void {
-		// last_verified_at は TTL 内（fresh）だが price が空のケース。
-		// isPriceDisplayable は price 空を非表示にするため、isStale が false（fresh扱い）だと
-		// TTL 内はずっと再取得されず、カードは価格非表示のまま自己修復しない。
+	public function test_needsRefetch_last_fetched_atが不正な日時文字列は再取得が必要(): void {
+		$platform = $this->platform( 24 );
+		$listing  = array( 'last_fetched_at' => 'not-a-date' );
+		$this->assertTrue( PriceFreshness::needsRefetch( $listing, $platform, 1_000_000 ) );
+	}
+
+	/**
+	 * 失敗が続き last_verified_at が古い/空・price が空のままでも、last_fetched_at
+	 * （直近の試行）が TTL 内なら再取得不要（＝毎掃引の連打を止める）。
+	 */
+	public function test_needsRefetch_last_verified_atやpriceが空でもlast_fetched_atがTTL内なら再取得不要(): void {
 		$platform = $this->platform( 24 );
 		$now      = 1_000_000;
 		$listing  = array(
 			'price'            => '',
-			'last_verified_at' => gmdate( 'c', $now - 3600 ), // 1時間前（TTL内）
+			'last_verified_at' => '',
+			'last_fetched_at'  => gmdate( 'c', $now - 3600 ), // 直近の失敗試行
 		);
-		$this->assertTrue( PriceFreshness::isStale( $listing, $platform, $now ) );
-	}
-
-	public function test_isStale_TTL内でもprice未設定はstale(): void {
-		$platform = $this->platform( 24 );
-		$now      = 1_000_000;
-		$listing  = array( 'last_verified_at' => gmdate( 'c', $now - 3600 ) ); // price キー自体が無い
-		$this->assertTrue( PriceFreshness::isStale( $listing, $platform, $now ) );
+		$this->assertFalse( PriceFreshness::needsRefetch( $listing, $platform, $now ) );
 	}
 }

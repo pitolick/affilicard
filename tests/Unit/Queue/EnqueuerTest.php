@@ -129,12 +129,18 @@ final class EnqueuerTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
-	public function test_enqueueSweep_freshはスキップしfalse(): void {
+	/**
+	 * 掃引の再取得判定は last_fetched_at（最終試行時刻）基準。last_verified_at が
+	 * 古い/空・price が空（＝失敗が続いている listing）でも、直近の試行
+	 * （last_fetched_at）が TTL 内ならスキップする（毎掃引の連打を防ぐ）。
+	 */
+	public function test_enqueueSweep_last_fetched_atがTTL内はlast_verified_atや価格に関わらずスキップしfalse(): void {
 		$def     = $this->platform( 'rakuten-kobo', 24 ); // priceTtlHours=24
 		$now     = 1_000_000;
 		$listing = array(
-			'price'            => '500',
-			'last_verified_at' => gmdate( 'c', $now - 3600 ),
+			'price'            => '', // 失敗続きで価格未確定
+			'last_verified_at' => '', // 一度も成功していない
+			'last_fetched_at'  => gmdate( 'c', $now - 3600 ), // 直近の試行はTTL内
 		);
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
 
@@ -142,13 +148,14 @@ final class EnqueuerTest extends TestCase {
 		$this->assertFalse( $result );
 	}
 
-	public function test_enqueueSweep_staleは深さ内でjitter付priority20投入しtrue(): void {
+	public function test_enqueueSweep_last_fetched_atがTTL超過は深さ内でjitter付priority20投入しtrue(): void {
 		$def     = $this->platform( 'rakuten-kobo', 24 );
 		$now     = 1_000_000;
 		$listing = array(
-			'price'            => '500',
-			'last_verified_at' => gmdate( 'c', $now - 25 * 3600 ),
-		); // stale
+			'price'            => '',
+			'last_verified_at' => '',
+			'last_fetched_at'  => gmdate( 'c', $now - 25 * 3600 ),
+		); // 直近の試行がTTL超過
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )->andReturn( array() ); // 深さ 0
 		WP_Mock::userFunction( 'wp_rand' )->with( 0, 300 )->andReturn( 42 );
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
@@ -169,6 +176,21 @@ final class EnqueuerTest extends TestCase {
 	}
 
 	/**
+	 * last_fetched_at が無い（初回・移行直後のデータ等）listing は常に再取得対象。
+	 */
+	public function test_enqueueSweep_last_fetched_at欠落は投入対象でtrue(): void {
+		$def     = $this->platform( 'rakuten-kobo', 24 );
+		$now     = 1_000_000;
+		$listing = array( 'price' => '500' ); // last_fetched_at 無し
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )->andReturn( array() ); // 深さ 0
+		WP_Mock::userFunction( 'wp_rand' )->with( 0, 300 )->andReturn( 0 );
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 101 );
+
+		$result = ( new Enqueuer() )->enqueueSweep( 12, 'rakuten-kobo', 'rakuten', $def, $listing, $now );
+		$this->assertTrue( $result );
+	}
+
+	/**
 	 * enqueueSweep は listing 毎に queueDepth() を再クエリせず、インスタンス内で
 	 * memoize した深さを使う（O(N) の as_get_scheduled_actions クエリ回避）。
 	 * enqueue 成功のたびに memo をインクリメントするので、cap 到達判定は
@@ -178,9 +200,9 @@ final class EnqueuerTest extends TestCase {
 		$def     = $this->platform( 'rakuten-kobo', 24 );
 		$now     = 1_000_000;
 		$listing = array(
-			'price'            => '500',
-			'last_verified_at' => gmdate( 'c', $now - 25 * 3600 ),
-		); // stale
+			'price'           => '500',
+			'last_fetched_at' => gmdate( 'c', $now - 25 * 3600 ),
+		); // 直近の試行がTTL超過
 
 		// 深さクエリは 1 回だけ（listing 3件を捌いても再クエリしない）。既存 pending=1。
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )->once()->andReturn( array( 1 ) );
@@ -204,9 +226,9 @@ final class EnqueuerTest extends TestCase {
 		$def     = $this->platform( 'rakuten-kobo', 24 );
 		$now     = 1_000_000;
 		$listing = array(
-			'price'            => '500',
-			'last_verified_at' => gmdate( 'c', $now - 25 * 3600 ),
-		); // stale
+			'price'           => '500',
+			'last_fetched_at' => gmdate( 'c', $now - 25 * 3600 ),
+		); // 直近の試行がTTL超過
 		WP_Mock::userFunction( 'as_get_scheduled_actions' )->andReturn( array( 1, 2 ) ); // 深さ 2
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
 

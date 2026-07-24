@@ -42,27 +42,29 @@ final class PriceFreshness {
 	}
 
 	/**
-	 * 再取得が必要か（stale か）を判定する。フレッシュな価格の再 fetch を避けるための鮮度スキップ用。
+	 * 掃引（sweep）の再取得判定：再取得を試みるべきか。
+	 *
+	 * last_fetched_at（成功/失敗を問わず毎試行で記録される最終試行時刻）＋
+	 * platform の priceTtlHours をクールダウンとして使う。last_verified_at
+	 * （成功時刻）ベースの isPriceDisplayable とは独立の判定であり、失敗が
+	 * 続いている listing でも「直近の試行から TTL 経過するまでは再投入しない」
+	 * ことで、掃引のたびに際限なく再エンキューされる（perpetual retry）事態を防ぐ。
 	 *
 	 * @param array<string, mixed> $listing
 	 */
-	public static function isStale( array $listing, ?PlatformDefinition $platform, int $nowTs ): bool {
+	public static function needsRefetch( array $listing, ?PlatformDefinition $platform, int $nowTs ): bool {
 		if ( null === $platform ) {
 			return true;
 		}
-		$price = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
-		if ( '' === $price ) {
+		$fetched = isset( $listing['last_fetched_at'] ) ? trim( (string) $listing['last_fetched_at'] ) : '';
+		if ( '' === $fetched ) {
 			return true;
 		}
-		$verified = isset( $listing['last_verified_at'] ) ? trim( (string) $listing['last_verified_at'] ) : '';
-		if ( '' === $verified ) {
-			return true;
-		}
-		$verifiedTs = strtotime( $verified );
-		if ( false === $verifiedTs ) {
+		$fetchedTs = strtotime( $fetched );
+		if ( false === $fetchedTs ) {
 			return true;
 		}
 		$ttl = $platform->priceTtlHours * 3600;
-		return ( $nowTs - $verifiedTs ) > $ttl;
+		return ( $nowTs - $fetchedTs ) > $ttl;
 	}
 }
