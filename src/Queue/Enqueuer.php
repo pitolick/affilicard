@@ -24,6 +24,15 @@ final class Enqueuer {
 	public const PRIORITY_SWEEP  = 20;
 
 	/**
+	 * enqueueSweep() が listing 毎に as_get_scheduled_actions を叩かないための
+	 * インスタンス内 memo。sweep 1 回（＝この Enqueuer インスタンスの生存期間）の
+	 * 間だけ有効で、null は「未クエリ」を表す。
+	 *
+	 * @var int|null
+	 */
+	private ?int $depthMemo = null;
+
+	/**
 	 * @param list<string> $providerCodes 深さ集計を affilicard-{provider} group 別に限定する
 	 *        provider コード（例: ['rakuten-kobo', 'dmm-ebook']）。空配列（既定）の場合は
 	 *        後方互換のため queueDepth() が group='' の全 pending 件数にフォールバックする
@@ -78,7 +87,7 @@ final class Enqueuer {
 		if ( ! PriceFreshness::isStale( $listing, $def, $nowTs ) ) {
 			return false;
 		}
-		if ( $this->queueDepth() >= $this->depthCap ) {
+		if ( $this->currentDepth() >= $this->depthCap ) {
 			return false;
 		}
 
@@ -89,6 +98,7 @@ final class Enqueuer {
 		$when = time() + wp_rand( 0, $this->maxJitterSeconds );
 
 		as_schedule_single_action( $when, self::HOOK_REFRESH, $args, $this->group( $provider ), true, self::PRIORITY_SWEEP );
+		++$this->depthMemo;
 		return true;
 	}
 
@@ -192,6 +202,21 @@ final class Enqueuer {
 		}
 
 		return $count;
+	}
+
+	/**
+	 * enqueueSweep() 専用の深さ参照。sweep は 1 商品 1 listing ずつ多数回呼ばれるため、
+	 * 呼び出しの都度 as_get_scheduled_actions（DB クエリ）する queueDepth() を使うと
+	 * O(N) クエリになってしまう。インスタンス内で 1 度だけクエリして memo し、以降は
+	 * enqueue 成功のたびに +1 する（cap 到達判定は sweep 内で引き続き正しく効く）。
+	 * 公開 API の queueDepth() は他の呼び出し元向けに常に最新値を返す契約を保つため、
+	 * memo とは独立に毎回クエリする。
+	 */
+	private function currentDepth(): int {
+		if ( null === $this->depthMemo ) {
+			$this->depthMemo = $this->queueDepth();
+		}
+		return $this->depthMemo;
 	}
 
 	/**

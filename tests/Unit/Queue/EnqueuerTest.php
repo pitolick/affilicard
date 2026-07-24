@@ -168,6 +168,38 @@ final class EnqueuerTest extends TestCase {
 		$this->assertTrue( $result );
 	}
 
+	/**
+	 * enqueueSweep は listing 毎に queueDepth() を再クエリせず、インスタンス内で
+	 * memoize した深さを使う（O(N) の as_get_scheduled_actions クエリ回避）。
+	 * enqueue 成功のたびに memo をインクリメントするので、cap 到達判定は
+	 * sweep 内で引き続き正しく効く。
+	 */
+	public function test_enqueueSweep_深さは初回のみクエリしmemoの増分でcapを守る(): void {
+		$def     = $this->platform( 'rakuten-kobo', 24 );
+		$now     = 1_000_000;
+		$listing = array(
+			'price'            => '500',
+			'last_verified_at' => gmdate( 'c', $now - 25 * 3600 ),
+		); // stale
+
+		// 深さクエリは 1 回だけ（listing 3件を捌いても再クエリしない）。既存 pending=1。
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )->once()->andReturn( array( 1 ) );
+		WP_Mock::userFunction( 'wp_rand' )->with( 0, 300 )->andReturn( 0 );
+		// cap=2・既存深さ=1 → 1件目は積める（memo は 2 に増分）。2・3件目は cap 到達でスキップ。
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 200 );
+
+		$enqueuer = new Enqueuer( 2 );
+
+		$result1 = $enqueuer->enqueueSweep( 1, 'rakuten-kobo', 'rakuten', $def, $listing, $now );
+		$result2 = $enqueuer->enqueueSweep( 2, 'rakuten-kobo', 'rakuten', $def, $listing, $now );
+		$result3 = $enqueuer->enqueueSweep( 3, 'rakuten-kobo', 'rakuten', $def, $listing, $now );
+
+		$this->assertTrue( $result1 );
+		$this->assertFalse( $result2 );
+		$this->assertFalse( $result3 );
+		$this->assertConditionsMet();
+	}
+
 	public function test_enqueueSweep_depthCap到達でスキップしfalse(): void {
 		$def     = $this->platform( 'rakuten-kobo', 24 );
 		$now     = 1_000_000;

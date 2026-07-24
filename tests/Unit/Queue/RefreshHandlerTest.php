@@ -60,14 +60,30 @@ final class RefreshHandlerTest extends TestCase {
 			);
 	}
 
-	public function test_handle_pause中は何もしない(): void {
+	public function test_handle_pause中はfetchせずジョブを再投入して保持する(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array( 'queue_paused' => true ) );
+		$this->stubPlatform();
 
-		// provider 解決・fetch は呼ばれない
+		// fetch は呼ばれない（消費しない）が、ジョブは reschedule で温存される
+		// （不再投入だと AS がアクションを complete 扱いにしてジョブが消滅してしまう）。
 		$refresher = Mockery::mock( ListingRefresher::class );
 		$refresher->shouldNotReceive( 'refreshOne' );
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 12,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten',
+				false,
+				Enqueuer::PRIORITY_MANUAL
+			)
+			->andReturn( 1 ); // rescheduleRefresh によるジョブ温存
 
 		$handler = new RefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry() );
 		$handler->handle( 12, 'rakuten-kobo' );

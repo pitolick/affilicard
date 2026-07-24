@@ -15,6 +15,9 @@ abstract class ThrottledActionHandler {
 
 	protected const MAX_ATTEMPTS = 5;
 
+	/** pause 中に温存したジョブを再チェックするまでの待機秒数（10分）。 */
+	protected const PAUSE_RETRY_SECONDS = 600;
+
 	public function __construct(
 		protected RateLimiter $limiter,
 		protected ProviderRegistry $registry
@@ -37,6 +40,10 @@ abstract class ThrottledActionHandler {
 	 */
 	protected function run( array $args ): void {
 		if ( GeneralSettings::isQueuePaused() ) {
+			// bare return だと AS がこのアクションを complete 扱いにしてジョブが消滅する
+			// （force/autocreate は掃引による再エンキューが無いため恒久ロスト）。
+			// スケジュールは残し、復旧後に処理する契約を守るため自己再投入して温存する。
+			$this->reschedule( time() + self::PAUSE_RETRY_SECONDS, $args );
 			return;
 		}
 		$providerCode = $this->providerCodeFor( $args );

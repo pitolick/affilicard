@@ -74,10 +74,11 @@ final class AutoCreateHandlerTest extends TestCase {
 			);
 	}
 
-	public function test_handle_pause中は何もしない(): void {
+	public function test_handle_pause中はcreateせずジョブを再投入して保持する(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array( 'queue_paused' => true ) );
+		$this->stubPlatform();
 
 		$provider = $this->provider();
 		$provider->shouldNotReceive( 'fetch' );
@@ -88,6 +89,23 @@ final class AutoCreateHandlerTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldNotReceive( 'save' );
 		$creator = new ProductAutoCreator( $registry, $repo );
+
+		// fetch/create は呼ばれない（消費しない）が、ジョブは reschedule で温存される
+		// （不再投入だと AS がアクションを complete 扱いにしてジョブが消滅してしまう）。
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_AUTOCREATE,
+				array(
+					'platform'    => 'rakuten-kobo',
+					'external_id' => 'ext-001',
+				),
+				'affilicard-rakuten',
+				false,
+				Enqueuer::PRIORITY_FORCE
+			)
+			->andReturn( 1 ); // rescheduleAutoCreate によるジョブ温存
 
 		$handler = new AutoCreateHandler( new Enqueuer(), new RateLimiter(), $creator, $registry );
 		$handler->handle( 'rakuten-kobo', 'ext-001' );
