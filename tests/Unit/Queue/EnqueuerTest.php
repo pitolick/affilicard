@@ -151,6 +151,16 @@ final class EnqueuerTest extends TestCase {
 	}
 
 	public function test_enqueueManual_即時priority10uniqueで投入する(): void {
+		// pending sweep（同一 base args）を繰り上げるため、投入前に base args を unschedule する。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once()
+			->with(
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 34,
+					'platform' => 'amazon-kindle',
+				),
+				'affilicard-amazon'
+			);
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(
 				\Mockery::type( 'int' ),
@@ -477,7 +487,16 @@ final class EnqueuerTest extends TestCase {
 		$this->stubRakutenPlatform();
 		$product = array( 'listings' => array( $this->eligibleListing() ) );
 
-		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+		// enqueueManual は pending sweep を繰り上げるため base args を unschedule してから積む。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once()
+			->with(
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 12,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten'
+			);
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(
 				\Mockery::type( 'int' ),

@@ -133,14 +133,21 @@ final class Enqueuer {
 
 	/**
 	 * 手動更新（画面操作起点だが強制ではない通常トリガー）。
+	 *
+	 * enqueueSweep と同一 base args（{post_id, platform}）＋ unique=true のため、pending の
+	 * sweep（priority 20・将来スケジュール）が残っていると as_schedule_single_action が新規
+	 * アクションを作らず、手動（priority 10・即時）が繰り上がらない。base args の pending を
+	 * 一度解除してから積み直し、手動更新が pending sweep を確実に上書き・即時実行されるようにする。
 	 */
 	public function enqueueManual( int $postId, string $platform, string $account ): void {
-		$args = array(
+		$args  = array(
 			'post_id'  => $postId,
 			'platform' => $platform,
 		);
+		$group = $this->group( $account );
 
-		as_schedule_single_action( time(), self::HOOK_REFRESH, $args, $this->group( $account ), true, self::PRIORITY_MANUAL );
+		as_unschedule_all_actions( self::HOOK_REFRESH, $args, $group );
+		as_schedule_single_action( time(), self::HOOK_REFRESH, $args, $group, true, self::PRIORITY_MANUAL );
 	}
 
 	/**

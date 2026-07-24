@@ -274,6 +274,13 @@ describe( 'PlatformEditor', () => {
 		expect(
 			screen.queryByText( /に対応していますが、現在は『手動入力』です/ )
 		).not.toBeInTheDocument();
+		// 切替ヒントは出ないが、自動非対応の手動入力である旨の注記は残る
+		// （注記まで消えていないことを担保する）。
+		expect(
+			screen.getByText(
+				'このプラットフォームは手動入力です（対応APIがありません）。'
+			)
+		).toBeInTheDocument();
 	} );
 
 	test( 'eligibleProvider が空のときトグルは出ず手動入力の注記のみ表示する', () => {
