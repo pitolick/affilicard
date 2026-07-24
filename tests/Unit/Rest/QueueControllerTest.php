@@ -46,6 +46,13 @@ final class QueueControllerTest extends TestCase {
 					return $text;
 				}
 			);
+		// pause() は防御的に rest_sanitize_boolean を適用する。実 WP と同じ真偽値化を再現する。
+		WP_Mock::userFunction( 'rest_sanitize_boolean' )
+			->andReturnUsing(
+				static function ( $value ) {
+					return filter_var( $value, FILTER_VALIDATE_BOOLEAN );
+				}
+			);
 	}
 
 	public function tearDown(): void {
@@ -247,7 +254,7 @@ final class QueueControllerTest extends TestCase {
 				array(
 					'group'    => self::RAKUTEN_GROUP,
 					'status'   => 'failed',
-					'per_page' => -1,
+					'per_page' => 100,
 				),
 				'ids'
 			)
@@ -257,7 +264,7 @@ final class QueueControllerTest extends TestCase {
 				array(
 					'group'    => self::DMM_GROUP,
 					'status'   => 'failed',
-					'per_page' => -1,
+					'per_page' => 100,
 				),
 				'ids'
 			)
@@ -293,7 +300,7 @@ final class QueueControllerTest extends TestCase {
 				array(
 					'group'    => self::RAKUTEN_GROUP,
 					'status'   => 'failed',
-					'per_page' => -1,
+					'per_page' => 100,
 				)
 			)
 			->andReturn( array( 20 => $action ) );
@@ -302,7 +309,7 @@ final class QueueControllerTest extends TestCase {
 				array(
 					'group'    => self::DMM_GROUP,
 					'status'   => 'failed',
-					'per_page' => -1,
+					'per_page' => 100,
 				)
 			)
 			->andReturn( array() );
@@ -337,7 +344,7 @@ final class QueueControllerTest extends TestCase {
 				array(
 					'group'    => self::RAKUTEN_GROUP,
 					'status'   => 'failed',
-					'per_page' => -1,
+					'per_page' => 100,
 				)
 			)
 			->andReturn( array( 30 => 'not-an-action-object' ) );
@@ -346,7 +353,7 @@ final class QueueControllerTest extends TestCase {
 				array(
 					'group'    => self::DMM_GROUP,
 					'status'   => 'failed',
-					'per_page' => -1,
+					'per_page' => 100,
 				)
 			)
 			->andReturn( array() );
@@ -386,7 +393,7 @@ final class QueueControllerTest extends TestCase {
 				array(
 					'group'    => self::RAKUTEN_GROUP,
 					'status'   => 'failed',
-					'per_page' => -1,
+					'per_page' => 100,
 				)
 			)
 			->andReturn( array( 40 => $action ) );
@@ -395,7 +402,7 @@ final class QueueControllerTest extends TestCase {
 				array(
 					'group'    => self::DMM_GROUP,
 					'status'   => 'failed',
-					'per_page' => -1,
+					'per_page' => 100,
 				)
 			)
 			->andReturn( array() );
@@ -422,5 +429,160 @@ final class QueueControllerTest extends TestCase {
 
 		$this->assertTrue( $res->get_data()['ok'] );
 		$this->assertSame( 0, $res->get_data()['retried'] );
+	}
+
+	/**
+	 * failed が上限（FAILED_BATCH_LIMIT=100）を超える場合、1 リクエストでは 100 件だけ削除して
+	 * 打ち切り（残りは次リクエストへ）、remaining=true を返す。上限に達した時点で後続 account
+	 * （dmm）の failed は取得すらしない（無駄な走査をしない）。
+	 */
+	public function test_deleteFailed_上限超過時は100件で打ち切りremainingを返す(): void {
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->with(
+				array(
+					'group'    => self::RAKUTEN_GROUP,
+					'status'   => 'failed',
+					'per_page' => 100,
+				),
+				'ids'
+			)
+			->andReturn( range( 1, 150 ) );
+		// dmm は rakuten だけで上限に達するため取得されない。
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->with(
+				array(
+					'group'    => self::DMM_GROUP,
+					'status'   => 'failed',
+					'per_page' => 100,
+				),
+				'ids'
+			)
+			->never();
+
+		$actionStore = Mockery::mock( ActionStoreInterface::class );
+		$actionStore->shouldReceive( 'deleteAction' )->times( 100 );
+
+		$res  = $this->controller( $actionStore )->deleteFailed( new WP_REST_Request() );
+		$data = $res->get_data();
+
+		$this->assertTrue( $data['ok'] );
+		$this->assertSame( 100, $data['deleted'] );
+		$this->assertTrue( $data['remaining'] );
+	}
+
+	/**
+	 * failed が上限未満なら remaining=false（残りなし）を返す。
+	 */
+	public function test_deleteFailed_上限未満ならremainingはfalse(): void {
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->with(
+				array(
+					'group'    => self::RAKUTEN_GROUP,
+					'status'   => 'failed',
+					'per_page' => 100,
+				),
+				'ids'
+			)
+			->andReturn( array( 10, 11 ) );
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->with(
+				array(
+					'group'    => self::DMM_GROUP,
+					'status'   => 'failed',
+					'per_page' => 100,
+				),
+				'ids'
+			)
+			->andReturn( array() );
+
+		$actionStore = Mockery::mock( ActionStoreInterface::class );
+		$actionStore->shouldReceive( 'deleteAction' )->times( 2 );
+
+		$res = $this->controller( $actionStore )->deleteFailed( new WP_REST_Request() );
+
+		$this->assertSame( 2, $res->get_data()['deleted'] );
+		$this->assertFalse( $res->get_data()['remaining'] );
+	}
+
+	/**
+	 * retryFailed も 1 リクエストで最大 FAILED_BATCH_LIMIT=100 件だけ処理して打ち切り、
+	 * remaining=true を返す（上限で後続 account の走査を止める）。
+	 */
+	public function test_retryFailed_上限超過時は100件で打ち切りremainingを返す(): void {
+		$actions = array();
+		for ( $i = 1; $i <= 150; $i++ ) {
+			$actions[ $i ] = new class( $i ) {
+				public function __construct( private int $pid ) {}
+
+				public function get_hook(): string {
+					return Enqueuer::HOOK_REFRESH;
+				}
+
+				/** @return array<string, mixed> */
+				public function get_args(): array {
+					return array(
+						'post_id'  => $this->pid,
+						'platform' => 'rakuten-kobo',
+					);
+				}
+			};
+		}
+
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->with(
+				array(
+					'group'    => self::RAKUTEN_GROUP,
+					'status'   => 'failed',
+					'per_page' => 100,
+				)
+			)
+			->andReturn( $actions );
+		// dmm は rakuten だけで上限に達するため取得されない。
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->with(
+				array(
+					'group'    => self::DMM_GROUP,
+					'status'   => 'failed',
+					'per_page' => 100,
+				)
+			)
+			->never();
+
+		WP_Mock::userFunction( 'as_schedule_single_action' )->andReturn( 999 );
+
+		$actionStore = Mockery::mock( ActionStoreInterface::class );
+		$actionStore->shouldReceive( 'deleteAction' )->times( 100 );
+
+		$res  = $this->controller( $actionStore )->retryFailed( new WP_REST_Request() );
+		$data = $res->get_data();
+
+		$this->assertTrue( $data['ok'] );
+		$this->assertSame( 100, $data['retried'] );
+		$this->assertTrue( $data['remaining'] );
+	}
+
+	/**
+	 * pause に文字列 "false"（HTTP 経由でありがちな値）が来ても、rest_sanitize_boolean 経由で
+	 * false として扱われる（素の (bool) キャストだと "false" が truthy になり不具合になる・Fix3）。
+	 */
+	public function test_pause_文字列falseはrest_sanitize_boolean経由でfalse扱いになる(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array( 'queue_paused' => true ) );
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->andReturnUsing(
+				function ( $key, $value, $autoload ) {
+					$this->assertFalse( $value['queue_paused'] );
+					return true;
+				}
+			);
+
+		$req = new WP_REST_Request();
+		$req->set_param( 'paused', 'false' );
+
+		$res = $this->controller()->pause( $req );
+
+		$this->assertFalse( $res->get_data()['paused'] );
 	}
 }

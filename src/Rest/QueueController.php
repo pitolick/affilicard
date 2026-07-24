@@ -27,6 +27,15 @@ use WP_REST_Response;
 final class QueueController {
 
 	/**
+	 * 1 リクエストで処理する failed action の上限（全 account 横断の合計）。
+	 *
+	 * deleteFailed/retryFailed は failed が数千件に膨らむと 1 リクエストで全件を同期処理して
+	 * PHP のタイムアウト/メモリ枯渇を招く。この上限で 1 リクエストあたりの処理件数を有界にし、
+	 * 未処理の failed は次リクエストに残す（レスポンスの remaining で残存を通知）。
+	 */
+	private const FAILED_BATCH_LIMIT = 100;
+
+	/**
 	 * @param list<string> $accountCodes 自動更新対象 account コード（例: ['rakuten', 'dmm']）。
 	 */
 	public function __construct(
@@ -62,6 +71,16 @@ final class QueueController {
 					'methods'             => 'POST',
 					'callback'            => array( $this, 'pause' ),
 					'permission_callback' => array( $this, 'canManageOptions' ),
+					// paused を boolean スキーマで受ける。sanitize_callback=rest_sanitize_boolean で
+					// 文字列 "false"/"0"/0 も正しく false へ正規化される（素の (bool) キャストだと
+					// "false" が truthy になる）。
+					'args'                => array(
+						'paused' => array(
+							'type'              => 'boolean',
+							'required'          => true,
+							'sanitize_callback' => 'rest_sanitize_boolean',
+						),
+					),
 				),
 			)
 		);
@@ -136,7 +155,9 @@ final class QueueController {
 	}
 
 	public function pause( WP_REST_Request $request ): WP_REST_Response {
-		$paused   = (bool) $request->get_param( 'paused' );
+		// register_rest_route の sanitize_callback で正規化済みだが、直接呼び出し経路でも
+		// "false"/"0" が truthy 化しないよう rest_sanitize_boolean を明示的に適用して防御する。
+		$paused   = (bool) rest_sanitize_boolean( $request->get_param( 'paused' ) );
 		$settings = GeneralSettings::update( array( 'queue_paused' => $paused ) );
 
 		return new WP_REST_Response(
@@ -178,8 +199,15 @@ final class QueueController {
 	public function deleteFailed( WP_REST_Request $request ): WP_REST_Response {
 		$deleted = 0;
 		foreach ( $this->accountCodes as $account ) {
-			$ids = $this->failedActionIds( $this->group( $account ) );
+			// 全 account 横断で最大 FAILED_BATCH_LIMIT 件だけ処理して打ち切る（残りは次リクエスト）。
+			if ( $deleted >= self::FAILED_BATCH_LIMIT ) {
+				break;
+			}
+			$ids = $this->failedActionIds( $this->group( $account ), self::FAILED_BATCH_LIMIT );
 			foreach ( $ids as $id ) {
+				if ( $deleted >= self::FAILED_BATCH_LIMIT ) {
+					break;
+				}
 				$this->actionStore->deleteAction( (int) $id );
 				++$deleted;
 			}
@@ -187,8 +215,10 @@ final class QueueController {
 
 		return new WP_REST_Response(
 			array(
-				'ok'      => true,
-				'deleted' => $deleted,
+				'ok'        => true,
+				'deleted'   => $deleted,
+				// 上限に達した＝未処理の failed が残っている可能性を示す（再度実行で続きを処理）。
+				'remaining' => $deleted >= self::FAILED_BATCH_LIMIT,
 			),
 			200
 		);
@@ -199,14 +229,19 @@ final class QueueController {
 	 * ActionStoreInterface 経由で削除する（キューの表示件数が failed→pending へ正しく移る）。
 	 */
 	public function retryFailed( WP_REST_Request $request ): WP_REST_Response {
-		$retried = 0;
+		$retried   = 0;
+		$processed = 0;
 		foreach ( $this->accountCodes as $account ) {
+			// 全 account 横断で最大 FAILED_BATCH_LIMIT 件だけ処理して打ち切る（残りは次リクエスト）。
+			if ( $processed >= self::FAILED_BATCH_LIMIT ) {
+				break;
+			}
 			$group   = $this->group( $account );
 			$actions = as_get_scheduled_actions(
 				array(
 					'group'    => $group,
 					'status'   => 'failed',
-					'per_page' => -1,
+					'per_page' => self::FAILED_BATCH_LIMIT,
 				)
 			);
 			if ( ! is_array( $actions ) ) {
@@ -214,6 +249,10 @@ final class QueueController {
 			}
 
 			foreach ( $actions as $id => $action ) {
+				if ( $processed >= self::FAILED_BATCH_LIMIT ) {
+					break;
+				}
+				++$processed;
 				if ( ! is_object( $action ) || ! method_exists( $action, 'get_hook' ) || ! method_exists( $action, 'get_args' ) ) {
 					continue;
 				}
@@ -237,8 +276,10 @@ final class QueueController {
 
 		return new WP_REST_Response(
 			array(
-				'ok'      => true,
-				'retried' => $retried,
+				'ok'        => true,
+				'retried'   => $retried,
+				// 上限に達した＝未処理の failed が残っている可能性を示す（再度実行で続きを処理）。
+				'remaining' => $processed >= self::FAILED_BATCH_LIMIT,
 			),
 			200
 		);
@@ -249,14 +290,16 @@ final class QueueController {
 	}
 
 	/**
+	 * @param int $limit 取得件数の上限（as_get_scheduled_actions の per_page）。バッチ処理で
+	 *                   1 リクエストの負荷を有界にするため既定は無制限（-1）ではなく呼び出し側が指定。
 	 * @return list<int|string>
 	 */
-	private function failedActionIds( string $group ): array {
+	private function failedActionIds( string $group, int $limit = -1 ): array {
 		$ids = as_get_scheduled_actions(
 			array(
 				'group'    => $group,
 				'status'   => 'failed',
-				'per_page' => -1,
+				'per_page' => $limit,
 			),
 			'ids'
 		);
