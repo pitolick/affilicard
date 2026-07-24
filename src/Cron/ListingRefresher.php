@@ -139,7 +139,11 @@ class ListingRefresher {
 	private function refreshListing( array $listing, string $productTitle ): array {
 		$platformCode = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
 		$externalId   = isset( $listing['external_id'] ) ? (string) $listing['external_id'] : '';
-		$now          = (string) current_time( 'c' );
+		// last_fetched_at は PriceFreshness::needsRefetch() が time()（実 UTC epoch）と比較して
+		// 掃引の再取得クールダウンを判定する。current_time('c') はサイトのローカル時刻に '+00:00'
+		// を付与するだけで実 UTC ではない（UTC 以外の TZ だとクールダウンがずれる）ため、
+		// last_verified_at と同様に gmdate('c')（実 UTC）で記録する。
+		$now = gmdate( 'c' );
 
 		$definition                 = PlatformConfig::find( $platformCode );
 		$provider                   = null !== $definition ? $this->registry->get( $definition->provider ) : null;
