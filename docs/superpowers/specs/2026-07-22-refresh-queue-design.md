@@ -22,7 +22,7 @@
 6. **全プラットフォーム対象**。
 7. **鮮度スキップ（最重要の削減レバー）**：`last_verified_at` が TTL 内の listing は**再取得しない**。stale/期限間近のみ更新対象にする。**キュー生成量そのものを激減**させる。
 8. **時間分散（jitter）**：更新を間隔内に分散し一斉バーストを避ける。
-9. **throttle を設定可能に**：provider 別のリクエストレートを設定値で持つ。
+9. **throttle を設定可能に**：account 別のリクエストレートを設定値で持つ（§11-2。レート制限は共有 API＝account 単位）。
 10. **（provider 対応時）multi-item バッチ**：API が複数商品同時取得に対応する場合はまとめて 1 リクエストにする（Amazon GetItems ≤10 ASIN 等）。楽天Kobo 検索は keyword 単位のため対象外＝provider 別。**後回し最適化**（Amazon は API 未解禁のため保留）。
 11. **リフレッシュ・トリガー（§8）**：①公開/更新時（記事内商品を force 事前同期・再掲対応）②future→publish ③スケジュール掃引（鮮度スキップ適用の継続更新＝主役）＋reconcile。すべて同一キュー（AS）へ。**閲覧駆動は不採用**（§10-1）。
 
@@ -33,13 +33,13 @@
 | # | 論点 | 確定 |
 | --- | --- | --- |
 | 1 | キュー機構 | **案B（Action Scheduler を bundle・土台）**。当初 lean は案A（自前）だったが、再検討で **memory 90% 停止・時間予算先読み・claim/ロック・single-flight・resumability・失敗保持・管理UI(Scheduled Actions)・WP-CLI ランナー** という「非同期ジョブの難所」を AS が実績込みで提供し、案A はこれを再実装（車輪の再発明・バグ温床）と判明したため **案B採用**。キュー量の細流化はスケール需要を下げるが、claim/timeout/memory 等の**正しさ需要**は量に依らず必要。トレードオフは AS を bundle する重依存の一点（AS は複数プラグイン同梱を想定し最新版を自動選択）。**outbound レート制限は AS も持たないので自前**。 |
-| 2 | ジョブ粒度 | **per-listing（post_id×platform）**。AS アクション hook=`affilicard_refresh_listing`・args=`{post_id, platform}`（＝dedup 同一性）・**group=`affilicard-{provider}`**（provider 別＝Scheduled Actions で provider 別フィルタが標準で効く・§3-2#5）。`force` は enqueue 時の判断でありスケジュール引数に含めない（dedup を安定させるため）。 |
+| 2 | ジョブ粒度 | **per-listing（post_id×platform）**。AS アクション hook=`affilicard_refresh_listing`・args=`{post_id, platform}`（＝dedup 同一性）・**group=`affilicard-{account}`**（account 別＝Scheduled Actions で account 別フィルタが標準で効く・§11-2・§3-2#5）。`force` は enqueue 時の判断でありスケジュール引数に含めない（dedup を安定させるため）。 |
 | 3 | 重複排除 | **AS ネイティブ `$unique=true`**（`as_schedule_single_action` の引数）で原子的に重複防止。自前 `as_has_scheduled_action` check-then-schedule（race あり）は使わない。 |
 | 4 | 優先度 | **AS ネイティブ `$priority` 引数**（0–255・小さいほど先）。force=0／手動一括=10／cron 掃引=20。時刻オフセットでのエミュレーションはしない。 |
 | 5 | ワーカー | **AS ランナー**（WP-Cron loopback or `wp action-scheduler run`）。時間予算・バッチ・memory ガード・claim・single-flight は AS 標準。**pause フラグ**でハンドラを即 return（§10-2）。 |
-| 6 | throttle | **`ProviderInterface::minRequestIntervalMs()`（provider 下限）＋ 管理画面で provider 別上書き**。実効 = `max(provider下限, 管理値)`。**AS ランナーを塞がない再スケジュール方式**（§3-2#3）。 |
+| 6 | throttle | **`ProviderInterface::minRequestIntervalMs()`（provider 下限）＋ 管理画面で account 別上書き（§11-2）**。実効 = `max(provider下限, 管理値)`。レート制限は共有 API＝account 単位でかける。**AS ランナーを塞がない再スケジュール方式**（§3-2#3）。 |
 | 7 | 公開/更新トリガー | `parse_blocks()` で解決 → **解決商品の auto listing 全部を force 投入（即時・priority 0）**。autoCreate なし。 |
-| 8 | 管理UI | **AS 再利用を最大化**（§3-2#5）。group=`affilicard-{provider}` により **per-job 明細・status/provider フィルタ・個別 Cancel/Run は AS の Tools→Scheduled Actions が標準提供**。自前は **設定セクション（provider 別 throttle／pause／retention）＋集計サマリ（AS API で件数取得）＋一括操作（全削除／failed 一括再試行）＋Scheduled Actions へのリンク** に縮小（フル自前テーブルは作らない）。 |
+| 8 | 管理UI | **AS 再利用を最大化**（§3-2#5）。group=`affilicard-{account}` により **per-job 明細・status/account フィルタ・個別 Cancel/Run は AS の Tools→Scheduled Actions が標準提供**。自前は **設定セクション（account 別 throttle／pause／retention）＋集計サマリ（AS API で account group を個別に件数取得し合算）＋一括操作（全削除／failed 一括再試行）＋Scheduled Actions へのリンク** に縮小（フル自前テーブルは作らない）。 |
 | 9 | 失敗可視化 | 既存 Fallback 列に **キュー状態（キュー待ち／失敗理由）を連携**（tooltip＋キューパネル/Scheduled Actions リンク）も今回。 |
 | 10 | 運用 | **サーバ実 cron 推奨ドキュメント ＋ AS 付属の `wp action-scheduler run`**（自前 WP-CLI ワーカーは作らず AS 標準を流用）。 |
 | 11 | ログ保持 | done=完了後まもなく／failed=既定保持。**AS の retention（`action_scheduler_retention_period`／`..._for_failed`）をフィルタで設定**。GeneralSettings から調整。 |
@@ -59,9 +59,9 @@ AS は同時刻に due のアクションを `$priority` 昇順で claim する�
 ### 3-2. コンポーネント
 
 1. **Enqueuer（AS ラッパ）** — 現行の同期 `run()` を置換。全トリガーが本 API 経由で投入。
-   - スケジュール: `as_schedule_single_action( $when, 'affilicard_refresh_listing', array( 'post_id'=>.., 'platform'=>.. ), 'affilicard-{provider}', $unique = true, $priority )`（group は provider 別＝§3-2#5 の Scheduled Actions フィルタ用）。
+   - スケジュール: `as_schedule_single_action( $when, 'affilicard_refresh_listing', array( 'post_id'=>.., 'platform'=>.. ), 'affilicard-{account}', $unique = true, $priority )`（group は account 別＝§11-2・§3-2#5 の Scheduled Actions フィルタ用。accountCode は 'rakuten'/'dmm' 等）。
    - **重複排除**: `$unique=true` で原子的に「同一 hook+group+args の pending/running が在れば投入しない」。
-   - **force の優先度確定**: force 投入時は既存の pending 掃引アクション（priority 20）を `as_unschedule_all_actions( 'affilicard_refresh_listing', array( 'post_id'=>.., 'platform'=>.. ), 'affilicard-{provider}' )` で解除してから priority 0 で再投入（force が確実に先行）。※重複しても実行時に鮮度スキップで noop になるため、この unschedule は最適化（必須ではない）。
+   - **force の優先度確定**: force 投入時は既存の pending 掃引アクション（priority 20）を `as_unschedule_all_actions( 'affilicard_refresh_listing', array( 'post_id'=>.., 'platform'=>.. ), 'affilicard-{account}' )` で解除してから priority 0 で再投入（force が確実に先行）。※重複しても実行時に鮮度スキップで noop になるため、この unschedule は最適化（必須ではない）。
    - **鮮度スキップ（要件7）**: force 以外は `PriceFreshness` で TTL 内なら投入しない。
    - **深さ上限バックストップ（要件4）**: AS の pending 件数が上限（設定可能・既定 500）超過時は掃引起点の投入だけ skip して log。force は常に通す。
    - **jitter（要件8）**: 掃引は `$when` に 0〜N 秒のランダムオフセット。
@@ -70,15 +70,15 @@ AS は同時刻に due のアクションを `$priority` 昇順で claim する�
    - **RateLimiter で throttle 判定**（§3-2#3）。
    - `provider->fetch()` → listing 反映（`last_verified_at=gmdate('c')` 等）。
    - **429/失敗**: `Retry-After`/指数バックオフで `as_schedule_single_action( next_attempt, ... )` に再投入（attempts はアクション args or listing 側カウンタで管理・上限で打ち切り＝failed）。AS のリトライ非自動・失敗保持・memory・time ガードはランナー標準を利用。
-3. **RateLimiter / Throttle（AS を塞がない再スケジュール式）** — provider ごとの**直近呼び出し時刻を option/transient に原子的に記録**（クロスプロセス）。ハンドラ冒頭で `tryAcquire(provider)`：
+3. **RateLimiter / Throttle（AS を塞がない再スケジュール式）** — account（共有 API 単位・§11-2）ごとの**直近呼び出し時刻を option に原子的に記録**（クロスプロセス）。ハンドラ冒頭で `tryAcquire(account)`：
    - 経過が min-interval 未満なら **fetch せず** `as_schedule_single_action( last_call + interval, same_action, priority )` で自分を後ろ倒しして return（**ハンドラ内で sleep しない**＝AS ランナーをブロックしない）。
    - 経過済みなら last_call を now に原子更新（`add_option` ロック or `GET_LOCK` or `UPDATE ... WHERE last_call<?`）してから fetch。
-   - これにより AS がバッチで複数アクションを走らせても、**provider 単位のレートはプロセス跨ぎで厳守**される（single-flight は AS の claim が担保）。
-   - 実効間隔 = `max(provider下限 minRequestIntervalMs(), 管理画面のprovider別設定)`。
+   - これにより AS がバッチで複数アクションを走らせても、**account 単位のレートはプロセス跨ぎで厳守**される（single-flight は AS の claim が担保）。
+   - 実効間隔 = `max(provider下限 minRequestIntervalMs(), 管理画面の account 別設定（throttle 上書き）)`。
 4. **ProviderInterface 拡張** — `minRequestIntervalMs(): int` を追加。manual=0／楽天=1100（1/sec＋余裕）／DMM=要確認（暫定 1000・公式/実測で確定）。
 5. **キュー管理 UI（AS 再利用最大化・自前は最小）** — 設定画面に「更新キュー」パネル。
-   - **per-job 明細・status/provider フィルタ・個別 Cancel/Run・検索は AS の Tools→Scheduled Actions が標準提供**（group=`affilicard-{provider}` で provider 別に絞れる）。自前でフルテーブルは作らない。
-   - 自前は最小：**設定セクション**（provider 別 throttle 上書き・**pause トグル（§10-2）**・retention 保持期間）＋**集計サマリ**（`as_get_scheduled_actions( array( 'group'=>'affilicard-*', 'status'=>.. ), 'ids' )` の件数で provider 別 pending/failed・深さ）＋**一括操作**（全削除＝`as_unschedule_all_actions`／failed 一括再試行＝再 enqueue）＋**Scheduled Actions へのリンク**。
+   - **per-job 明細・status/account フィルタ・個別 Cancel/Run・検索は AS の Tools→Scheduled Actions が標準提供**（group=`affilicard-{account}` で account 別に絞れる）。自前でフルテーブルは作らない。
+   - 自前は最小：**設定セクション**（account 別 throttle 上書き・**pause トグル（§10-2）**・retention 保持期間）＋**集計サマリ**（既知の各 account group（`affilicard-rakuten`／`affilicard-dmm` 等）を `as_get_scheduled_actions( array( 'group'=>'affilicard-{account}', 'status'=>.. ), 'ids' )` で**個別に件数取得して合算**し account 別 pending/failed・深さを出す。AS はワイルドカード group 検索を持たないため `affilicard-*` 一括では引かない＝実装 `QueueStats` も account を列挙して合算する）＋**一括操作**（全削除＝`as_unschedule_all_actions`／failed 一括再試行＝再 enqueue）＋**Scheduled Actions へのリンク**。
    - REST（`/affilicard/v1/refresh-queue` GET＋操作・**manage_options**）。
 6. **Sweep / Reconcile（既存グローバル cron `affilicard_refresh_all`・`refreshIntervalHours` 間隔）＝継続更新の主役** — 鮮度スキップ適用の軽量全件走査で stale を enqueue（priority 20・jitter）＋「スケジュール漏れ/失敗の reconcile 回収」（AS の `action_scheduler_ensure_recurring_actions` も活用可）。**cron は本 hook のみ**（ワーカーは AS ランナー・自前 tick は作らない）。低流入商品は鮮度スキップで大半が noop。ログ保持 purge は AS retention に委譲。
 7. **失敗可視化連携** — 既存 `ProductListColumns` の Fallback 列 tooltip に「キュー待ち／失敗理由」を連携し、キューパネル/Scheduled Actions へリンク。
@@ -87,13 +87,13 @@ AS は同時刻に due のアクションを `$priority` 昇順で claim する�
 
 ```text
 公開更新(parse_blocks force) / future→publish(force) / 手動ボタン / 掃引cron(鮮度スキップ)
-        │  Enqueuer.enqueue → as_schedule_single_action($when, 'affilicard_refresh_listing', {post_id,platform}, 'affilicard-{provider}', unique=true, priority)
+        │  Enqueuer.enqueue → as_schedule_single_action($when, 'affilicard_refresh_listing', {post_id,platform}, 'affilicard-{account}', unique=true, priority)
         │  (dedup: unique=true / 鮮度スキップ[force除く] / 深さ上限 / jitter[掃引] / priority=0(force)|10(手動)|20(掃引))
         ▼
    Action Scheduler ストア（claim・single-flight・時間予算・memoryガード・失敗保持・Scheduled Actions UI・WP-CLI は AS 標準）
         │  AS ランナー(WP-Cron loopback or `wp action-scheduler run`) → affilicard_refresh_listing ハンドラ
         ▼
-   [pause?→return] → RateLimiter.tryAcquire(provider)
+   [pause?→return] → RateLimiter.tryAcquire(account)
         ├─未経過→ as_schedule_single_action(last_call+interval, same, priority) で後ろ倒し return（sleepしない）
         └─経過→ last_call=now 原子更新 → provider->fetch()
                      ├─失敗/429→ Retry-After/backoff で as_schedule_single_action(next_attempt) 再投入（attempts上限でfailed）
@@ -106,7 +106,7 @@ AS は同時刻に due のアクションを `$priority` 昇順で claim する�
 
 - 手動一括更新ボタン: 「**更新をキューに投入しました（対象 N 件）**」を通知（非同期化）。
 - 個別「今すぐ更新」: 1 商品分を force 投入（即時・priority 0）。
-- キュー管理パネル: 深さ・provider 別内訳・failed・各操作・throttle/保持/pause 設定・Scheduled Actions へのリンク。
+- キュー管理パネル: 深さ・account 別内訳・failed・各操作・throttle/保持/pause 設定・Scheduled Actions へのリンク。
 
 ### 3-5. 描画経路（価格更新のキュー投入はしない＝毎閲覧 DB 書き込みを避ける）
 
@@ -123,7 +123,7 @@ AS は同時刻に due のアクションを `$priority` 昇順で claim する�
 
 既存 `ProductAutoCreator` は [Block::render()](../../../src/Block/Block.php#L128) から呼ばれ、未登録の `externalId+platform` ブロックがフロント描画されると**その場で同期 `provider->fetch()`（実HTTP）**を叩いて商品を1件生成していた（[ProductAutoCreator.php:35](../../../src/AutoCreate/ProductAutoCreator.php#L35)・5分 transient ロックのみでガード）。これは (a) 描画をブロックする同期API、(b) 今回根治するレート制限問題と同型、(c) RateLimiter/キューを通らない唯一残る同期API経路。
 
-- **改善**: `Block::render()` は未登録ブロックに対し **`as_schedule_single_action( now, 'affilicard_autocreate', array( 'platform'=>.., 'external_id'=>.. ), 'affilicard-{provider}', $unique=true, priority 0 )`** を投入するだけにし、**ハンドラで RateLimiter 経由生成**。`$unique=true` で重複防止（従来の transient ロックは「AS ストアを毎描画 read しない」ための安価な短絡ガードとして残す）。
+- **改善**: `Block::render()` は未登録ブロックに対し **`as_schedule_single_action( now, 'affilicard_autocreate', array( 'platform'=>.., 'external_id'=>.. ), 'affilicard-{account}', $unique=true, priority 0 )`** を投入するだけにし、**ハンドラで RateLimiter 経由生成**。`$unique=true` で重複防止（従来の transient ロックは「AS ストアを毎描画 read しない」ための安価な短絡ガードとして残す。加えて terminal failure 時は give-up マーカー transient で恒久失敗 ID の再 enqueue を止める）。
 - **UX トレードオフ**: 初回描画ではカード未表示（商品未生成）→ 生成完了後の次回描画から表示（**商品ごとに一度きり**）。低頻度イベントのため許容。
 - 生成後は既存商品として resolveProduct が即ヒット＝以降は同期処理も enqueue も発生しない。
 
@@ -205,7 +205,7 @@ AS は同時刻に due のアクションを `$priority` 昇順で claim する�
 ### 8-3. スケジュール掃引（継続更新の主役・reconcile floor）
 
 - 既存グローバル cron（`affilicard_refresh_all`・`refreshIntervalHours` 間隔）を、**鮮度スキップ適用の軽量掃引（stale を enqueue・priority 20・jitter）＋スケジュール漏れ/失敗の reconcile 回収**とする（§3-2#6・cron はこの hook のみ／ワーカーは AS ランナー）。**これが継続更新の主役**（競合と同じ cron ベース）。低流入商品は鮮度スキップで大半が noop。
-- WP-Cron は擬似 cron（リクエスト駆動）。青天井・確実運用では**サーバ実 cron（`DISABLE_WP_CRON`＋OS cron）＋ AS 付属の `wp action-scheduler run`**（WP-CLI ランナー）を推奨（§3-0#10）。
+- WP-Cron は擬似 cron（リクエスト駆動）。青天井・確実運用では**サーバ実 cron（`DISABLE_WP_CRON`＋OS cron）＋ AS 付属の `wp action-scheduler run`**（WP-CLI ランナー）を推奨（§3-0#10）。ただし `DISABLE_WP_CRON=true` にすると掃引の起点である WP-Cron イベント（`affilicard_refresh_all`）自体が発火しなくなるため、OS cron には `wp action-scheduler run`（キューの実行）**に加えて** `wp cron event run --due-now`（掃引 WP-Cron イベントの発火）も並べて登録する必要がある（どちらか一方では継続更新が回らない）。
 
 ## 9. セキュリティ・堅牢性（脆弱性レビュー・重点）
 
@@ -244,7 +244,7 @@ AS は同時刻に due のアクションを `$priority` 昇順で claim する�
 ### 9-7. bundle / アンインストールの安全性
 
 - AS は複数プラグイン同梱を想定し**最新版を自動選択**するため、他プラグイン（WooCommerce 等）が同梱していても衝突しない。ロードは AS 標準手順（`functions.php` require＋`ActionScheduler::init`）。
-- Uninstall では自前オプション（throttle/pause/retention 設定）を削除。AS テーブルは AS 所有のため drop しない（他プラグインが共有し得る）。自プラグインのスケジュール済みは **provider 別 group（`affilicard-{provider}`）ごとに** `as_unschedule_all_actions( '', array(), 'affilicard-{provider}' )` で解除（既知 provider を列挙）。
+- Uninstall では自前オプション（throttle/pause/retention 設定）を削除。AS テーブルは AS 所有のため drop しない（他プラグインが共有し得る）。自プラグインのスケジュール済みは **account 別 group（`affilicard-{account}`）ごとに** `as_unschedule_all_actions( '', array(), 'affilicard-{account}' )` で解除する（既知 account＝'rakuten'/'dmm' 等を列挙。空 hook 指定によりその group 内の affilicard の全アクション＝`affilicard_refresh_listing`／`affilicard_autocreate` の両方が解除される。実装 `Uninstall` も account を列挙してこの呼び出しを行う）。
 
 ### 9-8. WP-CLI
 
@@ -317,7 +317,7 @@ Playground 目視レビューで判明した改善点をこのブランチ（v2.
 - throttle 上書き・集計サマリ・RateLimiter キー・AS group を、provider コード（`dmm-ebook`/`rakuten-kobo`）から **accountCode（`dmm`/`rakuten`）** に統一。レート制限は共有 API（アカウント）単位が正しく、認証画面（DMM/楽天）ともUIが揃う。現状 1アカウント=1自動provider のため挙動不変。AS group=`affilicard-{account}`、Scheduled Actions のフィルタもアカウント単位。
 
 ### 11-3. AS 一覧を affilicard メニュー内に埋め込み＋日本語化
-- Action Scheduler の List Table を affilicard のサブメニューに描画し、`affilicard-*` group に絞って**日本語**で表示（AS の翻訳ロード確認）。実装困難なら Tools リンク＋日本語化にフォールバック。
+- Action Scheduler の List Table を affilicard のサブメニューに描画し、affilicard の account group（`affilicard-rakuten`／`affilicard-dmm` 等）に絞って**日本語**で表示（AS の翻訳ロード確認。AS はワイルドカード group を持たないため、既定検索語 `affilicard` で affilicard 系アクションに寄せる実装）。実装困難なら Tools リンク＋日本語化にフォールバック。
 
 ### 11-4. QueuePanel UI
 - 一般設定パネルと同じスタイル（`affilicard-general-panel` 相当のCSS）に揃える。各設定（throttle/保持/pause/depth）に**説明文**（何が起きるか）を付ける。

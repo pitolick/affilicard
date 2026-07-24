@@ -32,11 +32,19 @@ wp-config.php に以下を追加：
 define( 'DISABLE_WP_CRON', true );
 ```
 
-#### 手順 2: OS Cron に Action Scheduler ランナーを追加
+#### 手順 2: OS Cron に「掃引イベント発火」と「AS ランナー」の2本を追加
+
+`DISABLE_WP_CRON=true` にすると WP-Cron イベントが自動発火しなくなります。価格更新の継続更新は次の2段構えで回るため、**両方**を OS cron に登録してください（どちらか一方だけでは継続更新が止まります）。
+
+1. **掃引 WP-Cron イベントの発火**（stale listing をキューへ積む起点＝`affilicard_refresh_all`）
+2. **Action Scheduler ランナー**（積まれたキュージョブを実際に実行する）
 
 サーバの cron ジョブ（`crontab` または cPanel）に以下を追加します：
 
 ```bash
+# 1) 期限到来した WP-Cron イベント（掃引 affilicard_refresh_all を含む）を発火してキューへ積む
+* * * * * cd /path/to/wp && /usr/bin/wp cron event run --due-now >/dev/null 2>&1
+# 2) 積まれた Action Scheduler ジョブ（価格取得）を実行する
 * * * * * cd /path/to/wp && /usr/bin/wp action-scheduler run --batches=1 >/dev/null 2>&1
 ```
 
@@ -44,18 +52,11 @@ define( 'DISABLE_WP_CRON', true );
 - `* * * * *`: 毎分実行
 - `/path/to/wp`: WordPress のルートディレクトリパス（`wp-config.php` がある場所）
 - `/usr/bin/wp`: WP-CLI の実行パス（`which wp` で確認）
+- `wp cron event run --due-now`: 期限到来した WP-Cron イベントを発火。`DISABLE_WP_CRON=true` 下では掃引（`affilicard_refresh_all`）がこれ無しには回らない
 - `--batches=1`: 1 バッチ（デフォルト約10アクション）処理して終了。複数バッチ連続実行でタイムアウトを防ぐ
 - `>/dev/null 2>&1`: ログ出力を捨てる（不要ログで cron メール満杯を避ける）。トラブル時は一時的に外してログ確認
 
-#### 代替手段: WP-CLI cron コマンド
-
-AS が無い環境や従来の WP-Cron を使いたい場合：
-
-```bash
-* * * * * cd /path/to/wp && /usr/bin/wp cron event run --due-now >/dev/null 2>&1
-```
-
-ただし本番環境では `DISABLE_WP_CRON=true` + Action Scheduler ランナー推奨。
+> **なぜ2本必要か**: `wp action-scheduler run` は「既にキューに積まれたジョブ」を実行するだけで、stale listing をキューへ積む掃引イベント自体は発火しません。掃引は WP-Cron イベント（`affilicard_refresh_all`）なので、`DISABLE_WP_CRON=true` 下では `wp cron event run --due-now` で明示的に発火させる必要があります。
 
 #### Cron 登録の確認
 
@@ -95,7 +96,7 @@ WordPress 管理画面の affilicard 設定から「更新キュー」セクシ�
 - **キューサマリ**: 
   - pending 件数（待機中）
   - failed 件数（失敗）
-  - provider 別内訳
+  - account 別内訳（`rakuten`／`dmm` 等・認証画面と同単位）
   
 - **操作パネル**:
   - **削除**: すべての pending アクションを削除（慎重に）
@@ -234,7 +235,7 @@ wp option get 'affilicard_price_freshness_ttl_hours'  # 既定 24
 ### 初回導入時
 
 - [ ] WP-Cron を disable した（wp-config.php に `DISABLE_WP_CRON=true`）
-- [ ] OS Cron に AS ランナーを登録した
+- [ ] OS Cron に **掃引イベント発火**（`wp cron event run --due-now`）と **AS ランナー**（`wp action-scheduler run`）の**2本**を登録した（§手順2。片方だけだと継続更新が止まる）
 - [ ] `wp action-scheduler run --dry-run` で動作確認
 - [ ] Tools → Scheduled Actions にアクセス可能か確認
 - [ ] affilicard 設定 → 更新キュー パネルが表示されるか確認
