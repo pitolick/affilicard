@@ -20,18 +20,43 @@ final class RateLimiter {
 	}
 
 	/**
+	 * get_option()→update_option() の read-then-write は非原子的で、2 つの AS ワーカーが
+	 * 同時に同じ account/interval の枠を獲得できてしまう（レース）。ここでは option テーブルへの
+	 * 条件付き UPDATE（compare-and-set）1 文で「現在値が閾値以下のときだけ更新」を行い、
+	 * 影響行数（0 or 1）で獲得の成否を判定する。影響行数=1 のワーカーだけが本処理へ進める。
+	 *
 	 * @return array{ok: bool, next_ms: int}
 	 */
 	public function tryAcquire( string $account, int $intervalMs, int $nowMs ): array {
-		$key  = $this->optionKey( $account );
-		$last = (int) get_option( $key, 0 );
-		if ( $nowMs - $last >= $intervalMs ) {
-			update_option( $key, $nowMs, false );
+		global $wpdb;
+
+		$key = $this->optionKey( $account );
+
+		// option 行が無いと UPDATE は 0 行しかヒットしないため先にシードする
+		// （既に存在する場合は add_option が no-op を返すだけで安全）。
+		add_option( $key, '0', '', false );
+
+		$threshold = $nowMs - $intervalMs;
+		$updated   = $wpdb->query(
+			$wpdb->prepare(
+				"UPDATE {$wpdb->options} SET option_value = %d WHERE option_name = %s AND CAST(option_value AS UNSIGNED) <= %d",
+				$nowMs,
+				$key,
+				$threshold
+			)
+		);
+		// 生 SQL で option を書き換えたため、get_option() のオブジェクトキャッシュを
+		// 破棄しないと以降の読み出しが古い値を返し続ける。
+		wp_cache_delete( $key, 'options' );
+
+		if ( 1 === $updated ) {
 			return array(
 				'ok'      => true,
 				'next_ms' => $nowMs,
 			);
 		}
+
+		$last = (int) get_option( $key, 0 );
 		return array(
 			'ok'      => false,
 			'next_ms' => $last + $intervalMs,

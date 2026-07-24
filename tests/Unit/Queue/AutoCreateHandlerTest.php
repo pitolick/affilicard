@@ -33,8 +33,29 @@ final class AutoCreateHandlerTest extends TestCase {
 
 	public function tearDown(): void {
 		WP_Mock::tearDown();
+		if ( isset( $GLOBALS['wpdb'] ) ) {
+			unset( $GLOBALS['wpdb'] );
+		}
 		Mockery::close();
 		parent::tearDown();
+	}
+
+	/**
+	 * RateLimiter::tryAcquire() が条件付き UPDATE で使う $wpdb を stub する
+	 * （v2.4.0: 原子化した CAS のための $GLOBALS['wpdb'] モック。RateLimiterTest と同じ流儀）。
+	 * add_option/wp_cache_delete も合わせて許容する。
+	 *
+	 * @param int $queryReturn UPDATE の影響行数（1=獲得成功／0=未獲得）。
+	 */
+	private function mockRateLimiterWpdb( int $queryReturn ): void {
+		$wpdb          = Mockery::mock();
+		$wpdb->options = 'wp_options';
+		$wpdb->shouldReceive( 'prepare' )->andReturnUsing( static fn( string $query, ...$args ) => $query );
+		$wpdb->shouldReceive( 'query' )->andReturn( $queryReturn );
+		$GLOBALS['wpdb'] = $wpdb;
+
+		WP_Mock::userFunction( 'add_option' )->andReturn( true );
+		WP_Mock::userFunction( 'wp_cache_delete' )->andReturn( true );
 	}
 
 	/**
@@ -123,6 +144,7 @@ final class AutoCreateHandlerTest extends TestCase {
 			->andReturn( array() );
 		$this->stubPlatform();
 		// 実行時刻(ms)より確実に未来になる値を使い、実時計に依存せず「間隔未経過」を再現する。
+		$this->mockRateLimiterWpdb( 0 ); // CAS の UPDATE が 0 行 = 未獲得
 		WP_Mock::userFunction( 'get_option' )
 			->with( 'affilicard_ratelimit_rakuten', 0 )
 			->andReturn( 9999999999999 );
@@ -147,12 +169,7 @@ final class AutoCreateHandlerTest extends TestCase {
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array() );
 		$this->stubPlatform();
-		WP_Mock::userFunction( 'get_option' )
-			->with( 'affilicard_ratelimit_rakuten', 0 )
-			->andReturn( 0 ); // 経過済
-		WP_Mock::userFunction( 'update_option' )
-			->with( 'affilicard_ratelimit_rakuten', Mockery::type( 'int' ), false )
-			->andReturn( true );
+		$this->mockRateLimiterWpdb( 1 ); // CAS の UPDATE が 1 行 = 獲得成功（経過済）
 		WP_Mock::userFunction( 'delete_transient' )
 			->once()
 			->with( 'affilicard_autocreate_attempts_rakuten-kobo_ext-001' )
