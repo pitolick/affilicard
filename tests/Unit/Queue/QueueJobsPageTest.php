@@ -191,6 +191,11 @@ final class QueueJobsPageTest extends TestCase {
 	 * bundle した AS は ActionSchedulerLoader::boot() 経由でしか require されないため、
 	 * このテストプロセスではロードされない）場合、render() はフェイタルせず
 	 * 日本語の見出し・説明・Tools へのフォールバックリンクを出力する。
+	 *
+	 * ロード済みケース（defineFakeActionSchedulerAdminView を eval で定義）と同じプロセス分離に
+	 * 揃え、他テストの実行順に依存せず「AS 未ロード」前提を確実にする。
+	 *
+	 * @runInSeparateProcess
 	 */
 	public function test_render_as管理ビュー未ロード時は日本語の見出しとtoolsリンクへフォールバックする(): void {
 		$this->assertFalse(
