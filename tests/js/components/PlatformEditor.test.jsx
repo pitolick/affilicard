@@ -200,6 +200,82 @@ describe( 'PlatformEditor', () => {
 		);
 	} );
 
+	test( 'provider=manual かつ eligibleProvider ありのとき手動→自動への切替を促すヒントが表示される', () => {
+		window.affilicardProviders = [
+			{
+				code: 'manual',
+				label: '手動入力',
+				isAutomatic: false,
+				accountCode: null,
+			},
+			{
+				code: 'rakuten-kobo',
+				label: '楽天Kobo API',
+				isAutomatic: true,
+				accountCode: 'rakuten',
+			},
+		];
+		render(
+			<PlatformEditor
+				platform={ {
+					...basePlatform,
+					provider: 'manual',
+					eligibleProvider: 'rakuten-kobo',
+				} }
+				onChange={ jest.fn() }
+			/>
+		);
+		expect(
+			screen.getByText( /自動取得（楽天Kobo API）に対応していますが/ )
+		).toBeInTheDocument();
+	} );
+
+	test( 'provider が自動のときはヒントを表示しない', () => {
+		window.affilicardProviders = [
+			{
+				code: 'manual',
+				label: '手動入力',
+				isAutomatic: false,
+				accountCode: null,
+			},
+			{
+				code: 'rakuten-kobo',
+				label: '楽天Kobo API',
+				isAutomatic: true,
+				accountCode: 'rakuten',
+			},
+		];
+		render(
+			<PlatformEditor
+				platform={ {
+					...basePlatform,
+					provider: 'rakuten-kobo',
+					eligibleProvider: 'rakuten-kobo',
+				} }
+				onChange={ jest.fn() }
+			/>
+		);
+		expect(
+			screen.queryByText( /に対応していますが、現在は『手動入力』です/ )
+		).not.toBeInTheDocument();
+	} );
+
+	test( 'eligibleProvider が無い（自動非対応）ときは手動でもヒントを表示しない', () => {
+		render(
+			<PlatformEditor
+				platform={ {
+					...basePlatform,
+					provider: 'manual',
+					eligibleProvider: '',
+				} }
+				onChange={ jest.fn() }
+			/>
+		);
+		expect(
+			screen.queryByText( /に対応していますが、現在は『手動入力』です/ )
+		).not.toBeInTheDocument();
+	} );
+
 	test( 'eligibleProvider が空のときトグルは出ず手動入力の注記のみ表示する', () => {
 		const onChange = jest.fn();
 		render(

@@ -109,27 +109,45 @@ export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 					{__('価格の取得方法', 'affilicard')}
 				</h4>
 				{platform.eligibleProvider ? (
-					<ToggleControl
-						label={sprintf(
-							/* translators: %s: provider display name, e.g. "楽天Kobo API" */
-							__('自動取得（%s）', 'affilicard'),
-							providerLabel(platform.eligibleProvider)
+					<>
+						<ToggleControl
+							label={sprintf(
+								/* translators: %s: provider display name, e.g. "楽天Kobo API" */
+								__('自動取得（%s）', 'affilicard'),
+								providerLabel(platform.eligibleProvider)
+							)}
+							checked={
+								(platform.provider ?? 'manual') !== 'manual'
+							}
+							onChange={(v) =>
+								update({
+									provider: v
+										? platform.eligibleProvider
+										: 'manual',
+								})
+							}
+							help={sprintf(
+								/* translators: %s: provider display name, e.g. "楽天Kobo API" */
+								__(
+									'ON＝%s から価格・URLを自動取得し、全体設定の「更新間隔」で定期更新します。OFF＝手動入力（価格・URLを手で入力）。ストアの表示ON/OFFは上の「有効」、自動更新の稼働・間隔は全体設定で制御します。',
+									'affilicard'
+								),
+								providerLabel(platform.eligibleProvider)
+							)}
+						/>
+						{(platform.provider ?? 'manual') === 'manual' && (
+							<Notice status="warning" isDismissible={false}>
+								{sprintf(
+									/* translators: %s: provider display name, e.g. "楽天Kobo API" */
+									__(
+										'このプラットフォームは自動取得（%s）に対応していますが、現在は『手動入力』です。価格を自動更新するには上の『価格の取得方法』を自動取得に切り替えてください（別途、API 認証情報の登録が必要です）。',
+										'affilicard'
+									),
+									providerLabel(platform.eligibleProvider)
+								)}
+							</Notice>
 						)}
-						checked={(platform.provider ?? 'manual') !== 'manual'}
-						onChange={(v) =>
-							update({
-								provider: v ? platform.eligibleProvider : 'manual',
-							})
-						}
-						help={sprintf(
-							/* translators: %s: provider display name, e.g. "楽天Kobo API" */
-							__(
-								'ON＝%s から価格・URLを自動取得し、全体設定の「更新間隔」で定期更新します。OFF＝手動入力（価格・URLを手で入力）。ストアの表示ON/OFFは上の「有効」、自動更新の稼働・間隔は全体設定で制御します。',
-								'affilicard'
-							),
-							providerLabel(platform.eligibleProvider)
-						)}
-					/>
+					</>
 				) : (
 					<p className="affilicard-platform-editor__note">
 						{__(

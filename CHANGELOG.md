@@ -19,6 +19,7 @@
 - **更新キュー（ジョブ一覧）を affilicard 自身のメニューに埋め込み**（Phase2 §11-3）。商品一覧の子メニューに「更新キュー（ジョブ一覧）」を追加し、Action Scheduler の一覧（Tools→Scheduled Actions と同じ描画・`ActionScheduler_AdminView::render_admin_ui()` を再利用）をそのまま表示する。検索欄を既定で `affilicard` に絞り込み、Tools に移動しなくても affilicard のジョブを確認できるようにした。AS 自体は同梱パッケージに翻訳を含まないため、affilicard 側で用意した限定的な日本語 .mo（`languages/action-scheduler-ja.mo`。プレースホルダ・複数形を含む文字列は誤翻訳リスクのため対象外）を ja ロケール時のみ明示ロードする。AS 管理ビューが読み込めない環境では Tools 側へのリンクにフォールバックする。
 - ログ保持期間を Action Scheduler の retention フィルタに連動（完了=時間・失敗=日数、既定 24h/7日）。商品一覧の Fallback 列にキュー待ち/失敗理由を連携（provider エラー文字列は `wp_strip_all_tags`＋`esc_attr` の二重防御）。
 - 運用ドキュメント `docs/operations-refresh-queue.md`（サーバ実 cron＋`wp action-scheduler run` 推奨）を追加。
+- プラットフォーム設定に**手動→自動取得への切替を促すヒント**を追加。自動 Provider に対応（`eligibleProvider` 非空）しつつ「価格の取得方法」が『手動入力』（`provider === 'manual'`）のままのプラットフォームで、provider トグル直下に `Notice`（warning）を表示し、自動更新には取得方法の切替（＋別途 API 認証情報の登録）が必要な旨を案内する。認証登録済みでも取得が始まらない発見性の低さを解消する。
 
 ### Changed
 
