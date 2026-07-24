@@ -11,7 +11,11 @@ import {
 } from '../api/queue';
 import { fetchSettings, updateSettings } from '../api/settings';
 
-const SCHEDULED_ACTIONS_URL = 'tools.php?page=action-scheduler&s=affilicard';
+// affilicard 自身のサブメニュー（更新キュー・ジョブ一覧。QueueJobsPage が
+// Action Scheduler の一覧を affilicard-{account} スコープ・日本語で埋め込む）。
+// v2.4.0 Phase2 §11-3 で Tools > Scheduled Actions への直リンクから置き換えた。
+const QUEUE_JOBS_URL =
+	'edit.php?post_type=affilicard_product&page=affilicard-queue-jobs';
 
 export function QueuePanel() {
 	const [stats, setStats] = useState(null);
@@ -275,8 +279,8 @@ export function QueuePanel() {
 			</div>
 
 			<p>
-				<a href={SCHEDULED_ACTIONS_URL}>
-					{__('Scheduled Actions を開く（Tools）', 'affilicard')}
+				<a href={QUEUE_JOBS_URL}>
+					{__('更新キュー（ジョブ一覧）を開く', 'affilicard')}
 				</a>
 			</p>
 		</div>

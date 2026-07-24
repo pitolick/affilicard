@@ -14,6 +14,7 @@
 - **トリガーの層構造**: 公開/更新時に記事内商品を force 投入（`PublishTrigger`・`parse_blocks` で解決）、future→publish 昇格・手動更新も enqueue 化。dedup は Action Scheduler ネイティブの `$unique`、優先度は `$priority`（force=0/手動=10/掃引=20）で表現する。
 - **AutoCreate の非同期化**: 未登録ブロックのフロント描画時に同期 API を叩く従来動作を廃し、生成ジョブを enqueue するだけにした（描画の同期 HTTP を除去）。
 - **キュー管理 UI**（設定→更新キュー）: Provider 別 pending/in-progress/failed 集計・キュー深さ・pause トグル・Provider 別スロットル/保持期間設定・一括操作（全削除/failed 削除/failed 再試行/pending キャンセル）。per-job 明細は Action Scheduler の Tools→Scheduled Actions（group `affilicard-{provider}`）を活用する。REST は `manage_options`。
+- **更新キュー（ジョブ一覧）を affilicard 自身のメニューに埋め込み**（Phase2 §11-3）。商品一覧の子メニューに「更新キュー（ジョブ一覧）」を追加し、Action Scheduler の一覧（Tools→Scheduled Actions と同じ描画・`ActionScheduler_AdminView::render_admin_ui()` を再利用）をそのまま表示する。検索欄を既定で `affilicard` に絞り込み、Tools に移動しなくても affilicard のジョブを確認できるようにした。AS 自体は同梱パッケージに翻訳を含まないため、affilicard 側で用意した限定的な日本語 .mo（`languages/action-scheduler-ja.mo`。プレースホルダ・複数形を含む文字列は誤翻訳リスクのため対象外）を ja ロケール時のみ明示ロードする。AS 管理ビューが読み込めない環境では Tools 側へのリンクにフォールバックする。
 - ログ保持期間を Action Scheduler の retention フィルタに連動（完了=時間・失敗=日数、既定 24h/7日）。商品一覧の Fallback 列にキュー待ち/失敗理由を連携（provider エラー文字列は `wp_strip_all_tags`＋`esc_attr` の二重防御）。
 - 運用ドキュメント `docs/operations-refresh-queue.md`（サーバ実 cron＋`wp action-scheduler run` 推奨）を追加。
 

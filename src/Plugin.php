@@ -25,6 +25,7 @@ use Affilicard\Queue\ActionSchedulerStore;
 use Affilicard\Queue\AutoCreateHandler;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\PublishTrigger;
+use Affilicard\Queue\QueueJobsPage;
 use Affilicard\Queue\QueueMaintenance;
 use Affilicard\Queue\QueueStats;
 use Affilicard\Queue\RateLimiter;
@@ -82,6 +83,7 @@ final class Plugin {
 			$dashboard->register();
 
 			add_action( 'admin_menu', array( self::class, 'registerSettingsPage' ) );
+			add_action( 'admin_menu', array( QueueJobsPage::class, 'registerMenu' ) );
 			add_action( 'admin_enqueue_scripts', array( self::class, 'enqueueSettingsAssets' ) );
 			add_action( 'admin_init', array( self::class, 'purgeLegacyProviderCredentials' ) );
 			add_action( 'admin_init', array( self::class, 'backfillEligibleProviders' ) );

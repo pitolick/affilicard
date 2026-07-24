@@ -165,14 +165,14 @@ describe('QueuePanel', () => {
 		expect(screen.getByLabelText(/一時停止/)).toBeChecked();
 	});
 
-	test('links to the Scheduled Actions tools page', async () => {
+	test('links to the affilicard queue jobs page', async () => {
 		render(<QueuePanel />);
 		const link = await screen.findByRole('link', {
-			name: /Scheduled Actions/,
+			name: /更新キュー（ジョブ一覧）を開く/,
 		});
 		expect(link).toHaveAttribute(
 			'href',
-			'tools.php?page=action-scheduler&s=affilicard'
+			'edit.php?post_type=affilicard_product&page=affilicard-queue-jobs'
 		);
 	});
 });
