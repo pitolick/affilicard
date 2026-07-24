@@ -9,7 +9,7 @@
 ### Added
 
 - **価格更新を Action Scheduler ベースの非同期キューに移行**した。手動一括更新・cron・公開/更新イベントは「更新ジョブをキューに投入」するだけで即座に返し、実際の価格取得はバックグラウンドの Action Scheduler ランナーが順次処理する。Action Scheduler はプラグインに bundle し、プラグイン読み込み時に同期 require する。
-- **per-provider レート制限耐性**（`RateLimiter`）を追加。Provider ごとの最小リクエスト間隔（`ProviderInterface::minRequestIntervalMs()`／楽天 Kobo=1100ms・DMM=1000ms・手動=0）をクロスプロセスで厳守し、間隔未経過のジョブはワーカーをブロックせず後ろ倒し再スケジュールする。間隔は 429 バックオフ（指数・上限 1h クランプ）でも延長する。管理画面から Provider 別に上書き可能。
+- **per-provider レート制限耐性**（`RateLimiter`）を追加。Provider ごとの最小リクエスト間隔（`ProviderInterface::minRequestIntervalMs()`／楽天 Kobo=1100ms・DMM=1000ms・手動=0）を option に記録してプロセスを跨いで反映する（AS 既定の単一ワーカー実行を前提とした read-modify-write。並行ワーカー下での厳密なアトミック性は保証しない）。間隔未経過のジョブはワーカーをブロックせず後ろ倒し再スケジュールする。間隔は 429 バックオフ（指数・上限 1h クランプ）でも延長する。管理画面から Provider 別に上書き可能。
 - **鮮度スキップ**（`PriceFreshness::isStale()`）: `last_verified_at` が TTL 内の listing はキューに投入しない。cron 掃引（`affilicard_refresh_all`）が継続更新の主役となり、stale な auto listing のみを jitter 付きで投入する。
 - **トリガーの層構造**: 公開/更新時に記事内商品を force 投入（`PublishTrigger`・`parse_blocks` で解決）、future→publish 昇格・手動更新も enqueue 化。dedup は Action Scheduler ネイティブの `$unique`、優先度は `$priority`（force=0/手動=10/掃引=20）で表現する。
 - **AutoCreate の非同期化**: 未登録ブロックのフロント描画時に同期 API を叩く従来動作を廃し、生成ジョブを enqueue するだけにした（描画の同期 HTTP を除去）。

@@ -104,7 +104,7 @@ WordPress 管理画面の affilicard 設定から「更新キュー」セクシ�
 - **設定**:
   - **一時停止**: チェックで価格更新ワーカーをハルト（スケジュール自体は保持され、復旧時に処理）
   - **Provider 別スロットル**: 各 Provider のリクエスト最小間隔（ms）を上書き
-  - **ログ保持期間**: 完了・失敗ログの自動削除日数（既定 30 日）
+  - **ログ保持期間**: 完了・失敗ログの自動削除日数（既定 完了 24 時間 / 失敗 7 日）
 
 ---
 
@@ -173,11 +173,12 @@ Tools → Scheduled Actions で failed をフィルタ。詳細確認：
 
 **一括再試行**:
 
-```bash
-cd /path/to/wp && /usr/bin/wp db query "UPDATE $(wp db prefix)actionscheduler_actions SET status='pending' WHERE status='failed' AND hook LIKE 'affilicard_%';"
-```
+管理画面 → 更新キュー → **失敗を再試行** ボタンを使う。
 
-または管理画面 → 更新キュー → **失敗を再試行** ボタン。
+Action Scheduler のテーブル（`actionscheduler_actions` 等）を直接 `UPDATE` する運用は非対応。
+AS の API/hook を経由しない直接書き換えは、AS 内部の状態（ロック・グループ集計・
+アクション履歴）と不整合を起こしうるため行わない。件数確認のような読み取り専用の
+`SELECT`（§4-2 ①）は問題ない。
 
 #### ③ ログが肥大化（retention）
 
