@@ -10,6 +10,7 @@ use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\RateLimiter;
 use Affilicard\Queue\RefreshHandler;
+use Affilicard\Queue\WorkOutcome;
 use Affilicard\Settings\GeneralSettings;
 use Mockery;
 use WP_Mock;
@@ -189,14 +190,12 @@ final class RefreshHandlerTest extends TestCase {
 	}
 
 	/**
-	 * backoff() が MAX_ATTEMPTS 到達時に「打ち切り（AS complete 相当）」ではなく
-	 * 例外を投げることを確認する。AS はハンドラ呼び出しを try/catch しており、
-	 * 投げられた例外は failed アクションとして記録される（bare return だと
-	 * complete 扱いになり、失敗が可視化されない・パネルの failed 件数/再試行が
-	 * 機能しない問題の修正）。attemptKey の transient は打ち切り前に削除され、
-	 * reschedule（自己再投入）は呼ばれない。
+	 * 今回の修正の肝: 一時失敗（TRANSIENT_FAILURE）が backoff で MAX_ATTEMPTS に達したら
+	 * 例外を投げて AS の failed として記録する（従来通り）が、**give-up マーカーは絶対に立てない**。
+	 * 一時障害（API 到達不可・レート制限・保存競合）で価格が 3 日間隠れ続ける元インシデントを防ぐ。
+	 * give-up は恒久失敗（TERMINAL_FAILURE）経路のみが担う。
 	 */
-	public function test_handle_リトライ上限到達で例外を投げてAS失敗として記録させる(): void {
+	public function test_handle_transientがリトライ上限到達でも例外は投げるがgiveupマーカーは立てない(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array() );
@@ -204,7 +203,7 @@ final class RefreshHandlerTest extends TestCase {
 		$this->mockRateLimiterWpdb( 1 ); // CAS の UPDATE が 1 行 = 獲得成功（経過済）
 
 		$refresher = Mockery::mock( ListingRefresher::class );
-		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( false );
+		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( WorkOutcome::TRANSIENT_FAILURE );
 
 		// throttle 獲得成功 → 待機カウンタはリセットされる（listing が進捗したため）。
 		WP_Mock::userFunction( 'delete_transient' )
@@ -220,12 +219,10 @@ final class RefreshHandlerTest extends TestCase {
 			->once()
 			->with( 'affilicard_refresh_attempts_12_rakuten-kobo' )
 			->andReturn( true );
-		// B: terminal failure（MAX_ATTEMPTS 到達）で onGivenUp が give-up マーカーを set する。
-		// 恒久失敗 listing は GIVEUP_COOLDOWN（3日）中、掃引でスキップされ毎周回リトライを避ける。
+		// 肝: 一時失敗では give-up マーカーを立てない（set_transient がそのキーで呼ばれてはならない）。
 		WP_Mock::userFunction( 'set_transient' )
-			->once()
-			->with( 'affilicard_refresh_gaveup_12_rakuten-kobo', 1, 3 * DAY_IN_SECONDS )
-			->andReturn( true );
+			->with( 'affilicard_refresh_gaveup_12_rakuten-kobo', Mockery::any(), Mockery::any() )
+			->never();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never(); // reschedule されない（打ち切り）
 
 		$handler = new RefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry() );
@@ -242,6 +239,48 @@ final class RefreshHandlerTest extends TestCase {
 	}
 
 	/**
+	 * 恒久失敗（TERMINAL_FAILURE＝該当なし・無効 ID）は、backoff/リトライを経ず即座に
+	 * onTerminalFailure で give-up マーカーを立て、**例外を投げずに complete** する
+	 * （リトライしても成功しないため failed 記録は無意味）。attempts は消され、
+	 * backoff の get_transient(attempts) も呼ばれない。
+	 */
+	public function test_handle_terminalは即giveupマーカーを立て例外を投げずcompleteする(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		$this->stubPlatform();
+		$this->mockRateLimiterWpdb( 1 ); // CAS の UPDATE が 1 行 = 獲得成功（経過済）
+
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( WorkOutcome::TERMINAL_FAILURE );
+
+		// throttle 獲得成功 → 待機カウンタはリセットされる。
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_throttle_waits_12_rakuten-kobo' )
+			->andReturn( true );
+		// terminal は attempts を消して complete（backoff の get_transient(attempts) は呼ばれない）。
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_refresh_attempts_12_rakuten-kobo' )
+			->andReturn( true );
+		WP_Mock::userFunction( 'get_transient' )
+			->with( 'affilicard_refresh_attempts_12_rakuten-kobo' )
+			->never();
+		// onTerminalFailure が give-up マーカーを GIVEUP_COOLDOWN（3日）で立てる。
+		WP_Mock::userFunction( 'set_transient' )
+			->once()
+			->with( 'affilicard_refresh_gaveup_12_rakuten-kobo', 1, 3 * DAY_IN_SECONDS )
+			->andReturn( true );
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never(); // reschedule されない
+
+		$handler = new RefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry() );
+		$handler->handle( 12, 'rakuten-kobo' ); // 例外を投げず正常終了する（complete 扱い）
+
+		$this->assertConditionsMet();
+	}
+
+	/**
 	 * MAX_ATTEMPTS 未満（打ち切り前）は例外を投げず、従来通り backoff で
 	 * 自己再投入（reschedule）することを確認する。
 	 */
@@ -253,7 +292,7 @@ final class RefreshHandlerTest extends TestCase {
 		$this->mockRateLimiterWpdb( 1 ); // CAS の UPDATE が 1 行 = 獲得成功（経過済）
 
 		$refresher = Mockery::mock( ListingRefresher::class );
-		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( false );
+		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( WorkOutcome::TRANSIENT_FAILURE );
 
 		// throttle 獲得成功 → 待機カウンタはリセットされる（listing が進捗したため）。
 		WP_Mock::userFunction( 'delete_transient' )
@@ -308,7 +347,7 @@ final class RefreshHandlerTest extends TestCase {
 			->andReturn( true );
 
 		$refresher = Mockery::mock( ListingRefresher::class );
-		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( true );
+		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
 		// B: fetch 成功で give-up マーカーを delete（復旧した listing は通常周期に戻る）。
 		WP_Mock::userFunction( 'delete_transient' )
 			->once()
@@ -344,7 +383,7 @@ final class RefreshHandlerTest extends TestCase {
 			->andReturn( true );
 
 		$refresher = Mockery::mock( ListingRefresher::class );
-		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( true );
+		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
 		// B: fetch 成功で give-up マーカーを delete（復旧した listing は通常周期に戻る）。
 		WP_Mock::userFunction( 'delete_transient' )
 			->once()

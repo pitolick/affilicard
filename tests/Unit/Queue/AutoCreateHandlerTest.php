@@ -5,6 +5,7 @@ namespace Affilicard\Tests\Unit\Queue;
 
 use Affilicard\AutoCreate\ProductAutoCreator;
 use Affilicard\Platform\PlatformConfig;
+use Affilicard\Provider\FetchResult;
 use Affilicard\Provider\ProviderInterface;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Queue\AutoCreateHandler;
@@ -240,15 +241,17 @@ final class AutoCreateHandlerTest extends TestCase {
 			->once()
 			->with( 'ext-001', Mockery::type( 'array' ) )
 			->andReturn(
-				array(
-					'title'           => '架空のサンプル作品',
-					'price'           => '600',
-					'list_price'      => '1000',
-					'badge'           => '',
-					'image_url'       => 'https://example.test/i.jpg',
-					'regular_url'     => 'https://example.test/r',
-					'affiliate_url'   => 'https://example.test/a',
-					'platform_extras' => array(),
+				FetchResult::hit(
+					array(
+						'title'           => '架空のサンプル作品',
+						'price'           => '600',
+						'list_price'      => '1000',
+						'badge'           => '',
+						'image_url'       => 'https://example.test/i.jpg',
+						'regular_url'     => 'https://example.test/r',
+						'affiliate_url'   => 'https://example.test/a',
+						'platform_extras' => array(),
+					)
 				)
 			);
 		$registry = $this->registry( $provider );
@@ -264,11 +267,12 @@ final class AutoCreateHandlerTest extends TestCase {
 	}
 
 	/**
-	 * terminal failure（MAX_ATTEMPTS 到達）時、AutoCreateHandler::onGivenUp が give-up マーカー
-	 * （affilicard_autocreate_failed_{platform}_{externalId}）を 24h TTL で永続化し、例外を投げて
-	 * AS を failed 記録にする。Block::autoCreate はこのマーカーを見て恒久失敗 ID の再 enqueue を止める。
+	 * 恒久失敗（TERMINAL_FAILURE＝fetch miss＝無効/該当なし ID）時、AutoCreateHandler::onTerminalFailure
+	 * が give-up マーカー（affilicard_autocreate_failed_{platform}_{externalId}）を 24h TTL で立て、
+	 * backoff/リトライを経ず**例外を投げずに complete** する。Block::autoCreate はこのマーカーを見て
+	 * 恒久失敗 ID の再 enqueue を止める。attempts は消され、backoff の get_transient(attempts) は呼ばれない。
 	 */
-	public function test_handle_terminal_failure時はgiveupマーカーを立てて例外を投げる(): void {
+	public function test_handle_terminalは即giveupマーカーを立て例外を投げずcompleteする(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array() );
@@ -280,9 +284,54 @@ final class AutoCreateHandlerTest extends TestCase {
 			->with( 'affilicard_throttle_waits_rakuten-kobo_ext-001' )
 			->andReturn( true );
 
-		// fetch が null → create が null → performWork 失敗 → backoff。
+		// fetch miss（該当なし・無効 ID）→ create が TERMINAL_FAILURE → 即 give-up・complete。
 		$provider = $this->provider();
-		$provider->shouldReceive( 'fetch' )->once()->andReturn( null );
+		$provider->shouldReceive( 'fetch' )->once()->andReturn( FetchResult::miss() );
+		$registry = $this->registry( $provider );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldNotReceive( 'save' );
+		$creator = new ProductAutoCreator( $registry, $repo );
+
+		// terminal は attempts を消して complete（backoff の get_transient(attempts) は呼ばれない）。
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_autocreate_attempts_rakuten-kobo_ext-001' )
+			->andReturn( true );
+		WP_Mock::userFunction( 'get_transient' )
+			->with( 'affilicard_autocreate_attempts_rakuten-kobo_ext-001' )
+			->never();
+		// onTerminalFailure が give-up マーカーを 24h TTL で立てる。
+		WP_Mock::userFunction( 'set_transient' )
+			->once()
+			->with( 'affilicard_autocreate_failed_rakuten-kobo_ext-001', 1, DAY_IN_SECONDS )
+			->andReturn( true );
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never(); // reschedule されない
+
+		$handler = new AutoCreateHandler( new Enqueuer(), new RateLimiter(), $creator, $registry );
+		$handler->handle( 'rakuten-kobo', 'ext-001' ); // 例外を投げず正常終了する（complete 扱い）
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 一時失敗（TRANSIENT_FAILURE＝fetch error＝API 到達不可）が MAX_ATTEMPTS に達したら例外は投げるが、
+	 * **give-up マーカーは立てない**。一時障害の externalId を恒久失敗として封印してしまわないための肝。
+	 */
+	public function test_handle_transientがリトライ上限到達でも例外は投げるがgiveupマーカーは立てない(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		$this->stubPlatform();
+		$this->mockRateLimiterWpdb( 1 ); // throttle 獲得成功（経過済）→ performWork に到達
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_throttle_waits_rakuten-kobo_ext-001' )
+			->andReturn( true );
+
+		// fetch error（API 到達不可）→ create が TRANSIENT_FAILURE → backoff。
+		$provider = $this->provider();
+		$provider->shouldReceive( 'fetch' )->once()->andReturn( FetchResult::error() );
 		$registry = $this->registry( $provider );
 
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
@@ -298,11 +347,10 @@ final class AutoCreateHandlerTest extends TestCase {
 			->once()
 			->with( 'affilicard_autocreate_attempts_rakuten-kobo_ext-001' )
 			->andReturn( true );
-		// onGivenUp が give-up マーカーを 24h TTL で立てる。
+		// 肝: 一時失敗では give-up マーカーを立てない。
 		WP_Mock::userFunction( 'set_transient' )
-			->once()
-			->with( 'affilicard_autocreate_failed_rakuten-kobo_ext-001', 1, DAY_IN_SECONDS )
-			->andReturn( true );
+			->with( 'affilicard_autocreate_failed_rakuten-kobo_ext-001', Mockery::any(), Mockery::any() )
+			->never();
 
 		$handler = new AutoCreateHandler( new Enqueuer(), new RateLimiter(), $creator, $registry );
 

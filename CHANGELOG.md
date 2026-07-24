@@ -29,7 +29,7 @@
 ### Fixed
 
 - **掃引ジョブの決定的スタガリング**でキュー・チャーンを根本抑制。同一 account の sweep ジョブをランダム jitter ではなく実効レート間隔（`minRequestIntervalMs` と管理画面 override の大きい方）ぶんずつ確定的にずらして積むようにし、複数ジョブが同一レート窓へ集中→`RateLimiter` に弾かれ throttle 再投入される completed アクションのチャーン（Playground 実測「1商品に33回」）を回避する。
-- **恒久失敗 listing の give-up マーカー**を追加。外部 ID が恒久的に解決できない（廃盤/無効 ID）listing は terminal failure（リトライ上限到達）後 3 日間（`GIVEUP_COOLDOWN`）掃引でスキップし、再取得 TTL 毎の毎周回リトライ（API レート予算の浪費・チャーン）を抑える。fetch 成功でマーカーを消し、復旧した listing は通常周期に戻す。
+- **恒久失敗 listing の give-up マーカー**を追加。**terminal（該当なし・無効 ID）のみ give-up し、transient（API 到達不可・レート制限・保存競合等の一時障害）はリトライして give-up しない**。Provider の取得結果を `FetchResult`（hit=成功／miss=恒久失敗／error=一時失敗）で3値分類し、`WorkOutcome`（SUCCESS／TERMINAL_FAILURE／TRANSIENT_FAILURE）でワーカーの帰結を表す。恒久失敗 listing は即 give-up マーカーを立て `GIVEUP_COOLDOWN`（3 日）掃引でスキップ、fetch 成功でマーカーを消し復旧した listing を通常周期に戻す。一時障害はバックオフでリトライを続け（上限で failed 化はするが give-up マーカーは立てない）、一時障害が続いても価格が 3 日間隠れ続けない（規約上 24h 経過で表示が消える元インシデントを防ぐ）。
 
 ## [2.3.0] - 2026-07-21
 

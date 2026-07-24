@@ -6,6 +6,7 @@ namespace Affilicard\Cron;
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\Pricing\ListingEligibility;
 use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Queue\WorkOutcome;
 use Affilicard\Repository\ProductRepositoryInterface;
 
 /**
@@ -42,33 +43,41 @@ class ListingRefresher {
 	 * 後着の save が先着の別 platform 更新を消す（lost update）ため、単一 listing の原子的
 	 * 更新に委譲する。
 	 */
-	public function refreshOne( int $postId, string $platform ): bool {
+	public function refreshOne( int $postId, string $platform ): WorkOutcome {
 		$product = $this->repository->find( $postId );
 		if ( null === $product || ! is_array( $product['listings'] ?? null ) ) {
-			return false;
+			// 削除済み商品・listing 無し＝対象なし（no-op）。deleted 商品で failed 化させない。
+			return WorkOutcome::SUCCESS;
 		}
 		foreach ( $product['listings'] as $listing ) {
 			if ( ! is_array( $listing ) || ( $listing['platform'] ?? '' ) !== $platform ) {
 				continue;
 			}
 			if ( ! ListingEligibility::isEnabledAuto( $listing ) ) {
-				return false;
+				// 実行時に無効化・手動化された listing は対象外（no-op）＝SUCCESS。failed 化させない。
+				return WorkOutcome::SUCCESS;
 			}
-			$refreshed = $this->refreshListing( $listing, (string) $product['title'] );
+			list( $refreshed, $outcome ) = $this->refreshListing( $listing, (string) $product['title'] );
 			// updateListing() の戻り値を必ず反映する。find() から updateListing() の再読込
 			// までの間（外部 API fetch 中）に対象 platform の listing が削除・変更されると
 			// updateListing() は false（未保存）を返す。ここで false を握り潰すと、取得済みの
-			// 新しい価格が保存されないまま refreshOne() が true（成功）を返し、ハンドラが成功と
-			// 判断して再試行もされない＝サイレントなデータロスになる。$saved を戻り値に含める。
+			// 新しい価格が保存されないまま成功扱いになり、ハンドラが再試行もしない＝サイレントな
+			// データロスになる。保存失敗はリトライで解決し得るため TRANSIENT_FAILURE を返す。
 			$saved = $this->repository->updateListing( $postId, $platform, $refreshed );
-			return $saved && '' === (string) ( $refreshed['fetch_error'] ?? '' );
+			if ( ! $saved ) {
+				return WorkOutcome::TRANSIENT_FAILURE;
+			}
+			return $outcome;
 		}
-		return false;
+		// platform 該当 listing なし＝対象なし（no-op）＝SUCCESS。
+		return WorkOutcome::SUCCESS;
 	}
 
 	/**
+	 * 単一 listing を fetch→反映し、更新後 listing と WorkOutcome のタプルを返す。
+	 *
 	 * @param array<string, mixed> $listing
-	 * @return array<string, mixed>
+	 * @return array{0: array<string, mixed>, 1: WorkOutcome} 更新後 listing と outcome のタプル
 	 */
 	private function refreshListing( array $listing, string $productTitle ): array {
 		$platformCode = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
@@ -84,8 +93,10 @@ class ListingRefresher {
 		$listing['last_fetched_at'] = $now;
 
 		if ( null === $provider || ! $provider->isAutomatic() || '' === $externalId ) {
+			// config 状態（自動 Provider 未対応・external_id 無し）はリトライで解決し得る＝transient。
+			// give-up はしない（恒久失敗＝terminal は「該当なし・無効 ID」のみ）。
 			$listing['fetch_error'] = (string) __( '対応する自動 Provider がありません', 'affilicard' );
-			return $listing;
+			return array( $listing, WorkOutcome::TRANSIENT_FAILURE );
 		}
 
 		$context = array(
@@ -96,12 +107,20 @@ class ListingRefresher {
 			'external_id' => $externalId,
 		);
 
-		$fetched = $provider->fetch( $externalId, $context );
-		if ( null === $fetched ) {
+		$result = $provider->fetch( $externalId, $context );
+		if ( $result->isTerminalMiss() ) {
+			// 恒久失敗（該当なし・無効 ID）。last_verified_at は更新せず（表示鮮度据え置き）、
+			// TERMINAL_FAILURE を返してハンドラに give-up させる。
+			$listing['fetch_error'] = (string) __( '該当する商品が見つかりませんでした', 'affilicard' );
+			return array( $listing, WorkOutcome::TERMINAL_FAILURE );
+		}
+		if ( ! $result->isHit() ) {
+			// 一時失敗（API 到達不可・エラー・認証未設定等）。リトライで解決し得るため give-up しない。
 			$listing['fetch_error'] = (string) __( '価格情報の取得に失敗しました', 'affilicard' );
-			return $listing;
+			return array( $listing, WorkOutcome::TRANSIENT_FAILURE );
 		}
 
+		$fetched                = $result->data;
 		$listing['fetch_error'] = '';
 		// PriceFreshness::isPriceDisplayable() は time()（実 UTC epoch）と比較するため、
 		// last_verified_at も実 UTC で記録する必要がある。current_time('c') はサイトのローカル
@@ -121,6 +140,6 @@ class ListingRefresher {
 
 		$fetched_affiliate        = isset( $fetched['affiliate_url'] ) ? (string) $fetched['affiliate_url'] : '';
 		$listing['affiliate_url'] = '' !== $fetched_affiliate ? $fetched_affiliate : ( $listing['affiliate_url'] ?? '' );
-		return $listing;
+		return array( $listing, WorkOutcome::SUCCESS );
 	}
 }

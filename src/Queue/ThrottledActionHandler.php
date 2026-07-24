@@ -37,8 +37,11 @@ abstract class ThrottledActionHandler {
 	/** args から provider コードを解決（不明なら null）。 */
 	abstract protected function providerCodeFor( array $args ): ?string;
 
-	/** 本処理（fetch/create）。成功で true。 */
-	abstract protected function performWork( array $args ): bool;
+	/**
+	 * 本処理（fetch/create）。結果を WorkOutcome で返す。
+	 * SUCCESS＝成功/対象なし・TRANSIENT_FAILURE＝一時失敗（リトライ）・TERMINAL_FAILURE＝恒久失敗（即 give-up）。
+	 */
+	abstract protected function performWork( array $args ): WorkOutcome;
 
 	/** 自分自身を $whenSec に再投入（unique=false）。 */
 	abstract protected function reschedule( int $whenSec, array $args ): void;
@@ -50,13 +53,26 @@ abstract class ThrottledActionHandler {
 	abstract protected function throttleWaitKey( array $args ): string;
 
 	/**
-	 * terminal failure（MAX_ATTEMPTS 到達＝これ以上リトライしない確定失敗）時に 1 度だけ呼ぶフック。
-	 * base は no-op。サブクラスが override して give-up マーカーの永続化等を行う
-	 * （override しなければ挙動不変＝RefreshHandler 等は従来通り）。
+	 * 恒久失敗（TERMINAL_FAILURE＝該当なし・無効 ID 等、リトライしても成功しない）時に 1 度だけ
+	 * 呼ぶフック。base は no-op。サブクラスが override して give-up マーカーの永続化等を行う。
+	 *
+	 * v2.4.0 の再設計により give-up はこの terminal 経路のみが担う。一時失敗（TRANSIENT_FAILURE）は
+	 * backoff で MAX_ATTEMPTS に達しても failed 化するだけで、このフックは呼ばれない（give-up しない）。
+	 * これにより一時障害で価格が長時間隠れ続ける問題を防ぐ。
 	 *
 	 * @param array<string, mixed> $args
 	 */
-	protected function onGivenUp( array $args ): void {
+	protected function onTerminalFailure( array $args ): void {
+		// no-op（サブクラスが override する）。
+	}
+
+	/**
+	 * 成功（SUCCESS）時に 1 度だけ呼ぶフック。base は no-op。サブクラスが override して
+	 * give-up マーカーの解除（復旧した listing/ID を通常周期に戻す）等を行う。
+	 *
+	 * @param array<string, mixed> $args
+	 */
+	protected function onSuccess( array $args ): void {
 		// no-op（サブクラスが override する）。
 	}
 
@@ -98,10 +114,22 @@ abstract class ThrottledActionHandler {
 		// account を獲得できた＝競合待ちから抜けて進捗した。待機カウンタをリセットする。
 		delete_transient( $this->throttleWaitKey( $args ) );
 
-		if ( $this->performWork( $args ) ) {
+		$outcome = $this->performWork( $args );
+		if ( WorkOutcome::SUCCESS === $outcome ) {
+			// 成功/対象なし: attempts を消し、give-up マーカー解除フックを呼ぶ。
 			delete_transient( $this->attemptKey( $args ) );
+			$this->onSuccess( $args );
 			return;
 		}
+		if ( WorkOutcome::TERMINAL_FAILURE === $outcome ) {
+			// 恒久失敗: リトライ無意味。attempts を消して give-up マーカーを立て、そのまま complete
+			// する（backoff せず・例外も投げない）。failed 記録は無意味なため作らない。
+			delete_transient( $this->attemptKey( $args ) );
+			$this->onTerminalFailure( $args );
+			return;
+		}
+		// 一時失敗（TRANSIENT_FAILURE）: backoff でリトライ。MAX_ATTEMPTS 到達時は failed 化するが
+		// give-up マーカーは立てない（backoff は onTerminalFailure を呼ばない）。
 		$this->backoff( $args );
 	}
 
@@ -134,8 +162,8 @@ abstract class ThrottledActionHandler {
 		$attempts = (int) get_transient( $key ) + 1;
 		if ( $attempts >= self::MAX_ATTEMPTS ) {
 			delete_transient( $key );
-			// terminal failure フック（サブクラスが give-up マーカー永続化等に使う）。
-			$this->onGivenUp( $args );
+			// 一時失敗（transient）のリトライ上限到達。give-up マーカーは立てない（onTerminalFailure は
+			// 呼ばない）。恒久失敗と違い、後で API が回復すれば成功し得るため封印しない。
 			// 打ち切り。bare return だと AS がこのアクションを complete 扱いにしてしまい、
 			// 失敗が可視化されない・パネルの failed 件数/「失敗を再試行」が機能しなくなる。
 			// AS のランナーはアクションコールバックを try/catch しており、投げられた例外を
