@@ -78,16 +78,35 @@ final class Enqueuer {
 	 * 強制更新（ユーザーが「今すぐ更新」を明示的に押した場合）。
 	 *
 	 * 既存の同一ジョブを unschedule してから即時 priority 0 で積み直す。
+	 *
+	 * force は args に force=true を持たせ、sweep/manual と同一 base args
+	 * （{post_id, platform}）ではない別 unique キーで積む。sweep/manual の unique=true
+	 * ジョブが in-progress（claim 済み実行中）のとき、base args のまま force を
+	 * unique=true で積むと as_schedule_single_action が in-progress を重複とみなして
+	 * ドロップ→force が失われるため。as_unschedule_all_actions は pending のみ取り消し
+	 * in-progress は残すので、base args の掃除だけでは in-progress との衝突を避けられない。
+	 *
+	 * run 時に鮮度スキップは存在しない（PriceFreshness::needsRefetch は enqueueSweep 時のみ・
+	 * refreshOne は必ず fetch する）ため、force の実行時挙動は sweep と同一＝「必ず fetch」で、
+	 * force が確実に積まれることだけ保証すればよい（ハンドラ側は force を見ない）。
 	 */
 	public function enqueueForced( int $postId, string $platform, string $account ): void {
-		$args  = array(
+		$baseArgs  = array(
 			'post_id'  => $postId,
 			'platform' => $platform,
 		);
-		$group = $this->group( $account );
+		$forceArgs = array(
+			'post_id'  => $postId,
+			'platform' => $platform,
+			'force'    => true,
+		);
+		$group     = $this->group( $account );
 
-		as_unschedule_all_actions( self::HOOK_REFRESH, $args, $group );
-		as_schedule_single_action( time(), self::HOOK_REFRESH, $args, $group, true, self::PRIORITY_FORCE );
+		// base args（sweep/manual）の pending を取り消す。
+		as_unschedule_all_actions( self::HOOK_REFRESH, $baseArgs, $group );
+		// 先行 pending force を取り消し二重積みを防ぐ。
+		as_unschedule_all_actions( self::HOOK_REFRESH, $forceArgs, $group );
+		as_schedule_single_action( time(), self::HOOK_REFRESH, $forceArgs, $group, true, self::PRIORITY_FORCE );
 	}
 
 	/**

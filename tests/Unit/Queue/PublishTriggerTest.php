@@ -303,6 +303,16 @@ final class PublishTriggerTest extends TestCase {
 				),
 				'affilicard-rakuten'
 			);
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once()
+			->with(
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 12,
+					'platform' => 'rakuten-kobo',
+					'force'    => true,
+				),
+				'affilicard-rakuten'
+			);
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(
 				Mockery::type( 'int' ),
@@ -310,6 +320,7 @@ final class PublishTriggerTest extends TestCase {
 				array(
 					'post_id'  => 12,
 					'platform' => 'rakuten-kobo',
+					'force'    => true,
 				),
 				'affilicard-rakuten',
 				true,
@@ -463,7 +474,8 @@ final class PublishTriggerTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->with( 12 )->andReturn( $this->product( 12, array( $this->eligibleListing() ) ) );
 
-		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
+		// enqueueForced は base args と force args の 2 回 unschedule する。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->twice();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 301 );
 
 		$after  = $this->post(

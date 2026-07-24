@@ -384,6 +384,16 @@ final class PluginTest extends TestCase {
 				),
 				'affilicard-rakuten'
 			);
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once()
+			->with(
+				\Affilicard\Queue\Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => $postId,
+					'platform' => 'rakuten-kobo',
+					'force'    => true,
+				),
+				'affilicard-rakuten'
+			);
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(
 				Mockery::type( 'int' ),
@@ -391,6 +401,7 @@ final class PluginTest extends TestCase {
 				array(
 					'post_id'  => $postId,
 					'platform' => 'rakuten-kobo',
+					'force'    => true,
 				),
 				'affilicard-rakuten',
 				true,

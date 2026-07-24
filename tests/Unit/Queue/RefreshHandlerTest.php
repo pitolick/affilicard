@@ -310,4 +310,36 @@ final class RefreshHandlerTest extends TestCase {
 
 		$this->assertConditionsMet();
 	}
+
+	/**
+	 * force enqueue の args は force=true を余分に持つ（Enqueuer::enqueueForced）。AS は
+	 * これを positional に handle() へ渡し得るが、handle(int,string) は非可変長なので余剰
+	 * 引数は無視され、force は run()/refreshOne() へ伝播しない（run 時に鮮度スキップは無く
+	 * force の実行時挙動は sweep と同一＝必ず fetch なので、伝播しなくても正しい）。余分な
+	 * 引数付き呼び出しでも refreshOne が postId/platform だけで呼ばれ壊れないことを担保する。
+	 */
+	public function test_handle_forcetrueの余分な引数を渡されてもrefreshOneはpostIdとplatformだけで呼ぶ(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		$this->stubPlatform();
+		$this->mockRateLimiterWpdb( 1 ); // CAS の UPDATE が 1 行 = 獲得成功（経過済）
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_throttle_waits_12_rakuten-kobo' )
+			->andReturn( true );
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_refresh_attempts_12_rakuten-kobo' )
+			->andReturn( true );
+
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( true );
+
+		$handler = new RefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry() );
+		// AS が force=true を positional に渡す状況を模す（余剰引数は非可変長関数で無視される）。
+		$handler->handle( 12, 'rakuten-kobo', true );
+
+		$this->assertConditionsMet();
+	}
 }

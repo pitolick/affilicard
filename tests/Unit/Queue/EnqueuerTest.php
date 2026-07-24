@@ -105,13 +105,29 @@ final class EnqueuerTest extends TestCase {
 		);
 	}
 
-	public function test_enqueueForced_既存を解除し即時priority0uniqueで投入する(): void {
+	/**
+	 * force は base args（sweep/manual と同一）ではなく force=true 付き args で積む。
+	 * sweep/manual の in-progress ジョブ（同一 base args・unique=true）に unique 吸収されて
+	 * ドロップされるのを防ぐため。base args と force args の両方を unschedule してから
+	 * force args を priority 0・unique=true で積む。
+	 */
+	public function test_enqueueForced_base_forceの両方を解除しforce付きargsでpriority0uniqueで投入する(): void {
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once()
 			->with(
 				Enqueuer::HOOK_REFRESH,
 				array(
 					'post_id'  => 12,
 					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten'
+			);
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once()
+			->with(
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 12,
+					'platform' => 'rakuten-kobo',
+					'force'    => true,
 				),
 				'affilicard-rakuten'
 			);
@@ -122,6 +138,7 @@ final class EnqueuerTest extends TestCase {
 				array(
 					'post_id'  => 12,
 					'platform' => 'rakuten-kobo',
+					'force'    => true,
 				),
 				'affilicard-rakuten',
 				true,           // $unique
@@ -346,6 +363,16 @@ final class EnqueuerTest extends TestCase {
 				),
 				'affilicard-rakuten'
 			);
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once()
+			->with(
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 12,
+					'platform' => 'rakuten-kobo',
+					'force'    => true,
+				),
+				'affilicard-rakuten'
+			);
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(
 				\Mockery::type( 'int' ),
@@ -353,6 +380,7 @@ final class EnqueuerTest extends TestCase {
 				array(
 					'post_id'  => 12,
 					'platform' => 'rakuten-kobo',
+					'force'    => true,
 				),
 				'affilicard-rakuten',
 				true,
@@ -450,7 +478,8 @@ final class EnqueuerTest extends TestCase {
 			),
 		);
 
-		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
+		// enqueueForced は base args と force args の 2 回 unschedule する。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->twice();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 502 );
 
 		$count = $this->enqueuerWithRakuten()->enqueueProductListings( 12, $product, false );
@@ -466,7 +495,8 @@ final class EnqueuerTest extends TestCase {
 		$this->stubRakutenPlatform();
 		$product = array( 'listings' => array( $this->eligibleListing( array( 'auto_update' => false ) ) ) );
 
-		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
+		// enqueueForced は base args と force args の 2 回 unschedule する。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->twice();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(
 				\Mockery::type( 'int' ),
@@ -474,6 +504,7 @@ final class EnqueuerTest extends TestCase {
 				array(
 					'post_id'  => 12,
 					'platform' => 'rakuten-kobo',
+					'force'    => true,
 				),
 				'affilicard-rakuten',
 				true,
