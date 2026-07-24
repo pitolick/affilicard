@@ -35,47 +35,30 @@ class ListingRefresher {
 	 * 再チェックする（ListingEligibility::isEnabledAuto()）。auto_update はここでは見ない
 	 * ――force enqueue（管理画面「強制更新」）は auto_update=false の listing も対象に
 	 * 含める契約のため、実行時に auto_update だけを理由に取りこぼすと force 機能が壊れる。
+	 *
+	 * 保存は find→save（全 listings 上書き）ではなく Repository::updateListing()（対象
+	 * platform のみ原子的に差し替え）で行う。RateLimiter は account 単位で直列化するため、
+	 * 同一商品の別 platform listing は別 group で並行実行され得る。全 listings 上書きだと
+	 * 後着の save が先着の別 platform 更新を消す（lost update）ため、単一 listing の原子的
+	 * 更新に委譲する。
 	 */
 	public function refreshOne( int $postId, string $platform ): bool {
 		$product = $this->repository->find( $postId );
 		if ( null === $product || ! is_array( $product['listings'] ?? null ) ) {
 			return false;
 		}
-		$listings = $product['listings'];
-		foreach ( $listings as $index => $listing ) {
+		foreach ( $product['listings'] as $listing ) {
 			if ( ! is_array( $listing ) || ( $listing['platform'] ?? '' ) !== $platform ) {
 				continue;
 			}
 			if ( ! ListingEligibility::isEnabledAuto( $listing ) ) {
 				return false;
 			}
-			$refreshed          = $this->refreshListing( $listing, (string) $product['title'] );
-			$listings[ $index ] = $refreshed;
-			$this->saveProduct( $postId, $product, $listings );
+			$refreshed = $this->refreshListing( $listing, (string) $product['title'] );
+			$this->repository->updateListing( $postId, $platform, $refreshed );
 			return '' === (string) ( $refreshed['fetch_error'] ?? '' );
 		}
 		return false;
-	}
-
-	/**
-	 * 商品と更新後 listings を Repository 形に組んで保存する（refreshOne 用）。
-	 *
-	 * @param array<string, mixed>       $product  Repository::find() の戻り
-	 * @param list<array<string, mixed>> $listings 更新後 listing 群
-	 */
-	private function saveProduct( int $postId, array $product, array $listings ): void {
-		$this->repository->save(
-			array(
-				'id'           => $postId,
-				'title'        => (string) $product['title'],
-				'content'      => (string) $product['content'],
-				'status'       => (string) $product['status'],
-				'product_type' => (string) $product['product_type'],
-				'stock_status' => (string) $product['stock_status'],
-				'extras'       => $product['extras'],
-				'listings'     => array_values( $listings ),
-			)
-		);
 	}
 
 	/**

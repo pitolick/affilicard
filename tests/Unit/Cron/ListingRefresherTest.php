@@ -140,9 +140,10 @@ final class ListingRefresherTest extends TestCase {
 				),
 			)
 		);
-		$repo->shouldReceive( 'save' )->once()->andReturnUsing(
-			function ( array $d ) {
-				$listing = $d['listings'][0];
+		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
+			function ( int $postId, string $platform, array $listing ) {
+				$this->assertSame( 20, $postId );
+				$this->assertSame( 'rakuten-kobo', $platform );
 				$this->assertSame( '693', $listing['price'] );
 				$this->assertSame( '900', $listing['list_price'] );
 				$this->assertSame( '23%OFF', $listing['badge'] );
@@ -153,7 +154,7 @@ final class ListingRefresherTest extends TestCase {
 				$this->assertNotSame( '', (string) $listing['last_verified_at'] );
 				$this->assertArrayHasKey( 'last_fetched_at', $listing );
 				$this->assertNotSame( '', (string) $listing['last_fetched_at'] );
-				return 20;
+				return true;
 			}
 		);
 
@@ -186,12 +187,12 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		$repo->shouldReceive( 'save' )->once()->andReturnUsing(
-			function ( array $d ) {
-				$this->assertSame( '600', $d['listings'][0]['price'] );
-				$this->assertSame( 'https://example.test/existing-r', $d['listings'][0]['regular_url'] );
-				$this->assertSame( 'https://example.test/existing-a', $d['listings'][0]['affiliate_url'] );
-				return 15;
+		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
+			function ( int $postId, string $platform, array $listing ) {
+				$this->assertSame( '600', $listing['price'] );
+				$this->assertSame( 'https://example.test/existing-r', $listing['regular_url'] );
+				$this->assertSame( 'https://example.test/existing-a', $listing['affiliate_url'] );
+				return true;
 			}
 		);
 		$registry  = $this->dmmProvider(
@@ -244,11 +245,11 @@ final class ListingRefresherTest extends TestCase {
 				),
 			)
 		);
-		$repo->shouldReceive( 'save' )->once()->andReturnUsing(
-			function ( array $d ) {
-				$this->assertSame( '2020-01-01T00:00:00+09:00', $d['listings'][0]['last_verified_at'] );
-				$this->assertSame( '500', $d['listings'][0]['price'] );
-				return 21;
+		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
+			function ( int $postId, string $platform, array $listing ) {
+				$this->assertSame( '2020-01-01T00:00:00+09:00', $listing['last_verified_at'] );
+				$this->assertSame( '500', $listing['price'] );
+				return true;
 			}
 		);
 
@@ -283,12 +284,12 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		$repo->shouldReceive( 'save' )->once()->andReturnUsing(
-			function ( array $d ) {
-				$this->assertSame( 12, $d['id'] );
-				$this->assertSame( '693', $d['listings'][0]['price'] );
-				$this->assertSame( '', $d['listings'][0]['fetch_error'] );
-				return 12;
+		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
+			function ( int $postId, string $platform, array $listing ) {
+				$this->assertSame( 12, $postId );
+				$this->assertSame( '693', $listing['price'] );
+				$this->assertSame( '', $listing['fetch_error'] );
+				return true;
 			}
 		);
 
@@ -323,12 +324,12 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		$repo->shouldReceive( 'save' )->once()->andReturnUsing(
-			function ( array $d ) {
+		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
+			function ( int $postId, string $platform, array $listing ) {
 				// fetch 失敗でも保存はされる（fetch_error を記録するため）が price は維持される。
-				$this->assertSame( '500', $d['listings'][0]['price'] );
-				$this->assertNotSame( '', $d['listings'][0]['fetch_error'] );
-				return 12;
+				$this->assertSame( '500', $listing['price'] );
+				$this->assertNotSame( '', $listing['fetch_error'] );
+				return true;
 			}
 		);
 
@@ -352,7 +353,7 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		$repo->shouldNotReceive( 'save' );
+		$repo->shouldNotReceive( 'updateListing' );
 
 		$refresher = new ListingRefresher( new ProviderRegistry(), $repo );
 		$this->assertFalse( $refresher->refreshOne( 12, 'rakuten-kobo' ) );
@@ -361,7 +362,7 @@ final class ListingRefresherTest extends TestCase {
 	public function test_refreshOne_商品が見つからなければfalseを返す(): void {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->with( 999 )->andReturn( null );
-		$repo->shouldNotReceive( 'save' );
+		$repo->shouldNotReceive( 'updateListing' );
 
 		$refresher = new ListingRefresher( new ProviderRegistry(), $repo );
 		$this->assertFalse( $refresher->refreshOne( 999, 'rakuten-kobo' ) );
@@ -395,7 +396,7 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		$repo->shouldNotReceive( 'save' );
+		$repo->shouldNotReceive( 'updateListing' );
 
 		$refresher = new ListingRefresher( $registry, $repo );
 		$this->assertFalse( $refresher->refreshOne( 12, 'rakuten-kobo' ) );
@@ -424,7 +425,7 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		$repo->shouldNotReceive( 'save' );
+		$repo->shouldNotReceive( 'updateListing' );
 
 		$refresher = new ListingRefresher( $registry, $repo );
 		$this->assertFalse( $refresher->refreshOne( 12, 'rakuten-kobo' ) );
@@ -462,10 +463,10 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		$repo->shouldReceive( 'save' )->once()->andReturnUsing(
-			function ( array $d ) {
-				$this->assertSame( '693', $d['listings'][0]['price'] );
-				return 12;
+		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
+			function ( int $postId, string $platform, array $listing ) {
+				$this->assertSame( '693', $listing['price'] );
+				return true;
 			}
 		);
 

@@ -837,4 +837,142 @@ final class ProductRepositoryTest extends TestCase {
 		$repo->syncDerivedMeta( 42 );
 		$this->assertConditionsMet();
 	}
+
+	/**
+	 * updateListing() が発行する GET_LOCK/RELEASE_LOCK を捕捉する $wpdb モックを
+	 * $GLOBALS に設定する（RateLimiterTest::mockWpdb と同じ流儀）。
+	 *
+	 * @param int                $getLockReturn GET_LOCK の戻り（1=取得成功／0=タイムアウト）。
+	 * @param array<int, string> $capturedSql   prepare() に渡された SQL テンプレートを蓄積する参照。
+	 */
+	private function mockLockWpdb( int $getLockReturn, array &$capturedSql = array() ): void {
+		$wpdb = Mockery::mock();
+		$wpdb->shouldReceive( 'prepare' )->andReturnUsing(
+			static function ( string $query ) use ( &$capturedSql ) {
+				$capturedSql[] = $query;
+				return $query;
+			}
+		);
+		$wpdb->shouldReceive( 'get_var' )->andReturn( (string) $getLockReturn );
+		$wpdb->shouldReceive( 'query' )->andReturn( 1 );
+		$GLOBALS['wpdb'] = $wpdb;
+	}
+
+	public function test_updateListing_対象platformのみ差し替え他listingを保持して保存する(): void {
+		$captured = array();
+		$this->mockLockWpdb( 1, $captured );
+
+		$existing = array(
+			array(
+				'platform'    => 'rakuten-kobo',
+				'external_id' => 'r-1',
+				'price'       => '500',
+			),
+			array(
+				'platform'    => 'dmm-books',
+				'external_id' => 'd-1',
+				'price'       => '900',
+			),
+		);
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn( $existing );
+
+		$saved = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$saved ) {
+					$this->assertSame( 42, $post_id );
+					$this->assertSame( ProductPostType::META_LISTINGS, $key );
+					$saved = $value;
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListing(
+			42,
+			'rakuten-kobo',
+			array(
+				'platform'    => 'rakuten-kobo',
+				'external_id' => 'r-1',
+				'price'       => '693',
+			)
+		);
+
+		$this->assertTrue( $ok );
+		// 対象 platform（rakuten）だけ price が更新され、他 platform（dmm）は不変。
+		$this->assertSame( '693', $saved[0]['price'] );
+		$this->assertSame( 'dmm-books', $saved[1]['platform'] );
+		$this->assertSame( '900', $saved[1]['price'] );
+		// GET_LOCK と RELEASE_LOCK が発行される。
+		$this->assertStringContainsString( 'GET_LOCK', $captured[0] );
+		$this->assertStringContainsString( 'RELEASE_LOCK', $captured[1] );
+		$this->assertConditionsMet();
+	}
+
+	public function test_updateListing_一致platformが無ければfalseで保存しない(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 7, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform'    => 'dmm-books',
+						'external_id' => 'd-1',
+					),
+				)
+			);
+		WP_Mock::userFunction( 'update_post_meta' )->never();
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListing( 7, 'rakuten-kobo', array( 'platform' => 'rakuten-kobo' ) );
+
+		$this->assertFalse( $ok );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * GET_LOCK がタイムアウト（0）でも RMW は best-effort で続行し保存する
+	 * （fetch は既に成功済みで、ロック不能を理由に更新を捨てる方が有害）。
+	 */
+	public function test_updateListing_ロック取得失敗でもRMWを続行して保存する(): void {
+		$this->mockLockWpdb( 0 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 9, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'price'    => '500',
+					),
+				)
+			);
+		$saved = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$saved ) {
+					$saved = $value;
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListing(
+			9,
+			'rakuten-kobo',
+			array(
+				'platform' => 'rakuten-kobo',
+				'price'    => '693',
+			)
+		);
+
+		$this->assertTrue( $ok );
+		$this->assertSame( '693', $saved[0]['price'] );
+		$this->assertConditionsMet();
+	}
 }
