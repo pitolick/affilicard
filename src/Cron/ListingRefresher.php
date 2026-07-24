@@ -4,16 +4,18 @@ declare(strict_types=1);
 namespace Affilicard\Cron;
 
 use Affilicard\Platform\PlatformConfig;
-use Affilicard\PostType\ProductPostType;
 use Affilicard\Pricing\ListingEligibility;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Repository\ProductRepositoryInterface;
 
 /**
- * 公開中の商品 listing を Provider 経由で再取得し価格等を更新する。
+ * 商品 listing を Provider 経由で再取得し価格等を更新する。
  *
- * 対象 listing は update_mode='auto' && auto_update=true && enabled
- * （force=true のときは auto_update を無視）。post_status が publish 以外はスキップ。
+ * v2.4.0（Action Scheduler キュー化）以降、公開中商品を横断する同期スイープは
+ * QueueMaintenance::sweep()（enqueue）+ RefreshHandler（AS ワーカー実行時に
+ * refreshOne() を呼ぶ）に置き換わった。このクラスの公開 API は単一 listing を
+ * 対象にする refreshOne() のみで、複数商品を走査する run()/refreshProduct() 系
+ * （Phase 1 の同期スイープ実装）は死コードとして削除済み。
  */
 class ListingRefresher {
 
@@ -21,59 +23,6 @@ class ListingRefresher {
 		private ProviderRegistry $registry,
 		private ProductRepositoryInterface $repository
 	) {}
-
-	public function run( bool $force = false ): void {
-		$this->forEachPublished( null, $force );
-	}
-
-	public function runForPlatform( string $platformCode, bool $force = false ): void {
-		if ( '' === $platformCode ) {
-			return;
-		}
-		$this->forEachPublished( $platformCode, $force );
-	}
-
-	private function forEachPublished( ?string $onlyPlatform, bool $force ): void {
-		$ids = get_posts(
-			array(
-				'post_type'      => ProductPostType::POST_TYPE,
-				'post_status'    => 'publish',
-				'fields'         => 'ids',
-				'posts_per_page' => -1,
-				'no_found_rows'  => true,
-			)
-		);
-		if ( ! is_array( $ids ) ) {
-			return;
-		}
-		foreach ( $ids as $id ) {
-			$this->refreshProduct( (int) $id, $onlyPlatform, $force );
-		}
-	}
-
-	public function refreshProduct( int $postId, ?string $onlyPlatform = null, bool $force = false ): void {
-		$product = $this->repository->find( $postId );
-		if ( null === $product || ! is_array( $product['listings'] ?? null ) ) {
-			return;
-		}
-
-		$changed  = false;
-		$listings = $product['listings'];
-		foreach ( $listings as $index => $listing ) {
-			if ( ! is_array( $listing ) || ! $this->isListingEligible( $listing, $force ) ) {
-				continue;
-			}
-			if ( null !== $onlyPlatform && ( $listing['platform'] ?? '' ) !== $onlyPlatform ) {
-				continue;
-			}
-			$listings[ $index ] = $this->refreshListing( $listing, (string) $product['title'] );
-			$changed            = true;
-		}
-
-		if ( $changed ) {
-			$this->saveProduct( $postId, $product, $listings );
-		}
-	}
 
 	/**
 	 * 指定 platform の listing を1件 fetch→反映し保存する。
@@ -109,7 +58,7 @@ class ListingRefresher {
 	}
 
 	/**
-	 * 商品と更新後 listings を Repository 形に組んで保存する（refreshProduct/refreshOne 共用）。
+	 * 商品と更新後 listings を Repository 形に組んで保存する（refreshOne 用）。
 	 *
 	 * @param array<string, mixed>       $product  Repository::find() の戻り
 	 * @param list<array<string, mixed>> $listings 更新後 listing 群
@@ -127,19 +76,6 @@ class ListingRefresher {
 				'listings'     => array_values( $listings ),
 			)
 		);
-	}
-
-	/**
-	 * @param array<string, mixed> $listing
-	 */
-	private function isListingEligible( array $listing, bool $force = false ): bool {
-		$mode    = isset( $listing['update_mode'] ) ? (string) $listing['update_mode'] : 'auto';
-		$auto    = ! isset( $listing['auto_update'] ) || (bool) $listing['auto_update'];
-		$enabled = ! isset( $listing['enabled'] ) || (bool) $listing['enabled'];
-		if ( 'auto' !== $mode || ! $enabled ) {
-			return false;
-		}
-		return $force ? true : $auto;
 	}
 
 	/**

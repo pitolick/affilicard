@@ -84,67 +84,84 @@ final class ListingRefresherTest extends TestCase {
 		);
 	}
 
-	public function test_run_queries_only_published_products(): void {
-		WP_Mock::userFunction( 'get_posts' )->once()->with(
-			Mockery::on(
-				fn( $a ) =>
-				'publish' === $a['post_status'] && 'affilicard_product' === $a['post_type']
-			)
-		)->andReturn( array() );
-		( new ListingRefresher( new ProviderRegistry(), Mockery::mock( ProductRepositoryInterface::class ) ) )->run();
-		$this->assertTrue( true );
-	}
+	/**
+	 * v2.4.0: 死コード化した run()/refreshProduct()/runForPlatform() 系は削除済み
+	 * （複数商品を横断する同期スイープは QueueMaintenance::sweep() + RefreshHandler へ
+	 * 移行済み）。refreshListing() の反映ロジック（全フィールドマッピング・URL保持・
+	 * last_verified_at 刻印等）は、唯一残る公開 API の refreshOne() 経由で検証する。
+	 */
+	public function test_refreshOne_全フィールドを反映しsearch_keyとexternal_idをfetchへ渡す(): void {
+		$this->stubRakutenPlatform();
 
-	public function test_refresh_updates_eligible_listing_via_provider(): void {
-		$this->stubDmmPlatform();
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$provider->shouldReceive( 'fetch' )->once()->withArgs(
+			function ( string $externalId, array $context ) {
+				return 'deadbeef01' === $externalId
+					&& isset( $context['search_key'] ) && '対象巻' === $context['search_key']
+					&& isset( $context['external_id'] ) && 'deadbeef01' === $context['external_id'];
+			}
+		)->andReturn(
+			array(
+				'price'         => '693',
+				'list_price'    => '900',
+				'badge'         => '23%OFF',
+				'image_url'     => 'https://example.test/i',
+				'regular_url'   => 'https://example.test/r',
+				'affiliate_url' => 'https://example.test/a',
+			)
+		);
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
-		$repo->shouldReceive( 'find' )->with( 10 )->andReturn(
-			$this->product(
-				10,
-				array(
+		$repo->shouldReceive( 'find' )->with( 20 )->andReturn(
+			array(
+				'id'             => 20,
+				'title'          => '対象巻',
+				'status'         => 'publish',
+				'product_type'   => 'generic',
+				'stock_status'   => 'available',
+				'extras'         => array(),
+				'content'        => '',
+				'schema_version' => '1',
+				'modified'       => '',
+				'listings'       => array(
 					array(
-						'platform'        => 'dmm-books',
-						'enabled'         => true,
-						'update_mode'     => 'auto',
-						'auto_update'     => true,
-						'external_id'     => 'ext-1',
-						'price'           => '900',
-						'list_price'      => '1000',
-						'badge'           => '',
-						'image_url'       => '',
-						'regular_url'     => '',
-						'affiliate_url'   => '',
-						'last_fetched_at' => '',
-						'fetch_error'     => '',
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'external_id' => 'deadbeef01',
+						'search_key'  => '対象巻',
+						'price'       => '',
 					),
-				)
+				),
 			)
 		);
 		$repo->shouldReceive( 'save' )->once()->andReturnUsing(
 			function ( array $d ) {
-				$this->assertSame( 10, $d['id'] );
-				$this->assertSame( '600', $d['listings'][0]['price'] );
-				$this->assertSame( '40%OFF', $d['listings'][0]['badge'] );
-				$this->assertNotSame( '', $d['listings'][0]['last_fetched_at'] );
-				$this->assertSame( '', $d['listings'][0]['fetch_error'] );
-				return 10;
+				$listing = $d['listings'][0];
+				$this->assertSame( '693', $listing['price'] );
+				$this->assertSame( '900', $listing['list_price'] );
+				$this->assertSame( '23%OFF', $listing['badge'] );
+				$this->assertSame( 'https://example.test/i', $listing['image_url'] );
+				$this->assertSame( 'https://example.test/r', $listing['regular_url'] );
+				$this->assertSame( 'https://example.test/a', $listing['affiliate_url'] );
+				$this->assertArrayHasKey( 'last_verified_at', $listing );
+				$this->assertNotSame( '', (string) $listing['last_verified_at'] );
+				$this->assertArrayHasKey( 'last_fetched_at', $listing );
+				$this->assertNotSame( '', (string) $listing['last_fetched_at'] );
+				return 20;
 			}
 		);
-		$registry = $this->dmmProvider(
-			array(
-				'price'           => '600',
-				'list_price'      => '1000',
-				'badge'           => '40%OFF',
-				'image_url'       => 'https://example.test/i',
-				'regular_url'     => 'https://example.test/r',
-				'affiliate_url'   => 'https://example.test/a',
-				'platform_extras' => array(),
-			)
-		);
-		( new ListingRefresher( $registry, $repo ) )->refreshProduct( 10 );
+
+		$refresher = new ListingRefresher( $registry, $repo );
+		$this->assertTrue( $refresher->refreshOne( 20, 'rakuten-kobo' ) );
 	}
 
-	public function test_fetch結果のURLが空文字なら保存済みURLを上書きしない(): void {
+	public function test_refreshOne_fetch結果のURLが空文字なら保存済みURLを上書きしない(): void {
 		$this->stubDmmPlatform();
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->with( 15 )->andReturn(
@@ -177,7 +194,7 @@ final class ListingRefresherTest extends TestCase {
 				return 15;
 			}
 		);
-		$registry = $this->dmmProvider(
+		$registry  = $this->dmmProvider(
 			array(
 				'price'           => '600',
 				'list_price'      => '1000',
@@ -188,200 +205,11 @@ final class ListingRefresherTest extends TestCase {
 				'platform_extras' => array(),
 			)
 		);
-		( new ListingRefresher( $registry, $repo ) )->refreshProduct( 15 );
+		$refresher = new ListingRefresher( $registry, $repo );
+		$this->assertTrue( $refresher->refreshOne( 15, 'dmm-books' ) );
 	}
 
-	public function test_refresh_skips_manual_and_auto_update_off(): void {
-		WP_Mock::userFunction( 'get_option' )->andReturn( array() );
-		$repo = Mockery::mock( ProductRepositoryInterface::class );
-		$repo->shouldReceive( 'find' )->with( 11 )->andReturn(
-			$this->product(
-				11,
-				array(
-					array(
-						'platform'    => 'a',
-						'enabled'     => true,
-						'update_mode' => 'manual',
-						'auto_update' => true,
-						'external_id' => 'e1',
-					),
-					array(
-						'platform'    => 'b',
-						'enabled'     => true,
-						'update_mode' => 'auto',
-						'auto_update' => false,
-						'external_id' => 'e2',
-					),
-				)
-			)
-		);
-		$repo->shouldNotReceive( 'save' );
-		( new ListingRefresher( new ProviderRegistry(), $repo ) )->refreshProduct( 11 );
-		$this->assertTrue( true );
-	}
-
-	public function test_force_refreshes_auto_update_off_listing(): void {
-		$this->stubDmmPlatform();
-		$repo = Mockery::mock( ProductRepositoryInterface::class );
-		$repo->shouldReceive( 'find' )->with( 14 )->andReturn(
-			$this->product(
-				14,
-				array(
-					array(
-						'platform'    => 'dmm-books',
-						'enabled'     => true,
-						'update_mode' => 'auto',
-						'auto_update' => false,
-						'external_id' => 'ext-1',
-						'price'       => '900',
-					),
-				)
-			)
-		);
-		$repo->shouldReceive( 'save' )->once()->andReturnUsing(
-			function ( array $d ) {
-				$this->assertSame( '600', $d['listings'][0]['price'] );
-				return 14;
-			}
-		);
-		$registry = $this->dmmProvider(
-			array(
-				'price'           => '600',
-				'list_price'      => '1000',
-				'badge'           => '',
-				'platform_extras' => array(),
-			)
-		);
-		( new ListingRefresher( $registry, $repo ) )->refreshProduct( 14, null, true );
-	}
-
-	public function test_run_for_platform_only_touches_matching_listing(): void {
-		$this->stubDmmPlatform();
-		$repo = Mockery::mock( ProductRepositoryInterface::class );
-		$repo->shouldReceive( 'find' )->with( 13 )->andReturn(
-			$this->product(
-				13,
-				array(
-					array(
-						'platform'    => 'dmm-books',
-						'enabled'     => true,
-						'update_mode' => 'auto',
-						'auto_update' => true,
-						'external_id' => 'ext-1',
-						'price'       => '900',
-					),
-					array(
-						'platform'    => 'other',
-						'enabled'     => true,
-						'update_mode' => 'auto',
-						'auto_update' => true,
-						'external_id' => 'ext-2',
-						'price'       => '500',
-					),
-				)
-			)
-		);
-		$repo->shouldReceive( 'save' )->once()->andReturnUsing(
-			function ( array $d ) {
-				$this->assertSame( '600', $d['listings'][0]['price'] );
-				$this->assertSame( '500', $d['listings'][1]['price'] );
-				return 13;
-			}
-		);
-		$registry = $this->dmmProvider(
-			array(
-				'price'           => '600',
-				'list_price'      => '1000',
-				'badge'           => '',
-				'platform_extras' => array(),
-			)
-		);
-		( new ListingRefresher( $registry, $repo ) )->refreshProduct( 13, 'dmm-books' );
-	}
-
-	public function test_refresh_records_error_on_fetch_failure(): void {
-		$this->stubDmmPlatform();
-		$repo = Mockery::mock( ProductRepositoryInterface::class );
-		$repo->shouldReceive( 'find' )->with( 12 )->andReturn(
-			$this->product(
-				12,
-				array(
-					array(
-						'platform'    => 'dmm-books',
-						'enabled'     => true,
-						'update_mode' => 'auto',
-						'auto_update' => true,
-						'external_id' => 'ext-x',
-						'price'       => '600',
-						'fetch_error' => '',
-					),
-				)
-			)
-		);
-		$repo->shouldReceive( 'save' )->once()->andReturnUsing(
-			function ( array $d ) {
-				$this->assertNotSame( '', $d['listings'][0]['fetch_error'] );
-				$this->assertSame( '600', $d['listings'][0]['price'] );
-				return 12;
-			}
-		);
-		( new ListingRefresher( $this->dmmProvider( null ), $repo ) )->refreshProduct( 12 );
-	}
-
-	public function test_成功時にlast_verified_atを刻みsearch_keyとexternal_idをfetchへ渡す(): void {
-		$this->stubRakutenPlatform();
-
-		$provider = Mockery::mock( ProviderInterface::class );
-		$provider->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
-		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
-		$provider->shouldReceive( 'fetch' )->once()->withArgs(
-			function ( string $externalId, array $context ) {
-				return 'deadbeef01' === $externalId
-					&& isset( $context['search_key'] ) && '対象巻' === $context['search_key']
-					&& isset( $context['external_id'] ) && 'deadbeef01' === $context['external_id'];
-			}
-		)->andReturn( array( 'price' => '693' ) );
-		$registry = new ProviderRegistry();
-		$registry->register( $provider );
-
-		$repo = Mockery::mock( ProductRepositoryInterface::class );
-		$repo->shouldReceive( 'find' )->with( 20 )->andReturn(
-			array(
-				'id'             => 20,
-				'title'          => '対象巻',
-				'status'         => 'publish',
-				'product_type'   => 'generic',
-				'stock_status'   => 'available',
-				'extras'         => array(),
-				'content'        => '',
-				'schema_version' => '1',
-				'modified'       => '',
-				'listings'       => array(
-					array(
-						'platform'    => 'rakuten-kobo',
-						'enabled'     => true,
-						'update_mode' => 'auto',
-						'auto_update' => true,
-						'external_id' => 'deadbeef01',
-						'search_key'  => '対象巻',
-						'price'       => '',
-					),
-				),
-			)
-		);
-		$repo->shouldReceive( 'save' )->once()->andReturnUsing(
-			function ( array $d ) {
-				$this->assertSame( '693', $d['listings'][0]['price'] );
-				$this->assertArrayHasKey( 'last_verified_at', $d['listings'][0] );
-				$this->assertNotSame( '', (string) $d['listings'][0]['last_verified_at'] );
-				return 20;
-			}
-		);
-
-		( new ListingRefresher( $registry, $repo ) )->refreshProduct( 20 );
-	}
-
-	public function test_fetch失敗時はlast_verified_atを更新しない(): void {
+	public function test_refreshOne_fetch失敗時はlast_verified_atを更新しない(): void {
 		$this->stubRakutenPlatform();
 
 		$provider = Mockery::mock( ProviderInterface::class );
@@ -424,7 +252,8 @@ final class ListingRefresherTest extends TestCase {
 			}
 		);
 
-		( new ListingRefresher( $registry, $repo ) )->refreshProduct( 21 );
+		$refresher = new ListingRefresher( $registry, $repo );
+		$this->assertFalse( $refresher->refreshOne( 21, 'rakuten-kobo' ) );
 	}
 
 	public function test_refreshOne_fetch成功でtrueを返し保存する(): void {
