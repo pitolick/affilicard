@@ -303,3 +303,27 @@ AS は同時刻に due のアクションを `$priority` 昇順で claim する�
 ### 10-4. 結論
 
 案B 採用＋閲覧駆動不採用により、**堅牢性は AS 標準で充足**、**トリガーは競合と同型（cron＋イベント）**に収束し、自前は **outbound レート制限（AS 非提供）＋鮮度スキップ＋トリガー配線＋薄い集計UI＋pause** という**独自価値のみ**に集中する。車輪の再発明は排除され、設計は妥当かつリーンな範囲に収まっている。
+
+## 11. Phase 2 リファインメント（2026-07-24・Playground目視FB反映）
+
+Playground 目視レビューで判明した改善点をこのブランチ（v2.4.0）で対応する。
+
+### 11-1. 失敗ハンドリング（spec §9-6「attempts上限でfailed」を正しく実装＋競合準拠の再取得抑制）
+- **failed 化**: リトライ枯渇（MAX_ATTEMPTS）時、ハンドラは素の return（＝AS complete）ではなく**例外を投げて AS を "failed" 記録**にする。→ 失敗ステータスが可視化され、そのアクションは自動再実行されず、パネルの failed 件数/「失敗を再試行」が機能する（spec §9-6 の意図通り）。
+- **再取得クールダウン（無限再投入の防止）**: 掃引の再取得判定を `last_verified_at`（成功時刻）ベースから **`last_fetched_at`（最終試行時刻・成功/失敗問わず記録済み）＋クールダウン（= platform priceTtlHours）** に変更。成功 listing は従来通り TTL 毎、**失敗 listing も TTL 毎に1回だけ再試行**（毎掃引の連打を停止）。既存フィールドで実現。競合（Amazon系「24hキャッシュ／数時間待つ」・Rinker/ポチップ「再取得しない」）と整合。
+  - 表示側の鮮度（`PriceFreshness::isStale`/`isPriceDisplayable`＝last_verified_at）は不変。掃引の**再取得判定のみ** last_fetched_at 基準にする。
+
+### 11-2. アカウント単位への統一（認証画面と一致）
+- throttle 上書き・集計サマリ・RateLimiter キー・AS group を、provider コード（`dmm-ebook`/`rakuten-kobo`）から **accountCode（`dmm`/`rakuten`）** に統一。レート制限は共有 API（アカウント）単位が正しく、認証画面（DMM/楽天）ともUIが揃う。現状 1アカウント=1自動provider のため挙動不変。AS group=`affilicard-{account}`、Scheduled Actions のフィルタもアカウント単位。
+
+### 11-3. AS 一覧を affilicard メニュー内に埋め込み＋日本語化
+- Action Scheduler の List Table を affilicard のサブメニューに描画し、`affilicard-*` group に絞って**日本語**で表示（AS の翻訳ロード確認）。実装困難なら Tools リンク＋日本語化にフォールバック。
+
+### 11-4. QueuePanel UI
+- 一般設定パネルと同じスタイル（`affilicard-general-panel` 相当のCSS）に揃える。各設定（throttle/保持/pause/depth）に**説明文**（何が起きるか）を付ける。
+
+### 11-5. 未 defer 化（このブランチで実施）
+- RateLimiter の acquire を条件付き UPDATE で原子化／`refreshOne` 実行時 eligibility 再検証（force 経路と両立する形）／eligibility 判定の共有ヘルパ抽出／`ListingRefresher::run`系 死コード削除。
+
+### 11-6. 検証
+- unit（Docker phpunit）＋ **wp-env（Docker WP）で実地挙動確認**：失敗→failedステータス出現・キュー drain（async静止）・AS埋め込み画面の描画/日本語・QueuePanelスタイル。Playground は Origin除去のため実API不可（wp-env/本番で確認）。
