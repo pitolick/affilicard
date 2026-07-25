@@ -41,6 +41,44 @@ final class PluginTest extends TestCase {
 		$this->assertContains( 'dmm-ebook', $codes );
 	}
 
+	/**
+	 * QueueStats/QueueController に渡すのは isAutomatic()===true な provider の
+	 * accountCode()（'manual' 等・accountCode()===null の provider を含まない）。
+	 * v2.4.0: provider コード単位から account コード単位へ統一（レート制限は共有 API＝
+	 * account 単位でかかり、認証画面（楽天/DMM）と一致させるため）。楽天/DMM をハードコード
+	 * せず ProviderRegistry から導出することを固定する（Task 15 要件・v2.4.0 で account 化）。
+	 */
+	public function test_automaticAccountCodes_isAutomaticなproviderのaccountCodeのみを含みmanualを除く(): void {
+		$registry = Plugin::buildProviderRegistry();
+
+		$codes = Plugin::automaticAccountCodes( $registry );
+
+		$this->assertContains( 'rakuten', $codes );
+		$this->assertContains( 'dmm', $codes );
+		$this->assertNotContains( 'manual', $codes );
+		$this->assertNotContains( 'rakuten-kobo', $codes );
+		$this->assertNotContains( 'dmm-ebook', $codes );
+
+		foreach ( $registry->all() as $provider ) {
+			if ( ! $provider->isAutomatic() ) {
+				continue;
+			}
+			$this->assertContains( $provider->accountCode(), $codes );
+		}
+	}
+
+	/**
+	 * 現状 1 account = 1 自動 provider だが、将来複数 provider が同じ account を共有しても
+	 * accountCode 一覧に重複が出ないことを固定する。
+	 */
+	public function test_automaticAccountCodes_accountCodeは重複排除される(): void {
+		$registry = Plugin::buildProviderRegistry();
+
+		$codes = Plugin::automaticAccountCodes( $registry );
+
+		$this->assertSame( array_values( array_unique( $codes ) ), array_values( $codes ) );
+	}
+
 	public function test_buildProductTypeRegistry_includes_generic_and_ebook(): void {
 		$registry = Plugin::buildProductTypeRegistry();
 
@@ -98,6 +136,59 @@ final class PluginTest extends TestCase {
 		$this->assertTrue( $seeded_recorded, 'affilicard_seeded_at オプションが記録されるべき' );
 	}
 
+	/**
+	 * Fix 3: 純 affilicard サイト（WooCommerce 不在 → フィルタ既定 true）では
+	 * Tools > Scheduled Actions の重複サブメニューを remove_submenu_page で隠す。
+	 */
+	public function test_hideActionSchedulerToolsMenu_removes_submenu_when_filter_true(): void {
+		WP_Mock::onFilter( 'affilicard_hide_action_scheduler_tools_menu' )
+			->with( true )
+			->reply( true );
+		WP_Mock::userFunction( 'remove_submenu_page' )
+			->once()
+			->with( 'tools.php', 'action-scheduler' );
+
+		Plugin::hideActionSchedulerToolsMenu();
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * Fix 3: フィルタで false を返すサイト（例: 他の AS 消費プラグインを持つ）では
+	 * Tools > Scheduled Actions を隠さない（remove_submenu_page を呼ばない）。
+	 * これにより WooCommerce 等の AS 利用者の管理画面を壊さない。
+	 */
+	public function test_hideActionSchedulerToolsMenu_keeps_submenu_when_filter_false(): void {
+		WP_Mock::onFilter( 'affilicard_hide_action_scheduler_tools_menu' )
+			->with( true )
+			->reply( false );
+		WP_Mock::userFunction( 'remove_submenu_page' )->never();
+
+		Plugin::hideActionSchedulerToolsMenu();
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * Fix 3: 管理画面では admin_menu に priority 99（AS 本体のサブメニュー登録より後）で
+	 * hideActionSchedulerToolsMenu を配線する。
+	 */
+	public function test_boot_registers_hide_action_scheduler_tools_menu_hook_in_admin(): void {
+		WP_Mock::userFunction( 'is_admin', array( 'return' => true ) );
+		WP_Mock::userFunction( 'register_activation_hook', array( 'return' => true ) );
+		WP_Mock::userFunction( 'register_deactivation_hook', array( 'return' => true ) );
+
+		WP_Mock::expectActionAdded(
+			'admin_menu',
+			array( Plugin::class, 'hideActionSchedulerToolsMenu' ),
+			99
+		);
+
+		Plugin::boot();
+
+		$this->assertConditionsMet();
+	}
+
 	public function test_registerSettingsPage_calls_add_submenu_page_under_cpt(): void {
 		WP_Mock::userFunction( 'add_submenu_page' )
 			->once()
@@ -142,12 +233,54 @@ final class PluginTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	public function test_boot_registers_queue_handlers_and_publish_trigger_hooks(): void {
+		// v2.4.0 で追加された 3 配線（RefreshHandler/AutoCreateHandler/PublishTrigger）が
+		// Plugin::boot() から確実に登録されることを検証する。これが欠けると Enqueuer が積んだ
+		// ジョブが Action Scheduler 上に滞留したまま一切実行されなくなる、キュー機能の生命線。
+		WP_Mock::userFunction( 'is_admin', array( 'return' => false ) );
+		WP_Mock::userFunction( 'register_activation_hook', array( 'return' => true ) );
+		WP_Mock::userFunction( 'register_deactivation_hook', array( 'return' => true ) );
+
+		// RefreshHandler::handle / AutoCreateHandler::handle は bootInstance() 内で生成される
+		// インスタンスメソッド配列コールバックのため、インスタンス自体は特定できない。
+		// block init hook のテストと同じ手法（AnyInstance マッチャー）でクラス型のみ厳密に検査する。
+		WP_Mock::expectActionAdded(
+			\Affilicard\Queue\Enqueuer::HOOK_REFRESH,
+			array( new \WP_Mock\Matcher\AnyInstance( \Affilicard\Queue\RefreshHandler::class ), 'handle' ),
+			10,
+			2
+		);
+		WP_Mock::expectActionAdded(
+			\Affilicard\Queue\Enqueuer::HOOK_AUTOCREATE,
+			array( new \WP_Mock\Matcher\AnyInstance( \Affilicard\Queue\AutoCreateHandler::class ), 'handle' ),
+			10,
+			2
+		);
+
+		// transition_post_status は本テストで 2 系統登録される：
+		// 1) 既存の静的 [Plugin::class, 'onTransitionPostStatus']（商品 CPT 自身の future→publish）
+		// 2) 新規の PublishTrigger インスタンスコールバック（記事公開時に本文中の商品を force enqueue）
+		// 両方を expect しないと、片方が削除されてももう一方の一致だけでテストが緑のままになる。
+		WP_Mock::expectActionAdded( 'transition_post_status', array( Plugin::class, 'onTransitionPostStatus' ), 10, 3 );
+		WP_Mock::expectActionAdded(
+			'transition_post_status',
+			array( new \WP_Mock\Matcher\AnyInstance( \Affilicard\Queue\PublishTrigger::class ), 'onTransition' ),
+			10,
+			3
+		);
+
+		Plugin::boot();
+
+		$this->assertConditionsMet();
+	}
+
 	public function test_on_transition_refreshes_on_future_to_publish(): void {
 		$post = (object) array(
 			'ID'        => 77,
 			'post_type' => 'affilicard_product',
 		);
-		WP_Mock::userFunction( 'get_post' )->with( 77 )->andReturn( null ); // find→null → save 不発
+		WP_Mock::userFunction( 'get_post' )->with( 77 )->andReturn( null ); // find→null → enqueue 不発
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
 		\Affilicard\Plugin::onTransitionPostStatus( 'publish', 'future', $post );
 		$this->assertConditionsMet();
 	}
@@ -167,6 +300,117 @@ final class PluginTest extends TestCase {
 			'post_type' => 'affilicard_product',
 		);
 		\Affilicard\Plugin::onTransitionPostStatus( 'publish', 'draft', $post ); // draft→publish は対象外
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * D（v2.4.0）: 予約投稿 future→publish 昇格時、v2.4.0 以前は ListingRefresher::refreshProduct
+	 * で同期 fetch していたが、AS 非同期キュー化により商品の ELIGIBLE な auto listing を
+	 * Enqueuer::enqueueProductListings 経由で force enqueue する（同期 fetch はしない）。
+	 */
+	public function test_on_transition_enqueues_eligible_auto_listing_on_future_to_publish(): void {
+		$postId = 80;
+		$post   = (object) array(
+			'ID'            => $postId,
+			'post_type'     => \Affilicard\PostType\ProductPostType::POST_TYPE,
+			'post_title'    => '対象作品',
+			'post_content'  => '',
+			'post_status'   => 'publish',
+			'post_modified' => '2026-07-23 00:00:00',
+		);
+
+		WP_Mock::userFunction( 'get_post' )->with( $postId )->andReturn( $post );
+
+		$listing = array(
+			'platform'    => 'rakuten-kobo',
+			'enabled'     => true,
+			'update_mode' => 'auto',
+			'auto_update' => true,
+			'external_id' => 'deadbeef01',
+			'price'       => '500',
+		);
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_EXTRAS, true )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_LISTINGS, true )
+			->andReturn( array( $listing ) );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_PRODUCT_TYPE, true )
+			->andReturn( 'ebook' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_STOCK_STATUS, true )
+			->andReturn( 'available' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_SCHEMA_VERSION, true )
+			->andReturn( '2' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_RELEASE_DATE, true )
+			->andReturn( '' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_MASK_BLUR, true )
+			->andReturn( '' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_MASK_R18, true )
+			->andReturn( '' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, \Affilicard\PostType\ProductPostType::META_MASK_LABEL, true )
+			->andReturn( '' );
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( \Affilicard\Settings\GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					array(
+						'code'         => 'rakuten-kobo',
+						'name'         => '楽天Kobo',
+						'provider'     => 'rakuten-kobo',
+						'displayOrder' => 3,
+						'enabled'      => true,
+					),
+				)
+			);
+
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once()
+			->with(
+				\Affilicard\Queue\Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => $postId,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten'
+			);
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once()
+			->with(
+				\Affilicard\Queue\Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => $postId,
+					'platform' => 'rakuten-kobo',
+					'force'    => true,
+				),
+				'affilicard-rakuten'
+			);
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::type( 'int' ),
+				\Affilicard\Queue\Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => $postId,
+					'platform' => 'rakuten-kobo',
+					'force'    => true,
+				),
+				'affilicard-rakuten',
+				true,
+				\Affilicard\Queue\Enqueuer::PRIORITY_FORCE
+			)
+			->andReturn( 900 );
+
+		\Affilicard\Plugin::onTransitionPostStatus( 'publish', 'future', $post );
+
 		$this->assertConditionsMet();
 	}
 

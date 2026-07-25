@@ -28,7 +28,8 @@ final class GeneralSettingsTest extends TestCase {
 
 		$this->assertSame( 86400, $result['cache_ttl_seconds'] );
 		$this->assertSame( 'generic', $result['default_product_type'] );
-		$this->assertFalse( $result['cron_enabled'] );
+		// 既定 ON（自動更新は中核機能・未設定なら空回りで無害）。
+		$this->assertTrue( $result['cron_enabled'] );
 		$this->assertSame( 3, $result['refresh_interval_hours'] );
 		$this->assertSame( 2, $result['schema_version'] );
 	}
@@ -198,8 +199,15 @@ final class GeneralSettingsTest extends TestCase {
 		$this->assertTrue( GeneralSettings::isCronEnabled() );
 	}
 
-	public function test_is_cron_enabled_defaults_false(): void {
+	public function test_is_cron_enabled_defaults_true(): void {
+		// 既定 ON（自動更新は中核機能）。保存済みで false のサイトは影響を受けない。
 		WP_Mock::userFunction( 'get_option' )->with( GeneralSettings::OPTION_KEY, array() )->andReturn( array() );
+		$this->assertTrue( GeneralSettings::isCronEnabled() );
+	}
+
+	public function test_is_cron_enabled_reflects_saved_false(): void {
+		// 既に false を保存済みのサイトは既定変更の影響を受けず OFF のまま。
+		WP_Mock::userFunction( 'get_option' )->with( GeneralSettings::OPTION_KEY, array() )->andReturn( array( 'cron_enabled' => false ) );
 		$this->assertFalse( GeneralSettings::isCronEnabled() );
 	}
 
@@ -211,5 +219,101 @@ final class GeneralSettingsTest extends TestCase {
 	public function test_refresh_interval_hours_defaults_to_three(): void {
 		WP_Mock::userFunction( 'get_option' )->with( GeneralSettings::OPTION_KEY, array() )->andReturn( array() );
 		$this->assertSame( 3, GeneralSettings::refreshIntervalHours() );
+	}
+
+	public function test_defaults_キュー設定の既定値(): void {
+		WP_Mock::userFunction( 'get_option' )->with( GeneralSettings::OPTION_KEY, array() )->andReturn( array() );
+		$this->assertFalse( GeneralSettings::isQueuePaused() );
+		$this->assertSame( 500, GeneralSettings::queueDepthCap() );
+		$this->assertSame( 24, GeneralSettings::retentionDoneHours() );
+		$this->assertSame( 7, GeneralSettings::retentionFailedDays() );
+		$this->assertSame( 0, GeneralSettings::throttleOverrideMs( 'rakuten' ) );
+	}
+
+	public function test_throttleOverrideMs_account別に返す(): void {
+		WP_Mock::userFunction( 'get_option' )->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array( 'throttle_overrides' => array( 'rakuten' => 2000 ) ) );
+		$this->assertSame( 2000, GeneralSettings::throttleOverrideMs( 'rakuten' ) );
+		$this->assertSame( 0, GeneralSettings::throttleOverrideMs( 'dmm' ) );
+	}
+
+	public function test_queue_paused_true(): void {
+		WP_Mock::userFunction( 'get_option' )->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array( 'queue_paused' => true ) );
+		$this->assertTrue( GeneralSettings::isQueuePaused() );
+	}
+
+	public function test_update_キュー設定がsanitizeを経てupdate_optionに残る(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->andReturnUsing(
+				function ( $key, $value, $autoload ) {
+					$this->assertSame( GeneralSettings::OPTION_KEY, $key );
+					$this->assertFalse( $autoload );
+					$this->assertTrue( $value['queue_paused'] );
+					$this->assertSame( 1000, $value['queue_depth_cap'] );
+					$this->assertSame( array( 'rakuten' => 1500 ), $value['throttle_overrides'] );
+					$this->assertSame( 48, $value['retention_done_hours'] );
+					$this->assertSame( 14, $value['retention_failed_days'] );
+					return true;
+				}
+			);
+
+		$result = GeneralSettings::update(
+			array(
+				'queue_paused'          => true,
+				'queue_depth_cap'       => 1000,
+				'throttle_overrides'    => array( 'rakuten' => 1500 ),
+				'retention_done_hours'  => 48,
+				'retention_failed_days' => 14,
+			)
+		);
+
+		// update() の戻り値（sanitize 後）でも新キーが生き残っていることを確認する。
+		$this->assertTrue( $result['queue_paused'] );
+		$this->assertSame( 1000, $result['queue_depth_cap'] );
+		$this->assertSame( array( 'rakuten' => 1500 ), $result['throttle_overrides'] );
+		$this->assertSame( 48, $result['retention_done_hours'] );
+		$this->assertSame( 14, $result['retention_failed_days'] );
+	}
+
+	public function test_update_queue_depth_capの最小値は1にクランプされる(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->andReturnUsing(
+				function ( $key, $value, $autoload ) {
+					$this->assertSame( 1, $value['queue_depth_cap'] );
+					return true;
+				}
+			);
+
+		$result = GeneralSettings::update( array( 'queue_depth_cap' => 0 ) );
+		$this->assertSame( 1, $result['queue_depth_cap'] );
+	}
+
+	public function test_update_throttle_overridesの負値は0にクランプされる(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->andReturnUsing(
+				function ( $key, $value, $autoload ) {
+					$this->assertSame( array( 'rakuten' => 0 ), $value['throttle_overrides'] );
+					return true;
+				}
+			);
+
+		$result = GeneralSettings::update( array( 'throttle_overrides' => array( 'rakuten' => -100 ) ) );
+		$this->assertSame( array( 'rakuten' => 0 ), $result['throttle_overrides'] );
 	}
 }

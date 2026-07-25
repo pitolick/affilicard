@@ -2,9 +2,10 @@
     "name": "pitolick/affilicard",
     "description": "汎用アフィリエイト商品カード WordPress プラグイン",
     "type": "wordpress-plugin",
-    "license": "MIT",
+    "license": "GPL-2.0-or-later",
     "require": {
         "php": ">=8.1",
+        "woocommerce/action-scheduler": "^4.0",
         "yahnis-elsts/plugin-update-checker": "^5.7"
     },
     "require-dev": {

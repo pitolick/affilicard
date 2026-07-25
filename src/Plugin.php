@@ -7,6 +7,7 @@ use Affilicard\Account\AccountRegistry;
 use Affilicard\Account\AccountUiList;
 use Affilicard\Account\DmmAccount;
 use Affilicard\Account\RakutenAccount;
+use Affilicard\AutoCreate\ProductAutoCreator;
 use Affilicard\Block\Block;
 use Affilicard\Cron\ListingRefresher;
 use Affilicard\Cron\RefreshScheduler;
@@ -19,15 +20,28 @@ use Affilicard\Provider\ManualProvider;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Provider\ProviderUiList;
 use Affilicard\Provider\Rakuten\RakutenProvider;
+use Affilicard\Queue\ActionSchedulerLoader;
+use Affilicard\Queue\ActionSchedulerStore;
+use Affilicard\Queue\AutoCreateHandler;
+use Affilicard\Pricing\PriceFreshness;
+use Affilicard\Queue\Enqueuer;
+use Affilicard\Queue\PublishTrigger;
+use Affilicard\Queue\QueueJobsPage;
+use Affilicard\Queue\QueueMaintenance;
+use Affilicard\Queue\QueueStats;
+use Affilicard\Queue\RateLimiter;
+use Affilicard\Queue\RefreshHandler;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Rest\CardPreviewController;
 use Affilicard\Rest\CredentialsController;
 use Affilicard\Rest\PlatformsController;
 use Affilicard\Rest\ProductsController;
+use Affilicard\Rest\QueueController;
 use Affilicard\Rest\RefreshController;
 use Affilicard\Rest\RestController;
 use Affilicard\Rest\SettingsController;
 use Affilicard\Settings\DashboardWidget;
+use Affilicard\Settings\GeneralSettings;
 use Affilicard\Types\EbookType;
 use Affilicard\Types\GenericType;
 use Affilicard\Types\ProductTypeRegistry;
@@ -49,6 +63,12 @@ final class Plugin {
 	}
 
 	private function bootInstance(): void {
+		// bundle した Action Scheduler を同期ロード（プラグインファイル require 時点）。
+		// plugins_loaded へ延期すると、AS 自身が plugins_loaded@0 で登録する init コールバックが
+		// 現在イテレート中の plugins_loaded@0 バケットに追加され得ず（PHP/WP の do_action は
+		// イテレート中のバケットへの追加コールバックを拾わない）、AS が一切初期化されない不具合がある。
+		ActionSchedulerLoader::boot();
+
 		// CPT 登録
 		add_action( 'init', array( ProductPostType::class, 'register' ) );
 		add_action( 'init', array( \Affilicard\PostType\ProductMeta::class, 'register' ) );
@@ -63,7 +83,13 @@ final class Plugin {
 			$dashboard = new DashboardWidget( new ProductRepository() );
 			$dashboard->register();
 
+			\Affilicard\Admin\CronDisabledNotice::register();
 			add_action( 'admin_menu', array( self::class, 'registerSettingsPage' ) );
+			add_action( 'admin_menu', array( QueueJobsPage::class, 'registerMenu' ) );
+			// affilicard 独自の「更新キュー（ジョブ一覧）」を持つため、Tools > Scheduled Actions の
+			// 重複サブメニューを（affilicard が実質 AS のオーナーである純 affilicard サイトに限り）隠す。
+			// 遅い優先度で走らせて AS 本体がサブメニューを登録し終えた後に remove する。
+			add_action( 'admin_menu', array( self::class, 'hideActionSchedulerToolsMenu' ), 99 );
 			add_action( 'admin_enqueue_scripts', array( self::class, 'enqueueSettingsAssets' ) );
 			add_action( 'admin_init', array( self::class, 'purgeLegacyProviderCredentials' ) );
 			add_action( 'admin_init', array( self::class, 'backfillEligibleProviders' ) );
@@ -71,17 +97,35 @@ final class Plugin {
 
 		// ProductType レジストリ（Block の type 解決でも buildProductTypeRegistry() を参照）
 		$providers = self::buildProviderRegistry();
+		$accounts  = self::buildAccountRegistry();
 		self::buildProductTypeRegistry();
 
-		// REST API
+		// キューパネル（Task 15/16）・depth cap 集計（I1）共通: 自動更新対象 account コード
+		// （'manual' 等の非自動 provider を除く。v2.4.0: provider コードから account コードへ
+		// 統一。レート制限は共有 API＝account 単位でかかり、認証画面（楽天/DMM）と一致する）を
+		// ProviderRegistry から都度導出する。QueueStats/QueueController/Enqueuer にハードコードしない。
+		$automaticAccountCodes = self::automaticAccountCodes( $providers );
+
+		// キュー: REST/AS ハンドラ/トリガー間で共有する Repository/Enqueuer
+		// （depth cap は enqueueForced/enqueueManual では未使用だが、掃引と同じ構築パターンに揃える。
+		// ProviderRegistry は enqueueProductListings が platform の provider→account を解決するために渡す）。
 		$repository = new ProductRepository();
-		$rest       = new RestController(
+		$enqueuer   = new Enqueuer( GeneralSettings::queueDepthCap(), 300, array(), $providers );
+
+		// REST API
+		$rest = new RestController(
 			new ProductsController( $repository ),
 			new SettingsController(),
 			new PlatformsController(),
-			new CredentialsController( $providers, self::buildAccountRegistry() ),
-			new RefreshController( new ListingRefresher( $providers, new ProductRepository() ) ),
-			new CardPreviewController( $repository )
+			new CredentialsController( $providers, $accounts ),
+			new RefreshController( $repository, $enqueuer ),
+			new CardPreviewController( $repository ),
+			new QueueController(
+				new QueueStats( $automaticAccountCodes ),
+				$automaticAccountCodes,
+				new ActionSchedulerStore(),
+				$accounts
+			)
 		);
 		$rest->register();
 
@@ -103,14 +147,78 @@ final class Plugin {
 		);
 
 		// 価格更新 Cron: 全体単一イベントのハンドラ登録 + 設定との差分調整
+		// v2.4.0 でハンドラを同期一括更新（ListingRefresher::run）から掃引（QueueMaintenance::sweep）へ
+		// 差し替え。実際の fetch/保存は Action Scheduler ハンドラ（RefreshHandler）側に移る。
 		RefreshScheduler::register(
-			static function (): void {
-				( new ListingRefresher( self::buildProviderRegistry(), new ProductRepository() ) )->run();
+			static function () use ( $automaticAccountCodes, $providers ): void {
+				// I1: depth cap backstop が affilicard 以外の pending action（WooCommerce 等）に
+				// 誤反応しないよう、account group 別集計に限定する accountCodes を渡す。
+				// 再取得リード: 表示期限（priceTtlHours=24h＝規約上の表示上限）を変えず、掃引間隔
+				// ぶんだけ前倒しで needsRefetch を発火させ、価格が期限に達する前に再確認を終わらせる。
+				// A（決定的スタガリング）: account ごとの実効レート間隔（floor=minRequestIntervalMs と
+				// 管理画面 override の大きい方）を秒に丸めて Enqueuer に渡す。enqueueSweep が同一
+				// account の sweep ジョブを間隔ぶんずつ確定的にずらして積み、レート衝突→throttle
+				// 再投入（completed アクションのチャーン）を根本回避する。override を上げた account
+				// （インシデント対策で間隔を広げたケース）でもチャーンが出ない。
+				$rateLimiter            = new RateLimiter();
+				$accountIntervalSeconds = array();
+				foreach ( $automaticAccountCodes as $account ) {
+					$floorMs = 0;
+					foreach ( $providers->all() as $p ) {
+						if ( $p->accountCode() === $account ) {
+							$floorMs = $p->minRequestIntervalMs();
+							break;
+						}
+					}
+					$effMs                              = $rateLimiter->effectiveIntervalMs( $floorMs, GeneralSettings::throttleOverrideMs( $account ) );
+					$accountIntervalSeconds[ $account ] = (int) ceil( $effMs / 1000 );
+				}
+
+				$enqueuer = new Enqueuer(
+					GeneralSettings::queueDepthCap(),
+					300,
+					$automaticAccountCodes,
+					sweepLeadSeconds: PriceFreshness::sweepLeadSeconds( GeneralSettings::refreshIntervalHours() ),
+					accountIntervalSeconds: $accountIntervalSeconds
+				);
+				( new QueueMaintenance( new ProductRepository(), $enqueuer, $providers ) )->sweep();
 			}
 		);
 		add_action( 'init', array( RefreshScheduler::class, 'reconcile' ) );
 
-		// 予約投稿（future）→ publish 昇格時に最新価格へ refresh
+		// キュー: AS の completed/failed アクション保持期間を GeneralSettings に連動。
+		QueueMaintenance::registerRetentionFilters();
+
+		// キュー: AS アクション（Enqueuer::HOOK_REFRESH/HOOK_AUTOCREATE）のハンドラ配線。
+		// これが無いと Enqueuer が積んだジョブは AS 上に滞留したまま一切実行されない。
+		$refreshHandler = new RefreshHandler(
+			$enqueuer,
+			new RateLimiter(),
+			new ListingRefresher( $providers, $repository ),
+			$providers
+		);
+		add_action( Enqueuer::HOOK_REFRESH, array( $refreshHandler, 'handle' ), 10, 2 );
+
+		$autoCreateHandler = new AutoCreateHandler(
+			$enqueuer,
+			new RateLimiter(),
+			new ProductAutoCreator( $providers, $repository ),
+			$providers
+		);
+		add_action( Enqueuer::HOOK_AUTOCREATE, array( $autoCreateHandler, 'handle' ), 10, 2 );
+
+		// キュー: 記事（投稿）の公開時に、本文中の affilicard/product-card ブロックが参照する
+		// 既存商品の ELIGIBLE な auto listing を force enqueue するトリガー。
+		// これは商品 CPT 自身の future→publish（下の onTransitionPostStatus）とは独立した第 2 の
+		// transition_post_status ハンドラであり、両方を配線する（onUpdated は意図的に配線しない。
+		// transition_post_status は publish→publish の再保存も含め毎回発火するため、
+		// onTransition 側のガード（newStatus==='publish'）だけで全 publish ケースを既にカバーする。
+		// onUpdated も配線すると二重発火するため配線しない）。
+		$publishTrigger = new PublishTrigger( $repository, $enqueuer, $providers );
+		add_action( 'transition_post_status', array( $publishTrigger, 'onTransition' ), 10, 3 );
+
+		// 予約投稿（product CPT・future）→ publish 昇格時に、対象商品の ELIGIBLE な auto listing を
+		// force enqueue する（PublishTrigger とは別系統・商品 CPT 自身の遷移を扱う）。
 		add_action( 'transition_post_status', array( self::class, 'onTransitionPostStatus' ), 10, 3 );
 
 		// 有効化フック: デフォルト platform を idempotent に seed
@@ -125,6 +233,31 @@ final class Plugin {
 		$registry->register( new DmmProvider() );
 		$registry->register( new RakutenProvider() );
 		return $registry;
+	}
+
+	/**
+	 * 自動更新対象 provider の accountCode 一覧（重複排除・'manual' 等 isAutomatic()===false
+	 * や accountCode()===null の provider は除く）。
+	 *
+	 * v2.4.0: provider コード単位から account コード単位へ統一した（レート制限は provider
+	 * ではなく共有 API＝account 単位でかかり、認証画面（楽天/DMM）と一致させるため）。
+	 * QueueStats/QueueController/Enqueuer/Uninstall がキューの account group
+	 * （`affilicard-{account}`）を走査する対象として使う。
+	 *
+	 * @return list<string>
+	 */
+	public static function automaticAccountCodes( ProviderRegistry $providers ): array {
+		$codes = array();
+		foreach ( $providers->all() as $provider ) {
+			if ( ! $provider->isAutomatic() ) {
+				continue;
+			}
+			$account = $provider->accountCode();
+			if ( null !== $account && ! in_array( $account, $codes, true ) ) {
+				$codes[] = $account;
+			}
+		}
+		return $codes;
 	}
 
 	public static function buildAccountRegistry(): AccountRegistry {
@@ -241,13 +374,39 @@ final class Plugin {
 		);
 	}
 
+	/**
+	 * Tools > Scheduled Actions のサブメニューを条件付きで隠す。
+	 *
+	 * affilicard は独自の「更新キュー（ジョブ一覧）」を管理画面に埋め込んでいるため、
+	 * 純 affilicard サイトでは Tools 側の重複リンクを隠したい。ただし Action Scheduler は
+	 * WooCommerce をはじめ多くのプラグインが共有する共通基盤であり、それらの利用者は
+	 * Tools > Scheduled Actions に依存するため、無条件に消してはならない。
+	 *
+	 * ガード:
+	 * - 既定では WooCommerce（AS の代表的な大口消費者）が存在しない場合のみ隠す。
+	 * - 全体を `affilicard_hide_action_scheduler_tools_menu` フィルタで上書き可能にし、
+	 *   他の AS 消費プラグインを持つサイトが明示的に無効化（または強制有効化）できるようにする。
+	 */
+	public static function hideActionSchedulerToolsMenu(): void {
+		$shouldHide = apply_filters(
+			'affilicard_hide_action_scheduler_tools_menu',
+			! class_exists( 'WooCommerce' )
+		);
+
+		if ( $shouldHide ) {
+			remove_submenu_page( 'tools.php', 'action-scheduler' );
+		}
+	}
+
 	public static function renderSettingsPage(): void {
 		echo '<div class="wrap"><h1>' . esc_html__( 'Affilicard 設定', 'affilicard' ) . '</h1>';
 		echo '<div id="affilicard-settings-root"></div></div>';
 	}
 
 	/**
-	 * 予約投稿（future）が publish に昇格した瞬間に listing を最新価格へ refresh する。
+	 * 予約投稿（future）が publish に昇格した瞬間に、対象商品の ELIGIBLE な auto listing を
+	 * Enqueuer 経由で force enqueue する（v2.4.0: 同期 fetch から AS 非同期キュー化。実際の
+	 * fetch/保存は RefreshHandler が Enqueuer::HOOK_REFRESH ハンドラとして担う）。
 	 *
 	 * @param object $post
 	 */
@@ -258,7 +417,15 @@ final class Plugin {
 		if ( ! is_object( $post ) || ! isset( $post->post_type ) || ProductPostType::POST_TYPE !== $post->post_type ) {
 			return;
 		}
-		( new ListingRefresher( self::buildProviderRegistry(), new ProductRepository() ) )->refreshProduct( (int) $post->ID );
+
+		$postId  = (int) $post->ID;
+		$product = ( new ProductRepository() )->find( $postId );
+		if ( null === $product ) {
+			return;
+		}
+
+		( new Enqueuer( GeneralSettings::queueDepthCap(), 300, array(), self::buildProviderRegistry() ) )
+			->enqueueProductListings( $postId, $product, false );
 	}
 
 	public static function enqueueSettingsAssets( string $hook ): void {

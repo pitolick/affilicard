@@ -3,7 +3,9 @@ declare(strict_types=1);
 
 namespace Affilicard\Block;
 
-use Affilicard\AutoCreate\ProductAutoCreator;
+use Affilicard\Platform\PlatformConfig;
+use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Queue\Enqueuer;
 use Affilicard\Renderer\CardHtmlBuilder;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Repository\ProductRepositoryInterface;
@@ -22,15 +24,12 @@ final class Block {
 
 	public function __construct(
 		private ProductRepositoryInterface $repository,
-		private ProductAutoCreator $autoCreator
+		private Enqueuer $enqueuer,
+		private ProviderRegistry $providerRegistry
 	) {}
 
 	public static function register_hook(): void {
-		$repository = new ProductRepository();
-		$instance   = new self(
-			$repository,
-			new ProductAutoCreator( \Affilicard\Plugin::buildProviderRegistry(), $repository )
-		);
+		$instance = new self( new ProductRepository(), new Enqueuer(), \Affilicard\Plugin::buildProviderRegistry() );
 		add_action( 'init', array( $instance, 'register' ) );
 	}
 
@@ -125,20 +124,46 @@ final class Block {
 		return null;
 	}
 
+	/**
+	 * 未登録の externalId+platform を非同期 AutoCreate ジョブとして enqueue する。
+	 *
+	 * フロント render 中の同期 HTTP 呼び出しを避けるため、ここでは商品を作らず
+	 * ジョブを積むだけに留める（実際の生成は AutoCreateHandler が担う）。
+	 * カードは今回のビューでは描画されず、次回以降のビューで生成済み商品として解決される。
+	 */
 	private function autoCreate( string $platform, string $externalId ): ?array {
+		// terminal failure（AutoCreateHandler が MAX_ATTEMPTS 到達で立てた give-up マーカー）が
+		// 残っている間は、恒久的に無効な externalId をビューごとに永久再 enqueue するのを止める。
+		// 24h TTL なので、ID が後で有効化されればマーカー失効後に再試行される。
+		$giveup_key = 'affilicard_autocreate_failed_' . $platform . '_' . $externalId;
+		if ( false !== get_transient( $giveup_key ) ) {
+			return null;
+		}
+
 		$lock_key = 'affilicard_autocreate_' . $platform . '_' . $externalId;
 		if ( false !== get_transient( $lock_key ) ) {
 			return null;
 		}
 		set_transient( $lock_key, 1, 5 * MINUTE_IN_SECONDS );
 
-		$post_id = $this->autoCreator->create( $platform, $externalId );
-		if ( null === $post_id ) {
-			// 失敗時はロックを即解放し、次回リクエストで再試行できるようにする
+		$definition = PlatformConfig::find( $platform );
+		if ( null === $definition ) {
+			// 未知の platform code は enqueue できないため、ロックを即解放し次回リクエストで再試行できるようにする
 			// （解放しないと 5 分間リトライ不能になる）。
 			delete_transient( $lock_key );
 			return null;
 		}
-		return $this->repository->find( $post_id );
+
+		// v2.4.0: enqueueAutoCreate の group も account コード単位。account が解決できない
+		// （provider 未登録、または手動系で accountCode() が null）場合は enqueue できないため
+		// ロックを即解放する（未知 platform と同様の理由）。
+		$account = $this->providerRegistry->get( $definition->provider )?->accountCode();
+		if ( null === $account ) {
+			delete_transient( $lock_key );
+			return null;
+		}
+
+		$this->enqueuer->enqueueAutoCreate( $platform, $account, $externalId );
+		return null;
 	}
 }

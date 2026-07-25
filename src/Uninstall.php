@@ -27,6 +27,15 @@ final class Uninstall {
 		'affilicard_legacy_creds_purged',
 	);
 
+	/**
+	 * ProviderRegistry が安全に利用できない環境（vendor/ 不在フォールバックで
+	 * Plugin クラスが未 autoload）向けの最終手段リスト（account コード）。通常経路は
+	 * automaticAccountCodes() が Plugin::automaticAccountCodes() を優先する。
+	 *
+	 * @var list<string>
+	 */
+	private const AUTOMATIC_ACCOUNT_CODES_FALLBACK = array( 'dmm', 'rakuten' );
+
 	public static function run(): void {
 		foreach ( self::OPTION_KEYS as $option_key ) {
 			delete_option( $option_key );
@@ -34,6 +43,7 @@ final class Uninstall {
 
 		self::deleteProviderCredentials();
 		self::deleteAccountCredentials();
+		self::cleanupQueue();
 
 		$product_ids = get_posts(
 			array(
@@ -95,5 +105,41 @@ final class Uninstall {
 				$like
 			)
 		);
+	}
+
+	/**
+	 * 自動更新対象 account の queue クリーンアップ（spec §9-7）。
+	 *
+	 * v2.4.0: account 別 group（`affilicard-{account}`）の Action Scheduler スケジュールを
+	 * 解除し、RateLimiter の throttle option（`affilicard_ratelimit_{account}`）を削除する
+	 * （provider コード単位から account コード単位へ統一。レート制限は共有 API＝account
+	 * 単位でかかるため）。AS 自身のテーブルは他プラグインと共有し得るため drop しない
+	 * （`as_unschedule_all_actions` の呼び出しのみ・AS 未ロードなら function_exists で guard）。
+	 */
+	private static function cleanupQueue(): void {
+		$canUnschedule = function_exists( 'as_unschedule_all_actions' );
+
+		foreach ( self::automaticAccountCodes() as $account ) {
+			if ( $canUnschedule ) {
+				as_unschedule_all_actions( '', array(), 'affilicard-' . $account );
+			}
+			delete_option( 'affilicard_ratelimit_' . $account );
+		}
+	}
+
+	/**
+	 * 自動更新対象 account コード一覧。Plugin::automaticAccountCodes() が安全に
+	 * 利用できれば（vendor/ 経由で autoload されていれば）それを優先し、
+	 * vendor/ 不在フォールバック（uninstall.php 冒頭参照）で Plugin クラスが
+	 * 未 autoload の場合のみ既知の固定リストへ縮退する。
+	 *
+	 * @return list<string>
+	 */
+	private static function automaticAccountCodes(): array {
+		if ( ! class_exists( \Affilicard\Plugin::class ) ) {
+			return self::AUTOMATIC_ACCOUNT_CODES_FALLBACK;
+		}
+
+		return \Affilicard\Plugin::automaticAccountCodes( \Affilicard\Plugin::buildProviderRegistry() );
 	}
 }

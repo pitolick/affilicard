@@ -4,8 +4,10 @@ declare(strict_types=1);
 namespace Affilicard\Tests\Unit\AutoCreate;
 
 use Affilicard\AutoCreate\ProductAutoCreator;
+use Affilicard\Provider\FetchResult;
 use Affilicard\Provider\ProviderInterface;
 use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Queue\WorkOutcome;
 use Affilicard\Repository\ProductRepositoryInterface;
 use Mockery;
 use WP_Mock;
@@ -41,29 +43,32 @@ final class ProductAutoCreatorTest extends TestCase {
 		);
 	}
 
-	public function test_create_returns_null_when_platform_unknown(): void {
+	public function test_create_returns_terminal_when_platform_unknown(): void {
 		WP_Mock::userFunction( 'get_option' )->andReturn( array() );
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldNotReceive( 'save' );
 		$creator = new ProductAutoCreator( new ProviderRegistry(), $repo );
-		$this->assertNull( $creator->create( 'unknown', 'ext-1' ) );
+		// 未知 platform はリトライで解決しない＝恒久失敗（terminal）。
+		$this->assertSame( WorkOutcome::TERMINAL_FAILURE, $creator->create( 'unknown', 'ext-1' ) );
 	}
 
-	public function test_create_saves_product_and_returns_id_on_fetch_success(): void {
+	public function test_create_saves_product_and_returns_success_on_fetch_hit(): void {
 		$this->stubPlatformsOption();
 		$provider = Mockery::mock( ProviderInterface::class );
 		$provider->shouldReceive( 'code' )->andReturn( 'dmm-ebook' );
 		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
 		$provider->shouldReceive( 'fetch' )->with( 'ext-1', Mockery::type( 'array' ) )->andReturn(
-			array(
-				'title'           => '架空のサンプル作品',
-				'price'           => '600',
-				'list_price'      => '1000',
-				'badge'           => '40%OFF',
-				'image_url'       => 'https://example.test/i.jpg',
-				'regular_url'     => 'https://example.test/r',
-				'affiliate_url'   => 'https://example.test/a',
-				'platform_extras' => array(),
+			FetchResult::hit(
+				array(
+					'title'           => '架空のサンプル作品',
+					'price'           => '600',
+					'list_price'      => '1000',
+					'badge'           => '40%OFF',
+					'image_url'       => 'https://example.test/i.jpg',
+					'regular_url'     => 'https://example.test/r',
+					'affiliate_url'   => 'https://example.test/a',
+					'platform_extras' => array(),
+				)
 			)
 		);
 		$registry = new ProviderRegistry();
@@ -84,10 +89,10 @@ final class ProductAutoCreatorTest extends TestCase {
 			}
 		);
 		$creator = new ProductAutoCreator( $registry, $repo );
-		$this->assertSame( 123, $creator->create( 'dmm-books', 'ext-1' ) );
+		$this->assertSame( WorkOutcome::SUCCESS, $creator->create( 'dmm-books', 'ext-1' ) );
 	}
 
-	public function test_create_returns_null_when_provider_not_automatic(): void {
+	public function test_create_returns_terminal_when_provider_not_automatic(): void {
 		WP_Mock::userFunction( 'get_option' )->andReturn(
 			array(
 				array(
@@ -111,20 +116,52 @@ final class ProductAutoCreatorTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldNotReceive( 'save' );
 		$creator = new ProductAutoCreator( $registry, $repo );
-		$this->assertNull( $creator->create( 'manual-shop', 'ext-1' ) );
+		// 手動 Provider はリトライで解決しない＝恒久失敗（terminal）。
+		$this->assertSame( WorkOutcome::TERMINAL_FAILURE, $creator->create( 'manual-shop', 'ext-1' ) );
 	}
 
-	public function test_create_returns_null_when_fetch_fails(): void {
+	public function test_create_returns_transient_when_fetch_error(): void {
 		$this->stubPlatformsOption();
 		$provider = Mockery::mock( ProviderInterface::class );
 		$provider->shouldReceive( 'code' )->andReturn( 'dmm-ebook' );
 		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
-		$provider->shouldReceive( 'fetch' )->andReturn( null );
+		$provider->shouldReceive( 'fetch' )->andReturn( FetchResult::error() );
 		$registry = new ProviderRegistry();
 		$registry->register( $provider );
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldNotReceive( 'save' );
 		$creator = new ProductAutoCreator( $registry, $repo );
-		$this->assertNull( $creator->create( 'dmm-books', 'ext-1' ) );
+		// API 到達不可・エラーは一時失敗（transient）。give-up しない。
+		$this->assertSame( WorkOutcome::TRANSIENT_FAILURE, $creator->create( 'dmm-books', 'ext-1' ) );
+	}
+
+	public function test_create_returns_terminal_when_fetch_miss(): void {
+		$this->stubPlatformsOption();
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'dmm-ebook' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$provider->shouldReceive( 'fetch' )->andReturn( FetchResult::miss() );
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldNotReceive( 'save' );
+		$creator = new ProductAutoCreator( $registry, $repo );
+		// 該当なし・無効 ID は恒久失敗（terminal）。give-up してよい。
+		$this->assertSame( WorkOutcome::TERMINAL_FAILURE, $creator->create( 'dmm-books', 'ext-1' ) );
+	}
+
+	public function test_create_returns_transient_when_save_fails(): void {
+		$this->stubPlatformsOption();
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'dmm-ebook' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$provider->shouldReceive( 'fetch' )->andReturn( FetchResult::hit( array( 'title' => '架空作品' ) ) );
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'save' )->once()->andReturn( 0 ); // 保存失敗（0 = 未作成）
+		$creator = new ProductAutoCreator( $registry, $repo );
+		// 保存失敗はリトライで解決し得るため一時失敗（transient）。
+		$this->assertSame( WorkOutcome::TRANSIENT_FAILURE, $creator->create( 'dmm-books', 'ext-1' ) );
 	}
 }

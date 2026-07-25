@@ -67,6 +67,65 @@
 	border-top: 1px solid #e0e0e0;
 }
 
+/* 更新キュータブ（一般設定と同じ余白規律に揃える） */
+#affilicard-settings-root .affilicard-queue-panel {
+	max-width: 720px;
+}
+
+#affilicard-settings-root .affilicard-queue-panel__section {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	margin-bottom: 24px;
+	padding-bottom: 24px;
+	border-bottom: 1px solid #e0e0e0;
+}
+
+#affilicard-settings-root .affilicard-queue-panel__section .components-base-control {
+	margin-bottom: 0;
+}
+
+/* section は flex-column のため、そのままだと子の <Button> が幅・高さいっぱいに
+   引き伸ばされる（保存ボタンが巨大化する）。一般パネルのボタンと同じ自然サイズに
+   戻すため、行方向の伸長を止めて左寄せにする。 */
+#affilicard-settings-root .affilicard-queue-panel__section .components-button {
+	align-self: flex-start;
+}
+
+/* account ごとの集計＋throttle 上書き行 */
+#affilicard-settings-root .affilicard-queue-panel__provider-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px;
+	padding: 12px;
+	background: #f6f7f7;
+	border: 1px solid #e0e0e0;
+	border-radius: 4px;
+}
+
+#affilicard-settings-root .affilicard-queue-panel__provider-row > strong {
+	min-width: 80px;
+}
+
+#affilicard-settings-root .affilicard-queue-panel__provider-row .components-base-control {
+	margin-left: auto;
+	min-width: 180px;
+}
+
+/* 一括操作ボタン群。上の設定セクションと詰まって見える（余白がない）という目視指摘に
+   対応し、区切り線＋上下の余白で分離する。 */
+#affilicard-settings-root .affilicard-queue-panel__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	margin-top: 8px;
+	padding-top: 16px;
+	padding-bottom: 8px;
+	border-top: 1px solid #e0e0e0;
+}
+
 /* 型タブ内の保存ボタンをアコーディオンから離す */
 #affilicard-settings-root .affilicard-platforms-panel__save {
 	margin-top: 16px;

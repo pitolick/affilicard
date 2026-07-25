@@ -1,0 +1,91 @@
+# Japanese translation for Action Scheduler admin UI strings used by affilicard's
+# embedded queue-jobs page (src/Queue/QueueJobsPage.php). Hand-picked, non-exhaustive:
+# limited to strings with no printf placeholders and no plural forms, to avoid
+# introducing sprintf/plural-rule bugs. Regenerate with generate-action-scheduler-ja-mo.php.
+# See docs/superpowers/specs/2026-07-22-refresh-queue-design.md §11-3.
+msgid ""
+msgstr ""
+"Project-Id-Version: Action Scheduler (affilicard bundled ja overlay)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: ja\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Hook"
+msgstr "フック"
+
+msgid "Status"
+msgstr "ステータス"
+
+msgid "Arguments"
+msgstr "引数"
+
+msgid "Group"
+msgstr "グループ"
+
+msgid "Recurrence"
+msgstr "繰り返し"
+
+msgid "Scheduled Date"
+msgstr "実行予定日時"
+
+msgid "Log"
+msgstr "ログ"
+
+msgid "Claim ID"
+msgstr "クレームID"
+
+msgid "Scheduled Actions"
+msgstr "登録済みジョブ"
+
+msgid "Delete"
+msgstr "削除"
+
+msgid "Run"
+msgstr "今すぐ実行"
+
+msgid "Process the action now as if it were run as part of a queue"
+msgstr "キュー処理の一部として、このアクションを今すぐ実行します"
+
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgid "Cancel the action now to avoid it being run in future"
+msgstr "今後実行されないよう、このアクションを今すぐキャンセルします"
+
+msgid "Search hook, args and claim ID"
+msgstr "フック・引数・クレームIDで検索"
+
+msgid "Pending"
+msgstr "保留中"
+
+msgid "In-progress"
+msgstr "実行中"
+
+msgid "Complete"
+msgstr "完了"
+
+msgid "Failed"
+msgstr "失敗"
+
+msgid "Canceled"
+msgstr "キャンセル済み"
+
+msgid "Non-repeating"
+msgstr "繰り返しなし"
+
+msgid "async"
+msgstr "非同期"
+
+msgid "Filter"
+msgstr "フィルター"
+
+msgctxt "status labels"
+msgid "All"
+msgstr "すべて"
+
+msgctxt "status labels"
+msgid "Past-due"
+msgstr "期限超過"
+

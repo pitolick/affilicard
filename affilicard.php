@@ -3,11 +3,11 @@
  * Plugin Name: Affilicard
  * Plugin URI:  https://github.com/pitolick/affilicard
  * Description: 汎用アフィリエイト商品カード WordPress プラグイン
- * Version:     2.3.0
+ * Version:     2.4.0
  * Author:      pitolick
  * Author URI:  https://github.com/pitolick
- * License:     MIT
- * License URI: https://opensource.org/licenses/MIT
+ * License:     GPLv2 or later
+ * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: affilicard
  * Domain Path: /languages
  * Requires PHP: 8.1
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'AFFILICARD_VERSION', '2.3.0' );
+define( 'AFFILICARD_VERSION', '2.4.0' );
 define( 'AFFILICARD_PLUGIN_FILE', __FILE__ );
 define( 'AFFILICARD_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'AFFILICARD_PLUGIN_URL', plugin_dir_url( __FILE__ ) );

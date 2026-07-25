@@ -18,6 +18,27 @@ if ( ! defined( 'AFFILICARD_PLUGIN_FILE' ) ) {
 if ( ! defined( 'MINUTE_IN_SECONDS' ) ) {
 	define( 'MINUTE_IN_SECONDS', 60 );
 }
+if ( ! defined( 'HOUR_IN_SECONDS' ) ) {
+	define( 'HOUR_IN_SECONDS', 3600 );
+}
+if ( ! defined( 'DAY_IN_SECONDS' ) ) {
+	define( 'DAY_IN_SECONDS', 86400 );
+}
+
+// WP_Mock は did_action()/doing_action() を提供しないため、bundle した Action Scheduler の
+// synchronous require（Plugin::bootInstance() → ActionSchedulerLoader::boot()）が正しく動くよう
+// 最小スタブを用意する。plugins_loaded は本テストスイートでは一度も do_action() されないため、
+// 「まだ発火していない」という実 WP 環境（プラグイン require 時点）と同じ状態を返す。
+if ( ! function_exists( 'did_action' ) ) {
+	function did_action( string $tag ): int { // phpcs:ignore WordPress.NamingConventions.ValidFunctionName.MethodNameInvalid
+		return 0;
+	}
+}
+if ( ! function_exists( 'doing_action' ) ) {
+	function doing_action( ?string $tag = null ): bool { // phpcs:ignore WordPress.NamingConventions.ValidFunctionName.MethodNameInvalid
+		return false;
+	}
+}
 
 if ( ! class_exists( 'WP_Error' ) ) {
 	class WP_Error {} // @phpstan-ignore-line
@@ -166,6 +187,34 @@ if ( ! class_exists( 'WP_REST_Response' ) ) {
 		 */
 		public function get_headers(): array {
 			return $this->headers;
+		}
+	}
+}
+
+if ( ! class_exists( 'WP_Post' ) ) {
+	/**
+	 * Minimal WP_Post stub for unit tests.
+	 *
+	 * @phpstan-ignore-next-line
+	 */
+	#[\AllowDynamicProperties]
+	class WP_Post {
+
+		public int $ID = 0;
+
+		public string $post_type = 'post';
+
+		public string $post_status = 'publish';
+
+		public string $post_content = '';
+
+		/**
+		 * @param array<string, mixed> $data
+		 */
+		public function __construct( array $data = array() ) {
+			foreach ( $data as $key => $value ) {
+				$this->$key = $value;
+			}
 		}
 	}
 }

@@ -1,8 +1,8 @@
 {
 	"name": "affilicard",
-	"version": "2.3.0",
+	"version": "2.4.0",
 	"private": true,
-	"license": "MIT",
+	"license": "GPL-2.0-or-later",
 	"description": "汎用アフィリエイト商品カード WordPress プラグインの JS ビルド",
 	"engines": {
 		"node": ">=18.12.0"

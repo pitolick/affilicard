@@ -6,6 +6,7 @@ namespace Affilicard\Tests\Unit\Rest;
 use Affilicard\Account\AccountCredentials;
 use Affilicard\Account\AccountInterface;
 use Affilicard\Account\AccountRegistry;
+use Affilicard\Provider\FetchResult;
 use Affilicard\Provider\ProviderInterface;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Rest\CredentialsController;
@@ -121,14 +122,17 @@ final class CredentialsControllerTest extends TestCase {
 				public function accountCode(): ?string {
 					return 'sample';
 				}
-				public function fetch( string $externalId, array $platformConfig ): ?array {
-					return null;
+				public function fetch( string $externalId, array $platformConfig ): FetchResult {
+					return FetchResult::error();
 				}
 				public function testConnection( array $credentials ): array {
 					return array(
 						'ok'      => true,
 						'message' => 'pub=' . ( $credentials['pub'] ?? '' ) . ';sec=' . ( $credentials['sec'] ?? '' ),
 					);
+				}
+				public function minRequestIntervalMs(): int {
+					return 0;
 				}
 			}
 		);
@@ -154,14 +158,17 @@ final class CredentialsControllerTest extends TestCase {
 				public function accountCode(): ?string {
 					return null;
 				}
-				public function fetch( string $externalId, array $platformConfig ): ?array {
-					return null;
+				public function fetch( string $externalId, array $platformConfig ): FetchResult {
+					return FetchResult::error();
 				}
 				public function testConnection( array $credentials ): array {
 					return array(
 						'ok'      => true,
 						'message' => 'keys=' . implode( ',', array_keys( $credentials ) ),
 					);
+				}
+				public function minRequestIntervalMs(): int {
+					return 0;
 				}
 			}
 		);

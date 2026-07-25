@@ -51,6 +51,22 @@ final class UninstallTest extends TestCase {
 		$GLOBALS['wpdb'] = $wpdb;
 	}
 
+	/**
+	 * cleanupQueue() が呼ぶ as_unschedule_all_actions と ratelimit option の delete_option を
+	 * 汎用スタブする（queue クリーンアップの詳細を個別検証しないテスト用。詳細は
+	 * test_run_はprovider別groupのpendingスケジュールをunscheduleする 等の専用テストで検証する）。
+	 */
+	private function stubQueueCleanup(): void {
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->andReturn( null );
+		WP_Mock::userFunction( 'delete_option' )
+			->withArgs(
+				static function ( string $key ): bool {
+					return str_starts_with( $key, 'affilicard_ratelimit_' );
+				}
+			)
+			->andReturn( true );
+	}
+
 	public function test_run_deletes_known_options_and_all_products(): void {
 		$captured = array();
 		$this->mockWpdb( $captured );
@@ -61,6 +77,7 @@ final class UninstallTest extends TestCase {
 				->with( $option_key )
 				->andReturn( true );
 		}
+		$this->stubQueueCleanup();
 
 		WP_Mock::userFunction( 'get_posts' )
 			->once()
@@ -97,6 +114,7 @@ final class UninstallTest extends TestCase {
 				->with( $option_key )
 				->andReturn( true );
 		}
+		$this->stubQueueCleanup();
 
 		WP_Mock::userFunction( 'get_posts' )
 			->once()
@@ -122,6 +140,7 @@ final class UninstallTest extends TestCase {
 		$this->mockWpdb( $captured );
 
 		WP_Mock::userFunction( 'delete_option' )->andReturn( true );
+		$this->stubQueueCleanup();
 		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array() );
 		WP_Mock::userFunction( 'wp_delete_post' )->never();
 
@@ -139,6 +158,7 @@ final class UninstallTest extends TestCase {
 		$this->mockWpdb( $captured );
 
 		WP_Mock::userFunction( 'delete_option' )->andReturn( true );
+		$this->stubQueueCleanup();
 		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array() );
 		WP_Mock::userFunction( 'wp_delete_post' )->never();
 
@@ -149,5 +169,64 @@ final class UninstallTest extends TestCase {
 		$this->assertStringContainsString( 'affilicard', $captured[1] );
 		$this->assertStringContainsString( 'account', $captured[1] );
 		$this->assertStringContainsString( 'LIKE', $captured[1] );
+	}
+
+	/**
+	 * spec §9-7 / v2.4.0: uninstall は account 別 group（`affilicard-{account}`）の pending
+	 * スケジュールを as_unschedule_all_actions で解除する（provider コード単位から account
+	 * コード単位へ統一）。AS 自身のテーブルは他プラグイン共有のため drop しない（unschedule のみ）。
+	 */
+	public function test_run_はaccount別groupのpendingスケジュールをunscheduleする(): void {
+		$captured = array();
+		$this->mockWpdb( $captured );
+
+		WP_Mock::userFunction( 'delete_option' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array() );
+		WP_Mock::userFunction( 'wp_delete_post' )->never();
+
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )
+			->once()
+			->with( '', array(), 'affilicard-dmm' )
+			->andReturn( null );
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )
+			->once()
+			->with( '', array(), 'affilicard-rakuten' )
+			->andReturn( null );
+
+		Uninstall::run();
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * spec §9-7 / v2.4.0: uninstall は自前オプション（throttle 設定）も削除する対象に含む。
+	 * RateLimiter が account 別に書き込む `affilicard_ratelimit_{account}` option を削除する
+	 * （provider コード単位から account コード単位へ統一）。
+	 */
+	public function test_run_はaccount別のratelimitオプションを削除する(): void {
+		$captured = array();
+		$this->mockWpdb( $captured );
+
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->andReturn( null );
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array() );
+		WP_Mock::userFunction( 'wp_delete_post' )->never();
+
+		WP_Mock::userFunction( 'delete_option' )
+			->once()
+			->with( 'affilicard_ratelimit_dmm' )
+			->andReturn( true );
+		WP_Mock::userFunction( 'delete_option' )
+			->once()
+			->with( 'affilicard_ratelimit_rakuten' )
+			->andReturn( true );
+		// 'manual' provider は isAutomatic()===false のため ratelimit option を持たず対象外。
+		WP_Mock::userFunction( 'delete_option' )
+			->with( 'affilicard_ratelimit_manual' )
+			->never();
+		WP_Mock::userFunction( 'delete_option' )->andReturn( true );
+
+		Uninstall::run();
+
+		$this->assertConditionsMet();
 	}
 }

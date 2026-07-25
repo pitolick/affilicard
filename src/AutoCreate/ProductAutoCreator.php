@@ -5,6 +5,7 @@ namespace Affilicard\AutoCreate;
 
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Queue\WorkOutcome;
 use Affilicard\Repository\ProductRepositoryInterface;
 
 /**
@@ -20,26 +21,41 @@ final class ProductAutoCreator {
 		private ProductRepositoryInterface $repository
 	) {}
 
-	public function create( string $platformCode, string $externalId ): ?int {
+	/**
+	 * 商品を1件 auto-create し、結果を WorkOutcome で返す。
+	 *
+	 * give-up 機構（AutoCreateHandler）が terminal/transient を区別できるよう、単なる成否では
+	 * なく3値で返す:
+	 * - SUCCESS           = fetch hit → 商品作成成功
+	 * - TERMINAL_FAILURE  = データ不備（空 ID）・未知 platform・非自動 Provider・fetch miss
+	 *                       （該当なし・無効 ID）。リトライしても成功しないため give-up してよい。
+	 * - TRANSIENT_FAILURE = fetch error（API 到達不可・エラー・認証未設定）・save 失敗。
+	 *                       後で成功し得るため give-up しない。
+	 */
+	public function create( string $platformCode, string $externalId ): WorkOutcome {
 		if ( '' === $platformCode || '' === $externalId ) {
-			return null;
+			return WorkOutcome::TERMINAL_FAILURE;
 		}
 		$definition = PlatformConfig::find( $platformCode );
 		if ( null === $definition ) {
-			return null;
+			return WorkOutcome::TERMINAL_FAILURE;
 		}
 		$provider = $this->registry->get( $definition->provider );
 		if ( null === $provider || ! $provider->isAutomatic() ) {
-			return null;
+			return WorkOutcome::TERMINAL_FAILURE;
 		}
-		$fetched = $provider->fetch( $externalId, array() );
-		if ( null === $fetched ) {
-			return null;
+		$result = $provider->fetch( $externalId, array() );
+		if ( $result->isTerminalMiss() ) {
+			return WorkOutcome::TERMINAL_FAILURE;
+		}
+		if ( ! $result->isHit() ) {
+			return WorkOutcome::TRANSIENT_FAILURE;
 		}
 		$post_id = $this->repository->save(
-			$this->buildProductData( $definition->code, $definition->name, $externalId, $fetched )
+			$this->buildProductData( $definition->code, $definition->name, $externalId, $result->data )
 		);
-		return $post_id > 0 ? $post_id : null;
+		// save 失敗（0）はリトライで解決し得るため一時失敗。
+		return $post_id > 0 ? WorkOutcome::SUCCESS : WorkOutcome::TRANSIENT_FAILURE;
 	}
 
 	/**

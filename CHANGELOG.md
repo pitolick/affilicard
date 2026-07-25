@@ -4,6 +4,36 @@
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-07-24
+
+### Added
+
+- **価格更新を Action Scheduler ベースの非同期キューに移行**した。手動一括更新・cron・公開/更新イベントは「更新ジョブをキューに投入」するだけで即座に返し、実際の価格取得はバックグラウンドの Action Scheduler ランナーが順次処理する。Action Scheduler はプラグインに bundle し、プラグイン読み込み時に同期 require する。
+- **アカウント別レート制限耐性**（`RateLimiter`）を追加。共有 API（アカウント）ごとの最小リクエスト間隔（`ProviderInterface::minRequestIntervalMs()`／楽天=1100ms・DMM=1000ms・手動=0）を **options テーブルの条件付き UPDATE（compare-and-set）でプロセス間アトミックに acquire** し、並行ワーカーでも 1 呼び出しだけが取得する。間隔未経過のジョブはワーカーをブロックせず後ろ倒し再スケジュールする。間隔は 429 バックオフ（指数・上限 1h クランプ）でも延長する。管理画面からアカウント別に上書き可能。
+- **鮮度スキップ／再取得クールダウン**: cron 掃引は listing の **`last_fetched_at`（最終試行時刻・成功/失敗問わず記録）が TTL 内なら再投入しない**（`PriceFreshness::needsRefetch()`）。成功 listing は TTL 毎に更新、**恒久的に失敗する listing も TTL 毎に1回だけ再試行**され、毎掃引の連打・キュー肥大を防ぐ（競合の「24h キャッシュ／数時間待つ」に整合）。表示鮮度（`isPriceDisplayable`＝last_verified_at）は不変。
+- **再取得の適応リード**: 表示鮮度ゲート（`isPriceDisplayable`）は Amazon Creators API・楽天ウェブサービス・DMM いずれの規約とも整合する「価格は取得後 24h まで表示可」に従い **24h（`priceTtlHours`）を維持**する。一方で `needsRefetch` は **掃引間隔 + バッファ（`PriceFreshness::sweepLeadSeconds`）ぶんだけ表示期限より手前で発火**させ（`Enqueuer` のコンストラクタ `sweepLeadSeconds`）、価格が 24h に達する前に再取得・再確認を完了させる。これにより、再取得と表示期限が同じ 24h でバッファゼロだった従来構成で正常運用中に価格が数時間途切れる問題を解消する（再取得しきい値は過剰な API 呼び出しを避けるため `priceTtlHours` の 1/2 未満には下げない）。
+- **トリガーの層構造**: 公開/更新時に記事内商品を force 投入（`PublishTrigger`・`parse_blocks` で解決）、future→publish 昇格・手動更新も enqueue 化。dedup は Action Scheduler ネイティブの `$unique`、優先度は `$priority`（force=0/手動=10/掃引=20）で表現する。
+- **AutoCreate の非同期化**: 未登録ブロックのフロント描画時に同期 API を叩く従来動作を廃し、生成ジョブを enqueue するだけにした（描画の同期 HTTP を除去）。
+- **キュー管理 UI**（設定→更新キュー）: **アカウント別**（DMM／楽天。認証画面と単位を統一）の pending/in-progress/failed 集計・キュー深さ・pause トグル・アカウント別スロットル/保持期間設定・一括操作（全削除/failed 削除/failed 再試行/pending キャンセル）。AS group は `affilicard-{account}`。各設定に説明文を付け、一般設定と同じスタイルに揃えた。REST は `manage_options`。
+- **失敗ハンドリング**: リトライ上限（既定 5 回・指数バックオフ）到達時に**例外を送出して Action Scheduler の "failed" として記録**する（従来は complete 扱いで失敗が不可視だった）。これによりキューパネルの失敗件数・「失敗を再試行」・Scheduled Actions の失敗フィルタが機能する。
+- **更新キュー（ジョブ一覧）を affilicard 自身のメニューに埋め込み**（Phase2 §11-3）。商品一覧の子メニューに「更新キュー（ジョブ一覧）」を追加し、Action Scheduler の一覧（Tools→Scheduled Actions と同じ描画・`ActionScheduler_AdminView::render_admin_ui()` を再利用）をそのまま表示する。検索欄を既定で `affilicard` に絞り込み、Tools に移動しなくても affilicard のジョブを確認できるようにした。AS 自体は同梱パッケージに翻訳を含まないため、affilicard 側で用意した限定的な日本語 .mo（`languages/action-scheduler-ja.mo`。プレースホルダ・複数形を含む文字列は誤翻訳リスクのため対象外）を ja ロケール時のみ明示ロードする。AS 管理ビューが読み込めない環境では Tools 側へのリンクにフォールバックする。
+- ログ保持期間を Action Scheduler の retention フィルタに連動（完了=時間・失敗=日数、既定 24h/7日）。商品一覧の Fallback 列にキュー待ち/失敗理由を連携（provider エラー文字列は `wp_strip_all_tags`＋`esc_attr` の二重防御）。
+- 運用ドキュメント `docs/operations-refresh-queue.md`（サーバ実 cron＋`wp action-scheduler run` 推奨）を追加。
+- プラットフォーム設定に**手動→自動取得への切替を促すヒント**を追加。自動 Provider に対応（`eligibleProvider` 非空）しつつ「価格の取得方法」が『手動入力』（`provider === 'manual'`）のままのプラットフォームで、provider トグル直下に `Notice`（warning）を表示し、自動更新には取得方法の切替（＋別途 API 認証情報の登録）が必要な旨を案内する。認証登録済みでも取得が始まらない発見性の低さを解消する。
+- カード下部の価格鮮度の免責文言を**日付のみから日付＋時刻（サイトのタイムゾーン）**に変更（`※ YYYY年M月D日 HH:MM時点の価格です`）。日付のみだと「時点」が最大24時間の幅を持ち、規約（Amazon Creators API/楽天/DMM とも価格は取得後24h以内の表示）に照らして期限超過に見え得るため、時刻まで明示して「いつ確認したか」を一意にした。
+- **自動更新（`cron_enabled`）の既定を ON** に変更（従来 OFF）。価格を規約準拠の 24h 以内に保つ自動更新は本プラグインの中核で、OFF のままだと価格が順次非表示になるため。新規 install で自動取得プロバイダ未設定なら掃引は何も積まず無害（空回りの WP-Cron イベントのみ）。既に `cron_enabled` を保存済みのサイトは既定変更の影響を受けない（保存値が優先）。
+- 既に自動更新を OFF で保存しているサイト向けに、**自動取得プロバイダが設定済みなのに自動更新が無効なとき、affilicard 管理画面に注意通知**（`CronDisabledNotice`）を表示。「設定 → 一般で有効化」リンクと「今後表示しない」（ユーザーメタで永続）を備え、価格が 24h で非表示になる旨を案内する。全て手動運用のサイトでは表示しない。
+
+### Changed
+
+- 手動更新 REST（`/affilicard/v1/refresh`）・product CPT の future→publish 昇格を、同期処理から Action Scheduler enqueue に変更した（`force` パラメータの「auto_update=false も対象」挙動は維持）。
+- 内部整理: listing の適格性判定（`update_mode`/`enabled`/`auto_update`）を共有ヘルパ `ListingEligibility` に集約。`RefreshHandler` が worker 実行時に `update_mode`/`enabled` を再チェックし、enqueue 後に無効化・手動化された listing を取りこぼさない（TOCTOU 対策。`force` 用に `auto_update` は見ない）。`last_fetched_at` を実 UTC（`gmdate`）で記録。同期スイープ時代の死コード（`ListingRefresher::run()`/`refreshProduct()` 等）を削除。
+
+### Fixed
+
+- **掃引ジョブの決定的スタガリング**でキュー・チャーンを根本抑制。同一 account の sweep ジョブをランダム jitter ではなく実効レート間隔（`minRequestIntervalMs` と管理画面 override の大きい方）ぶんずつ確定的にずらして積むようにし、複数ジョブが同一レート窓へ集中→`RateLimiter` に弾かれ throttle 再投入される completed アクションのチャーン（Playground 実測「1商品に33回」）を回避する。
+- **恒久失敗 listing の give-up マーカー**を追加。**terminal（該当なし・無効 ID）のみ give-up し、transient（API 到達不可・レート制限・保存競合等の一時障害）はリトライして give-up しない**。Provider の取得結果を `FetchResult`（hit=成功／miss=恒久失敗／error=一時失敗）で3値分類し、`WorkOutcome`（SUCCESS／TERMINAL_FAILURE／TRANSIENT_FAILURE）でワーカーの帰結を表す。恒久失敗 listing は即 give-up マーカーを立て `GIVEUP_COOLDOWN`（3 日）掃引でスキップ、fetch 成功でマーカーを消し復旧した listing を通常周期に戻す。一時障害はバックオフでリトライを続け（上限で failed 化はするが give-up マーカーは立てない）、一時障害が続いても価格が 3 日間隠れ続けない（規約上 24h 経過で表示が消える元インシデントを防ぐ）。
+
 ## [2.3.0] - 2026-07-21
 
 ### Added

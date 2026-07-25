@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Provider\Dmm;
 
 use Affilicard\Account\AccountCredentials;
+use Affilicard\Provider\FetchResult;
 use Affilicard\Provider\ProviderInterface;
 
 /**
@@ -32,16 +33,24 @@ final class DmmProvider implements ProviderInterface {
 	}
 
 	/**
+	 * 結果は FetchResult の3値で分類する:
+	 * - credentials 未設定 = error()（transient・後で設定され得る）
+	 * - external_id 空 = miss()（terminal・データ不備。リトライで解決しない）
+	 * - API 到達不可（wp_error/非200/非JSON）= error()（transient）
+	 * - items 空（該当なし）= miss()（terminal）
+	 * - 成功 = hit(data)
+	 *
 	 * @param array<string, mixed> $platformConfig
-	 * @return array<string, mixed>|null
 	 */
-	public function fetch( string $externalId, array $platformConfig ): ?array {
+	public function fetch( string $externalId, array $platformConfig ): FetchResult {
 		$credentials = AccountCredentials::get( (string) $this->accountCode() );
 		if ( empty( $credentials['api_id'] ) || empty( $credentials['affiliate_id'] ) ) {
-			return null;
+			// 認証未設定は一時失敗（transient）。後で登録され得るため give-up しない。
+			return FetchResult::error();
 		}
 		if ( '' === $externalId ) {
-			return null;
+			// external_id 空はデータ不備（無効）＝リトライで解決しない恒久失敗（terminal）。
+			return FetchResult::miss();
 		}
 
 		$url = $this->buildUrl(
@@ -59,26 +68,27 @@ final class DmmProvider implements ProviderInterface {
 
 		$response = wp_remote_get( $url, array( 'timeout' => 10 ) );
 		if ( self::isWpError( $response ) ) {
-			return null;
+			return FetchResult::error();
 		}
 
 		$code = (int) wp_remote_retrieve_response_code( $response );
 		if ( 200 !== $code ) {
-			return null;
+			return FetchResult::error();
 		}
 
 		$body    = (string) wp_remote_retrieve_body( $response );
 		$decoded = json_decode( $body, true );
 		if ( ! is_array( $decoded ) ) {
-			return null;
+			return FetchResult::error();
 		}
 
 		$item = self::firstItem( $decoded );
 		if ( null === $item ) {
-			return null;
+			// API 到達し 200 を得たが該当商品なし＝恒久失敗（terminal）。
+			return FetchResult::miss();
 		}
 
-		return self::normalizeItem( $item );
+		return FetchResult::hit( self::normalizeItem( $item ) );
 	}
 
 	/**
@@ -225,5 +235,9 @@ final class DmmProvider implements ProviderInterface {
 			return (bool) is_wp_error( $value );
 		}
 		return $value instanceof \WP_Error;
+	}
+
+	public function minRequestIntervalMs(): int {
+		return 1000; // 暫定・公式/実測で確定
 	}
 }

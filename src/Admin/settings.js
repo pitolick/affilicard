@@ -3,6 +3,7 @@ import { TabPanel } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import { GeneralPanel } from './components/GeneralPanel';
 import { PlatformsPanel } from './components/PlatformsPanel';
+import { QueuePanel } from './components/QueuePanel';
 
 export function SettingsApp() {
 	return (
@@ -15,11 +16,18 @@ export function SettingsApp() {
 					name: 'platforms',
 					title: __('プラットフォーム', 'affilicard'),
 				},
+				{ name: 'queue', title: __('更新キュー', 'affilicard') },
 			]}
 		>
-			{(tab) =>
-				tab.name === 'general' ? <GeneralPanel /> : <PlatformsPanel />
-			}
+			{(tab) => {
+				if (tab.name === 'platforms') {
+					return <PlatformsPanel />;
+				}
+				if (tab.name === 'queue') {
+					return <QueuePanel />;
+				}
+				return <GeneralPanel />;
+			}}
 		</TabPanel>
 	);
 }

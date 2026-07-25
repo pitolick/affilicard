@@ -168,6 +168,58 @@ final class ProductRepository implements ProductRepositoryInterface {
 	}
 
 	/**
+	 * 指定 platform の listing だけを差し替え、他 listing を保持して原子的に保存する。
+	 *
+	 * find()→save() の全 listings 上書きは、同一商品の別 platform listing を別 account
+	 * group（affilicard-rakuten / affilicard-dmm 等）で並行更新すると後着の save が先着の
+	 * 変更を消す（lost update）。ここでは MySQL 名前付きロックで read-modify-write を
+	 * クリティカルセクション化し、META_LISTINGS をその場で再読込→対象 platform の listing
+	 * だけを $listingFields で丸ごと置換して update_post_meta することで、並行更新された
+	 * 他 platform listing を失わない。external_id は refresh で変わらないため extid ミラー
+	 * 同期（syncExternalIdMirror）は呼ばない。
+	 *
+	 * ロック取得に失敗（0/null）しても RMW は best-effort で続行する（fetch は既に成功済みで、
+	 * ロック不能を理由に更新を捨てる方が有害。取得可否は挙動を変えない安全弁）。
+	 *
+	 * @param array<string, mixed> $listingFields refreshListing() が返すフィールド完全形の listing。
+	 */
+	public function updateListing( int $postId, string $platform, array $listingFields ): bool {
+		global $wpdb;
+
+		// GET_LOCK の名前は 64 バイト以内。post ID は整数なので prefix 込みで超えない。
+		$lock = "affilicard_listing_{$postId}";
+		$got  = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $lock, 10 ) );
+
+		try {
+			$raw      = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
+			$listings = is_string( $raw )
+				? JsonField::decode( $raw, array() )
+				: ( is_array( $raw ) ? $raw : array() );
+
+			$found = false;
+			foreach ( $listings as $index => $listing ) {
+				if ( ! is_array( $listing ) || ( $listing['platform'] ?? '' ) !== $platform ) {
+					continue;
+				}
+				$listings[ $index ] = $listingFields;
+				$found              = true;
+				break;
+			}
+
+			if ( ! $found ) {
+				return false;
+			}
+
+			update_post_meta( $postId, ProductPostType::META_LISTINGS, array_values( $listings ) );
+			return true;
+		} finally {
+			if ( $got > 0 ) {
+				$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock ) );
+			}
+		}
+	}
+
+	/**
 	 * 投稿 ID とデータ配列からメタフィールドのみを保存する。
 	 *
 	 * `save()` の内部でも呼ばれるが、`save_post` ハンドラから直接呼ぶことも想定している。

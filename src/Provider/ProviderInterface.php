@@ -31,12 +31,17 @@ interface ProviderInterface {
 	/**
 	 * 商品 ID から API/スクレイピング等で raw 商品情報を取得する。
 	 *
-	 * 取得不可・credentials 未設定の場合は null を返す。
+	 * 結果は3値で分類して返す:
+	 * - 成功           = FetchResult::hit( $data )  取得データ（title/price/... の連想配列）
+	 * - 恒久失敗(terminal) = FetchResult::miss()   API 到達したが該当商品が無い・無効 ID。
+	 *                                              リトライしても成功しないため give-up してよい。
+	 * - 一時失敗(transient) = FetchResult::error() API 到達不可・エラー・認証未設定等。
+	 *                                              後で成功し得るため give-up せずリトライする。
 	 *
 	 * @param array<string, mixed> $platformConfig 対象 platform の追加設定
-	 * @return array{title?: string, price?: string, list_price?: string, badge?: string, image_url?: string, regular_url?: string, affiliate_url?: string, platform_extras?: array<string, mixed>, raw?: array<string, mixed>}|null
+	 * @return FetchResult 成功=hit(data)／恒久失敗(該当なし・無効ID)=miss()／一時失敗(API到達不可・エラー)=error()
 	 */
-	public function fetch( string $externalId, array $platformConfig ): ?array;
+	public function fetch( string $externalId, array $platformConfig ): FetchResult;
 
 	/**
 	 * credentials を使った疎通確認。
@@ -45,4 +50,10 @@ interface ProviderInterface {
 	 * @return array{ok: bool, message: string}
 	 */
 	public function testConnection( array $credentials ): array;
+
+	/**
+	 * この provider の安全な最小リクエスト間隔（ミリ秒）。手動入力は 0。
+	 * RateLimiter が provider 別 throttle の下限として使う。
+	 */
+	public function minRequestIntervalMs(): int;
 }

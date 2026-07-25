@@ -272,7 +272,8 @@ final class RakutenProviderTest extends TestCase {
 
 		$result = ( new RakutenProvider() )->fetch( '8913122576600', array() );
 
-		$this->assertSame( 'サンプル作品', $result['title'] );
+		$this->assertTrue( $result->isHit() );
+		$this->assertSame( 'サンプル作品', $result->data['title'] );
 		$this->assertStringContainsString( 'itemNumber=8913122576600', $captured );
 		$this->assertStringNotContainsString( 'keyword=', $captured );
 	}
@@ -293,18 +294,20 @@ final class RakutenProviderTest extends TestCase {
 		$this->stubFetchResponse( $item );
 
 		$result = ( new RakutenProvider() )->fetch( '8913122576600', array() );
+		$this->assertTrue( $result->isHit() );
+		$data = $result->data;
 
-		$this->assertSame( 'サンプル作品', $result['title'] );
-		$this->assertSame( '660', $result['price'] );
-		$this->assertSame( '', $result['list_price'] );
-		$this->assertSame( '', $result['badge'] );
-		$this->assertSame( 'https://img.example/large.jpg', $result['image_url'] );
-		$this->assertSame( 'https://shop.example/item/1', $result['regular_url'] );
-		$this->assertSame( 'https://aff.example/hgc/xxx', $result['affiliate_url'] );
-		$this->assertSame( '2026-07-10', $result['platform_extras']['release_date'] );
-		$this->assertSame( 'サンプルシリーズ', $result['platform_extras']['series_name'] );
-		$this->assertSame( 'サンプル著者', $result['platform_extras']['author'] );
-		$this->assertSame( 'サンプル出版', $result['platform_extras']['publisher'] );
+		$this->assertSame( 'サンプル作品', $data['title'] );
+		$this->assertSame( '660', $data['price'] );
+		$this->assertSame( '', $data['list_price'] );
+		$this->assertSame( '', $data['badge'] );
+		$this->assertSame( 'https://img.example/large.jpg', $data['image_url'] );
+		$this->assertSame( 'https://shop.example/item/1', $data['regular_url'] );
+		$this->assertSame( 'https://aff.example/hgc/xxx', $data['affiliate_url'] );
+		$this->assertSame( '2026-07-10', $data['platform_extras']['release_date'] );
+		$this->assertSame( 'サンプルシリーズ', $data['platform_extras']['series_name'] );
+		$this->assertSame( 'サンプル著者', $data['platform_extras']['author'] );
+		$this->assertSame( 'サンプル出版', $data['platform_extras']['publisher'] );
 	}
 
 	public function test_fetch_falls_back_to_medium_image_when_large_missing(): void {
@@ -315,7 +318,8 @@ final class RakutenProviderTest extends TestCase {
 			)
 		);
 		$result = ( new RakutenProvider() )->fetch( '123', array() );
-		$this->assertSame( 'https://img.example/medium.jpg', $result['image_url'] );
+		$this->assertTrue( $result->isHit() );
+		$this->assertSame( 'https://img.example/medium.jpg', $result->data['image_url'] );
 	}
 
 	public function test_fetch_uses_keyword_query_for_non_numeric_external_id(): void {
@@ -354,12 +358,12 @@ final class RakutenProviderTest extends TestCase {
 		$provider = new RakutenProvider();
 		$result   = $provider->fetch( 'deadbeef01', array( 'search_key' => '対象巻タイトル' ) );
 
-		$this->assertIsArray( $result );
-		$this->assertSame( '693', $result['price'] );
-		$this->assertSame( 'https://books.rakuten.co.jp/rk/deadbeef01/', $result['regular_url'] );
+		$this->assertTrue( $result->isHit() );
+		$this->assertSame( '693', $result->data['price'] );
+		$this->assertSame( 'https://books.rakuten.co.jp/rk/deadbeef01/', $result->data['regular_url'] );
 	}
 
-	public function test_fetch_ハッシュ一致0件はnullで非破壊(): void {
+	public function test_fetch_ハッシュ一致0件はmiss_terminalで非破壊(): void {
 		$this->stubRakutenCredentials();
 		$this->stubRakutenResponse(
 			200,
@@ -374,10 +378,10 @@ final class RakutenProviderTest extends TestCase {
 			)
 		);
 		$provider = new RakutenProvider();
-		$this->assertNull( $provider->fetch( 'deadbeef01', array( 'search_key' => 'タイトル' ) ) );
+		$this->assertTrue( $provider->fetch( 'deadbeef01', array( 'search_key' => 'タイトル' ) )->isTerminalMiss() );
 	}
 
-	public function test_fetch_ハッシュ一致が複数はnull_誤上書き防止(): void {
+	public function test_fetch_ハッシュ一致が複数はmiss_terminalで誤上書き防止(): void {
 		$this->stubRakutenCredentials();
 		$this->stubRakutenResponse(
 			200,
@@ -397,7 +401,7 @@ final class RakutenProviderTest extends TestCase {
 			)
 		);
 		$provider = new RakutenProvider();
-		$this->assertNull( $provider->fetch( 'dup', array( 'search_key' => 'タイトル' ) ) );
+		$this->assertTrue( $provider->fetch( 'dup', array( 'search_key' => 'タイトル' ) )->isTerminalMiss() );
 	}
 
 	public function test_fetch_数字externalIdはitemNumber検索で先頭ヒット採用(): void {
@@ -416,33 +420,40 @@ final class RakutenProviderTest extends TestCase {
 		);
 		$provider = new RakutenProvider();
 		$result   = $provider->fetch( '123456', array() ); // search_key 無し・数字 → itemNumber
-		$this->assertIsArray( $result );
-		$this->assertSame( '1200', $result['price'] );
+		$this->assertTrue( $result->isHit() );
+		$this->assertSame( '1200', $result->data['price'] );
 	}
 
-	public function test_fetch_returns_null_when_credentials_missing(): void {
+	public function test_fetch_credentials未設定はerror_transient(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( 'affilicard_account_rakuten_credentials', '' )
 			->andReturn( '' );
 
-		$this->assertNull( ( new RakutenProvider() )->fetch( '123', array() ) );
+		$result = ( new RakutenProvider() )->fetch( '123', array() );
+		// creds 未設定は一時失敗（transient）。後で設定されれば成功し得るため give-up しない。
+		$this->assertFalse( $result->isHit() );
+		$this->assertFalse( $result->isTerminalMiss() );
 	}
 
-	public function test_fetch_returns_null_for_empty_external_id(): void {
+	public function test_fetch_search_keyとexternal_id両方空はmiss_terminal(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( 'affilicard_account_rakuten_credentials', '' )
 			->andReturn( $this->encryptedCredentials() );
 
-		$this->assertNull( ( new RakutenProvider() )->fetch( '', array() ) );
+		// データ不備（両方空）はリトライしても解決しないため恒久失敗（terminal）。
+		$this->assertTrue( ( new RakutenProvider() )->fetch( '', array() )->isTerminalMiss() );
 	}
 
 	/**
+	 * API 到達不可・エラー応答（wp_error・非200・errors・非JSON）は一時失敗（error/transient）。
+	 * 後で API が回復すれば成功し得るため give-up しない。
+	 *
 	 * @param mixed  $remoteReturn wp_remote_get の戻り値
 	 * @param int    $code         HTTP ステータス
 	 * @param string $body         レスポンスボディ
-	 * @dataProvider provideFetchFailureCases
+	 * @dataProvider provideTransientFailureCases
 	 */
-	public function test_fetch_returns_null_on_api_failure( $remoteReturn, int $code, string $body ): void {
+	public function test_fetch_API到達不可やエラーはerror_transient( $remoteReturn, int $code, string $body ): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( 'affilicard_account_rakuten_credentials', '' )
 			->andReturn( $this->encryptedCredentials() );
@@ -457,13 +468,15 @@ final class RakutenProviderTest extends TestCase {
 		WP_Mock::userFunction( 'wp_remote_retrieve_response_code' )->andReturn( $code );
 		WP_Mock::userFunction( 'wp_remote_retrieve_body' )->andReturn( $body );
 
-		$this->assertNull( ( new RakutenProvider() )->fetch( '123', array() ) );
+		$result = ( new RakutenProvider() )->fetch( '123', array() );
+		$this->assertFalse( $result->isHit() );
+		$this->assertFalse( $result->isTerminalMiss() );
 	}
 
 	/**
 	 * @return array<string, array{0: mixed, 1: int, 2: string}>
 	 */
-	public function provideFetchFailureCases(): array {
+	public function provideTransientFailureCases(): array {
 		return array(
 			'wp_error'       => array( new \WP_Error(), 0, '' ),
 			'non_200'        => array( array( 'response' => array( 'code' => 429 ) ), 429, '' ),
@@ -472,13 +485,21 @@ final class RakutenProviderTest extends TestCase {
 				200,
 				json_encode( array( 'errors' => array( 'errorCode' => 403 ) ) ),
 			),
-			'empty_items'    => array(
-				array( 'response' => array( 'code' => 200 ) ),
-				200,
-				json_encode( array( 'Items' => array() ) ),
-			),
 			'not_json'       => array( array( 'response' => array( 'code' => 200 ) ), 200, 'not-json' ),
 		);
+	}
+
+	/**
+	 * 200 で応答したが Items が空（該当商品なし）は恒久失敗（miss/terminal）。
+	 * 同じ検索を繰り返しても該当は現れないため give-up してよい。
+	 */
+	public function test_fetch_200でItems空はmiss_terminal(): void {
+		$this->stubRakutenCredentials();
+		WP_Mock::userFunction( 'wp_remote_get' )->once()->andReturn( array( 'response' => array( 'code' => 200 ) ) );
+		WP_Mock::userFunction( 'wp_remote_retrieve_response_code' )->andReturn( 200 );
+		WP_Mock::userFunction( 'wp_remote_retrieve_body' )->andReturn( json_encode( array( 'Items' => array() ) ) );
+
+		$this->assertTrue( ( new RakutenProvider() )->fetch( '123', array() )->isTerminalMiss() );
 	}
 
 	public function test_normalize_date_returns_empty_for_invalid_format(): void {
@@ -489,6 +510,11 @@ final class RakutenProviderTest extends TestCase {
 			)
 		);
 		$result = ( new RakutenProvider() )->fetch( '123', array() );
-		$this->assertSame( '', $result['platform_extras']['release_date'] );
+		$this->assertTrue( $result->isHit() );
+		$this->assertSame( '', $result->data['platform_extras']['release_date'] );
+	}
+
+	public function test_minRequestIntervalMs_楽天は1100(): void {
+		$this->assertSame( 1100, ( new RakutenProvider() )->minRequestIntervalMs() );
 	}
 }
