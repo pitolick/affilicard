@@ -870,7 +870,8 @@ final class CardRendererTest extends TestCase {
 		// （フッターの「最新日付選択」ロジック自体は Task 10 の鮮度ゲートとは別に検証したい）。
 		$html = ( new CardRenderer() )->render( $product, array( $this->store( 87600 ) ) );
 		$this->assertStringContainsString( 'affilicard-card__timestamp', $html );
-		$this->assertStringContainsString( '2026年4月20日時点の価格', $html );
+		// 日付＋時刻（サイト tz）まで表示して鮮度を一意にする。
+		$this->assertStringContainsString( gmdate( 'Y年n月j日 H:i', strtotime( '2026-04-20T10:30:00+09:00' ) ) . '時点の価格', $html );
 	}
 
 	public function test_uses_latest_last_verified_at_across_listings(): void {
@@ -895,7 +896,7 @@ final class CardRendererTest extends TestCase {
 			)
 		);
 		$html    = ( new CardRenderer() )->render( $product, array( $this->store( 87600 ) ) );
-		$this->assertStringContainsString( '2026年4月20日時点の価格', $html );
+		$this->assertStringContainsString( gmdate( 'Y年n月j日 H:i', strtotime( '2026-04-20T09:00:00+09:00' ) ) . '時点の価格', $html );
 	}
 
 	public function test_no_timestamp_footer_when_no_last_verified_at(): void {
@@ -1027,7 +1028,7 @@ final class CardRendererTest extends TestCase {
 			)
 		);
 		$this->assertStringContainsString( 'affilicard-card__timestamp', $html );
-		$this->assertStringContainsString( gmdate( 'Y年n月j日', $ts ) . '時点の価格', $html );
+		$this->assertStringContainsString( gmdate( 'Y年n月j日 H:i', $ts ) . '時点の価格', $html );
 	}
 
 	public function test_未確認価格のみではフッターの免責文言は出ない(): void {
@@ -1161,7 +1162,7 @@ final class CardRendererTest extends TestCase {
 			array( $this->dmmBooks( 87600 ), $this->store( 87600 ) ),
 			array( 'only_platforms' => array( 'dmm-books' ) )
 		);
-		$this->assertStringContainsString( '2026年4月18日時点の価格', $html );
+		$this->assertStringContainsString( gmdate( 'Y年n月j日 H:i', strtotime( '2026-04-18T09:00:00+09:00' ) ) . '時点の価格', $html );
 		$this->assertStringNotContainsString( '2026年4月25日', $html );
 	}
 
@@ -1189,7 +1190,7 @@ final class CardRendererTest extends TestCase {
 			)
 		);
 		$html    = ( new CardRenderer() )->render( $product, array( $this->dmmBooks( 87600 ), $this->store( 87600 ) ) );
-		$this->assertStringContainsString( '2026年4月18日時点の価格', $html );
+		$this->assertStringContainsString( gmdate( 'Y年n月j日 H:i', strtotime( '2026-04-18T09:00:00+09:00' ) ) . '時点の価格', $html );
 		$this->assertStringNotContainsString( '2026年4月25日', $html );
 	}
 
@@ -1220,7 +1221,7 @@ final class CardRendererTest extends TestCase {
 			array( $this->dmmBooks( 87600 ), $this->store( 87600 ) ),
 			array( 'hide_platforms' => array( 'example-store' ) )
 		);
-		$this->assertStringContainsString( '2026年4月18日時点の価格', $html );
+		$this->assertStringContainsString( gmdate( 'Y年n月j日 H:i', strtotime( '2026-04-18T09:00:00+09:00' ) ) . '時点の価格', $html );
 		$this->assertStringNotContainsString( '2026年4月25日', $html );
 	}
 

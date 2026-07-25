@@ -267,7 +267,9 @@ final class CardRenderer {
 
 	/**
 	 * 表示中（API確認済み・鮮度内＝PriceFreshness::isPriceDisplayable）listing のうち
-	 * 最新 last_verified_at（ISO8601）から「※ YYYY年M月D日時点の価格です。…」を生成する。
+	 * 最新 last_verified_at（ISO8601）から「※ YYYY年M月D日 HH:MM時点の価格です。…」を生成する。
+	 * 日付のみだと「時点」が最大24時間の幅を持ち、規約（価格は取得後24h以内）に照らして
+	 * 期限超過に見え得るため、時刻（サイトのタイムゾーン）まで明示して鮮度を一意にする。
 	 * 表示中の価格 listing が1件も無ければ空文字（免責文言は出さない＝手動/未確認/期限切れのみの
 	 * カードでは価格の裏付けが無いため注記自体を出さない）。
 	 *
@@ -296,9 +298,12 @@ final class CardRenderer {
 		if ( 0 === $latest ) {
 			return '';
 		}
-		$date = (string) wp_date( 'Y年n月j日', $latest );
+		// 日付＋時刻（サイトのタイムゾーン）まで表示する。日付のみだと最大24時間の幅が生まれ、
+		// 規約（Amazon Creators API/楽天/DMM とも価格は取得後24h以内の表示）に照らして期限超過に
+		// 見え得るため、時刻を添えて「いつ確認したか」を一意にする。
+		$date = (string) wp_date( 'Y年n月j日 H:i', $latest );
 		$note = sprintf(
-			/* translators: %s: formatted date */
+			/* translators: %s: formatted date and time */
 			(string) __( '※ %s時点の価格です。最新価格は各販売サイトでご確認ください。', 'affilicard' ),
 			$date
 		);
