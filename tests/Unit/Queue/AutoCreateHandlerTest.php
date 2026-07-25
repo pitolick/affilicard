@@ -164,7 +164,25 @@ final class AutoCreateHandlerTest extends TestCase {
 			->with( 'affilicard_throttle_waits_rakuten-kobo_ext-001', 6, DAY_IN_SECONDS )
 			->andReturn( true );
 		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 ); // rescheduleAutoCreate の jitter
-		WP_Mock::userFunction( 'as_schedule_single_action' )->once(); // rescheduleAutoCreate
+		// rescheduleAutoCreate: 未来時刻・同一 payload・group・unique=false・priority を検証する
+		// （呼び出し有無だけでなくスケジュール契約の誤りを検出できるようにする）。
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::on(
+					static function ( $when ) {
+						return is_int( $when ) && $when > time();
+					}
+				),
+				Enqueuer::HOOK_AUTOCREATE,
+				array(
+					'platform'    => 'rakuten-kobo',
+					'external_id' => 'ext-001',
+				),
+				'affilicard-rakuten',
+				false,
+				Enqueuer::PRIORITY_FORCE
+			)
+			->andReturn( 1 );
 
 		$provider = $this->provider();
 		$provider->shouldNotReceive( 'fetch' );
@@ -206,8 +224,25 @@ final class AutoCreateHandlerTest extends TestCase {
 			->with( 'affilicard_throttle_waits_rakuten-kobo_ext-001', 30, DAY_IN_SECONDS )
 			->andReturn( true );
 		WP_Mock::userFunction( 'delete_transient' )->never();
-		// 打ち切らず、長い遅延で再投入して保持する（reschedule=as_schedule_single_action 1回）。
-		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 777 );
+		// 打ち切らず、長い遅延（最低でも +1h）で再投入して保持する。時刻・同一 payload・group・
+		// unique=false・priority まで検証し、スケジュール契約の誤りを検出できるようにする。
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::on(
+					static function ( $when ) {
+						return is_int( $when ) && $when >= time() + HOUR_IN_SECONDS;
+					}
+				),
+				Enqueuer::HOOK_AUTOCREATE,
+				array(
+					'platform'    => 'rakuten-kobo',
+					'external_id' => 'ext-001',
+				),
+				'affilicard-rakuten',
+				false,
+				Enqueuer::PRIORITY_FORCE
+			)
+			->andReturn( 777 );
 
 		$provider = $this->provider();
 		$provider->shouldNotReceive( 'fetch' );
