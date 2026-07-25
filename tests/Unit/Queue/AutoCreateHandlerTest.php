@@ -164,13 +164,15 @@ final class AutoCreateHandlerTest extends TestCase {
 			->with( 'affilicard_throttle_waits_rakuten-kobo_ext-001', 6, DAY_IN_SECONDS )
 			->andReturn( true );
 		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 ); // rescheduleAutoCreate の jitter
+		// 下限は handle() 実行前に捕捉する（closure 内で time() を評価すると境界で flaky になり得る）。
+		$not_before = time();
 		// rescheduleAutoCreate: 未来時刻・同一 payload・group・unique=false・priority を検証する
 		// （呼び出し有無だけでなくスケジュール契約の誤りを検出できるようにする）。
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(
 				Mockery::on(
-					static function ( $when ) {
-						return is_int( $when ) && $when > time();
+					static function ( $when ) use ( $not_before ) {
+						return is_int( $when ) && $when >= $not_before;
 					}
 				),
 				Enqueuer::HOOK_AUTOCREATE,
@@ -224,13 +226,16 @@ final class AutoCreateHandlerTest extends TestCase {
 			->with( 'affilicard_throttle_waits_rakuten-kobo_ext-001', 30, DAY_IN_SECONDS )
 			->andReturn( true );
 		WP_Mock::userFunction( 'delete_transient' )->never();
+		// 下限は handle() 実行前に捕捉する（closure 内で time() を評価すると、$when 算出時刻と
+		// マッチ時刻がずれて境界で flaky になり得るため）。
+		$not_before = time() + HOUR_IN_SECONDS;
 		// 打ち切らず、長い遅延（最低でも +1h）で再投入して保持する。時刻・同一 payload・group・
 		// unique=false・priority まで検証し、スケジュール契約の誤りを検出できるようにする。
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(
 				Mockery::on(
-					static function ( $when ) {
-						return is_int( $when ) && $when >= time() + HOUR_IN_SECONDS;
+					static function ( $when ) use ( $not_before ) {
+						return is_int( $when ) && $when >= $not_before;
 					}
 				),
 				Enqueuer::HOOK_AUTOCREATE,
