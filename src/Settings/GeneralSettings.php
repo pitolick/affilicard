@@ -15,7 +15,10 @@ final class GeneralSettings {
 	public const DEFAULTS = array(
 		'cache_ttl_seconds'      => 86400,
 		'default_product_type'   => 'generic',
-		'cron_enabled'           => false,
+		// 既定 ON: 自動更新は本プラグインの中核（価格を規約準拠の 24h 以内に保つ）。新規 install で
+		// 自動取得プロバイダ未設定なら掃引は何も積まず無害（空回りの WP-Cron イベントのみ）。既に
+		// cron_enabled を保存済みのサイトはこの既定変更の影響を受けない（保存値が優先）。
+		'cron_enabled'           => true,
 		'refresh_interval_hours' => 3,
 		'schema_version'         => 2,
 		'queue_paused'           => false,

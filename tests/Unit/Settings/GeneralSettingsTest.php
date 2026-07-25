@@ -28,7 +28,8 @@ final class GeneralSettingsTest extends TestCase {
 
 		$this->assertSame( 86400, $result['cache_ttl_seconds'] );
 		$this->assertSame( 'generic', $result['default_product_type'] );
-		$this->assertFalse( $result['cron_enabled'] );
+		// 既定 ON（自動更新は中核機能・未設定なら空回りで無害）。
+		$this->assertTrue( $result['cron_enabled'] );
 		$this->assertSame( 3, $result['refresh_interval_hours'] );
 		$this->assertSame( 2, $result['schema_version'] );
 	}
@@ -198,8 +199,15 @@ final class GeneralSettingsTest extends TestCase {
 		$this->assertTrue( GeneralSettings::isCronEnabled() );
 	}
 
-	public function test_is_cron_enabled_defaults_false(): void {
+	public function test_is_cron_enabled_defaults_true(): void {
+		// 既定 ON（自動更新は中核機能）。保存済みで false のサイトは影響を受けない。
 		WP_Mock::userFunction( 'get_option' )->with( GeneralSettings::OPTION_KEY, array() )->andReturn( array() );
+		$this->assertTrue( GeneralSettings::isCronEnabled() );
+	}
+
+	public function test_is_cron_enabled_reflects_saved_false(): void {
+		// 既に false を保存済みのサイトは既定変更の影響を受けず OFF のまま。
+		WP_Mock::userFunction( 'get_option' )->with( GeneralSettings::OPTION_KEY, array() )->andReturn( array( 'cron_enabled' => false ) );
 		$this->assertFalse( GeneralSettings::isCronEnabled() );
 	}
 

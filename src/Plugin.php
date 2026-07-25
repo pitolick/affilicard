@@ -83,6 +83,7 @@ final class Plugin {
 			$dashboard = new DashboardWidget( new ProductRepository() );
 			$dashboard->register();
 
+			\Affilicard\Admin\CronDisabledNotice::register();
 			add_action( 'admin_menu', array( self::class, 'registerSettingsPage' ) );
 			add_action( 'admin_menu', array( QueueJobsPage::class, 'registerMenu' ) );
 			// affilicard 独自の「更新キュー（ジョブ一覧）」を持つため、Tools > Scheduled Actions の
