@@ -3,6 +3,7 @@ import { Button, Notice, TabPanel } from '@wordpress/components';
 import { __, sprintf } from '@wordpress/i18n';
 import { fetchPlatforms, updatePlatforms } from '../api/platforms';
 import { enabledRanks, movePlatform } from '../platformOrder';
+import { useFlipReorder } from '../useFlipReorder';
 import { PlatformEditor } from './PlatformEditor';
 import { ApiCredentialsPanel } from './ApiCredentialsPanel';
 
@@ -36,6 +37,7 @@ export function PlatformsPanel() {
 	const [ notice, setNotice ] = useState( null );
 	const [ announcement, setAnnouncement ] = useState( '' );
 	const listRef = useRef( null );
+	useFlipReorder( listRef );
 
 	useEffect( () => {
 		fetchPlatforms()
