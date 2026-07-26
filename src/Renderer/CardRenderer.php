@@ -318,8 +318,9 @@ final class CardRenderer {
 	 * @param array<string, string>             $cta_overrides ブロック属性由来の CTA ラベル上書き（code→label）
 	 */
 	/**
-	 * 表示対象（platform 既知・hide 非該当・only 許可・platform/listing 有効）の listing だけを返す。
-	 * CTA 行（renderListings）と日時フッター（renderTimestamp）が同一集合を見るための共有フィルタ。
+	 * 表示対象（platform 既知・hide 非該当・only 許可・platform/listing 有効）の listing だけを、
+	 * platform の displayOrder 昇順（同値は元の出現順）で返す。
+	 * CTA 行（renderListings）と日時フッター（renderTimestamp）が同一集合・同一順序を見るための共有フィルタ。
 	 *
 	 * @param list<array<string, mixed>>        $listings
 	 * @param array<string, PlatformDefinition> $by_code
@@ -355,7 +356,47 @@ final class CardRenderer {
 			}
 			$out[] = $listing;
 		}
-		return $out;
+		return $this->sortByDisplayOrder( $out, $by_code );
+	}
+
+	/**
+	 * listing を platform の displayOrder 昇順に並べ替える。同値は元の出現順を保つ。
+	 *
+	 * CTA 行の並びを listing の登録順から切り離すのが目的。listing を後から追記する運用
+	 * （生成後に別ストアの listing を merge する等）では登録順がカードごとにばらつき、
+	 * 同一記事内でボタン位置が食い違うため、表示順はプラットフォーム設定を単一の出所とする。
+	 *
+	 * PHP 8.0 以降の usort は安定ソートだが、意図を明示するため元 index を第 2 キーにする。
+	 *
+	 * @param list<array<string, mixed>>        $listings visibleListings() でフィルタ済みの listing
+	 * @param array<string, PlatformDefinition> $by_code  code => PlatformDefinition（全 code 存在が保証済み）
+	 * @return list<array<string, mixed>>
+	 */
+	private function sortByDisplayOrder( array $listings, array $by_code ): array {
+		$indexed = array();
+		foreach ( $listings as $index => $listing ) {
+			$indexed[] = array(
+				'index'   => $index,
+				'order'   => $by_code[ (string) $listing['platform'] ]->displayOrder,
+				'listing' => $listing,
+			);
+		}
+
+		usort(
+			$indexed,
+			static function ( array $a, array $b ): int {
+				if ( $a['order'] === $b['order'] ) {
+					return $a['index'] <=> $b['index'];
+				}
+				return $a['order'] <=> $b['order'];
+			}
+		);
+
+		$sorted = array();
+		foreach ( $indexed as $entry ) {
+			$sorted[] = $entry['listing'];
+		}
+		return $sorted;
 	}
 
 	/**

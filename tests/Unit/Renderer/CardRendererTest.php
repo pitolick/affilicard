@@ -1545,4 +1545,110 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( 'https://cdn/eye.jpg', $html );
 		$this->assertStringNotContainsString( 'javascript:alert', $html );
 	}
+
+	/**
+	 * 表示順テスト用の platform を作る。imagePriority は displayOrder と独立であることを
+	 * 明示するため、意図的に displayOrder と逆順の値を渡せるようにしてある。
+	 */
+	private function orderedPlatform( string $code, string $name, int $displayOrder ): PlatformDefinition {
+		return new PlatformDefinition(
+			$code,
+			$name,
+			'manual',
+			$displayOrder,
+			true,
+			array( 'ebook' ),
+			$name . 'で読む',
+			'#444444',
+			'#ffffff'
+		);
+	}
+
+	/**
+	 * @param list<string> $codes
+	 * @return array<string, mixed>
+	 */
+	private function productWithListings( array $codes ): array {
+		$listings = array();
+		foreach ( $codes as $code ) {
+			$listings[] = array(
+				'platform'      => $code,
+				'enabled'       => true,
+				'affiliate_url' => 'https://example.test/' . $code,
+			);
+		}
+		return array(
+			'title'        => 'テスト商品',
+			'stock_status' => 'available',
+			'listings'     => $listings,
+		);
+	}
+
+	public function test_cta_rows_follow_display_order_not_listing_order(): void {
+		// listing は登録順（ストアC → ストアA → ストアB）だが、displayOrder は A=1, B=2, C=3。
+		$platforms = array(
+			$this->orderedPlatform( 'store-a', 'ストアA', 1 ),
+			$this->orderedPlatform( 'store-b', 'ストアB', 2 ),
+			$this->orderedPlatform( 'store-c', 'ストアC', 3 ),
+		);
+		$html = ( new CardRenderer() )->render(
+			$this->productWithListings( array( 'store-c', 'store-a', 'store-b' ) ),
+			$platforms
+		);
+		$pos_a = strpos( $html, 'https://example.test/store-a' );
+		$pos_b = strpos( $html, 'https://example.test/store-b' );
+		$pos_c = strpos( $html, 'https://example.test/store-c' );
+		$this->assertLessThan( $pos_b, $pos_a );
+		$this->assertLessThan( $pos_c, $pos_b );
+	}
+
+	public function test_cta_rows_keep_listing_order_when_display_order_ties(): void {
+		// displayOrder が同値なら登録順を保つ（安定ソート）。
+		$platforms = array(
+			$this->orderedPlatform( 'store-a', 'ストアA', 7 ),
+			$this->orderedPlatform( 'store-b', 'ストアB', 7 ),
+		);
+		$html = ( new CardRenderer() )->render(
+			$this->productWithListings( array( 'store-b', 'store-a' ) ),
+			$platforms
+		);
+		$this->assertLessThan(
+			strpos( $html, 'https://example.test/store-a' ),
+			strpos( $html, 'https://example.test/store-b' )
+		);
+	}
+
+	public function test_disabled_platform_is_excluded_and_rest_follows_display_order(): void {
+		$platforms = array(
+			$this->orderedPlatform( 'store-a', 'ストアA', 1 ),
+			new PlatformDefinition( 'store-b', 'ストアB', 'manual', 2, false, array( 'ebook' ), 'ストアBで読む', '#444444', '#ffffff' ),
+			$this->orderedPlatform( 'store-c', 'ストアC', 3 ),
+		);
+		$html = ( new CardRenderer() )->render(
+			$this->productWithListings( array( 'store-c', 'store-b', 'store-a' ) ),
+			$platforms
+		);
+		$this->assertStringNotContainsString( 'https://example.test/store-b', $html );
+		$this->assertLessThan(
+			strpos( $html, 'https://example.test/store-c' ),
+			strpos( $html, 'https://example.test/store-a' )
+		);
+	}
+
+	public function test_only_platforms_is_a_filter_and_does_not_define_order(): void {
+		// only_platforms の指定順は許可リストであって順序ではない。
+		$platforms = array(
+			$this->orderedPlatform( 'store-a', 'ストアA', 1 ),
+			$this->orderedPlatform( 'store-b', 'ストアB', 2 ),
+		);
+		$html = ( new CardRenderer() )->render(
+			$this->productWithListings( array( 'store-a', 'store-b' ) ),
+			$platforms,
+			array( 'only_platforms' => array( 'store-b', 'store-a' ) )
+		);
+		$this->assertLessThan(
+			strpos( $html, 'https://example.test/store-b' ),
+			strpos( $html, 'https://example.test/store-a' )
+		);
+	}
 }
