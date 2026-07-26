@@ -311,11 +311,12 @@ describe( 'PlatformEditor', () => {
 		expect(
 			screen.getByLabelText( 'ボタンラベル' )
 		).toBeInTheDocument();
-		expect( screen.getByLabelText( '表示順' ) ).toBeInTheDocument();
 		expect( screen.getByLabelText( 'ブランド色' ) ).toBeInTheDocument();
 		expect(
 			screen.getByLabelText( 'ボタン文字色' )
 		).toBeInTheDocument();
+		// 表示順は PlatformsPanel の ↑ / ↓ に一本化したため、ここには無い
+		expect( screen.queryByLabelText( '表示順' ) ).not.toBeInTheDocument();
 	} );
 
 	test( 'onChange propagates patch to parent', () => {

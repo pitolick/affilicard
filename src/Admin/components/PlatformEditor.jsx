@@ -74,14 +74,6 @@ export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 					onChange={(v) => update({ buttonLabel: v })}
 				/>
 				<TextControl
-					label={__('表示順', 'affilicard')}
-					type="number"
-					value={String(platform.displayOrder ?? 1)}
-					onChange={(v) =>
-						update({ displayOrder: parseInt(v, 10) || 1 })
-					}
-				/>
-				<TextControl
 					label={__('画像優先度（小さいほど優先）', 'affilicard')}
 					type="number"
 					value={String(platform.imagePriority ?? 999)}

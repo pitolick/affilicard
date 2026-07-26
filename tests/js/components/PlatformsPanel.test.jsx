@@ -146,4 +146,146 @@ describe( 'PlatformsPanel', () => {
 			screen.getByRole( 'tab', { name: 'API 認証' } )
 		).toBeInTheDocument();
 	} );
+	// 並べ替え検証用: 有効 a(1) / 無効 b(2) / 有効 c(3)。
+	// 無効行を挟むことで「無効を飛ばして有効同士が入れ替わる」ことを検証できる。
+	const orderable = [
+		{
+			code: 'a',
+			name: 'ストアA',
+			provider: 'manual',
+			enabled: true,
+			displayOrder: 1,
+			applicableTypes: [ 'ebook' ],
+			buttonLabel: 'Aで読む',
+			brandColor: '#444',
+			buttonTextColor: '#fff',
+		},
+		{
+			code: 'b',
+			name: 'ストアB',
+			provider: 'manual',
+			enabled: false,
+			displayOrder: 2,
+			applicableTypes: [ 'ebook' ],
+			buttonLabel: 'Bで読む',
+			brandColor: '#444',
+			buttonTextColor: '#fff',
+		},
+		{
+			code: 'c',
+			name: 'ストアC',
+			provider: 'manual',
+			enabled: true,
+			displayOrder: 3,
+			applicableTypes: [ 'ebook' ],
+			buttonLabel: 'Cで読む',
+			brandColor: '#444',
+			buttonTextColor: '#fff',
+		},
+	];
+
+	const renderOrderable = async () => {
+		fetchPlatforms.mockResolvedValue( orderable );
+		const view = render( <PlatformsPanel /> );
+		await screen.findByText( /ストアA \(a\)/ );
+		return view;
+	};
+
+	const rowCodes = ( container ) =>
+		Array.from(
+			container.querySelectorAll( '.affilicard-platform-row' )
+		).map( ( row ) => row.dataset.platformCode );
+
+	test( '並び順の説明文をタブ内に表示する', async () => {
+		await renderOrderable();
+		expect(
+			screen.getByText( /この順番で商品カードのボタンが上から並びます/ )
+		).toBeInTheDocument();
+		expect(
+			screen.getByText( /無効なプラットフォームはカードに表示されない/ )
+		).toBeInTheDocument();
+		expect(
+			screen.getByText( /公開済みの記事のカードにも反映されます/ )
+		).toBeInTheDocument();
+	} );
+
+	test( '有効な platform には順位バッジ、無効には — を出す', async () => {
+		const { container } = await renderOrderable();
+		const ranks = Array.from(
+			container.querySelectorAll( '.affilicard-platform-row__rank' )
+		).map( ( el ) => el.textContent );
+		expect( ranks ).toEqual( [ '1', '—', '2' ] );
+	} );
+
+	test( '無効な platform には並べ替えボタンを出さない', async () => {
+		await renderOrderable();
+		expect(
+			screen.queryByRole( 'button', { name: 'ストアBを上へ移動' } )
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole( 'button', { name: 'ストアBを下へ移動' } )
+		).not.toBeInTheDocument();
+	} );
+
+	test( '↓ を押すと無効行を飛ばして次の有効行と入れ替わる', async () => {
+		const { container } = await renderOrderable();
+		fireEvent.click(
+			screen.getByRole( 'button', { name: 'ストアAを下へ移動' } )
+		);
+		expect( rowCodes( container ) ).toEqual( [ 'c', 'b', 'a' ] );
+	} );
+
+	test( '↑ を押すと前の有効行と入れ替わる', async () => {
+		const { container } = await renderOrderable();
+		fireEvent.click(
+			screen.getByRole( 'button', { name: 'ストアCを上へ移動' } )
+		);
+		expect( rowCodes( container ) ).toEqual( [ 'c', 'b', 'a' ] );
+	} );
+
+	test( '先頭の ↑ と末尾の ↓ は disabled', async () => {
+		await renderOrderable();
+		expect(
+			screen.getByRole( 'button', { name: 'ストアAを上へ移動' } )
+		).toBeDisabled();
+		expect(
+			screen.getByRole( 'button', { name: 'ストアCを下へ移動' } )
+		).toBeDisabled();
+		expect(
+			screen.getByRole( 'button', { name: 'ストアAを下へ移動' } )
+		).toBeEnabled();
+	} );
+
+	test( '並べ替えの結果を aria-live で通知する', async () => {
+		const { container } = await renderOrderable();
+		fireEvent.click(
+			screen.getByRole( 'button', { name: 'ストアAを下へ移動' } )
+		);
+		expect(
+			container.querySelector( '[aria-live="polite"]' )
+		).toHaveTextContent( 'ストアAを 2 番目に移動しました' );
+	} );
+
+	test( '並べ替えて保存すると displayOrder が 1..N の連番で送られる', async () => {
+		updatePlatforms.mockResolvedValue( orderable );
+		await renderOrderable();
+		fireEvent.click(
+			screen.getByRole( 'button', { name: 'ストアAを下へ移動' } )
+		);
+		fireEvent.click( screen.getByRole( 'button', { name: '保存' } ) );
+		await waitFor( () => expect( updatePlatforms ).toHaveBeenCalled() );
+		const sent = updatePlatforms.mock.calls[ 0 ][ 0 ];
+		expect( sent.map( ( p ) => p.code ) ).toEqual( [ 'c', 'b', 'a' ] );
+		expect( sent.map( ( p ) => p.displayOrder ) ).toEqual( [ 1, 2, 3 ] );
+	} );
+
+	test( 'Element.prototype.animate が無い環境でも並べ替えは成立する', async () => {
+		// jsdom には animate が無い。アニメーションは装飾であり機能の前提にしない。
+		expect( typeof Element.prototype.animate ).toBe( 'undefined' );
+		const { container } = await renderOrderable();
+		fireEvent.click(
+			screen.getByRole( 'button', { name: 'ストアAを下へ移動' } )
+		);
+		expect( rowCodes( container ) ).toEqual( [ 'c', 'b', 'a' ] );
+	} );
 } );

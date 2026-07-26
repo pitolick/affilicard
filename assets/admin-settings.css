@@ -126,6 +126,63 @@
 	border-top: 1px solid #e0e0e0;
 }
 
+/* 並べ替えの説明。何の順番なのかが画面から読み取れるよう、リストの直前に置く。 */
+#affilicard-settings-root .affilicard-platforms-panel__order-help {
+	margin: 0 0 12px;
+	color: #50575e;
+	font-size: 13px;
+}
+
+#affilicard-settings-root .affilicard-platforms-panel__order-help p {
+	margin: 0 0 4px;
+}
+
+#affilicard-settings-root .affilicard-platforms-panel__order-help ul {
+	margin: 0;
+	padding-left: 1.2em;
+	list-style: disc;
+}
+
+/* 1 行 = 並べ替えコントロール（左） + 既存のアコーディオン（右）。
+   ↑ / ↓ は PanelBody のタイトル（button 要素）の中に入れられないため外側に出す。 */
+#affilicard-settings-root .affilicard-platform-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	border-bottom: 1px solid #e0e0e0;
+}
+
+#affilicard-settings-root .affilicard-platform-row:last-child {
+	border-bottom: 0;
+}
+
+#affilicard-settings-root .affilicard-platform-row__order {
+	display: flex;
+	flex: 0 0 auto;
+	align-items: center;
+	gap: 2px;
+	padding-top: 10px;
+}
+
+#affilicard-settings-root .affilicard-platform-row__rank {
+	display: inline-block;
+	min-width: 1.5em;
+	text-align: center;
+	font-size: 12px;
+	font-weight: 600;
+	color: #50575e;
+}
+
+#affilicard-settings-root .affilicard-platform-row__body {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+/* 無効なプラットフォームはカードに出ない＝並びに参加しないことを見た目でも示す */
+#affilicard-settings-root .affilicard-platform-row--disabled {
+	opacity: 0.6;
+}
+
 /* 型タブ内の保存ボタンをアコーディオンから離す */
 #affilicard-settings-root .affilicard-platforms-panel__save {
 	margin-top: 16px;
