@@ -1591,13 +1591,13 @@ final class CardRendererTest extends TestCase {
 			$this->orderedPlatform( 'store-b', 'ストアB', 2 ),
 			$this->orderedPlatform( 'store-c', 'ストアC', 3 ),
 		);
-		$html = ( new CardRenderer() )->render(
+		$html      = ( new CardRenderer() )->render(
 			$this->productWithListings( array( 'store-c', 'store-a', 'store-b' ) ),
 			$platforms
 		);
-		$pos_a = strpos( $html, 'https://example.test/store-a' );
-		$pos_b = strpos( $html, 'https://example.test/store-b' );
-		$pos_c = strpos( $html, 'https://example.test/store-c' );
+		$pos_a     = strpos( $html, 'https://example.test/store-a' );
+		$pos_b     = strpos( $html, 'https://example.test/store-b' );
+		$pos_c     = strpos( $html, 'https://example.test/store-c' );
 		$this->assertLessThan( $pos_b, $pos_a );
 		$this->assertLessThan( $pos_c, $pos_b );
 	}
@@ -1608,7 +1608,7 @@ final class CardRendererTest extends TestCase {
 			$this->orderedPlatform( 'store-a', 'ストアA', 7 ),
 			$this->orderedPlatform( 'store-b', 'ストアB', 7 ),
 		);
-		$html = ( new CardRenderer() )->render(
+		$html      = ( new CardRenderer() )->render(
 			$this->productWithListings( array( 'store-b', 'store-a' ) ),
 			$platforms
 		);
@@ -1624,7 +1624,7 @@ final class CardRendererTest extends TestCase {
 			new PlatformDefinition( 'store-b', 'ストアB', 'manual', 2, false, array( 'ebook' ), 'ストアBで読む', '#444444', '#ffffff' ),
 			$this->orderedPlatform( 'store-c', 'ストアC', 3 ),
 		);
-		$html = ( new CardRenderer() )->render(
+		$html      = ( new CardRenderer() )->render(
 			$this->productWithListings( array( 'store-c', 'store-b', 'store-a' ) ),
 			$platforms
 		);
@@ -1641,7 +1641,7 @@ final class CardRendererTest extends TestCase {
 			$this->orderedPlatform( 'store-a', 'ストアA', 1 ),
 			$this->orderedPlatform( 'store-b', 'ストアB', 2 ),
 		);
-		$html = ( new CardRenderer() )->render(
+		$html      = ( new CardRenderer() )->render(
 			$this->productWithListings( array( 'store-a', 'store-b' ) ),
 			$platforms,
 			array( 'only_platforms' => array( 'store-b', 'store-a' ) )
