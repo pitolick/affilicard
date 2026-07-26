@@ -288,4 +288,22 @@ describe( 'PlatformsPanel', () => {
 		);
 		expect( rowCodes( container ) ).toEqual( [ 'c', 'b', 'a' ] );
 	} );
+
+	test( '端に到達してボタンが disabled になったら同じ行のもう一方へフォーカスを移す', async () => {
+		await renderOrderable();
+		// ストアAを下へ移動すると A は末尾の有効行になり、A の ↓ が disabled になる。
+		fireEvent.click(
+			screen.getByRole( 'button', { name: 'ストアAを下へ移動' } )
+		);
+		// 前提条件: 押した本人のボタンが disabled になっていること。
+		expect(
+			screen.getByRole( 'button', { name: 'ストアAを下へ移動' } )
+		).toBeDisabled();
+		// requestAnimationFrame の中で行われるフォーカス移送を待つ。
+		await waitFor( () =>
+			expect(
+				screen.getByRole( 'button', { name: 'ストアAを上へ移動' } )
+			).toHaveFocus()
+		);
+	} );
 } );
