@@ -307,14 +307,60 @@ describe( 'PlatformsPanel', () => {
 		);
 	} );
 
+	// 非連番 displayOrder フィクスチャ。正規化の検出力をテストするため、
+	// displayOrder が [5, 7, 9] という欠番フィクスチャ。
+	const nonSequentialOrderable = [
+		{
+			code: 'x',
+			name: 'ストアX',
+			provider: 'manual',
+			enabled: true,
+			displayOrder: 5,
+			applicableTypes: [ 'ebook' ],
+			buttonLabel: 'Xで読む',
+			brandColor: '#444',
+			buttonTextColor: '#fff',
+		},
+		{
+			code: 'y',
+			name: 'ストアY',
+			provider: 'manual',
+			enabled: true,
+			displayOrder: 7,
+			applicableTypes: [ 'ebook' ],
+			buttonLabel: 'Yで読む',
+			brandColor: '#444',
+			buttonTextColor: '#fff',
+		},
+		{
+			code: 'z',
+			name: 'ストアZ',
+			provider: 'manual',
+			enabled: true,
+			displayOrder: 9,
+			applicableTypes: [ 'ebook' ],
+			buttonLabel: 'Zで読む',
+			brandColor: '#444',
+			buttonTextColor: '#fff',
+		},
+	];
+
+	const renderNonSequentialOrderable = async () => {
+		fetchPlatforms.mockResolvedValue( nonSequentialOrderable );
+		const view = render( <PlatformsPanel /> );
+		await screen.findByText( /ストアX \(x\)/ );
+		return view;
+	};
+
 	test( '並べ替えずに保存したときは displayOrder を振り直さない', async () => {
 		// 正規化は並べ替え時にだけ起きるため、↑ / ↓ を一度も押さずに保存すると、
-		// フィクスチャの displayOrder 値 (1, 2, 3) のまま保存される。
-		updatePlatforms.mockResolvedValue( orderable );
-		await renderOrderable();
+		// フィクスチャの非連番 displayOrder 値 [5, 7, 9] のまま保存される。
+		// もし onSave が誤って renumberDisplayOrder() を呼ぶようになれば、[1, 2, 3] に変わるため即座に落ちる。
+		updatePlatforms.mockResolvedValue( nonSequentialOrderable );
+		await renderNonSequentialOrderable();
 		fireEvent.click( screen.getByRole( 'button', { name: '保存' } ) );
 		await waitFor( () => expect( updatePlatforms ).toHaveBeenCalled() );
 		const sent = updatePlatforms.mock.calls[ 0 ][ 0 ];
-		expect( sent.map( ( p ) => p.displayOrder ) ).toEqual( [ 1, 2, 3 ] );
+		expect( sent.map( ( p ) => p.displayOrder ) ).toEqual( [ 5, 7, 9 ] );
 	} );
 } );
