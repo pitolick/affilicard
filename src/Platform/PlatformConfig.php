@@ -102,7 +102,6 @@ final class PlatformConfig {
 				__( 'DMMブックスで読む', 'affilicard' ),
 				'#d72d65',
 				'#ffffff',
-				imagePriority: 10,
 				eligibleProvider: 'dmm-ebook',
 				priceTtlHours: 24
 			),
@@ -116,7 +115,6 @@ final class PlatformConfig {
 				__( 'Kindleで読む', 'affilicard' ),
 				'#ff9900',
 				'#000000',
-				imagePriority: 20,
 				priceTtlHours: 24
 			),
 			new PlatformDefinition(
@@ -129,7 +127,6 @@ final class PlatformConfig {
 				__( '楽天Koboで読む', 'affilicard' ),
 				'#bf0000',
 				'#ffffff',
-				imagePriority: 30,
 				eligibleProvider: 'rakuten-kobo',
 				priceTtlHours: 24
 			),

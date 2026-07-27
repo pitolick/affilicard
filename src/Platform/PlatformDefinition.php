@@ -23,7 +23,6 @@ final class PlatformDefinition {
 		public readonly string $buttonLabel,
 		public readonly string $brandColor,
 		public readonly string $buttonTextColor,
-		public readonly int $imagePriority = 999,
 		public readonly string $eligibleProvider = '',
 		public readonly int $priceTtlHours = 24
 	) {
@@ -46,7 +45,6 @@ final class PlatformDefinition {
 			'buttonLabel'      => $this->buttonLabel,
 			'brandColor'       => $this->brandColor,
 			'buttonTextColor'  => $this->buttonTextColor,
-			'imagePriority'    => $this->imagePriority,
 			'eligibleProvider' => $this->eligibleProvider,
 			'priceTtlHours'    => $this->priceTtlHours,
 		);
@@ -80,8 +78,6 @@ final class PlatformDefinition {
 			$price_ttl = 24;
 		}
 
-		$image_priority = isset( $data['imagePriority'] ) ? (int) $data['imagePriority'] : 999;
-
 		return new self(
 			$code,
 			isset( $data['name'] ) ? (string) $data['name'] : $code,
@@ -92,7 +88,6 @@ final class PlatformDefinition {
 			isset( $data['buttonLabel'] ) && '' !== (string) $data['buttonLabel'] ? (string) $data['buttonLabel'] : '購入する',
 			isset( $data['brandColor'] ) && '' !== (string) $data['brandColor'] ? (string) $data['brandColor'] : '#444444',
 			isset( $data['buttonTextColor'] ) && '' !== (string) $data['buttonTextColor'] ? (string) $data['buttonTextColor'] : '#ffffff',
-			$image_priority,
 			isset( $data['eligibleProvider'] ) ? (string) $data['eligibleProvider'] : '',
 			$price_ttl
 		);

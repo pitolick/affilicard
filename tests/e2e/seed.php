@@ -110,9 +110,41 @@ $repo->saveMeta(
 	)
 );
 
+// 表示順テスト用。listing は displayOrder の逆順（楽天Kobo=3 → DMMブックス=1）で登録し、
+// カードの CTA が登録順ではなく displayOrder 順に並ぶことを検証できるようにする。
+$display_order_id = $repo->save(
+	array(
+		'title'        => 'E2E 表示順テスト商品',
+		'status'       => 'publish',
+		'product_type' => 'ebook',
+		'stock_status' => 'available',
+		'listings'     => array(
+			array(
+				'platform'      => 'rakuten-kobo',
+				'enabled'       => true,
+				'update_mode'   => 'manual',
+				'auto_update'   => false,
+				'affiliate_url' => 'https://example.com/aff-order-kobo',
+				'regular_url'   => '',
+				'image_url'     => 'https://example.com/cover-kobo.png',
+			),
+			array(
+				'platform'      => 'dmm-books',
+				'enabled'       => true,
+				'update_mode'   => 'manual',
+				'auto_update'   => false,
+				'affiliate_url' => 'https://example.com/aff-order-dmm',
+				'regular_url'   => '',
+				'image_url'     => 'https://example.com/cover-dmm.png',
+			),
+		),
+	)
+);
+
 $available_post = $make_post( array( 'productId' => $available_id, 'ctaBgColor' => '#123456' ) );
 $out_post       = $make_post( array( 'productId' => $out_id ) );
 $future_post    = $make_post( array( 'productId' => $future_id ) );
+$display_order_post = $make_post( array( 'productId' => $display_order_id ) );
 
 echo 'SEED_JSON:' . wp_json_encode(
 	array(
@@ -122,5 +154,6 @@ echo 'SEED_JSON:' . wp_json_encode(
 		'futurePostId'       => $future_post,
 		'futureProductId'    => $future_id,
 		'draftProductId'     => $draft_id,
+		'displayOrderPostId' => $display_order_post,
 	)
 ) . "\n";

@@ -108,15 +108,20 @@ describe( 'PlatformsPanel', () => {
 		).not.toBeInTheDocument();
 	} );
 
-	test( 'opens the first platform by default', async () => {
+	test( 'どの行も initialOpen が true にならない（並べ替えで開閉が変わらないことの担保）', async () => {
+		// 行の開閉を先頭かどうかに依存させると、並べ替えで先頭が入れ替わるたびに
+		// 開閉状態も移動してしまい操作が分かりづらくなる。並べ替え UI としては
+		// どの行も既定で畳まれているべきで、位置によらず initialOpen は常に false になる。
 		fetchPlatforms.mockResolvedValue( platforms );
 		const { container } = render( <PlatformsPanel /> );
 		await waitFor( () =>
 			expect( screen.getByText( /DMM \(dmm\)/ ) ).toBeInTheDocument()
 		);
 		const panels = container.querySelectorAll( '[data-panel]' );
-		expect( panels[ 0 ] ).toHaveAttribute( 'data-initial-open', 'true' );
-		expect( panels[ 1 ] ).toHaveAttribute( 'data-initial-open', 'false' );
+		expect( panels ).toHaveLength( 2 );
+		panels.forEach( ( panel ) => {
+			expect( panel ).toHaveAttribute( 'data-initial-open', 'false' );
+		} );
 	} );
 
 	test( 'renders product-type sub-tabs and an API auth tab', async () => {
@@ -145,5 +150,238 @@ describe( 'PlatformsPanel', () => {
 		expect(
 			screen.getByRole( 'tab', { name: 'API 認証' } )
 		).toBeInTheDocument();
+	} );
+	// 並べ替え検証用: 有効 a(1) / 無効 b(2) / 有効 c(3)。
+	// 無効行を挟むことで「無効を飛ばして有効同士が入れ替わる」ことを検証できる。
+	const orderable = [
+		{
+			code: 'a',
+			name: 'ストアA',
+			provider: 'manual',
+			enabled: true,
+			displayOrder: 1,
+			applicableTypes: [ 'ebook' ],
+			buttonLabel: 'Aで読む',
+			brandColor: '#444',
+			buttonTextColor: '#fff',
+		},
+		{
+			code: 'b',
+			name: 'ストアB',
+			provider: 'manual',
+			enabled: false,
+			displayOrder: 2,
+			applicableTypes: [ 'ebook' ],
+			buttonLabel: 'Bで読む',
+			brandColor: '#444',
+			buttonTextColor: '#fff',
+		},
+		{
+			code: 'c',
+			name: 'ストアC',
+			provider: 'manual',
+			enabled: true,
+			displayOrder: 3,
+			applicableTypes: [ 'ebook' ],
+			buttonLabel: 'Cで読む',
+			brandColor: '#444',
+			buttonTextColor: '#fff',
+		},
+	];
+
+	const renderOrderable = async () => {
+		fetchPlatforms.mockResolvedValue( orderable );
+		const view = render( <PlatformsPanel /> );
+		await screen.findByText( /ストアA \(a\)/ );
+		return view;
+	};
+
+	const rowCodes = ( container ) =>
+		Array.from(
+			container.querySelectorAll( '.affilicard-platform-row' )
+		).map( ( row ) => row.dataset.platformCode );
+
+	test( '並び順の説明文をタブ内に表示する', async () => {
+		await renderOrderable();
+		expect(
+			screen.getByText( /この順番で商品カードのボタンが上から並びます/ )
+		).toBeInTheDocument();
+		expect(
+			screen.getByText( /無効なプラットフォームはカードに表示されない/ )
+		).toBeInTheDocument();
+		expect(
+			screen.getByText( /公開済みの記事のカードにも反映されます/ )
+		).toBeInTheDocument();
+	} );
+
+	test( '有効な platform には順位バッジ、無効には — を出す', async () => {
+		const { container } = await renderOrderable();
+		const badges = Array.from(
+			container.querySelectorAll( '.affilicard-platform-row__rank' )
+		);
+		// a(有効・1 番目)・b(無効)・c(有効・2 番目) の順。
+		// 単位テキスト（screen-reader-text の「番目」）が加わるため textContent の
+		// 完全一致ではなく、数字が含まれるかどうかで検証する。
+		expect( badges[ 0 ].textContent ).toContain( '1' );
+		expect( badges[ 1 ].textContent ).toBe( '—' );
+		expect( badges[ 2 ].textContent ).toContain( '2' );
+	} );
+
+	test( '有効な行のバッジは支援技術に読み上げられ、無効な行は aria-hidden のまま', async () => {
+		const { container } = await renderOrderable();
+		const badges = Array.from(
+			container.querySelectorAll( '.affilicard-platform-row__rank' )
+		);
+		// a(有効)・b(無効)・c(有効) の順。
+		expect( badges[ 0 ] ).not.toHaveAttribute( 'aria-hidden' );
+		expect( badges[ 1 ] ).toHaveAttribute( 'aria-hidden', 'true' );
+		expect( badges[ 2 ] ).not.toHaveAttribute( 'aria-hidden' );
+	} );
+
+	test( '無効な platform には並べ替えボタンを出さない', async () => {
+		await renderOrderable();
+		expect(
+			screen.queryByRole( 'button', { name: 'ストアBを上へ移動' } )
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole( 'button', { name: 'ストアBを下へ移動' } )
+		).not.toBeInTheDocument();
+	} );
+
+	test( '↓ を押すと無効行を飛ばして次の有効行と入れ替わる', async () => {
+		const { container } = await renderOrderable();
+		fireEvent.click(
+			screen.getByRole( 'button', { name: 'ストアAを下へ移動' } )
+		);
+		expect( rowCodes( container ) ).toEqual( [ 'c', 'b', 'a' ] );
+	} );
+
+	test( '↑ を押すと前の有効行と入れ替わる', async () => {
+		const { container } = await renderOrderable();
+		fireEvent.click(
+			screen.getByRole( 'button', { name: 'ストアCを上へ移動' } )
+		);
+		expect( rowCodes( container ) ).toEqual( [ 'c', 'b', 'a' ] );
+	} );
+
+	test( '先頭の ↑ と末尾の ↓ は disabled', async () => {
+		await renderOrderable();
+		expect(
+			screen.getByRole( 'button', { name: 'ストアAを上へ移動' } )
+		).toBeDisabled();
+		expect(
+			screen.getByRole( 'button', { name: 'ストアCを下へ移動' } )
+		).toBeDisabled();
+		expect(
+			screen.getByRole( 'button', { name: 'ストアAを下へ移動' } )
+		).toBeEnabled();
+	} );
+
+	test( '並べ替えの結果を aria-live で通知する', async () => {
+		const { container } = await renderOrderable();
+		fireEvent.click(
+			screen.getByRole( 'button', { name: 'ストアAを下へ移動' } )
+		);
+		expect(
+			container.querySelector( '[aria-live="polite"]' )
+		).toHaveTextContent( 'ストアAを 2 番目に移動しました' );
+	} );
+
+	test( '並べ替えて保存すると displayOrder が 1..N の連番で送られる', async () => {
+		updatePlatforms.mockResolvedValue( orderable );
+		await renderOrderable();
+		fireEvent.click(
+			screen.getByRole( 'button', { name: 'ストアAを下へ移動' } )
+		);
+		fireEvent.click( screen.getByRole( 'button', { name: '保存' } ) );
+		await waitFor( () => expect( updatePlatforms ).toHaveBeenCalled() );
+		const sent = updatePlatforms.mock.calls[ 0 ][ 0 ];
+		expect( sent.map( ( p ) => p.code ) ).toEqual( [ 'c', 'b', 'a' ] );
+		expect( sent.map( ( p ) => p.displayOrder ) ).toEqual( [ 1, 2, 3 ] );
+	} );
+
+	test( 'Element.prototype.animate が無い環境でも並べ替えは成立する', async () => {
+		// jsdom には animate が無い。アニメーションは装飾であり機能の前提にしない。
+		expect( typeof Element.prototype.animate ).toBe( 'undefined' );
+		const { container } = await renderOrderable();
+		fireEvent.click(
+			screen.getByRole( 'button', { name: 'ストアAを下へ移動' } )
+		);
+		expect( rowCodes( container ) ).toEqual( [ 'c', 'b', 'a' ] );
+	} );
+
+	test( '端に到達してボタンが disabled になったら同じ行のもう一方へフォーカスを移す', async () => {
+		await renderOrderable();
+		// ストアAを下へ移動すると A は末尾の有効行になり、A の ↓ が disabled になる。
+		fireEvent.click(
+			screen.getByRole( 'button', { name: 'ストアAを下へ移動' } )
+		);
+		// 前提条件: 押した本人のボタンが disabled になっていること。
+		expect(
+			screen.getByRole( 'button', { name: 'ストアAを下へ移動' } )
+		).toBeDisabled();
+		// requestAnimationFrame の中で行われるフォーカス移送を待つ。
+		await waitFor( () =>
+			expect(
+				screen.getByRole( 'button', { name: 'ストアAを上へ移動' } )
+			).toHaveFocus()
+		);
+	} );
+
+	// 非連番 displayOrder フィクスチャ。正規化の検出力をテストするため、
+	// displayOrder が [5, 7, 9] という欠番フィクスチャ。
+	const nonSequentialOrderable = [
+		{
+			code: 'x',
+			name: 'ストアX',
+			provider: 'manual',
+			enabled: true,
+			displayOrder: 5,
+			applicableTypes: [ 'ebook' ],
+			buttonLabel: 'Xで読む',
+			brandColor: '#444',
+			buttonTextColor: '#fff',
+		},
+		{
+			code: 'y',
+			name: 'ストアY',
+			provider: 'manual',
+			enabled: true,
+			displayOrder: 7,
+			applicableTypes: [ 'ebook' ],
+			buttonLabel: 'Yで読む',
+			brandColor: '#444',
+			buttonTextColor: '#fff',
+		},
+		{
+			code: 'z',
+			name: 'ストアZ',
+			provider: 'manual',
+			enabled: true,
+			displayOrder: 9,
+			applicableTypes: [ 'ebook' ],
+			buttonLabel: 'Zで読む',
+			brandColor: '#444',
+			buttonTextColor: '#fff',
+		},
+	];
+
+	const renderNonSequentialOrderable = async () => {
+		fetchPlatforms.mockResolvedValue( nonSequentialOrderable );
+		const view = render( <PlatformsPanel /> );
+		await screen.findByText( /ストアX \(x\)/ );
+		return view;
+	};
+
+	test( '並べ替えずに保存したときは displayOrder を振り直さない', async () => {
+		// 正規化は並べ替え時にだけ起きるため、↑ / ↓ を一度も押さずに保存すると、
+		// フィクスチャの非連番 displayOrder 値 [5, 7, 9] のまま保存される。
+		// もし onSave が誤って renumberDisplayOrder() を呼ぶようになれば、[1, 2, 3] に変わるため即座に落ちる。
+		updatePlatforms.mockResolvedValue( nonSequentialOrderable );
+		await renderNonSequentialOrderable();
+		fireEvent.click( screen.getByRole( 'button', { name: '保存' } ) );
+		await waitFor( () => expect( updatePlatforms ).toHaveBeenCalled() );
+		const sent = updatePlatforms.mock.calls[ 0 ][ 0 ];
+		expect( sent.map( ( p ) => p.displayOrder ) ).toEqual( [ 5, 7, 9 ] );
 	} );
 } );
