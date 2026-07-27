@@ -178,8 +178,11 @@
 	min-width: 0;
 }
 
-/* 無効なプラットフォームはカードに出ない＝並びに参加しないことを見た目でも示す */
-#affilicard-settings-root .affilicard-platform-row--disabled {
+/* 無効なプラットフォームは並び順に参加しないことを順位カラムの淡色で示す。
+   行全体を薄くすると、アコーディオン内の編集可能なテキストのコントラストが
+   WCAG 1.4.3 を下回るため、対象を順序コントロールに限定する。
+   無効であること自体はアコーディオンのタイトル（「— 無効」）が伝える。 */
+#affilicard-settings-root .affilicard-platform-row--disabled .affilicard-platform-row__order {
 	opacity: 0.6;
 }
 

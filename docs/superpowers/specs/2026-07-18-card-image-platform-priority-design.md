@@ -4,6 +4,8 @@
 > プラットフォーム設定の「表示順」に統合されている。
 > 現行設計は `2026-07-26-platform-display-order-design.md` を参照。
 
+---
+
 > **作成: 2026-07-18**
 > 対象: affilicard（全 product_type 共通仕様）。想定バージョン **v2.1.0**（後方互換の MINOR）。
 
