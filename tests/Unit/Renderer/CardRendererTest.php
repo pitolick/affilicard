@@ -1417,7 +1417,7 @@ final class CardRendererTest extends TestCase {
 		);
 	}
 
-	public function test_card_image_follows_platform_priority_dmm_over_kobo(): void {
+	public function test_card_image_follows_display_order_dmm_over_kobo(): void {
 		$product = array(
 			'title'        => 'X',
 			'stock_status' => 'available',
@@ -1457,7 +1457,7 @@ final class CardRendererTest extends TestCase {
 				),
 			),
 		);
-		// 楽天Kobo のみ表示 → DMM の方が優先度高いが表示外なので Kobo 画像を使う。
+		// 楽天Kobo のみ表示 → DMM の方が表示順は先だが表示外なので Kobo 画像を使う。
 		$html = ( new CardRenderer() )->render(
 			$product,
 			$this->bookPlatforms(),

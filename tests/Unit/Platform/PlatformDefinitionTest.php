@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace Affilicard\Tests\Unit\Platform;
 
-use Affilicard\Platform\PlatformConfig;
 use Affilicard\Platform\PlatformDefinition;
 use InvalidArgumentException;
 use WP_Mock;
