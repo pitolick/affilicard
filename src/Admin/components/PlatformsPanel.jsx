@@ -181,7 +181,7 @@ export function PlatformsPanel() {
 								className="affilicard-platform-list"
 								ref={ listRef }
 							>
-								{ indexed.map( ( { p, i }, localIdx ) => (
+								{ indexed.map( ( { p, i } ) => (
 									<div
 										className={
 											p.enabled
@@ -266,10 +266,18 @@ export function PlatformsPanel() {
 											) }
 										</div>
 										<div className="affilicard-platform-row__body">
+											{ /*
+											 * PanelBody はユーザーが手動でトグルするまで、毎レンダーで
+											 * initialOpen prop を読み直して開閉を決める（@wordpress/components の
+											 * useControlledState 実装）。そのため initialOpen を行の位置（先頭かどうか）
+											 * に依存させると、並べ替えで先頭が入れ替わるたびに開閉状態も一緒に
+											 * 移動してしまい、並べ替え操作が分かりづらくなる。並べ替え UI としては
+											 * どの行も既定で畳まれている方が順序を一覧しやすいため、常に false にする。
+											 */ }
 											<PlatformEditor
 												platform={ p }
 												onChange={ onChange( i ) }
-												initialOpen={ localIdx === 0 }
+												initialOpen={ false }
 											/>
 										</div>
 									</div>

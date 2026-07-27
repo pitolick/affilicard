@@ -108,15 +108,20 @@ describe( 'PlatformsPanel', () => {
 		).not.toBeInTheDocument();
 	} );
 
-	test( 'opens the first platform by default', async () => {
+	test( 'どの行も initialOpen が true にならない（並べ替えで開閉が変わらないことの担保）', async () => {
+		// 行の開閉を先頭かどうかに依存させると、並べ替えで先頭が入れ替わるたびに
+		// 開閉状態も移動してしまい操作が分かりづらくなる。並べ替え UI としては
+		// どの行も既定で畳まれているべきで、位置によらず initialOpen は常に false になる。
 		fetchPlatforms.mockResolvedValue( platforms );
 		const { container } = render( <PlatformsPanel /> );
 		await waitFor( () =>
 			expect( screen.getByText( /DMM \(dmm\)/ ) ).toBeInTheDocument()
 		);
 		const panels = container.querySelectorAll( '[data-panel]' );
-		expect( panels[ 0 ] ).toHaveAttribute( 'data-initial-open', 'true' );
-		expect( panels[ 1 ] ).toHaveAttribute( 'data-initial-open', 'false' );
+		expect( panels ).toHaveLength( 2 );
+		panels.forEach( ( panel ) => {
+			expect( panel ).toHaveAttribute( 'data-initial-open', 'false' );
+		} );
 	} );
 
 	test( 'renders product-type sub-tabs and an API auth tab', async () => {
