@@ -1918,4 +1918,7 @@ git commit -m "feat!: 商品カードの書影も表示順で選ぶようにし 
 - [ ] `docker run --rm -v "$(pwd):/app" -w /app php:8.2-cli php vendor/bin/phpcs` が ERRORS 0 / WARNINGS 0
 - [ ] `npm run test:e2e` が全 PASS
 - [ ] `affilicard.php` の `Version:` と `package.json` の `version` が `3.0.0` で一致
-- [ ] `grep -rn "imagePriority" src tests` のヒットが 0 件
+- [ ] `imagePriority` が実ロジックから消えている（`PlatformDefinition` のコンストラクタ・`toArray()`・
+  `fromArray()`、`PlatformConfig::defaults()`、`selectCardImage()`、管理画面 UI）。
+  撤去の経緯を説明する docblock コメントと、「キーが無いこと」「旧データを読み捨てること」を
+  検証するテストに名前が残るのは正しい状態
