@@ -1411,9 +1411,9 @@ final class CardRendererTest extends TestCase {
 	/** @return list<PlatformDefinition> */
 	private function bookPlatforms(): array {
 		return array(
-			new PlatformDefinition( 'dmm-books', 'DMMブックス', 'manual', 1, true, array( 'ebook' ), 'DMMで読む', '#000', '#fff', imagePriority: 10 ),
-			new PlatformDefinition( 'amazon-kindle', 'Amazon', 'manual', 2, true, array( 'ebook' ), 'Kindleで読む', '#000', '#fff', imagePriority: 20 ),
-			new PlatformDefinition( 'rakuten-kobo', '楽天Kobo', 'manual', 3, true, array( 'ebook' ), 'Koboで読む', '#000', '#fff', imagePriority: 30 ),
+			new PlatformDefinition( 'dmm-books', 'DMMブックス', 'manual', 1, true, array( 'ebook' ), 'DMMで読む', '#000', '#fff' ),
+			new PlatformDefinition( 'amazon-kindle', 'Amazon', 'manual', 2, true, array( 'ebook' ), 'Kindleで読む', '#000', '#fff' ),
+			new PlatformDefinition( 'rakuten-kobo', '楽天Kobo', 'manual', 3, true, array( 'ebook' ), 'Koboで読む', '#000', '#fff' ),
 		);
 	}
 
@@ -1485,32 +1485,6 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( 'https://cdn/eyecatch.jpg', $html );
 	}
 
-	public function test_card_image_tiebreak_prefers_lower_display_order_on_equal_priority(): void {
-		$platforms = array(
-			new PlatformDefinition( 'store-a', 'A', 'manual', 2, true, array( 'ebook' ), 'Aで読む', '#000', '#fff', imagePriority: 10 ),
-			new PlatformDefinition( 'store-b', 'B', 'manual', 1, true, array( 'ebook' ), 'Bで読む', '#000', '#fff', imagePriority: 10 ),
-		);
-		$product   = array(
-			'title'        => 'X',
-			'stock_status' => 'available',
-			'listings'     => array(
-				array(
-					'platform'      => 'store-a',
-					'affiliate_url' => 'https://a/a',
-					'image_url'     => 'https://cdn/a.jpg',
-				),
-				array(
-					'platform'      => 'store-b',
-					'affiliate_url' => 'https://a/b',
-					'image_url'     => 'https://cdn/b.jpg',
-				),
-			),
-		);
-		$html      = ( new CardRenderer() )->render( $product, $platforms, array( 'image_url' => 'https://cdn/eye.jpg' ) );
-		$this->assertStringContainsString( 'https://cdn/b.jpg', $html );
-		$this->assertStringNotContainsString( 'https://cdn/a.jpg', $html );
-	}
-
 	public function test_card_image_skips_empty_string_image_url(): void {
 		$product = array(
 			'title'        => 'X',
@@ -1547,8 +1521,8 @@ final class CardRendererTest extends TestCase {
 	}
 
 	/**
-	 * 表示順テスト用の platform を作る。imagePriority は displayOrder と独立であることを
-	 * 明示するため、意図的に displayOrder と逆順の値を渡せるようにしてある。
+	 * 表示順テスト用の platform を作る。displayOrder を任意の値に設定でき、
+	 * listing の登録順とは独立に並びを検証できる。
 	 */
 	private function orderedPlatform( string $code, string $name, int $displayOrder ): PlatformDefinition {
 		return new PlatformDefinition(
@@ -1650,5 +1624,78 @@ final class CardRendererTest extends TestCase {
 			strpos( $html, 'https://example.test/store-b' ),
 			strpos( $html, 'https://example.test/store-a' )
 		);
+	}
+
+	public function test_card_image_comes_from_the_first_platform_in_display_order(): void {
+		$platforms = array(
+			$this->orderedPlatform( 'store-a', 'ストアA', 1 ),
+			$this->orderedPlatform( 'store-b', 'ストアB', 2 ),
+		);
+		// listing の登録順は逆（B → A）。表示順の先頭は A なので A の画像が選ばれる。
+		$product = array(
+			'title'        => 'テスト商品',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'      => 'store-b',
+					'enabled'       => true,
+					'affiliate_url' => 'https://example.test/store-b',
+					'image_url'     => 'https://cdn.test/b.jpg',
+				),
+				array(
+					'platform'      => 'store-a',
+					'enabled'       => true,
+					'affiliate_url' => 'https://example.test/store-a',
+					'image_url'     => 'https://cdn.test/a.jpg',
+				),
+			),
+		);
+		$html    = ( new CardRenderer() )->render( $product, $platforms, array( 'image_url' => 'https://cdn.test/eyecatch.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn.test/a.jpg', $html );
+		$this->assertStringNotContainsString( 'https://cdn.test/b.jpg', $html );
+	}
+
+	public function test_card_image_falls_back_to_next_listing_when_first_has_no_image(): void {
+		$platforms = array(
+			$this->orderedPlatform( 'store-a', 'ストアA', 1 ),
+			$this->orderedPlatform( 'store-b', 'ストアB', 2 ),
+		);
+		$product   = array(
+			'title'        => 'テスト商品',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'      => 'store-a',
+					'enabled'       => true,
+					'affiliate_url' => 'https://example.test/store-a',
+					'image_url'     => '',
+				),
+				array(
+					'platform'      => 'store-b',
+					'enabled'       => true,
+					'affiliate_url' => 'https://example.test/store-b',
+					'image_url'     => 'https://cdn.test/b.jpg',
+				),
+			),
+		);
+		$html      = ( new CardRenderer() )->render( $product, $platforms, array( 'image_url' => 'https://cdn.test/eyecatch.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn.test/b.jpg', $html );
+	}
+
+	public function test_card_image_falls_back_to_featured_image_when_no_listing_has_one(): void {
+		$platforms = array( $this->orderedPlatform( 'store-a', 'ストアA', 1 ) );
+		$product   = array(
+			'title'        => 'テスト商品',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'      => 'store-a',
+					'enabled'       => true,
+					'affiliate_url' => 'https://example.test/store-a',
+				),
+			),
+		);
+		$html      = ( new CardRenderer() )->render( $product, $platforms, array( 'image_url' => 'https://cdn.test/eyecatch.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn.test/eyecatch.jpg', $html );
 	}
 }

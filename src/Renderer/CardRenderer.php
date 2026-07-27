@@ -48,7 +48,7 @@ final class CardRenderer {
 			$hide,
 			$only
 		);
-		$image_url        = $this->selectCardImage( $visible_listings, $by_code, $fallback_image );
+		$image_url        = $this->selectCardImage( $visible_listings, $fallback_image );
 		$colors           = isset( $options['colors'] ) && is_array( $options['colors'] ) ? $options['colors'] : array();
 		$header_keys      = isset( $options['header_keys'] ) && is_array( $options['header_keys'] ) ? array_map( 'strval', $options['header_keys'] ) : array( 'author', 'publisher' );
 		$hidden_keys      = isset( $options['hidden_keys'] ) && is_array( $options['hidden_keys'] ) ? array_map( 'strval', $options['hidden_keys'] ) : array();
@@ -400,33 +400,25 @@ final class CardRenderer {
 	}
 
 	/**
-	 * 表示中 listing のうち image_url 非空のものから imagePriority 順で 1 枚選ぶ。
-	 * 同値は displayOrder 昇順 → 出現順。無ければ $fallback（WP アイキャッチ）。
+	 * 表示中 listing を表示順（displayOrder 昇順）の先頭から走査し、image_url が非空の
+	 * 最初の 1 件を書影に採る。どれにも無ければ $fallback（WP アイキャッチ）。
 	 *
-	 * @param list<array<string, mixed>>        $visibleListings visibleListings() の戻り
-	 * @param array<string, PlatformDefinition> $by_code       code => PlatformDefinition
+	 * 書影の選択順は CTA ボタンの並びと同じ「表示順」に従う。かつて存在した imagePriority
+	 * （書影だけを別の優先度で選ぶ設定）は撤去した。設定はあるのに描画へ効かない値を
+	 * 増やさないため、順序の概念を displayOrder 1 本に統合する。
+	 *
+	 * @param list<array<string, mixed>> $visibleListings visibleListings() の戻り（displayOrder 昇順）
 	 */
-	private function selectCardImage( array $visibleListings, array $by_code, string $fallback ): string {
-		$best_url      = '';
-		$best_priority = PHP_INT_MAX;
-		$best_order    = PHP_INT_MAX;
+	private function selectCardImage( array $visibleListings, string $fallback ): string {
 		foreach ( $visibleListings as $listing ) {
 			$img = isset( $listing['image_url'] ) ? trim( (string) $listing['image_url'] ) : '';
+			// esc_url_raw は javascript: 等の危険スキームを空文字にする。空になった listing は飛ばす。
 			$img = esc_url_raw( $img );
-			if ( '' === $img ) {
-				continue;
-			}
-			$code     = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
-			$def      = $by_code[ $code ] ?? null;
-			$priority = $def instanceof PlatformDefinition ? $def->imagePriority : 999;
-			$order    = $def instanceof PlatformDefinition ? $def->displayOrder : 999;
-			if ( $priority < $best_priority || ( $priority === $best_priority && $order < $best_order ) ) {
-				$best_url      = $img;
-				$best_priority = $priority;
-				$best_order    = $order;
+			if ( '' !== $img ) {
+				return $img;
 			}
 		}
-		return '' !== $best_url ? $best_url : $fallback;
+		return $fallback;
 	}
 
 	private function renderListings( array $listings, array $by_code, array $hide, array $only, array $cta_overrides = array(), bool $is_preorder = false ): string {

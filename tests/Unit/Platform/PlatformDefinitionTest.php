@@ -135,32 +135,6 @@ final class PlatformDefinitionTest extends TestCase {
 		$this->assertArrayNotHasKey( 'refreshFrequency', $def->toArray() );
 	}
 
-	public function test_imagePriority_defaults_to_999_when_absent(): void {
-		$def = PlatformDefinition::fromArray( array( 'code' => 'x' ) );
-		$this->assertSame( 999, $def->imagePriority );
-	}
-
-	public function test_imagePriority_roundtrips_through_fromArray_and_toArray(): void {
-		$def = PlatformDefinition::fromArray(
-			array(
-				'code'          => 'dmm-books',
-				'imagePriority' => 10,
-			)
-		);
-		$this->assertSame( 10, $def->imagePriority );
-		$this->assertSame( 10, $def->toArray()['imagePriority'] );
-	}
-
-	public function test_defaults_set_image_priority_for_book_platforms(): void {
-		$by_code = array();
-		foreach ( PlatformConfig::defaults() as $def ) {
-			$by_code[ $def->code ] = $def->imagePriority;
-		}
-		$this->assertSame( 10, $by_code['dmm-books'] );
-		$this->assertSame( 20, $by_code['amazon-kindle'] );
-		$this->assertSame( 30, $by_code['rakuten-kobo'] );
-	}
-
 	public function test_eligibleProvider_toArrayとfromArrayを往復する(): void {
 		$def = PlatformDefinition::fromArray(
 			array(
@@ -175,5 +149,25 @@ final class PlatformDefinitionTest extends TestCase {
 	public function test_eligibleProvider_欠損時は空文字(): void {
 		$def = PlatformDefinition::fromArray( array( 'code' => 'x' ) );
 		$this->assertSame( '', $def->eligibleProvider );
+	}
+
+	public function test_toArray_has_no_image_priority_key(): void {
+		$def = new PlatformDefinition( 'store-a', 'ストアA', 'manual', 1, true, array( 'ebook' ), 'Aで読む', '#444444', '#ffffff' );
+		$this->assertArrayNotHasKey( 'imagePriority', $def->toArray() );
+	}
+
+	public function test_fromArray_ignores_leftover_image_priority_from_old_installs(): void {
+		// 旧バージョンで保存された option には imagePriority キーが残る。読み捨てて壊れないこと。
+		$def = PlatformDefinition::fromArray(
+			array(
+				'code'          => 'store-a',
+				'name'          => 'ストアA',
+				'displayOrder'  => 2,
+				'imagePriority' => 10,
+			)
+		);
+		$this->assertSame( 'store-a', $def->code );
+		$this->assertSame( 2, $def->displayOrder );
+		$this->assertArrayNotHasKey( 'imagePriority', $def->toArray() );
 	}
 }
