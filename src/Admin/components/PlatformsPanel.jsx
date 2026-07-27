@@ -37,7 +37,7 @@ export function PlatformsPanel() {
 	const [ notice, setNotice ] = useState( null );
 	const [ announcement, setAnnouncement ] = useState( '' );
 	const listRef = useRef( null );
-	useFlipReorder( listRef );
+	const capturePositions = useFlipReorder( listRef );
 
 	useEffect( () => {
 		fetchPlatforms()
@@ -64,6 +64,9 @@ export function PlatformsPanel() {
 		if ( next === platforms ) {
 			return;
 		}
+		// FLIP の First はここで測る。state 更新後の再描画を待つと、アコーディオン開閉のような
+		// 親を再描画しない DOM 変化を挟んだ直後に座標が古くなる（stale になる）ため。
+		capturePositions();
 		setPlatforms( next );
 		setAnnouncement(
 			sprintf(

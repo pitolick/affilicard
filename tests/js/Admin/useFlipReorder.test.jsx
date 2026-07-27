@@ -10,12 +10,18 @@ import { useRef, useState } from '@wordpress/element';
 import { render, fireEvent, screen } from '@testing-library/react';
 import { useFlipReorder } from '../../../src/Admin/useFlipReorder';
 
-function Rows( { codes, onSwap } ) {
+function Rows( { codes, onSwap, skipCapture = false } ) {
 	const ref = useRef( null );
-	useFlipReorder( ref );
+	const capturePositions = useFlipReorder( ref );
+	const handleSwap = () => {
+		if ( ! skipCapture ) {
+			capturePositions();
+		}
+		onSwap();
+	};
 	return (
 		<>
-			<button type="button" onClick={ onSwap }>
+			<button type="button" onClick={ handleSwap }>
 				swap
 			</button>
 			<div ref={ ref }>
@@ -29,11 +35,12 @@ function Rows( { codes, onSwap } ) {
 	);
 }
 
-function Harness( { initial } ) {
+function Harness( { initial, skipCapture = false } ) {
 	const [ codes, setCodes ] = useState( initial );
 	return (
 		<Rows
 			codes={ codes }
+			skipCapture={ skipCapture }
 			onSwap={ () => setCodes( ( prev ) => [ ...prev ].reverse() ) }
 		/>
 	);
@@ -97,6 +104,19 @@ describe( 'useFlipReorder', () => {
 
 		const { rerender } = render( <Harness initial={ [ 'a', 'b' ] } /> );
 		rerender( <Harness initial={ [ 'a', 'b' ] } /> );
+		expect( animate ).not.toHaveBeenCalled();
+	} );
+
+	test( 'capture せずに再描画した場合はアニメートしない', () => {
+		const animate = jest.fn();
+		Element.prototype.animate = animate;
+		window.matchMedia = jest.fn().mockReturnValue( { matches: false } );
+		stubLayout();
+
+		// capturePositions() を呼ばずに並び順だけ変える（アコーディオン開閉等で
+		// 親が再描画されるだけのケースを模す）。First が無いのでアニメートしない。
+		render( <Harness initial={ [ 'a', 'b' ] } skipCapture /> );
+		fireEvent.click( screen.getByRole( 'button', { name: 'swap' } ) );
 		expect( animate ).not.toHaveBeenCalled();
 	} );
 
