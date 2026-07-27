@@ -67,7 +67,7 @@ listing を後から追記する運用（記事生成時点では取得できな
 | ---------- | ---- |
 | `renderListings()` | **CTA 行が `displayOrder` 順になる**（本変更の目的） |
 | `renderTimestamp()` | 最新 `last_verified_at` を取るだけなので順序非依存＝結果不変 |
-| `selectCardImage()` | `imagePriority` 主・`displayOrder` 副の比較なので結果不変 |
+| `selectCardImage()` | **並びの先頭から `image_url` 非空の最初の 1 件を採る**（下記「書影の選択も表示順に従わせる」） |
 
 ### 明示的に採用しない選択肢
 
@@ -76,6 +76,33 @@ listing を後から追記する運用（記事生成時点では取得できな
   `onlyPlatforms` は今後も**許可リスト（フィルタ）**であり、順序の意味を持たない。
 - **listing 側に順序フィールドを持たせる**: 採用しない。商品ごとに順序を持つと、
   サイト全体でボタン位置を揃えるという目的に反する。
+
+### 書影の選択も表示順に従わせる
+
+商品カードのサムネイル（書影）は `selectCardImage()` が選ぶ。従来は `PlatformDefinition::imagePriority`
+（小さいほど優先）を主キー、`displayOrder` を同値時のタイブレークとしていた。
+
+本設計では**書影も表示順に従わせる**。`visibleListings()` は既に `displayOrder` 昇順なので、
+その並びを頭から走査して `image_url` が非空の**最初の listing** の画像を採る。
+
+これにより `imagePriority` は役目を失うため**撤去する**。設定として存在するのに何も効かない値は、
+本設計が解消しようとしている問題（`displayOrder` が UI にあるのに描画に効いていなかった）と
+同じ形であり、残す方が有害である。
+
+撤去する範囲:
+
+- `PlatformDefinition` のコンストラクタ引数・public readonly プロパティ・`toArray()` の出力キー・
+  `fromArray()` の読み取り
+- `PlatformConfig::defaults()` の `imagePriority: 10 / 20 / 30`
+- プラットフォーム設定 UI の「画像優先度（小さいほど優先）」数値入力
+- 上記に紐づくテスト
+
+既存インストールの `affilicard_platforms` オプションには `imagePriority` キーが残るが、
+`fromArray()` が読まなくなるため無視される。次回の保存で `toArray()` の出力から消える。
+マイグレーションは不要。
+
+「ボタンは DMM を先頭にしつつ、書影は別ストアの高画質なものを使う」という使い分けはできなくなる。
+表示順という 1 つの概念に統合することを優先する。
 
 ### 既存表示との差分
 
@@ -176,8 +203,8 @@ listing を後から追記する運用（記事生成時点では取得できな
 
 - `PlatformEditor` 内の「表示順」`TextControl` を削除する。
   ↑ / ↓ と数値入力の 2 系統が残ると、値が食い違ったときに並びが壊れるため。
-- 「画像優先度（小さいほど優先）」の数値入力は**残す**。表示順とは別軸（書影の選択）であり、
-  本変更のスコープ外。
+- 「画像優先度（小さいほど優先）」の数値入力も撤去する。書影の選択を表示順に統合するため
+  （§3「書影の選択も表示順に従わせる」）。
 
 ## 5. テスト
 
@@ -191,7 +218,10 @@ listing を後から追記する運用（記事生成時点では取得できな
 | `displayOrder` が同値の 2 件 | 登録順が保たれる（安定ソート） |
 | 無効 platform を含む | 従来どおり除外され、残りが `displayOrder` 順 |
 | `only_platforms` の指定順が `displayOrder` と逆 | `displayOrder` 順で出力される（指定順は無視） |
-| 書影選択（`imagePriority` 主） | 既存テストが引き続き通る＝結果不変 |
+| 書影選択 | 並びの先頭から `image_url` 非空の最初の 1 件が選ばれる |
+| 先頭 listing に `image_url` が無い | 次の listing の画像へフォールバックする |
+| どの listing にも `image_url` が無い | WP アイキャッチ（`options['image_url']`）へフォールバックする |
+| `toArray()` / `fromArray()` | `imagePriority` キーを持たない。既存データに残っていても無視する |
 
 ### 5-2. JS（Vitest + Testing Library）
 
@@ -225,8 +255,10 @@ listing を後から追記する運用（記事生成時点では取得できな
 
 ## 6. バージョンと互換性
 
-- **v2.5.0（MINOR）**。公開 IF の破壊はない（`displayOrder` のキー名・型・REST の形は不変）。
-  カードの描画順という**振る舞いが変わる**ためパッチではなくマイナーとする。
+- **v3.0.0（MAJOR）**。`imagePriority` の撤去により、`PlatformDefinition` の public な
+  コンストラクタ引数・プロパティと `GET/PUT /affilicard/v1/platforms` のペイロードから
+  キーが 1 つ消える。これは公開 IF の破壊にあたる。
+  `displayOrder` 自体のキー名・型・REST の形は不変。
 - リリース時は `affilicard.php` の `Version:` ヘッダと `package.json` の `version` を
   同一コミットで揃える（更新チェッカがタグのツリーのヘッダを読むため）。
 - 既存インストールの `displayOrder` 値はそのまま使われる。マイグレーションは不要。
@@ -236,5 +268,6 @@ listing を後から追記する運用（記事生成時点では取得できな
 
 - カード CTA のミニプレビューを管理画面に出すこと。まず 4-1 の説明文言で足りるかを見る。
 - ドラッグ&ドロップによる並べ替え。↑ / ↓ で目的を満たすため、依存を増やしてまで入れない。
-- `imagePriority`（書影の選択順）の UI 変更。
+- カード書影を「表示順の先頭」以外の規則で選ぶ手段の再提供（`imagePriority` の代替）。
+  必要になったら別途設計する。
 - listing を書き込む外部スクリプト側の並び順。プラグイン側で描画順を決めるため不要。

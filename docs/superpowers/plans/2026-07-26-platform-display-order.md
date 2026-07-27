@@ -1,4 +1,4 @@
-# プラットフォーム表示順の一元化と並べ替え UI 実装計画（v2.5.0）
+# プラットフォーム表示順の一元化と並べ替え UI 実装計画（v3.0.0）
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -12,7 +12,9 @@
 
 ## Global Constraints
 
-- 対象バージョンは **v2.5.0（MINOR）**。公開 IF の破壊はない。
+- 対象バージョンは **v3.0.0（MAJOR）**。Task 7 の `imagePriority` 撤去で公開 IF（`PlatformDefinition`
+  のコンストラクタ引数・プロパティ、`/affilicard/v1/platforms` のペイロード）からキーが 1 つ消えるため。
+  Task 1〜6 の時点では v2.5.0 として作業しており、Task 7 で 3.0.0 に上げ直す。
 - コミットメッセージは日本語の Conventional Commits（`feat:` / `fix:` / `test:` / `docs:` / `chore:`）。
 - **新しい npm 依存を追加しない。** アイコンは `@wordpress/components` の `Button` に dashicon 文字列（`arrow-up-alt2` / `arrow-down-alt2`）を渡す。`@wordpress/icons` は依存に無いので import しない。
 - PHP のテスト・lint は Docker で実行する（ローカル Mac に PHP を入れない）。
@@ -1605,11 +1607,315 @@ git commit -m "chore: v2.5.0 へバージョンを上げ CHANGELOG を更新"
 
 ---
 
+### Task 7: 書影の選択も表示順に従わせ、imagePriority を撤去して v3.0.0 にする
+
+**Files:**
+
+- Modify: `src/Renderer/CardRenderer.php`（`selectCardImage()` と 51 行目付近の呼び出し）
+- Modify: `src/Platform/PlatformDefinition.php`（コンストラクタ引数・`toArray()`・`fromArray()`）
+- Modify: `src/Platform/PlatformConfig.php`（`defaults()` の `imagePriority: 10 / 20 / 30`）
+- Modify: `src/Admin/components/PlatformEditor.jsx`（「画像優先度（小さいほど優先）」入力）
+- Modify: `affilicard.php` / `package.json` / `package-lock.json` / `CHANGELOG.md`
+- Modify: `docs/superpowers/specs/2026-07-18-card-image-platform-priority-design.md`（廃止note）
+- Test: `tests/Unit/Renderer/CardRendererTest.php`
+- Test: `tests/Unit/Platform/PlatformDefinitionTest.php`
+- Test: `tests/js/components/PlatformEditor.test.jsx`
+
+**Interfaces:**
+
+- Consumes: Task 1 の `visibleListings()`（`displayOrder` 昇順・同値は登録順の安定ソート済み）
+- Produces:
+  - `CardRenderer::selectCardImage( array $visibleListings, string $fallback ): string`
+    — 第 2 引数の `$by_code` を**削除**する（表示順は既に配列順に反映済みで platform 定義を引く必要がない）
+  - `PlatformDefinition` のコンストラクタ引数から `imagePriority` を削除。
+    残る並びは `code, name, provider, displayOrder, enabled, applicableTypes, buttonLabel,
+    brandColor, buttonTextColor, eligibleProvider = '', priceTtlHours = 24`
+  - `toArray()` の出力キーから `imagePriority` が消える（`fromArray()` も読まない）
+
+- [ ] **Step 1: 失敗するテストを書く（PHP）**
+
+`tests/Unit/Renderer/CardRendererTest.php` の末尾（最後の `}` の直前）に追加する。
+Task 1 で追加済みの `orderedPlatform()` ヘルパを再利用する。
+
+```php
+	public function test_card_image_comes_from_the_first_platform_in_display_order(): void {
+		$platforms = array(
+			$this->orderedPlatform( 'store-a', 'ストアA', 1 ),
+			$this->orderedPlatform( 'store-b', 'ストアB', 2 ),
+		);
+		// listing の登録順は逆（B → A）。表示順の先頭は A なので A の画像が選ばれる。
+		$product = array(
+			'title'        => 'テスト商品',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'      => 'store-b',
+					'enabled'       => true,
+					'affiliate_url' => 'https://example.test/store-b',
+					'image_url'     => 'https://cdn.test/b.jpg',
+				),
+				array(
+					'platform'      => 'store-a',
+					'enabled'       => true,
+					'affiliate_url' => 'https://example.test/store-a',
+					'image_url'     => 'https://cdn.test/a.jpg',
+				),
+			),
+		);
+		$html = ( new CardRenderer() )->render( $product, $platforms, array( 'image_url' => 'https://cdn.test/eyecatch.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn.test/a.jpg', $html );
+		$this->assertStringNotContainsString( 'https://cdn.test/b.jpg', $html );
+	}
+
+	public function test_card_image_falls_back_to_next_listing_when_first_has_no_image(): void {
+		$platforms = array(
+			$this->orderedPlatform( 'store-a', 'ストアA', 1 ),
+			$this->orderedPlatform( 'store-b', 'ストアB', 2 ),
+		);
+		$product = array(
+			'title'        => 'テスト商品',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'      => 'store-a',
+					'enabled'       => true,
+					'affiliate_url' => 'https://example.test/store-a',
+					'image_url'     => '',
+				),
+				array(
+					'platform'      => 'store-b',
+					'enabled'       => true,
+					'affiliate_url' => 'https://example.test/store-b',
+					'image_url'     => 'https://cdn.test/b.jpg',
+				),
+			),
+		);
+		$html = ( new CardRenderer() )->render( $product, $platforms, array( 'image_url' => 'https://cdn.test/eyecatch.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn.test/b.jpg', $html );
+	}
+
+	public function test_card_image_falls_back_to_featured_image_when_no_listing_has_one(): void {
+		$platforms = array( $this->orderedPlatform( 'store-a', 'ストアA', 1 ) );
+		$product   = array(
+			'title'        => 'テスト商品',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform'      => 'store-a',
+					'enabled'       => true,
+					'affiliate_url' => 'https://example.test/store-a',
+				),
+			),
+		);
+		$html = ( new CardRenderer() )->render( $product, $platforms, array( 'image_url' => 'https://cdn.test/eyecatch.jpg' ) );
+		$this->assertStringContainsString( 'https://cdn.test/eyecatch.jpg', $html );
+	}
+```
+
+`tests/Unit/Platform/PlatformDefinitionTest.php` の末尾に追加する。
+
+```php
+	public function test_toArray_has_no_image_priority_key(): void {
+		$def = new PlatformDefinition( 'store-a', 'ストアA', 'manual', 1, true, array( 'ebook' ), 'Aで読む', '#444444', '#ffffff' );
+		$this->assertArrayNotHasKey( 'imagePriority', $def->toArray() );
+	}
+
+	public function test_fromArray_ignores_leftover_image_priority_from_old_installs(): void {
+		// 旧バージョンで保存された option には imagePriority キーが残る。読み捨てて壊れないこと。
+		$def = PlatformDefinition::fromArray(
+			array(
+				'code'          => 'store-a',
+				'name'          => 'ストアA',
+				'displayOrder'  => 2,
+				'imagePriority' => 10,
+			)
+		);
+		$this->assertSame( 'store-a', $def->code );
+		$this->assertSame( 2, $def->displayOrder );
+		$this->assertArrayNotHasKey( 'imagePriority', $def->toArray() );
+	}
+```
+
+- [ ] **Step 2: 既存の imagePriority 依存テストを外す（PHP）**
+
+以下を削除・修正する。**削除だけで済ませず、消えた検証の代わりが Step 1 のテストで担保されていることを確認すること。**
+
+1. `tests/Unit/Renderer/CardRendererTest.php` の `test_card_image_tiebreak_prefers_lower_display_order_on_equal_priority`
+   — `imagePriority` 同値タイブレークという前提が消えるので**テストごと削除**する。
+   代わりの検証は Step 1 の `test_card_image_comes_from_the_first_platform_in_display_order`。
+2. 同ファイルの `bookPlatforms()` ヘルパから `imagePriority: 10 / 20 / 30` の名前付き引数を削除する。
+3. `tests/Unit/Platform/PlatformDefinitionTest.php` の
+   `test_imagePriority_defaults_to_999_when_absent` /
+   `test_imagePriority_roundtrips_through_fromArray_and_toArray` /
+   `test_defaults_set_image_priority_for_book_platforms` を削除する。
+4. `grep -rn "imagePriority" tests/` を実行し、残ったヒットをすべて解消する。
+
+- [ ] **Step 3: テストが落ちることを確認する**
+
+Run: `docker run --rm -v "$(pwd):/app" -w /app php:8.2-cli php vendor/bin/phpunit --filter 'test_card_image_comes_from_the_first_platform_in_display_order|test_toArray_has_no_image_priority_key'`
+
+Expected: FAIL（書影は現状 `imagePriority` で選ばれ、`toArray()` には `imagePriority` キーが残っているため）
+
+- [ ] **Step 4: `selectCardImage()` を書き換える**
+
+`src/Renderer/CardRenderer.php` の `selectCardImage()` を丸ごと次で置き換える。
+
+```php
+	/**
+	 * 表示中 listing を表示順（displayOrder 昇順）の先頭から走査し、image_url が非空の
+	 * 最初の 1 件を書影に採る。どれにも無ければ $fallback（WP アイキャッチ）。
+	 *
+	 * 書影の選択順は CTA ボタンの並びと同じ「表示順」に従う。かつて存在した imagePriority
+	 * （書影だけを別の優先度で選ぶ設定）は撤去した。設定はあるのに描画へ効かない値を
+	 * 増やさないため、順序の概念を displayOrder 1 本に統合する。
+	 *
+	 * @param list<array<string, mixed>> $visibleListings visibleListings() の戻り（displayOrder 昇順）
+	 */
+	private function selectCardImage( array $visibleListings, string $fallback ): string {
+		foreach ( $visibleListings as $listing ) {
+			$img = isset( $listing['image_url'] ) ? trim( (string) $listing['image_url'] ) : '';
+			// esc_url_raw は javascript: 等の危険スキームを空文字にする。空になった listing は飛ばす。
+			$img = esc_url_raw( $img );
+			if ( '' !== $img ) {
+				return $img;
+			}
+		}
+		return $fallback;
+	}
+```
+
+あわせて呼び出し側（51 行目付近）から `$by_code` を外す。
+
+```php
+		$image_url = $this->selectCardImage( $visible_listings, $fallback_image );
+```
+
+- [ ] **Step 5: `imagePriority` をデータモデルから撤去する**
+
+1. `src/Platform/PlatformDefinition.php`
+   - コンストラクタから `public readonly int $imagePriority = 999,` の行を削除
+   - `toArray()` から `'imagePriority'    => $this->imagePriority,` の行を削除
+   - `fromArray()` から `$image_priority = isset( $data['imagePriority'] ) ? (int) $data['imagePriority'] : 999;` の行と、`new self(...)` に渡している `$image_priority,` の行を削除
+2. `src/Platform/PlatformConfig.php` の `defaults()` から `imagePriority: 10,` / `imagePriority: 20,` / `imagePriority: 30,` の 3 行を削除
+3. `grep -rn "imagePriority" src/` を実行し、残ったヒットをすべて解消する
+
+- [ ] **Step 6: 管理画面から「画像優先度」入力を撤去する**
+
+`src/Admin/components/PlatformEditor.jsx` から次のブロックを丸ごと削除する。
+
+```jsx
+				<TextControl
+					label={ __( '画像優先度（小さいほど優先）', 'affilicard' ) }
+					type="number"
+					value={ String( platform.imagePriority ?? 999 ) }
+					onChange={ ( v ) => {
+						const value = parseInt( v, 10 );
+						update( {
+							imagePriority: Number.isNaN( value ) ? 999 : value,
+						} );
+					} }
+				/>
+```
+
+（実ファイルの整形は Prettier に従っているため、上と細部が異なる可能性がある。`画像優先度` を含む `TextControl` のブロックを削除する、と読むこと。）
+
+`tests/js/components/PlatformEditor.test.jsx` を直す。
+
+1. フィクスチャ（33 行目付近）から `imagePriority: 10,` を削除
+2. `renders imagePriority input with platform value` /
+   `onChange propagates imagePriority patch to parent` /
+   `onChange keeps 0 as a valid imagePriority instead of falling back to 999` の 3 テストを削除
+3. `renders all editor controls with platform values` テストの末尾（`表示順` の不在アサーションの隣）に次を足す
+
+```jsx
+		// 画像優先度は撤去し、書影も表示順（↑ / ↓）に従うようにした
+		expect(
+			screen.queryByLabelText( '画像優先度（小さいほど優先）' )
+		).not.toBeInTheDocument();
+```
+
+4. `grep -rn "imagePriority" tests/js/` を実行し、残ったヒットをすべて解消する
+
+- [ ] **Step 7: テストが通ることを確認する**
+
+Run:
+
+```bash
+docker run --rm -v "$(pwd):/app" -w /app php:8.2-cli php vendor/bin/phpunit
+docker run --rm -v "$(pwd):/app" -w /app php:8.2-cli php vendor/bin/phpcs
+npm run test:js
+npm run lint:js
+npm run build
+```
+
+Expected: すべてエラー 0。phpcs は ERRORS 0 / WARNINGS 0。
+
+- [ ] **Step 8: バージョンを v3.0.0 に上げ直す**
+
+Task 6 で 2.5.0 にしてあるものを 3.0.0 にする。
+
+1. `affilicard.php` の `Version:     2.5.0` → `Version:     3.0.0`（`AFFILICARD_VERSION` 定数も同じ値に）
+2. `package.json` の `"version": "2.5.0"` → `"3.0.0"`
+3. `package-lock.json` の `version`（ルートと `packages[""]` の 2 箇所）を `3.0.0` に。
+   **`npm install` は走らせず手で直す**（依存の解決結果を変えないため）。
+   直したら `git diff package-lock.json` で version 以外が変わっていないことを確認する
+4. `grep -n "2\.5\.0" affilicard.php package.json package-lock.json` で取り残しが無いことを確認する
+
+- [ ] **Step 9: CHANGELOG を 3.0.0 に書き換える**
+
+`## [2.5.0] - 2026-07-26` の見出しを `## [3.0.0] - 2026-07-27` に変え、既存の Fixed / Added / Changed / Removed
+の各項目はそのまま残したうえで、次を追記する。
+
+`### Fixed` の末尾に追加:
+
+```markdown
+- **商品カードのサムネイル（書影）もプラットフォーム設定の「表示順」で選ぶようにした**。表示順の先頭から走査し、書影 URL を持つ最初の listing の画像を採る（無ければ次の listing、どれにも無ければ WordPress のアイキャッチへフォールバック）。CTA ボタンの並びと書影の出所が一致する。
+```
+
+`### Removed` の末尾に追加:
+
+```markdown
+- **破壊的変更**: プラットフォームの `imagePriority`（画像優先度）を撤去した。書影の選択を「表示順」に統合したため役目を失ったもので、設定として存在するのに描画へ効かない値を残さない判断による。`PlatformDefinition` のコンストラクタ引数・プロパティと `GET/PUT /affilicard/v1/platforms` のペイロードからキーが消える。既存インストールのオプションに残った値は読み捨てられ、次回保存時に消える（マイグレーション不要）。「ボタンの並びとは別の優先度で書影を選ぶ」使い分けはできなくなる。
+```
+
+- [ ] **Step 10: 旧設計書に廃止note を入れる**
+
+`docs/superpowers/specs/2026-07-18-card-image-platform-priority-design.md` の冒頭（最初の見出しの直後）に 1 行入れる。
+
+```markdown
+> **廃止（2026-07-27 / v3.0.0）**: 本設計の `imagePriority` は撤去した。書影の選択は
+> プラットフォーム設定の「表示順」に統合されている。
+> 現行設計は `2026-07-26-platform-display-order-design.md` を参照。
+```
+
+- [ ] **Step 11: 全テストを流してコミット**
+
+Run:
+
+```bash
+docker run --rm -v "$(pwd):/app" -w /app php:8.2-cli php vendor/bin/phpunit
+docker run --rm -v "$(pwd):/app" -w /app php:8.2-cli php vendor/bin/phpcs
+npm run test:js && npm run lint:js && npm run build
+```
+
+Expected: すべてエラー 0
+
+```bash
+git add src tests affilicard.php package.json package-lock.json CHANGELOG.md docs
+git commit -m "feat!: 商品カードの書影も表示順で選ぶようにし imagePriority を撤去する"
+```
+
+**注意**: `npm run test:e2e` はこのタスクでは実行しない（wp-env の状態を保つため。E2E は最終レビュー前にまとめて回す）。
+
+---
+
 ## 完了条件
 
 - [ ] `docker run --rm -v "$(pwd):/app" -w /app php:8.2-cli php vendor/bin/phpunit` が全 PASS
 - [ ] `npm run test:js` が全 PASS
 - [ ] `npm run lint:js` がエラーなし
 - [ ] `npm run build` が成功
+- [ ] `docker run --rm -v "$(pwd):/app" -w /app php:8.2-cli php vendor/bin/phpcs` が ERRORS 0 / WARNINGS 0
 - [ ] `npm run test:e2e` が全 PASS
-- [ ] `affilicard.php` の `Version:` と `package.json` の `version` が `2.5.0` で一致
+- [ ] `affilicard.php` の `Version:` と `package.json` の `version` が `3.0.0` で一致
+- [ ] `grep -rn "imagePriority" src tests` のヒットが 0 件
