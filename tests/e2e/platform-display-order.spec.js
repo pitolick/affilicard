@@ -27,6 +27,15 @@ async function ctaLabels(page) {
 		.allTextContents();
 }
 
+/** 先頭カードの書影 <img> の src 属性を返す。 */
+async function cardImageSrc(page) {
+	return page
+		.locator('.affilicard-card')
+		.first()
+		.locator('img.affilicard-card__media-image')
+		.getAttribute('src');
+}
+
 /** 設定 → プラットフォーム → 電子書籍タブを開く。 */
 async function openEbookTab(page) {
 	await page.goto(SETTINGS_URL);
@@ -70,6 +79,8 @@ test('listing の登録順が逆でも CTA は displayOrder 順に並ぶ', async
 		'DMMブックスで読む',
 		'楽天Koboで読む',
 	]);
+	// 書影も CTA と同じく displayOrder 順（既定は DMMブックス=1）で選ばれる。
+	expect(await cardImageSrc(page)).toBe('https://example.com/cover-dmm.png');
 });
 
 test('設定画面で並べ替えて保存すると公開記事のカードに反映される', async ({
@@ -93,6 +104,10 @@ test('設定画面で並べ替えて保存すると公開記事のカードに�
 			'楽天Koboで読む',
 			'DMMブックスで読む',
 		]);
+		// 書影も並べ替え後の順（楽天Kobo=1）に切り替わる。
+		expect(await cardImageSrc(page)).toBe(
+			'https://example.com/cover-kobo.png'
+		);
 	} finally {
 		// 他 spec に影響しないよう元の並びへ戻す。中間アサーションが失敗した場合でも
 		// affilicard_platforms を壊れたまま残さないよう、必ず finally で実行する。
@@ -104,4 +119,6 @@ test('設定画面で並べ替えて保存すると公開記事のカードに�
 		'DMMブックスで読む',
 		'楽天Koboで読む',
 	]);
+	// 既定順へ復元したあとは書影も DMM に戻る。
+	expect(await cardImageSrc(page)).toBe('https://example.com/cover-dmm.png');
 });

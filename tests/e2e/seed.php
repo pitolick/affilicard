@@ -126,6 +126,7 @@ $display_order_id = $repo->save(
 				'auto_update'   => false,
 				'affiliate_url' => 'https://example.com/aff-order-kobo',
 				'regular_url'   => '',
+				'image_url'     => 'https://example.com/cover-kobo.png',
 			),
 			array(
 				'platform'      => 'dmm-books',
@@ -134,6 +135,7 @@ $display_order_id = $repo->save(
 				'auto_update'   => false,
 				'affiliate_url' => 'https://example.com/aff-order-dmm',
 				'regular_url'   => '',
+				'image_url'     => 'https://example.com/cover-dmm.png',
 			),
 		),
 	)

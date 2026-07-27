@@ -247,13 +247,18 @@ $p_generic_landscape = $repo->save(
 // uploads に書き出して添付する（Playground の PHP に画像拡張が無くても確実に書影が出る）。
 // SVG を <img> で表示しても CSS filter: blur() は効くのでぼかしの視認に問題はない。
 // $ratio: 'portrait'(既定・書影マスク確認用) / 'square'(vod 近似正方) / 'landscape'(object-fit:contain 確認用の横長)。
-$set_demo_cover = static function ( int $post_id, string $label, string $bg, string $ratio = 'portrait' ): void {
-	if ( $post_id <= 0 ) {
-		return;
-	}
+//
+// SVG の組み立て・ファイル書き出し・添付ファイル登録は「アイキャッチに設定する」
+// （$set_demo_cover）と「listing の image_url 用に URL だけ欲しい」（$demo_cover_url、
+// 表示順デモでストアごとに違う書影を用意するために使う）の両方から必要なため、
+// 共通処理として 1 か所に切り出す（重複させない）。
+// $slug はファイル名の一意化に使う。$set_demo_cover は 1 投稿につき書影 1 枚のため
+// post_id で足りるが、$demo_cover_url は 1 投稿に複数枚（プラットフォームごと）の
+// 書影を持たせるケースがあるため、呼び出し元で platform 等を含めた一意な値を渡す。
+$build_demo_cover_attachment = static function ( int $parent_post_id, string $slug, string $label, string $bg, string $ratio = 'portrait' ): int {
 	$uploads = wp_upload_dir();
 	if ( ! empty( $uploads['error'] ) ) {
-		return;
+		return 0;
 	}
 	$safe_label = htmlspecialchars( $label, ENT_QUOTES, 'UTF-8' );
 
@@ -283,29 +288,50 @@ $set_demo_cover = static function ( int $post_id, string $label, string $bg, str
 			. '</svg>';
 	}
 
-	$filename = 'affilicard-demo-cover-' . $post_id . '.svg';
+	$filename = 'affilicard-demo-cover-' . $slug . '.svg';
 	$file     = trailingslashit( $uploads['path'] ) . $filename;
 	if ( false === file_put_contents( $file, $svg ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
-		return;
+		return 0;
 	}
 
 	$attach_id = wp_insert_attachment(
 		array(
 			'post_mime_type' => 'image/svg+xml',
-			'post_title'     => 'Affilicard demo cover ' . $post_id,
+			'post_title'     => 'Affilicard demo cover ' . $slug,
 			'post_status'    => 'inherit',
 			'guid'           => trailingslashit( $uploads['url'] ) . $filename,
 		),
 		$file,
-		$post_id
+		$parent_post_id
 	);
 	if ( is_wp_error( $attach_id ) || ! $attach_id ) {
-		return;
+		return 0;
 	}
 	// SVG はサブサイズを持たないため _wp_attached_file だけ設定すれば
 	// wp_get_attachment_image_url( $id, 'medium' ) がフルサイズ URL を返す。
 	update_post_meta( $attach_id, '_wp_attached_file', _wp_relative_upload_path( $file ) );
-	set_post_thumbnail( $post_id, $attach_id );
+	return (int) $attach_id;
+};
+
+$set_demo_cover = static function ( int $post_id, string $label, string $bg, string $ratio = 'portrait' ) use ( $build_demo_cover_attachment ): void {
+	if ( $post_id <= 0 ) {
+		return;
+	}
+	$attach_id = $build_demo_cover_attachment( $post_id, (string) $post_id, $label, $bg, $ratio );
+	if ( $attach_id > 0 ) {
+		set_post_thumbnail( $post_id, $attach_id );
+	}
+};
+
+// listing の image_url 用にダミー書影の URL だけを返す（アイキャッチには設定しない）。
+// 表示順デモ商品で、プラットフォームごとに見た目の違う書影を用意するために使う。
+$demo_cover_url = static function ( string $slug, string $label, string $bg, string $ratio = 'portrait' ) use ( $build_demo_cover_attachment ): string {
+	$attach_id = $build_demo_cover_attachment( 0, $slug, $label, $bg, $ratio );
+	if ( $attach_id <= 0 ) {
+		return '';
+	}
+	$url = wp_get_attachment_image_url( $attach_id, 'medium' );
+	return is_string( $url ) ? $url : '';
 };
 
 // マスク確認セクションの各サンプル（＋「なし」対照の $p_ebook）にダミー書影を設定。
@@ -319,6 +345,46 @@ $set_demo_cover( (int) $p_mask_inherit, 'BLOCK OVERRIDE', '#347860' );
 // （画像なし 3 サンプルはアイキャッチ未設定のままプレースホルダを確認する）。
 $set_demo_cover( (int) $p_vod_image, 'KEY VISUAL', '#1f7a5c', 'square' );
 $set_demo_cover( (int) $p_generic_landscape, 'LANDSCAPE', '#7a5c1f', 'landscape' );
+
+// 表示順デモ: プラットフォーム設定（設定 → プラットフォーム → 電子書籍タブ）で
+// 表示順を並べ替えて保存すると、カードの書影が表示順の先頭 listing の画像に切り替わる
+// ことを目視確認するためのサンプル。dmm-books / amazon-kindle / rakuten-kobo の
+// 3 listing それぞれに見た目で区別できる書影を持たせる。
+$p_display_order = $repo->save(
+	array(
+		'title'        => 'サンプル漫画 2巻（書影が表示順に追従）',
+		'status'       => 'publish',
+		'product_type' => 'ebook',
+		'stock_status' => 'available',
+		'content'      => "<!-- wp:paragraph -->\n<p>設定 → プラットフォーム → 電子書籍タブで表示順を並べ替えて保存すると、このカードの書影が新しい先頭 listing の画像に切り替わることを確認できるダミーデータです。</p>\n<!-- /wp:paragraph -->",
+		'listings'     => array(
+			array_merge(
+				$listing( 'dmm-books', 'https://example.com/aff-display-order-dmm', '600', '40%OFF', '1,000' ),
+				array( 'image_url' => $demo_cover_url( 'display-order-dmm', 'DMM', '#0f6ab4' ) )
+			),
+			array_merge(
+				$listing( 'amazon-kindle', 'https://example.com/aff-display-order-amazon', '660', '50%ポイント還元' ),
+				array( 'image_url' => $demo_cover_url( 'display-order-amazon', 'AMAZON', '#ff9900' ) )
+			),
+			array_merge(
+				$listing( 'rakuten-kobo', 'https://example.com/aff-display-order-rakuten', '640', '', '900' ),
+				array( 'image_url' => $demo_cover_url( 'display-order-rakuten', 'RAKUTEN', '#bf0000' ) )
+			),
+		),
+		'extras'       => array(
+			array(
+				'key'   => 'author',
+				'label' => '著者',
+				'value' => '架空 次郎',
+			),
+			array(
+				'key'   => 'publisher',
+				'label' => '出版社',
+				'value' => 'サンプル出版社',
+			),
+		),
+	)
+);
 
 $block = static function ( int $id, array $attrs = array() ): string {
 	$a = array_merge( array( 'productId' => $id ), $attrs );
@@ -350,6 +416,9 @@ $content = implode(
 		),
 		$block( $p_out ),
 		$block( $p_disc ),
+		'<!-- wp:heading {"level":3} --><h3>表示順デモ（並べ替えで書影も切り替わる）</h3><!-- /wp:heading -->',
+		'<!-- wp:paragraph --><p>設定 → プラットフォーム → 電子書籍タブで表示順を並べ替えて保存すると、下のカードの CTA ボタンだけでなく書影もストアごとに用意した別々の画像へ切り替わることを確認できます。</p><!-- /wp:paragraph -->',
+		$block( $p_display_order ),
 		'<!-- wp:heading {"level":3} --><h3>表紙マスク確認</h3><!-- /wp:heading -->',
 		'<!-- wp:paragraph --><p>なし／ぼかしのみ／ぼかし＋ラベル／R18（18+ バッジ＋ぼかし強制）／ブロック属性でぼかしを上書き（商品側は無し）の対照。</p><!-- /wp:paragraph -->',
 		$block( $p_ebook ),
