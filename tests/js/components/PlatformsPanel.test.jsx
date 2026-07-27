@@ -306,4 +306,15 @@ describe( 'PlatformsPanel', () => {
 			).toHaveFocus()
 		);
 	} );
+
+	test( '並べ替えずに保存したときは displayOrder を振り直さない', async () => {
+		// 正規化は並べ替え時にだけ起きるため、↑ / ↓ を一度も押さずに保存すると、
+		// フィクスチャの displayOrder 値 (1, 2, 3) のまま保存される。
+		updatePlatforms.mockResolvedValue( orderable );
+		await renderOrderable();
+		fireEvent.click( screen.getByRole( 'button', { name: '保存' } ) );
+		await waitFor( () => expect( updatePlatforms ).toHaveBeenCalled() );
+		const sent = updatePlatforms.mock.calls[ 0 ][ 0 ];
+		expect( sent.map( ( p ) => p.displayOrder ) ).toEqual( [ 1, 2, 3 ] );
+	} );
 } );
