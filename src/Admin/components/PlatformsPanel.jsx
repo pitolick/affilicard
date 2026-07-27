@@ -192,12 +192,24 @@ export function PlatformsPanel() {
 										key={ p.code }
 									>
 										<div className="affilicard-platform-row__order">
-											<span
-												className="affilicard-platform-row__rank"
-												aria-hidden="true"
-											>
-												{ ranks[ p.code ] ?? '—' }
-											</span>
+											{ p.enabled ? (
+												<span className="affilicard-platform-row__rank">
+													{ ranks[ p.code ] }
+													<span className="screen-reader-text">
+														{ __(
+															'番目',
+															'affilicard'
+														) }
+													</span>
+												</span>
+											) : (
+												<span
+													className="affilicard-platform-row__rank"
+													aria-hidden="true"
+												>
+													—
+												</span>
+											) }
 											{ p.enabled && (
 												<>
 													<Button

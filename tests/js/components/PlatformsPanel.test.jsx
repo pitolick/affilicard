@@ -211,10 +211,26 @@ describe( 'PlatformsPanel', () => {
 
 	test( '有効な platform には順位バッジ、無効には — を出す', async () => {
 		const { container } = await renderOrderable();
-		const ranks = Array.from(
+		const badges = Array.from(
 			container.querySelectorAll( '.affilicard-platform-row__rank' )
-		).map( ( el ) => el.textContent );
-		expect( ranks ).toEqual( [ '1', '—', '2' ] );
+		);
+		// a(有効・1 番目)・b(無効)・c(有効・2 番目) の順。
+		// 単位テキスト（screen-reader-text の「番目」）が加わるため textContent の
+		// 完全一致ではなく、数字が含まれるかどうかで検証する。
+		expect( badges[ 0 ].textContent ).toContain( '1' );
+		expect( badges[ 1 ].textContent ).toBe( '—' );
+		expect( badges[ 2 ].textContent ).toContain( '2' );
+	} );
+
+	test( '有効な行のバッジは支援技術に読み上げられ、無効な行は aria-hidden のまま', async () => {
+		const { container } = await renderOrderable();
+		const badges = Array.from(
+			container.querySelectorAll( '.affilicard-platform-row__rank' )
+		);
+		// a(有効)・b(無効)・c(有効) の順。
+		expect( badges[ 0 ] ).not.toHaveAttribute( 'aria-hidden' );
+		expect( badges[ 1 ] ).toHaveAttribute( 'aria-hidden', 'true' );
+		expect( badges[ 2 ] ).not.toHaveAttribute( 'aria-hidden' );
 	} );
 
 	test( '無効な platform には並べ替えボタンを出さない', async () => {
