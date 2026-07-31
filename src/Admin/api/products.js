@@ -55,6 +55,9 @@ export function getCardPreview(id, params = {}) {
 	if (params.maskLabel !== undefined) {
 		query.set('maskLabel', params.maskLabel);
 	}
+	if (params.hideMedia !== undefined) {
+		query.set('hideMedia', params.hideMedia ? '1' : '0');
+	}
 	const qs = query.toString();
 	return apiFetch({
 		path: `${BASE}/${id}/card-preview${qs ? `?${qs}` : ''}`,

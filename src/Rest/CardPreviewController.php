@@ -67,6 +67,9 @@ final class CardPreviewController {
 						'maskLabel'         => array(
 							'type' => 'string',
 						),
+						'hideMedia'         => array(
+							'type' => 'boolean',
+						),
 					),
 				),
 			)
@@ -110,6 +113,14 @@ final class CardPreviewController {
 		if ( null !== $request->get_param( 'maskR18' ) ) {
 			$attributes['maskR18'] = filter_var( $request->get_param( 'maskR18' ), FILTER_VALIDATE_BOOLEAN );
 		}
+		// ブロック属性の hideMedia を落とすと、編集画面のプレビューと保存後の表示が食い違う。
+		// 未指定のときはキーごと入れない（CardHtmlBuilder が array_key_exists で
+		// 「明示指定なし → グローバル設定に従う」を判定するため）。
+		$hide_media = $request->get_param( 'hideMedia' );
+		if ( null !== $hide_media ) {
+			$attributes['hideMedia'] = filter_var( $hide_media, FILTER_VALIDATE_BOOLEAN );
+		}
+
 		$mask_label = $request->get_param( 'maskLabel' );
 		if ( null !== $mask_label ) {
 			$attributes['maskLabel'] = (string) $mask_label;

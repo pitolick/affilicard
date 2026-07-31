@@ -161,7 +161,12 @@ $cases = array(
 	),
 );
 
-$css  = file_get_contents( __DIR__ . '/../assets/card.css' );
+$css_path = __DIR__ . '/../assets/card.css';
+$css      = file_get_contents( $css_path );
+if ( false === $css ) {
+	fwrite( STDERR, "card.css を読めませんでした: {$css_path}\n" );
+	exit( 1 );
+}
 $html = '<!doctype html><meta charset="utf-8"><title>affilicard card preview</title><style>'
 	. 'body{font-family:system-ui,sans-serif;background:#f0f0f1;margin:0;padding:24px}'
 	. '.wrap{max-width:1080px;margin:0 auto}'
