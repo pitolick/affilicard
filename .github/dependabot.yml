@@ -1,61 +1,119 @@
 version: 2
 updates:
-  # Composer (PHP)
+  # Composer (PHP)。vendor/ として配布 zip に同梱されるため、更新は配布物に直結する。
   - package-ecosystem: composer
     directory: /
+    # 公開プラグインであり、リリースが plugin-update-checker 経由で利用者に更新通知として
+    # 届く。weekly だと年 50 回近く通知が飛ぶため monthly にする。
+    # security updates はスケジュールに関係なく即時に立つ。
     schedule:
-      interval: weekly
+      interval: monthly
     open-pull-requests-limit: 10
     labels:
       - dependencies
     commit-message:
       prefix: chore
       include: scope
+    cooldown:
+      default-days: 7
+    # Dependabot は「先にマッチしたグループ」に入れるため、定義順そのものが設計の一部。
     groups:
-      dev-dependencies:
+      # ① phpcs 一式は wpcs / phpcompatibility が php_codesniffer のバージョン範囲に
+      #    依存するため、対で上げないと composer install が解決できない。major も含める。
+      phpcs-toolchain:
+        patterns:
+          - 'squizlabs/php_codesniffer'
+          - 'wp-coding-standards/wpcs'
+          - 'phpcompatibility/*'
+          - 'dealerdirect/phpcodesniffer-composer-installer'
+      # ② 直接依存を prod / dev に分ける。
+      production:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+      development:
         dependency-type: development
         update-types:
           - minor
           - patch
-      production-dependencies:
-        dependency-type: production
+      # ③ ①②のどれにも入らなかったものを回収する。必ず最後に置くこと。
+      indirect:
+        patterns:
+          - '*'
         update-types:
+          - minor
           - patch
 
   # npm (@wordpress/scripts 等)
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     open-pull-requests-limit: 10
     labels:
       - dependencies
     commit-message:
       prefix: chore
       include: scope
+    cooldown:
+      default-days: 7
+    # React は WordPress 同梱版に合わせるべきもので、@wordpress/scripts の更新に追随して
+    # 上がる。単体で major を上げると @testing-library/react が未対応で全テストが
+    # ReactCurrentDispatcher で落ちる。PR を close するだけでは新しいパッチ版が出るたびに
+    # 再提案されるため、設定で止める。WordPress 側が React 19 に移行したらこの ignore を外す。
+    ignore:
+      - dependency-name: 'react'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'react-dom'
+        update-types: ['version-update:semver-major']
     groups:
-      dev-dependencies:
+      # ① 同一 monorepo / 対で動くパッケージ。update-types を指定せず major も含める。
+      #    react と react-dom が別 PR になると、どちらも単独では CI が通らない。
+      wordpress:
+        patterns:
+          - '@wordpress/*'
+      react:
+        patterns:
+          - 'react'
+          - 'react-dom'
+      testing-library:
+        patterns:
+          - '@testing-library/*'
+      # ② 直接依存を prod / dev に分ける。
+      production:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+      development:
         dependency-type: development
         update-types:
           - minor
           - patch
-      production-dependencies:
-        dependency-type: production
+      # ③ ①②のどれにも入らなかったもの ＝ 推移的依存（indirect）。必ず最後に置くこと。
+      indirect:
+        patterns:
+          - '*'
         update-types:
+          - minor
           - patch
 
   # GitHub Actions
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     open-pull-requests-limit: 5
     labels:
       - dependencies
     commit-message:
       prefix: ci
       include: scope
+    cooldown:
+      default-days: 7
     groups:
+      # Actions 同士は独立しているためファミリグループは不要。
       github-actions:
         patterns:
           - '*'
