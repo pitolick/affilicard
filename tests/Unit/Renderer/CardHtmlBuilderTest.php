@@ -221,6 +221,41 @@ final class CardHtmlBuilderTest extends TestCase {
 		$this->assertStringNotContainsString( '予約受付中', $html );
 	}
 
+	public function test_hide_media_block_attribute_overrides_global_setting(): void {
+		// グローバル設定は既定（表示する）。ブロック属性 true が優先されて画像が消える。
+		\WP_Mock::userFunction( 'get_option' )->andReturn( array() );
+		\WP_Mock::userFunction( 'get_post_thumbnail_id' )->andReturn( 0 );
+		\WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing(
+			static fn( $v ) => is_string( $v ) ? trim( $v ) : ''
+		);
+		WP_Mock::userFunction( 'current_time', array( 'return' => '2026-07-31' ) );
+
+		$builder = new CardHtmlBuilder();
+		$product = $this->productWith(
+			array(
+				'listings' => array(
+					array(
+						'platform'      => 'dmm-books',
+						'enabled'       => true,
+						'affiliate_url' => 'https://al.dmm.com/x',
+						'image_url'     => 'https://cdn.example/cover.jpg',
+					),
+				),
+			)
+		);
+
+		// 既定（＝グローバル設定 false）では書影カラムが描画される
+		$shown = $builder->build( $product, array() );
+		$this->assertStringContainsString( 'affilicard-card__media', $shown );
+		$this->assertStringNotContainsString( 'affilicard-card--no-media', $shown );
+
+		// ブロック属性 true でカラムごと消える（画像の実 URL は platform 未登録の
+		// このケースでは元々描画されないため、カラムの有無で判定する）
+		$hidden = $builder->build( $product, array( 'hideMedia' => true ) );
+		$this->assertStringNotContainsString( 'affilicard-card__media', $hidden );
+		$this->assertStringContainsString( 'affilicard-card--no-media', $hidden );
+	}
+
 	public function test_resolve_mask_block_overrides_product_meta(): void {
 		$builder = new \Affilicard\Renderer\CardHtmlBuilder();
 		$product = array(

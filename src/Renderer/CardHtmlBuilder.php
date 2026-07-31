@@ -85,6 +85,10 @@ final class CardHtmlBuilder {
 			'mask_blur'           => $mask['blur'],
 			'mask_r18'            => $mask['r18'],
 			'mask_label'          => $mask['label'],
+			// ブロック属性で明示されていればそれを、無ければグローバル設定を使う（マスクと同じ優先順）。
+			'hide_media'          => array_key_exists( 'hideMedia', $attributes ) && null !== $attributes['hideMedia']
+				? (bool) $attributes['hideMedia']
+				: \Affilicard\Settings\GeneralSettings::hidesProductImages(),
 		);
 
 		return ( new CardRenderer() )->render( $product, $platforms, $options );

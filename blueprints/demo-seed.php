@@ -439,6 +439,14 @@ $content = implode(
 		$block( $p_ebook_noimage ),
 		$block( $p_vod_noimage ),
 		$block( $p_generic_landscape ),
+		'<!-- wp:heading {"level":3} --><h3>商品画像を表示しない（v3.1.0）</h3><!-- /wp:heading -->',
+		'<!-- wp:paragraph --><p>カードから商品画像を出さない設定です。<strong>上＝通常表示／下＝非表示</strong>。非表示側は画像カラムごと畳んで本文が全幅になり、「画像がありません」のプレースホルダにも落ちません。</p><!-- /wp:paragraph -->',
+		$block( $p_ebook ),
+		$block( $p_ebook, array( 'hideMedia' => true ) ),
+		'<!-- wp:paragraph --><p>ぼかし・R18 マスクを設定した商品でも、非表示側では画像そのものが出ません（下）。</p><!-- /wp:paragraph -->',
+		$block( $p_mask_r18 ),
+		$block( $p_mask_r18, array( 'hideMedia' => true ) ),
+		'<!-- wp:paragraph --><p>ここでは 1 枚ずつ比較できるようブロック属性で上書きしていますが、<strong>設定 → 一般 →「商品画像を表示しない」</strong>でサイト全体を一括で切り替えられます。</p><!-- /wp:paragraph -->',
 	)
 );
 

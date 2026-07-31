@@ -52,6 +52,12 @@
 	align-items: stretch;
 }
 
+/* 商品画像を出さない設定のとき。画像カラムを描画しないので本文を全幅にする
+   （160px の列が残ると本文がその幅に押し込まれる）。 */
+.affilicard-card--no-media .affilicard-card__inner {
+	grid-template-columns: 1fr;
+}
+
 /* メディア枠: inline aspect-ratio は枠自体ではなく内側の実画像/マスクカバー/プレースホルダ
    側に付与する（CardRenderer 側）。type 別の比率がそのまま実際の content box（= 表示される
    画像領域そのもの）に適用され、枠の padding が比率を歪ませることはない。grid item は
