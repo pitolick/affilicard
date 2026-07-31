@@ -9,6 +9,7 @@ import {
 	ToolbarButton,
 	Spinner,
 	TextControl,
+	SelectControl,
 } from '@wordpress/components';
 import {
 	InspectorControls,
@@ -70,6 +71,7 @@ export function Edit({ attributes, setAttributes }) {
 		maskBlur,
 		maskR18,
 		maskLabel,
+		hideMedia,
 	} = attributes;
 	const [options, setOptions] = useState([]);
 	const [filter, setFilter] = useState('');
@@ -153,6 +155,7 @@ export function Edit({ attributes, setAttributes }) {
 				maskBlur,
 				maskR18,
 				maskLabel,
+				hideMedia,
 			})
 				.then((res) => {
 					if (!active) return;
@@ -185,6 +188,7 @@ export function Edit({ attributes, setAttributes }) {
 		maskBlur,
 		maskR18,
 		maskLabel,
+		hideMedia,
 	]);
 
 	const setCtaOverride = (code, value) => {
@@ -253,6 +257,42 @@ export function Edit({ attributes, setAttributes }) {
 					))}
 				</PanelBody>
 			)}
+			<PanelBody
+				title={__('商品画像', 'affilicard')}
+				initialOpen={false}
+			>
+				<SelectControl
+					label={__('このカードの商品画像', 'affilicard')}
+					value={
+						hideMedia === undefined
+							? 'inherit'
+							: String(hideMedia)
+					}
+					options={[
+						{
+							label: __('サイト設定に従う', 'affilicard'),
+							value: 'inherit',
+						},
+						{ label: __('表示する', 'affilicard'), value: 'false' },
+						{
+							label: __('表示しない', 'affilicard'),
+							value: 'true',
+						},
+					]}
+					onChange={(value) =>
+						setAttributes({
+							hideMedia:
+								'inherit' === value ? undefined : 'true' === value,
+						})
+					}
+					help={__(
+						'「サイト設定に従う」のときは、設定 → 一般 の「商品画像を表示しない」に従います。',
+						'affilicard'
+					)}
+					__nextHasNoMarginBottom
+					__next40pxDefaultSize
+				/>
+			</PanelBody>
 			<PanelBody
 				title={__('表紙マスク', 'affilicard')}
 				initialOpen={false}

@@ -221,6 +221,72 @@ final class CardHtmlBuilderTest extends TestCase {
 		$this->assertStringNotContainsString( '予約受付中', $html );
 	}
 
+	/**
+	 * @param array<string, mixed> $settings affilicard_general_settings に入れる値
+	 */
+	private function withGeneralSettings( array $settings ): void {
+		// 引数の既定値をアロー関数の本体（三項）に持ち込むと PHPCS の
+		// AssignmentInTernaryCondition に当たるので、通常のクロージャで書く。
+		\WP_Mock::userFunction( 'get_option' )->andReturnUsing(
+			static function ( $key, $fallback = false ) use ( $settings ) {
+				return \Affilicard\Settings\GeneralSettings::OPTION_KEY === $key ? $settings : $fallback;
+			}
+		);
+		\WP_Mock::userFunction( 'get_post_thumbnail_id' )->andReturn( 0 );
+		\WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing(
+			static fn( $v ) => is_string( $v ) ? trim( $v ) : ''
+		);
+		WP_Mock::userFunction( 'current_time', array( 'return' => '2026-07-31' ) );
+	}
+
+	private function productForMedia(): array {
+		return $this->productWith(
+			array(
+				'listings' => array(
+					array(
+						'platform'      => 'dmm-books',
+						'enabled'       => true,
+						'affiliate_url' => 'https://al.dmm.com/x',
+						'image_url'     => 'https://cdn.example/cover.jpg',
+					),
+				),
+			)
+		);
+	}
+
+	public function test_hide_media_follows_global_setting_when_block_does_not_specify(): void {
+		$this->withGeneralSettings( array( 'hide_product_images' => true ) );
+
+		$html = ( new CardHtmlBuilder() )->build( $this->productForMedia(), array() );
+
+		$this->assertStringNotContainsString( 'affilicard-card__media', $html );
+		$this->assertStringContainsString( 'affilicard-card--no-media', $html );
+	}
+
+	public function test_hide_media_block_true_overrides_global_false(): void {
+		$this->withGeneralSettings( array( 'hide_product_images' => false ) );
+
+		$builder = new CardHtmlBuilder();
+		$shown   = $builder->build( $this->productForMedia(), array() );
+		$hidden  = $builder->build( $this->productForMedia(), array( 'hideMedia' => true ) );
+
+		$this->assertStringContainsString( 'affilicard-card__media', $shown );
+		$this->assertStringNotContainsString( 'affilicard-card--no-media', $shown );
+
+		$this->assertStringNotContainsString( 'affilicard-card__media', $hidden );
+		$this->assertStringContainsString( 'affilicard-card--no-media', $hidden );
+	}
+
+	public function test_hide_media_block_false_overrides_global_true(): void {
+		// false は「未指定」ではなく明示的な上書き（マスクと同じ扱い）。
+		$this->withGeneralSettings( array( 'hide_product_images' => true ) );
+
+		$html = ( new CardHtmlBuilder() )->build( $this->productForMedia(), array( 'hideMedia' => false ) );
+
+		$this->assertStringContainsString( 'affilicard-card__media', $html );
+		$this->assertStringNotContainsString( 'affilicard-card--no-media', $html );
+	}
+
 	public function test_resolve_mask_block_overrides_product_meta(): void {
 		$builder = new \Affilicard\Renderer\CardHtmlBuilder();
 		$product = array(

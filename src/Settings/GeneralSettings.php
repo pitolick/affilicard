@@ -26,6 +26,8 @@ final class GeneralSettings {
 		'throttle_overrides'     => array(),
 		'retention_done_hours'   => 24,
 		'retention_failed_days'  => 7,
+		// すべてのカードで商品画像を描画しない。
+		'hide_product_images'    => false,
 	);
 
 	private const MIN_TTL = 60;
@@ -51,6 +53,15 @@ final class GeneralSettings {
 	public static function refreshIntervalHours(): int {
 		$settings = self::get();
 		return (int) $settings['refresh_interval_hours'];
+	}
+
+	/**
+	 * すべてのカードで商品画像を描画しないか（既定 false）。
+	 *
+	 * ブロック属性 `hideMedia` が明示されていればそちらが優先される。
+	 */
+	public static function hidesProductImages(): bool {
+		return ! empty( self::get()['hide_product_images'] );
 	}
 
 	public static function isQueuePaused(): bool {
@@ -144,6 +155,8 @@ final class GeneralSettings {
 			$throttle_overrides[ (string) $account ] = max( 0, (int) $ms );
 		}
 
+		$hide_product_images = ! empty( $values['hide_product_images'] );
+
 		$retention_done_hours  = isset( $values['retention_done_hours'] ) ? max( 1, (int) $values['retention_done_hours'] ) : self::DEFAULTS['retention_done_hours'];
 		$retention_failed_days = isset( $values['retention_failed_days'] ) ? max( 1, (int) $values['retention_failed_days'] ) : self::DEFAULTS['retention_failed_days'];
 
@@ -158,6 +171,7 @@ final class GeneralSettings {
 			'throttle_overrides'     => $throttle_overrides,
 			'retention_done_hours'   => $retention_done_hours,
 			'retention_failed_days'  => $retention_failed_days,
+			'hide_product_images'    => $hide_product_images,
 		);
 	}
 }

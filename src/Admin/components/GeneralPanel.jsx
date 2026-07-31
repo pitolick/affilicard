@@ -124,6 +124,16 @@ export function GeneralPanel() {
 				/>
 
 				{settings.cron_enabled && <CronHelpBox />}
+
+				<ToggleControl
+					label={__('商品画像を表示しない', 'affilicard')}
+					checked={Boolean(settings.hide_product_images)}
+					onChange={(v) => update({ hide_product_images: v })}
+					help={__(
+						'すべてのカードから商品画像を描画しません。画像の枠ごと畳んで本文を全幅にします。',
+						'affilicard'
+					)}
+				/>
 			</div>
 
 			<div className="affilicard-general-panel__actions">

@@ -48,12 +48,16 @@ final class CardRenderer {
 			$hide,
 			$only
 		);
-		$image_url        = $this->selectCardImage( $visible_listings, $fallback_image );
-		$colors           = isset( $options['colors'] ) && is_array( $options['colors'] ) ? $options['colors'] : array();
-		$header_keys      = isset( $options['header_keys'] ) && is_array( $options['header_keys'] ) ? array_map( 'strval', $options['header_keys'] ) : array( 'author', 'publisher' );
-		$hidden_keys      = isset( $options['hidden_keys'] ) && is_array( $options['hidden_keys'] ) ? array_map( 'strval', $options['hidden_keys'] ) : array();
-		$media_label      = isset( $options['media_label'] ) ? (string) $options['media_label'] : (string) __( '商品画像', 'affilicard' );
-		$media_aspect     = isset( $options['media_aspect_ratio'] ) ? trim( (string) $options['media_aspect_ratio'] ) : '';
+		// 商品画像を出さない設定のときは、画像カラムごと描画しない。
+		// 画像だけ空にしてプレースホルダに落とすと「画像がありません」と出て
+		// 読み込み失敗に見えるため、枠ごと畳んで本文を全幅にする。
+		$hide_media   = ! empty( $options['hide_media'] );
+		$image_url    = $hide_media ? '' : $this->selectCardImage( $visible_listings, $fallback_image );
+		$colors       = isset( $options['colors'] ) && is_array( $options['colors'] ) ? $options['colors'] : array();
+		$header_keys  = isset( $options['header_keys'] ) && is_array( $options['header_keys'] ) ? array_map( 'strval', $options['header_keys'] ) : array( 'author', 'publisher' );
+		$hidden_keys  = isset( $options['hidden_keys'] ) && is_array( $options['hidden_keys'] ) ? array_map( 'strval', $options['hidden_keys'] ) : array();
+		$media_label  = isset( $options['media_label'] ) ? (string) $options['media_label'] : (string) __( '商品画像', 'affilicard' );
+		$media_aspect = isset( $options['media_aspect_ratio'] ) ? trim( (string) $options['media_aspect_ratio'] ) : '';
 		if ( '' === $media_aspect ) {
 			$media_aspect = '1 / 1';
 		}
@@ -75,8 +79,9 @@ final class CardRenderer {
 
 		$extras = isset( $product['extras'] ) && is_array( $product['extras'] ) ? $product['extras'] : array();
 
-		$style = $this->rootStyle( $colors );
-		$html  = '<div class="affilicard-card"' . ( '' !== $style ? ' style="' . esc_attr( $style ) . '"' : '' ) . '>';
+		$style      = $this->rootStyle( $colors );
+		$root_class = 'affilicard-card' . ( $hide_media ? ' affilicard-card--no-media' : '' );
+		$html       = '<div class="' . esc_attr( $root_class ) . '"' . ( '' !== $style ? ' style="' . esc_attr( $style ) . '"' : '' ) . '>';
 
 		$html .= '<div class="affilicard-card__inner">';
 
@@ -86,46 +91,48 @@ final class CardRenderer {
 		// 実画像は object-fit: contain（全 type 共通）で枠内に収める。mask/R18/label は不変。
 		$aspect_attr = ' style="aspect-ratio: ' . esc_attr( $media_aspect ) . '"';
 
-		$html .= '<div class="affilicard-card__media">';
-		if ( '' !== $image_url ) {
-			$src = esc_url( $image_url );
-			$alt = esc_attr( (string) ( $product['title'] ?? '' ) );
-			if ( $mask_blur ) {
-				// マスク時: aspect-ratio はカバーラッパ側が持つ。内側のぼかし画像は cover を
-				// そのまま埋めるだけでよい（アスペクトを持たせない）。
-				$img     = '<img class="affilicard-card__media-image" src="' . $src . '" alt="' . $alt . '" loading="lazy" />';
-				$overlay = '';
-				if ( $mask_r18 ) {
-					$overlay .= self::R18_BADGE_SVG;
+		if ( ! $hide_media ) {
+			$html .= '<div class="affilicard-card__media">';
+			if ( '' !== $image_url ) {
+				$src = esc_url( $image_url );
+				$alt = esc_attr( (string) ( $product['title'] ?? '' ) );
+				if ( $mask_blur ) {
+					// マスク時: aspect-ratio はカバーラッパ側が持つ。内側のぼかし画像は cover を
+					// そのまま埋めるだけでよい（アスペクトを持たせない）。
+					$img     = '<img class="affilicard-card__media-image" src="' . $src . '" alt="' . $alt . '" loading="lazy" />';
+					$overlay = '';
+					if ( $mask_r18 ) {
+						$overlay .= self::R18_BADGE_SVG;
+					}
+					if ( '' !== $mask_label ) {
+						$overlay .= '<span class="affilicard-card__cover-label">' . esc_html( $mask_label ) . '</span>';
+					}
+					$overlay_html = '' !== $overlay
+						? '<div class="affilicard-card__cover-overlay">' . $overlay . '</div>'
+						: '';
+					$html        .= '<div class="affilicard-card__cover affilicard-card__cover--masked"' . $aspect_attr . '>'
+						. '<div class="affilicard-card__cover-blur">' . $img . '</div>'
+						. $overlay_html
+						. '</div>';
+				} else {
+					$html .= '<img class="affilicard-card__media-image" src="' . $src . '" alt="' . $alt . '" loading="lazy"' . $aspect_attr . ' />';
 				}
-				if ( '' !== $mask_label ) {
-					$overlay .= '<span class="affilicard-card__cover-label">' . esc_html( $mask_label ) . '</span>';
-				}
-				$overlay_html = '' !== $overlay
-					? '<div class="affilicard-card__cover-overlay">' . $overlay . '</div>'
-					: '';
-				$html        .= '<div class="affilicard-card__cover affilicard-card__cover--masked"' . $aspect_attr . '>'
-					. '<div class="affilicard-card__cover-blur">' . $img . '</div>'
-					. $overlay_html
-					. '</div>';
 			} else {
-				$html .= '<img class="affilicard-card__media-image" src="' . $src . '" alt="' . $alt . '" loading="lazy"' . $aspect_attr . ' />';
+				// 可視ラベルは中立の「画像がありません」に固定する（type 名を出すと読み込み失敗に見えるため）。
+				// type別ラベル（書影／商品画像／キービジュアル等）は role="img" + aria-label の
+				// スクリーンリーダー向け情報として保持する。
+				$placeholder_label = sprintf(
+					/* translators: %s: media type label (e.g. 書影). */
+					(string) __( '%sがありません', 'affilicard' ),
+					$media_label
+				);
+				$html .= '<div class="affilicard-card__media-placeholder"' . $aspect_attr . ' role="img" aria-label="' . esc_attr( $placeholder_label ) . '">'
+					. '<span class="affilicard-card__media-placeholder-icon" aria-hidden="true">' . self::MEDIA_PLACEHOLDER_ICON_SVG . '</span>'
+					. '<span class="affilicard-card__media-placeholder-label" aria-hidden="true">' . esc_html__( '画像がありません', 'affilicard' ) . '</span>'
+					. '</div>';
 			}
-		} else {
-			// 可視ラベルは中立の「画像がありません」に固定する（type 名を出すと読み込み失敗に見えるため）。
-			// type別ラベル（書影／商品画像／キービジュアル等）は role="img" + aria-label の
-			// スクリーンリーダー向け情報として保持する。
-			$placeholder_label = sprintf(
-				/* translators: %s: media type label (e.g. 書影). */
-				(string) __( '%sがありません', 'affilicard' ),
-				$media_label
-			);
-			$html .= '<div class="affilicard-card__media-placeholder"' . $aspect_attr . ' role="img" aria-label="' . esc_attr( $placeholder_label ) . '">'
-				. '<span class="affilicard-card__media-placeholder-icon" aria-hidden="true">' . self::MEDIA_PLACEHOLDER_ICON_SVG . '</span>'
-				. '<span class="affilicard-card__media-placeholder-label" aria-hidden="true">' . esc_html__( '画像がありません', 'affilicard' ) . '</span>'
-				. '</div>';
+			$html .= '</div>';
 		}
-		$html .= '</div>';
 
 		// 本文カラム。
 		$html .= '<div class="affilicard-card__body">';

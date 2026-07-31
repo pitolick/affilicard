@@ -218,6 +218,66 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringNotContainsString( 'affilicard-card__cta', $html );
 	}
 
+	public function test_hide_media_omits_image_column_entirely(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'      => 'example-store',
+						'enabled'       => true,
+						'affiliate_url' => 'https://x',
+						'image_url'     => 'https://cdn.example/cover.jpg',
+					),
+				),
+			)
+		);
+
+		$shown  = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$hidden = ( new CardRenderer() )->render( $product, array( $this->store() ), array( 'hide_media' => true ) );
+
+		// 通常は書影が出る
+		$this->assertStringContainsString( 'https://cdn.example/cover.jpg', $shown );
+		$this->assertStringContainsString( 'affilicard-card__media', $shown );
+
+		// 非表示にすると画像 URL もカラムごと消える
+		$this->assertStringNotContainsString( 'https://cdn.example/cover.jpg', $hidden );
+		$this->assertStringNotContainsString( 'affilicard-card__media', $hidden );
+		// 「画像がありません」のプレースホルダにも落とさない（読み込み失敗に見えるため）
+		$this->assertStringNotContainsString( '画像がありません', $hidden );
+		// 本文を全幅にするための修飾クラスが付く
+		$this->assertStringContainsString( 'affilicard-card--no-media', $hidden );
+		// CTA と本文は残る
+		$this->assertStringContainsString( 'affilicard-card__cta', $hidden );
+		$this->assertStringContainsString( 'affilicard-card__body', $hidden );
+	}
+
+	public function test_hide_media_also_suppresses_masked_cover(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'      => 'example-store',
+						'enabled'       => true,
+						'affiliate_url' => 'https://x',
+						'image_url'     => 'https://cdn.example/cover.jpg',
+					),
+				),
+			)
+		);
+
+		$html = ( new CardRenderer() )->render(
+			$product,
+			array( $this->store() ),
+			array(
+				'hide_media' => true,
+				'mask_r18'   => true,
+			)
+		);
+
+		$this->assertStringNotContainsString( 'affilicard-card__cover', $html );
+		$this->assertStringNotContainsString( 'https://cdn.example/cover.jpg', $html );
+	}
+
 	public function test_skips_unknown_platform_listing(): void {
 		$product = $this->product(
 			array(
