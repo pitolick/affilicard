@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-08-01
+
+### Changed
+
+- 開発/ビルド依存を更新: `@wordpress/scripts` 32.6.0 → 33.0.0、`@testing-library/jest-dom` 6.9.1 → 7.0.0、`axios` 1.16.1 → 1.19.0、`shell-quote` 1.8.4 → 1.10.0（Dependabot #93 / #92 / #88 / #95）。
+- CI: `actions/setup-node` を 6 → 7 に更新（#90）。
+
+`src/` に変更はありません。`@wordpress/scripts` の更新が `build/` の出力（配布 zip）に影響するため、patch リリースとして反映します。
+
 ## [3.1.0] - 2026-07-31
 
 ### 追加
