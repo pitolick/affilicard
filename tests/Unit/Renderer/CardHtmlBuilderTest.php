@@ -225,8 +225,12 @@ final class CardHtmlBuilderTest extends TestCase {
 	 * @param array<string, mixed> $settings affilicard_general_settings に入れる値
 	 */
 	private function withGeneralSettings( array $settings ): void {
+		// 引数の既定値をアロー関数の本体（三項）に持ち込むと PHPCS の
+		// AssignmentInTernaryCondition に当たるので、通常のクロージャで書く。
 		\WP_Mock::userFunction( 'get_option' )->andReturnUsing(
-			static fn( $key, $default = false ) => \Affilicard\Settings\GeneralSettings::OPTION_KEY === $key ? $settings : $default
+			static function ( $key, $fallback = false ) use ( $settings ) {
+				return \Affilicard\Settings\GeneralSettings::OPTION_KEY === $key ? $settings : $fallback;
+			}
 		);
 		\WP_Mock::userFunction( 'get_post_thumbnail_id' )->andReturn( 0 );
 		\WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing(
