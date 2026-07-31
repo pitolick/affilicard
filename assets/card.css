@@ -210,6 +210,14 @@
 	margin-top: 0;
 }
 
+/* 本文の最後が店舗リスト以外のとき、カード下端に貼り付くのを防ぐ。
+   在庫切れ・取扱終了は CTA を出さないためバッジが最後の要素になり、
+   商品画像も無いと本文がカードの高さをそのまま決めて下辺と接する。
+   店舗リストは自前で行の枠と区切り線を持つので対象外にする。 */
+.affilicard-card__body > :last-child:not(.affilicard-card__listings) {
+	margin-bottom: 20px;
+}
+
 .affilicard-card__badge {
 	display: inline-block;
 	align-self: flex-start;
