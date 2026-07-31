@@ -71,14 +71,17 @@ jobs:
         uses: dependabot/fetch-metadata@v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: patch / dev minor / GitHub Actions minor を自動マージ
+      # patch / minor はすべて自動マージする（dev / prod / indirect / Actions を問わない）。
+      # 以前は direct:development に限っていたため、推移的依存（indirect）の minor が
+      # 条件から漏れて滞留していた。グループ PR では update-type がグループ内の最大の
+      # semver 変更を返すため、この 2 項だけで major の混入を弾ける。
+      - name: patch / minor を自動マージ
         if: |
           steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-          (steps.metadata.outputs.update-type == 'version-update:semver-minor' &&
-           steps.metadata.outputs.dependency-type == 'direct:development') ||
-          (steps.metadata.outputs.update-type == 'version-update:semver-minor' &&
-           steps.metadata.outputs.package-ecosystem == 'github_actions')
-        run: gh pr merge ${{ github.event.pull_request.number }} --squash --delete-branch
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        # required status checks に含まれる e2e は別ワークフローのため needs: に書けない。
+        # 直接マージだと e2e 完走前に叩いてしまうため --auto を使い、GitHub 側に待たせる。
+        run: gh pr merge ${{ github.event.pull_request.number }} --auto --squash --delete-branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
