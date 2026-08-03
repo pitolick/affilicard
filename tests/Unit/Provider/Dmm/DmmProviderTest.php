@@ -206,6 +206,54 @@ final class DmmProviderTest extends TestCase {
 		$this->assertSame( '', $result->data['affiliate_url'] );
 	}
 
+	/**
+	 * content_id は `cid`（ID 直引き）で引く。`keyword` に渡してはいけない。
+	 *
+	 * DMM の keyword 検索は**シリーズごとに最新巻 1 件だけ**を返すため、30 巻の content_id を
+	 * keyword に渡すと 39 巻が返る（2026-08-03 実測）。それを listing に書き戻すと価格・表紙・
+	 * URL が別の巻に置き換わり、読者が違う巻を買わされる。
+	 */
+	public function test_fetch_はcidで商品を直引きする(): void {
+		$credentials = array(
+			'api_id'            => 'test-api-id',
+			'affiliate_id'      => 'pitolick-990',
+			'affiliate_link_id' => 'pitolick-007',
+		);
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_account_dmm_credentials', '' )
+			->andReturn( Crypto::encrypt( JsonField::encode( $credentials ) ) );
+
+		$requested = '';
+		WP_Mock::userFunction( 'wp_remote_get' )
+			->once()
+			->andReturnUsing(
+				static function ( $url ) use ( &$requested ) {
+					$requested = $url;
+					return array( 'response' => array( 'code' => 200 ) );
+				}
+			);
+		WP_Mock::userFunction( 'wp_remote_retrieve_response_code' )->andReturn( 200 );
+		WP_Mock::userFunction( 'wp_remote_retrieve_body' )->andReturn(
+			json_encode(
+				array(
+					'result' => array(
+						'items' => array(
+							array(
+								'title' => 'サンプル 30',
+								'URL'   => 'https://book.dmm.com/product/1/vol30/',
+							),
+						),
+					),
+				)
+			)
+		);
+
+		( new DmmProvider() )->fetch( 'vol30', array() );
+		parse_str( (string) parse_url( $requested, PHP_URL_QUERY ), $query );
+		$this->assertSame( 'vol30', $query['cid'] ?? null );
+		$this->assertArrayNotHasKey( 'keyword', $query );
+	}
+
 	public function test_fetch_includes_title_from_item(): void {
 		$credentials = array(
 			'api_id'            => 'test-api-id',
