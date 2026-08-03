@@ -45,5 +45,18 @@ final class AccountsSchemaTest extends TestCase {
 		}
 		$this->assertSame( 'password', $byKey['api_id'] );
 		$this->assertSame( 'text', $byKey['affiliate_id'] );
+		// DMM のアフィリエイト ID は用途で 2 つに分かれる（API リクエスト用＝末尾 990〜999 /
+		// リンク埋め込み用＝サイト単位）。1 つにまとめると必ずどちらかが壊れる。
+		$this->assertSame( 'text', $byKey['affiliate_link_id'] );
+	}
+
+	public function test_dmm_account_の全項目が必須(): void {
+		$byKey = array();
+		foreach ( ( new DmmAccount() )->credentialsSchema() as $f ) {
+			$byKey[ $f['key'] ] = $f['required'];
+		}
+		// リンク埋め込み用 ID が未入力だとアフィリエイト URL を組めず（＝空になり）収益化
+		// されないため、任意項目にはしない。
+		$this->assertTrue( $byKey['affiliate_link_id'] );
 	}
 }

@@ -88,7 +88,9 @@ final class DmmProvider implements ProviderInterface {
 			return FetchResult::miss();
 		}
 
-		return FetchResult::hit( self::normalizeItem( $item ) );
+		return FetchResult::hit(
+			self::normalizeItem( $item, (string) ( $credentials['affiliate_link_id'] ?? '' ) )
+		);
 	}
 
 	/**
@@ -183,10 +185,37 @@ final class DmmProvider implements ProviderInterface {
 	}
 
 	/**
+	 * アフィリエイトリンクのリダイレクタ。`?lurl=<encoded>&af_id=<linkId>&ch=api` の形になる。
+	 */
+	private const AFFILIATE_BASE = 'https://al.dmm.com/';
+
+	/**
+	 * 商品ページ URL とリンク埋め込み用 ID からアフィリエイト URL を組み立てる。
+	 *
+	 * **API 応答の `affiliateURL` を使ってはいけない**——ItemList はリクエストに使った
+	 * `affiliate_id`（末尾 990〜999 の API 用 ID）をそのまま `af_id` に埋めて返すため、
+	 * そのリンクは `al.dmm.com` が HTTP 400「無効リンク」を返す（2026-08-03 実測）。
+	 * 実際にリンクへ載せてよいのはサイト単位で発行される別 ID（`affiliate_link_id`）。
+	 *
+	 * リンク用 ID が未設定なら**空文字を返す**。空を返すと `ListingRefresher` は
+	 * 既存の `affiliate_url` を保持する（非空のときだけ上書きする実装）ため、
+	 * 手で登録した正しいリンクを壊さない。カード側も `affiliate_url ?: regular_url` で
+	 * 通常 URL にフォールバックするので、リンクが死ぬことはない。
+	 */
+	private static function buildAffiliateUrl( string $productUrl, string $linkId ): string {
+		if ( '' === $productUrl || '' === $linkId ) {
+			return '';
+		}
+		return self::AFFILIATE_BASE . '?lurl=' . rawurlencode( $productUrl )
+			. '&af_id=' . rawurlencode( $linkId ) . '&ch=api';
+	}
+
+	/**
 	 * @param array<string, mixed> $item
+	 * @param string               $linkId リンク埋め込み用アフィリエイト ID（API 用とは別値）。
 	 * @return array<string, mixed>
 	 */
-	private static function normalizeItem( array $item ): array {
+	private static function normalizeItem( array $item, string $linkId = '' ): array {
 		$prices     = isset( $item['prices'] ) && is_array( $item['prices'] ) ? $item['prices'] : array();
 		$price      = isset( $prices['price'] ) ? (string) $prices['price'] : '';
 		$list_price = isset( $prices['list_price'] ) ? (string) $prices['list_price'] : '';
@@ -209,8 +238,9 @@ final class DmmProvider implements ProviderInterface {
 			}
 		}
 
-		$regular_url   = isset( $item['URL'] ) ? (string) $item['URL'] : '';
-		$affiliate_url = isset( $item['affiliateURL'] ) ? (string) $item['affiliateURL'] : '';
+		$regular_url = isset( $item['URL'] ) ? (string) $item['URL'] : '';
+		// API 応答の affiliateURL フィールドは意図的に使わない（buildAffiliateUrl の説明を参照）。
+		$affiliate_url = self::buildAffiliateUrl( $regular_url, $linkId );
 
 		return array(
 			'title'           => isset( $item['title'] ) ? (string) $item['title'] : '',
