@@ -249,7 +249,10 @@ final class DmmProviderTest extends TestCase {
 		);
 
 		( new DmmProvider() )->fetch( 'vol30', array() );
-		parse_str( (string) parse_url( $requested, PHP_URL_QUERY ), $query );
+		// wp_parse_url() は WP_Mock 環境で未定義なため、クエリ部分を素朴に切り出す
+		// （phpcs は parse_url() の直接利用を警告するので使わない）。
+		$query_string = substr( (string) strstr( $requested, '?' ), 1 );
+		parse_str( $query_string, $query );
 		$this->assertSame( 'vol30', $query['cid'] ?? null );
 		$this->assertArrayNotHasKey( 'keyword', $query );
 	}
