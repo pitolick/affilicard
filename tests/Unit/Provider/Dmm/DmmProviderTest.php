@@ -120,10 +120,97 @@ final class DmmProviderTest extends TestCase {
 		$this->assertFalse( $result['ok'] );
 	}
 
-	public function test_fetch_includes_title_from_item(): void {
+	/**
+	 * affiliate_url は API 応答の affiliateURL ではなく affiliate_link_id から組み立てる。
+	 *
+	 * ItemList はリクエストに使った affiliate_id（末尾 990〜999 の API 用 ID）を
+	 * そのまま affiliateURL に埋めて返すため、それを採ると al.dmm.com が HTTP 400
+	 * 「無効リンク」を返す（2026-08-03 実測）。ここが崩れると全 DMM リンクが死ぬ。
+	 */
+	public function test_fetch_はaffiliate_link_idからアフィリエイトURLを組む(): void {
+		$credentials = array(
+			'api_id'            => 'test-api-id',
+			'affiliate_id'      => 'pitolick-990',
+			'affiliate_link_id' => 'pitolick-007',
+		);
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_account_dmm_credentials', '' )
+			->andReturn( Crypto::encrypt( JsonField::encode( $credentials ) ) );
+
+		$item_json = json_encode(
+			array(
+				'result' => array(
+					'items' => array(
+						array(
+							'title'        => 'サンプル商品タイトル',
+							'URL'          => 'https://book.dmm.com/product/1/b1/',
+							// API はリクエスト用 ID を埋めた URL を返す（＝無効リンク）。使ってはいけない。
+							'affiliateURL' => 'https://al.dmm.com/?lurl=x&af_id=pitolick-990&ch=api',
+						),
+					),
+				),
+			)
+		);
+
+		WP_Mock::userFunction( 'wp_remote_get' )
+			->once()
+			->andReturn( array( 'response' => array( 'code' => 200 ) ) );
+		WP_Mock::userFunction( 'wp_remote_retrieve_response_code' )->andReturn( 200 );
+		WP_Mock::userFunction( 'wp_remote_retrieve_body' )->andReturn( $item_json );
+
+		$result = ( new DmmProvider() )->fetch( 'b1', array() );
+		$this->assertTrue( $result->isHit() );
+		$this->assertSame(
+			'https://al.dmm.com/?lurl=https%3A%2F%2Fbook.dmm.com%2Fproduct%2F1%2Fb1%2F&af_id=pitolick-007&ch=api',
+			$result->data['affiliate_url']
+		);
+		$this->assertStringNotContainsString( 'pitolick-990', $result->data['affiliate_url'] );
+	}
+
+	/**
+	 * リンク用 ID 未設定なら affiliate_url は空。ListingRefresher は空の取得値では
+	 * 既存値を保持するため、手で登録した正しいリンクを壊さない（カードは regular_url へ
+	 * フォールバックする）。「無効リンクで上書きする」より安全側に倒す。
+	 */
+	public function test_fetch_はaffiliate_link_id未設定なら空のaffiliate_urlを返す(): void {
 		$credentials = array(
 			'api_id'       => 'test-api-id',
-			'affiliate_id' => 'test-aff-id',
+			'affiliate_id' => 'pitolick-990',
+		);
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_account_dmm_credentials', '' )
+			->andReturn( Crypto::encrypt( JsonField::encode( $credentials ) ) );
+
+		$item_json = json_encode(
+			array(
+				'result' => array(
+					'items' => array(
+						array(
+							'title'        => 'サンプル商品タイトル',
+							'URL'          => 'https://book.dmm.com/product/1/b1/',
+							'affiliateURL' => 'https://al.dmm.com/?lurl=x&af_id=pitolick-990&ch=api',
+						),
+					),
+				),
+			)
+		);
+
+		WP_Mock::userFunction( 'wp_remote_get' )
+			->once()
+			->andReturn( array( 'response' => array( 'code' => 200 ) ) );
+		WP_Mock::userFunction( 'wp_remote_retrieve_response_code' )->andReturn( 200 );
+		WP_Mock::userFunction( 'wp_remote_retrieve_body' )->andReturn( $item_json );
+
+		$result = ( new DmmProvider() )->fetch( 'b1', array() );
+		$this->assertTrue( $result->isHit() );
+		$this->assertSame( '', $result->data['affiliate_url'] );
+	}
+
+	public function test_fetch_includes_title_from_item(): void {
+		$credentials = array(
+			'api_id'            => 'test-api-id',
+			'affiliate_id'      => 'test-aff-id',
+			'affiliate_link_id' => 'test-link-id',
 		);
 		$encrypted   = Crypto::encrypt( JsonField::encode( $credentials ) );
 
