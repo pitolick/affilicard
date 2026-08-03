@@ -53,6 +53,11 @@ final class DmmProvider implements ProviderInterface {
 			return FetchResult::miss();
 		}
 
+		// **`cid`（商品 ID 直引き）を使う。`keyword` で content_id を渡してはいけない**
+		// ——DMM の keyword 検索は**シリーズごとに最新巻 1 件だけ**を返すため、30 巻の
+		// content_id で検索すると 39 巻（＝そのシリーズの最新巻）が返る（2026-08-03 実測）。
+		// その結果を listing に書き戻すと、価格・表紙・商品 URL・アフィリエイト URL が
+		// すべて別の巻のものに置き換わり、読者は 30 巻のカードから 39 巻を買わされる。
 		$url = $this->buildUrl(
 			array(
 				'api_id'       => $credentials['api_id'],
@@ -61,7 +66,7 @@ final class DmmProvider implements ProviderInterface {
 				'service'      => 'ebook',
 				'floor'        => 'comic',
 				'hits'         => '1',
-				'keyword'      => $externalId,
+				'cid'          => $externalId,
 				'output'       => 'json',
 			)
 		);
