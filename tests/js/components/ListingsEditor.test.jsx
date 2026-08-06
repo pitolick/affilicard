@@ -28,6 +28,18 @@ const EMPTY_LISTING_FIXTURE = {
 	button_label_override: '',
 };
 
+/** 1 件の listing fixture。上書きしたいフィールドだけ patch で渡す。 */
+function listingWith( patch ) {
+	return {
+		...EMPTY_LISTING_FIXTURE,
+		platform: 'dmm-books',
+		external_id: '111',
+		affiliate_url: 'https://a-aff',
+		price: '500',
+		...patch,
+	};
+}
+
 beforeEach( () => {
 	fetchPlatforms.mockReset();
 } );
@@ -172,62 +184,104 @@ describe( 'ListingsEditor', () => {
 		expect( arg.length ).toBe( 1 );
 		expect( arg[ 0 ].platform ).toBe( '' );
 		expect( arg[ 0 ].enabled ).toBe( true );
-		expect( arg[ 0 ].update_mode ).toBe( 'manual' );
-		expect( arg[ 0 ].auto_update ).toBe( false );
+		// 追加した listing がそのまま自動更新の対象になるよう、既定は auto / ON。
+		// （既定が 'manual' だと UI から追加した listing は永久に更新されない）
+		expect( arg[ 0 ].update_mode ).toBe( 'auto' );
+		expect( arg[ 0 ].auto_update ).toBe( true );
 	} );
 
-	test( 'update_mode "api" reveals 自動更新 toggle', async () => {
+	test( '更新モードのセレクトは表示しない', async () => {
 		fetchPlatforms.mockResolvedValue( platforms );
-		const listings = [
-			{
-				platform: 'dmm-books',
-				enabled: true,
-				update_mode: 'api',
-				auto_update: true,
-				external_id: '111',
-				regular_url: '',
-				affiliate_url: 'https://a',
-				price: '500',
-				list_price: '',
-				badge: '',
-				image_url: '',
-				button_label_override: '',
-			},
-		];
 		render(
-			<ListingsEditor listings={ listings } onChange={ () => {} } />
+			<ListingsEditor
+				listings={ [ listingWith( { update_mode: 'auto' } ) ] }
+				onChange={ () => {} }
+			/>
 		);
-		await waitFor( () =>
-			expect( fetchPlatforms ).toHaveBeenCalled()
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+		expect( screen.queryByText( '更新モード' ) ).not.toBeInTheDocument();
+	} );
+
+	test( '自動更新 toggle は update_mode=auto の listing で表示される', async () => {
+		fetchPlatforms.mockResolvedValue( platforms );
+		render(
+			<ListingsEditor
+				listings={ [
+					listingWith( { update_mode: 'auto', auto_update: true } ),
+				] }
+				onChange={ () => {} }
+			/>
 		);
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
 		expect( screen.getByText( '自動更新' ) ).toBeInTheDocument();
 	} );
 
-	test( 'update_mode "manual" hides 自動更新 toggle', async () => {
+	test( '自動更新 toggle は update_mode=manual の listing でも表示される', async () => {
+		// 自動取得の可否はプラットフォームの Provider 側で決まる。listing 側の
+		// トグルはプラットフォームや過去の update_mode に関わらず常に出す（統一）。
 		fetchPlatforms.mockResolvedValue( platforms );
-		const listings = [
-			{
-				platform: 'dmm-books',
-				enabled: true,
-				update_mode: 'manual',
-				auto_update: false,
-				external_id: '111',
-				regular_url: '',
-				affiliate_url: 'https://a',
-				price: '500',
-				list_price: '',
-				badge: '',
-				image_url: '',
-				button_label_override: '',
-			},
-		];
 		render(
-			<ListingsEditor listings={ listings } onChange={ () => {} } />
+			<ListingsEditor
+				listings={ [
+					listingWith( { update_mode: 'manual', auto_update: false } ),
+				] }
+				onChange={ () => {} }
+			/>
 		);
-		await waitFor( () =>
-			expect( fetchPlatforms ).toHaveBeenCalled()
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+		expect( screen.getByText( '自動更新' ) ).toBeInTheDocument();
+	} );
+
+	test( '自動更新 toggle の切り替えで auto_update が更新される', async () => {
+		fetchPlatforms.mockResolvedValue( platforms );
+		const onChange = jest.fn();
+		render(
+			<ListingsEditor
+				listings={ [
+					listingWith( { update_mode: 'auto', auto_update: true } ),
+				] }
+				onChange={ onChange }
+			/>
 		);
-		expect( screen.queryByText( '自動更新' ) ).not.toBeInTheDocument();
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+		fireEvent.click( screen.getByLabelText( '自動更新' ) );
+		expect( onChange ).toHaveBeenCalledTimes( 1 );
+		expect( onChange.mock.calls[ 0 ][ 0 ][ 0 ].auto_update ).toBe( false );
+	} );
+
+	test( '自動更新 toggle の操作で legacy な update_mode を auto へ正す', async () => {
+		// 旧 UI が書いた update_mode='manual' が残っていると、トグルを ON にしても
+		// PHP 側で弾かれ、トグルが無言で効かない。トグルは自動更新の唯一のスイッチ
+		// なので、操作時に update_mode も auto へ揃える。
+		fetchPlatforms.mockResolvedValue( platforms );
+		const onChange = jest.fn();
+		render(
+			<ListingsEditor
+				listings={ [
+					listingWith( { update_mode: 'manual', auto_update: false } ),
+				] }
+				onChange={ onChange }
+			/>
+		);
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+		fireEvent.click( screen.getByLabelText( '自動更新' ) );
+		const row = onChange.mock.calls[ 0 ][ 0 ][ 0 ];
+		expect( row.auto_update ).toBe( true );
+		expect( row.update_mode ).toBe( 'auto' );
+	} );
+
+	test( '自動更新 toggle に強制一括更新で更新される旨の注意が出る', async () => {
+		fetchPlatforms.mockResolvedValue( platforms );
+		render(
+			<ListingsEditor
+				listings={ [
+					listingWith( { update_mode: 'auto', auto_update: false } ),
+				] }
+				onChange={ () => {} }
+			/>
+		);
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+		expect( screen.getByText( /強制一括更新/ ) ).toBeInTheDocument();
 	} );
 
 	test( 'falls back to empty platforms list when fetchPlatforms rejects', async () => {

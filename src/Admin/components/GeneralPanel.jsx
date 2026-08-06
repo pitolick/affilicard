@@ -154,7 +154,10 @@ export function GeneralPanel() {
 				>
 					{refreshing === 'force'
 						? __('更新中…', 'affilicard')
-						: __('強制一括更新（取扱終了も含む）', 'affilicard')}
+						: __(
+								'強制一括更新（自動更新 OFF も含む）',
+								'affilicard'
+						  )}
 				</Button>
 
 				<Button variant="primary" onClick={onSave} disabled={saving}>
