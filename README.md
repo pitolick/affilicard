@@ -96,7 +96,7 @@ curl -u 'username:xxxx xxxx xxxx xxxx xxxx xxxx' \
          {
            "platform": "dmm-books",
            "enabled": true,
-           "update_mode": "manual",
+           "auto_update": true,
            "external_id": "56869",
            "regular_url":   "https://book.dmm.com/product/56869/",
            "affiliate_url": "https://al.dmm.com/?lurl=...",
@@ -107,6 +107,10 @@ curl -u 'username:xxxx xxxx xxxx xxxx xxxx xxxx' \
        ]
      }'
 ```
+
+`auto_update`（既定 `true`）は **listing 単位の自動更新スイッチ**で、全プラットフォーム共通。`false` にすると定期実行の価格更新から外れる（同期の負荷を抑えたい listing に使う）。設定画面の「強制一括更新」は `false` の listing も更新する。自動取得そのものの可否はプラットフォームの Provider 側で決まるため、Provider が手動入力のプラットフォームでは `true` でも取得されない。
+
+なお `update_mode`（既定 `auto`）は v3.2.x 以前の互換フィールドで、保存済みの値も判定に使われる。`manual` の listing は `auto_update` が `true` でも自動更新されない（`api` は `auto` の旧表記として扱う）。商品編集画面で「自動更新」トグルを操作すると `auto` へ正規化される。
 
 ### 一括作成（bulk）
 

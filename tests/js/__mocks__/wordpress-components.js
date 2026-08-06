@@ -35,16 +35,29 @@ function TextControl( { label, value, onChange, type, className, help } ) {
 	);
 }
 
-function ToggleControl( { label, checked, onChange } ) {
+function ToggleControl( { label, checked, onChange, help } ) {
+	// help は TextControl / SelectControl と同様、label の外側の兄弟要素として描画する
+	// （getByLabelText の accessible name に混ざらないようにするため）。
 	return React.createElement(
-		'label',
+		React.Fragment,
 		null,
-		label,
-		React.createElement( 'input', {
-			type: 'checkbox',
-			checked: Boolean( checked ),
-			onChange: ( e ) => onChange( e.target.checked ),
-		} )
+		React.createElement(
+			'label',
+			null,
+			label,
+			React.createElement( 'input', {
+				type: 'checkbox',
+				checked: Boolean( checked ),
+				onChange: ( e ) => onChange( e.target.checked ),
+			} )
+		),
+		help
+			? React.createElement(
+					'span',
+					{ className: 'components-base-control__help' },
+					help
+				)
+			: null
 	);
 }
 

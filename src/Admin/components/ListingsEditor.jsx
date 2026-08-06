@@ -11,16 +11,14 @@ import {
 import { __ } from '@wordpress/i18n';
 import { fetchPlatforms } from '../api/platforms';
 
-const UPDATE_MODE_OPTIONS = [
-	{ value: 'manual', label: __('手動', 'affilicard') },
-	{ value: 'api', label: __('API', 'affilicard') },
-];
-
 const EMPTY_LISTING = {
 	platform: '',
 	enabled: true,
-	update_mode: 'manual',
-	auto_update: false,
+	// 自動取得の可否はプラットフォームの Provider 側で決まるため、listing 側は
+	// 既定で自動更新の対象にする（'manual' 固定だと追加した listing が永久に
+	// 更新されない）。止めたい listing だけ「自動更新」トグルを OFF にする。
+	update_mode: 'auto',
+	auto_update: true,
 	external_id: '',
 	regular_url: '',
 	affiliate_url: '',
@@ -115,21 +113,24 @@ export function ListingsEditor({ listings, onChange }) {
 							checked={Boolean(row.enabled)}
 							onChange={(v) => updateRow(i, { enabled: v })}
 						/>
-						<SelectControl
-							label={__('更新モード', 'affilicard')}
-							value={row.update_mode}
-							options={UPDATE_MODE_OPTIONS}
-							onChange={(v) => updateRow(i, { update_mode: v })}
+						<ToggleControl
+							label={__('自動更新', 'affilicard')}
+							checked={Boolean(row.auto_update)}
+							onChange={(v) =>
+								// update_mode は v3.3.0 でこのトグルに一本化した。旧 UI が
+								// 書いた 'manual' が残っていると ON にしても PHP 側で弾かれ、
+								// トグルが無言で効かないため、操作時に auto へ正規化する。
+								// （'api' は PHP 側が auto の別表記として救済する）
+								updateRow(i, {
+									auto_update: v,
+									update_mode: 'auto',
+								})
+							}
+							help={__(
+								'OFF にするとこの listing は定期実行の自動更新の対象から外れます。ただし設定 →「強制一括更新」を実行した場合は OFF の listing も更新されます。プラットフォームの Provider が手動入力の場合は ON でも自動取得されません。',
+								'affilicard'
+							)}
 						/>
-						{row.update_mode === 'api' && (
-							<ToggleControl
-								label={__('自動更新', 'affilicard')}
-								checked={Boolean(row.auto_update)}
-								onChange={(v) =>
-									updateRow(i, { auto_update: v })
-								}
-							/>
-						)}
 						<TextControl
 							label={__('外部 ID', 'affilicard')}
 							value={row.external_id}

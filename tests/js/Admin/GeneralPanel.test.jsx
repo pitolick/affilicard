@@ -72,7 +72,7 @@ describe( '一括更新ボタンの feedback', () => {
 		await waitFor( () => expect( fetchSettings ).toHaveBeenCalled() );
 
 		const bulkBtn = screen.getByText( '一括更新' );
-		const forceBtn = screen.getByText( '強制一括更新（取扱終了も含む）' );
+		const forceBtn = screen.getByText( '強制一括更新（自動更新 OFF も含む）' );
 
 		fireEvent.click( bulkBtn );
 		expect( triggerRefresh ).toHaveBeenCalledWith( null, false );
@@ -91,7 +91,7 @@ describe( '一括更新ボタンの feedback', () => {
 		await waitFor( () =>
 			expect( screen.getByText( '一括更新' ) ).not.toBeDisabled()
 		);
-		expect( screen.getByText( '強制一括更新（取扱終了も含む）' ) ).not.toBeDisabled();
+		expect( screen.getByText( '強制一括更新（自動更新 OFF も含む）' ) ).not.toBeDisabled();
 	} );
 
 	test( '強制一括更新クリックで triggerRefresh(null,true) を呼び、強制側だけ「更新中…」になる', async () => {
@@ -107,7 +107,7 @@ describe( '一括更新ボタンの feedback', () => {
 		await waitFor( () => expect( fetchSettings ).toHaveBeenCalled() );
 
 		fireEvent.click(
-			screen.getByText( '強制一括更新（取扱終了も含む）' )
+			screen.getByText( '強制一括更新（自動更新 OFF も含む）' )
 		);
 		expect( triggerRefresh ).toHaveBeenCalledWith( null, true );
 

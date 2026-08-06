@@ -85,6 +85,14 @@ final class ListingEligibilityTest extends TestCase {
 		$this->assertFalse( ListingEligibility::isEnabledAuto( array( 'enabled' => false ) ) );
 	}
 
+	public function test_isEnabledAuto_update_modeがapiなら旧UIの表記ゆれとしてtrue(): void {
+		// v3.3.0 より前の商品編集 UI は「更新モード」の選択肢を 'manual'/'api' で
+		// 出していたが、判定側は 'auto' のみを見ていた。ユーザーが自動更新のつもりで
+		// 「API」を選んだ listing が永久に更新されない状態になっていたため、
+		// 'api' は 'auto' の別表記として救済する。
+		$this->assertTrue( ListingEligibility::isEnabledAuto( array( 'update_mode' => 'api' ) ) );
+	}
+
 	public function test_isEnabledAuto_auto_updateがfalseでもauto_updateは無視してtrue(): void {
 		// force 経路（enqueue 時点では auto_update=false でも対象に含めた listing）を
 		// ワーカー実行時に auto_update だけを理由に取りこぼさないための仕様。
