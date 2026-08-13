@@ -22,6 +22,7 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 *
 	 * @return array{
 	 *   id: int,
+	 *   slug: string,
 	 *   title: string,
 	 *   content: string,
 	 *   status: string,
@@ -58,6 +59,7 @@ final class ProductRepository implements ProductRepositoryInterface {
 
 		return array(
 			'id'             => (int) $post->ID,
+			'slug'           => (string) ( $post->post_name ?? '' ),
 			'title'          => (string) ( $post->post_title ?? '' ),
 			'content'        => (string) ( $post->post_content ?? '' ),
 			'status'         => (string) ( $post->post_status ?? '' ),

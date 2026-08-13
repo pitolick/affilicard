@@ -131,6 +131,106 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertSame( '', $result['mask_label'] );
 	}
 
+	public function test_find_returns_slug_from_post_name(): void {
+		$post = (object) array(
+			'ID'            => 202,
+			'post_type'     => ProductPostType::POST_TYPE,
+			'post_title'    => 'タイトル',
+			'post_name'     => 'sample-title-vol1',
+			'post_content'  => '',
+			'post_status'   => 'publish',
+			'post_modified' => '2026-08-13 12:00:00',
+		);
+
+		WP_Mock::userFunction( 'get_post' )
+			->with( 202 )
+			->andReturn( $post );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 202, ProductPostType::META_EXTRAS, true )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 202, ProductPostType::META_LISTINGS, true )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 202, ProductPostType::META_PRODUCT_TYPE, true )
+			->andReturn( 'ebook' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 202, ProductPostType::META_STOCK_STATUS, true )
+			->andReturn( 'available' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 202, ProductPostType::META_SCHEMA_VERSION, true )
+			->andReturn( SchemaVersion::CURRENT );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 202, ProductPostType::META_RELEASE_DATE, true )
+			->andReturn( '' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 202, ProductPostType::META_MASK_BLUR, true )
+			->andReturn( '' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 202, ProductPostType::META_MASK_R18, true )
+			->andReturn( '' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 202, ProductPostType::META_MASK_LABEL, true )
+			->andReturn( '' );
+
+		$repo   = new ProductRepository();
+		$result = $repo->find( 202 );
+
+		$this->assertNotNull( $result );
+		$this->assertSame( 'sample-title-vol1', $result['slug'] );
+	}
+
+	/**
+	 * post_name が無い投稿（下書き直後など）でも例外にせず空文字を返す。
+	 */
+	public function test_find_returns_empty_slug_when_post_name_missing(): void {
+		$post = (object) array(
+			'ID'            => 203,
+			'post_type'     => ProductPostType::POST_TYPE,
+			'post_title'    => 'タイトル',
+			'post_content'  => '',
+			'post_status'   => 'publish',
+			'post_modified' => '2026-08-13 12:00:00',
+		);
+
+		WP_Mock::userFunction( 'get_post' )
+			->with( 203 )
+			->andReturn( $post );
+
+		foreach (
+			array(
+				ProductPostType::META_EXTRAS,
+				ProductPostType::META_LISTINGS,
+			) as $meta_key
+		) {
+			WP_Mock::userFunction( 'get_post_meta' )
+				->with( 203, $meta_key, true )
+				->andReturn( array() );
+		}
+		foreach (
+			array(
+				ProductPostType::META_PRODUCT_TYPE,
+				ProductPostType::META_STOCK_STATUS,
+				ProductPostType::META_SCHEMA_VERSION,
+				ProductPostType::META_RELEASE_DATE,
+				ProductPostType::META_MASK_BLUR,
+				ProductPostType::META_MASK_R18,
+				ProductPostType::META_MASK_LABEL,
+			) as $meta_key
+		) {
+			WP_Mock::userFunction( 'get_post_meta' )
+				->with( 203, $meta_key, true )
+				->andReturn( '' );
+		}
+
+		$repo   = new ProductRepository();
+		$result = $repo->find( 203 );
+
+		$this->assertNotNull( $result );
+		$this->assertSame( '', $result['slug'] );
+	}
+
 	public function test_find_includes_release_date(): void {
 		$post = (object) array(
 			'ID'            => 7,
