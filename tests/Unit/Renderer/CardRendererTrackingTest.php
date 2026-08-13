@@ -27,11 +27,12 @@ final class CardRendererTrackingTest extends TestCase {
 		WP_Mock::userFunction( '__', array( 'return_arg' => 0 ) );
 		WP_Mock::userFunction( 'sanitize_hex_color', array( 'return_arg' => 0 ) );
 		WP_Mock::userFunction( 'wp_date', array( 'return' => '2026年8月13日 12:00' ) );
-		// 実 WordPress の esc_attr は _wp_specialchars( $text, ENT_QUOTES ) 相当。
+		// 実 WordPress の esc_attr は _wp_specialchars( $text, ENT_QUOTES ) 相当
+		// （$double_encode のデフォルトは false。第 4 引数 false で揃える）。
 		WP_Mock::userFunction( 'esc_attr' )
 			->andReturnUsing(
 				static function ( $value ): string {
-					return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' );
+					return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8', false );
 				}
 			);
 	}

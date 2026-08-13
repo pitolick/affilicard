@@ -79,7 +79,7 @@ final class CardRenderer {
 
 		$extras = isset( $product['extras'] ) && is_array( $product['extras'] ) ? $product['extras'] : array();
 
-		// 計測用の商品識別子。Task 3 でカードのルート要素にも同じ値を出す。
+		// 計測用の商品識別子。カードのルート要素と各 CTA の両方に同じ値を出す。
 		$tracking = array(
 			'product-id'    => isset( $product['id'] ) && (int) $product['id'] > 0 ? (string) (int) $product['id'] : '',
 			'product-slug'  => isset( $product['slug'] ) ? trim( (string) $product['slug'] ) : '',
