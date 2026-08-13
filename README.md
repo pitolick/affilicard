@@ -43,6 +43,33 @@
 }
 ```
 
+## 計測用 data 属性
+
+商品カードは、タグマネージャや解析ツールから読めるように `data-affilicard-*` 属性を出力します。
+プラグイン自体は計測イベントを送信しません（フロント JS を一切読み込みません）。送信は
+Google Tag Manager などの外部ツール側で組み立ててください。
+
+### CTA ボタン（`a.affilicard-card__cta`）
+
+| 属性 | 内容 |
+| --- | --- |
+| `data-affilicard-platform` | プラットフォームコード（例: `rakuten-kobo`） |
+| `data-affilicard-product-id` | 商品 CPT の投稿 ID |
+| `data-affilicard-product-slug` | 商品 CPT のスラッグ |
+| `data-affilicard-product-title` | 商品タイトル |
+
+### カードのルート要素（`.affilicard-card`）
+
+`data-affilicard-product-id` / `data-affilicard-product-slug` / `data-affilicard-product-title` の 3 つ。
+`data-affilicard-platform` は出力しません（1 枚のカードに複数プラットフォームが並ぶため単一値にならないため）。
+
+### 注意
+
+- **値が空の項目は属性ごと出力されません。** 空文字の属性が計測側に空パラメータとして届くのを避けるためです
+- クリックを拾うセレクタは `a[data-affilicard-platform]`、カードの表示を拾うセレクタは `.affilicard-card` を推奨します
+- 将来 CTA の内部に要素が増えてもクリック対象がずれないよう、イベント側では `closest()` で祖先を辿ってください
+- **非 ASCII のタイトルから WordPress が自動生成したスラッグはパーセントエンコードされ、非常に長くなります**（和文 20 文字程度で 180 文字前後）。計測基盤にはパラメータ値の長さ制限があることが多く（例: GA4 は 100 文字で無言の切り詰め）、超えた分は復元できません。長さが問題になる場合は商品に明示的な ASCII スラッグを与えてください。**スラッグは REST API が返す値と一致している必要があるため、プラグイン側でデコードして出力することはしません**
+
 ## 動作要件
 
 - WordPress 6.8+
