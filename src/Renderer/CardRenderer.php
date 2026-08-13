@@ -88,7 +88,7 @@ final class CardRenderer {
 
 		$style      = $this->rootStyle( $colors );
 		$root_class = 'affilicard-card' . ( $hide_media ? ' affilicard-card--no-media' : '' );
-		$html       = '<div class="' . esc_attr( $root_class ) . '"' . ( '' !== $style ? ' style="' . esc_attr( $style ) . '"' : '' ) . '>';
+		$html       = '<div class="' . esc_attr( $root_class ) . '"' . $this->trackingAttributes( $tracking ) . ( '' !== $style ? ' style="' . esc_attr( $style ) . '"' : '' ) . '>';
 
 		$html .= '<div class="affilicard-card__inner">';
 

@@ -114,4 +114,53 @@ final class CardRendererTrackingTest extends TestCase {
 		$this->assertStringContainsString( 'data-affilicard-product-id="123"', $html );
 		$this->assertStringContainsString( 'data-affilicard-platform="example-store"', $html );
 	}
+
+	public function test_card_root_carries_product_identifiers(): void {
+		$html = ( new CardRenderer() )->render( $this->product(), array( $this->store() ) );
+
+		$this->assertMatchesRegularExpression(
+			'/<div class="affilicard-card"[^>]*data-affilicard-product-id="123"/',
+			$html
+		);
+		$this->assertMatchesRegularExpression(
+			'/<div class="affilicard-card"[^>]*data-affilicard-product-slug="sample-title-vol1"/',
+			$html
+		);
+		$this->assertMatchesRegularExpression(
+			'/<div class="affilicard-card"[^>]*data-affilicard-product-title="サンプル作品（1）"/',
+			$html
+		);
+	}
+
+	/**
+	 * ルートには platform を載せない（1 カードに複数ストアが並ぶため単一値にならない）。
+	 */
+	public function test_card_root_has_no_platform_attribute(): void {
+		$html = ( new CardRenderer() )->render( $this->product(), array( $this->store() ) );
+
+		$this->assertDoesNotMatchRegularExpression(
+			'/<div class="affilicard-card"[^>]*data-affilicard-platform/',
+			$html
+		);
+	}
+
+	/**
+	 * ルート要素の既存の style 属性（色変数の注入）を壊さない。
+	 */
+	public function test_card_root_keeps_inline_style(): void {
+		$html = ( new CardRenderer() )->render(
+			$this->product(),
+			array( $this->store() ),
+			array( 'colors' => array( 'card_bg' => '#ffffff' ) )
+		);
+
+		$this->assertMatchesRegularExpression(
+			'/<div class="affilicard-card"[^>]*style="[^"]*--affilicard-card-bg/',
+			$html
+		);
+		$this->assertMatchesRegularExpression(
+			'/<div class="affilicard-card"[^>]*data-affilicard-product-id="123"/',
+			$html
+		);
+	}
 }
