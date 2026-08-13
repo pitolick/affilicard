@@ -79,6 +79,13 @@ final class CardRenderer {
 
 		$extras = isset( $product['extras'] ) && is_array( $product['extras'] ) ? $product['extras'] : array();
 
+		// 計測用の商品識別子。Task 3 でカードのルート要素にも同じ値を出す。
+		$tracking = array(
+			'product-id'    => isset( $product['id'] ) && (int) $product['id'] > 0 ? (string) (int) $product['id'] : '',
+			'product-slug'  => isset( $product['slug'] ) ? trim( (string) $product['slug'] ) : '',
+			'product-title' => isset( $product['title'] ) ? trim( (string) $product['title'] ) : '',
+		);
+
 		$style      = $this->rootStyle( $colors );
 		$root_class = 'affilicard-card' . ( $hide_media ? ' affilicard-card--no-media' : '' );
 		$html       = '<div class="' . esc_attr( $root_class ) . '"' . ( '' !== $style ? ' style="' . esc_attr( $style ) . '"' : '' ) . '>';
@@ -166,7 +173,8 @@ final class CardRenderer {
 				$hide,
 				$only,
 				$cta_overrides,
-				$is_preorder
+				$is_preorder,
+				$tracking
 			);
 		}
 
@@ -428,7 +436,7 @@ final class CardRenderer {
 		return $fallback;
 	}
 
-	private function renderListings( array $listings, array $by_code, array $hide, array $only, array $cta_overrides = array(), bool $is_preorder = false ): string {
+	private function renderListings( array $listings, array $by_code, array $hide, array $only, array $cta_overrides = array(), bool $is_preorder = false, array $tracking = array() ): string {
 		$rows   = '';
 		$now_ts = time();
 		foreach ( $this->visibleListings( $listings, $by_code, $hide, $only ) as $listing ) {
@@ -493,13 +501,36 @@ final class CardRenderer {
 				}
 			}
 
+			$cta_tracking = array_merge( array( 'platform' => $code ), $tracking );
+
 			$rows .= '<li class="affilicard-card__row">'
 				. '<div class="affilicard-card__platform">' . esc_html( $platform->name ) . '</div>'
 				. '<div class="affilicard-card__pricing">' . $pricing . '</div>'
-				. '<a class="affilicard-card__cta" href="' . esc_url( $url ) . '" target="_blank" rel="nofollow sponsored noopener" style="' . esc_attr( $btn_style ) . '">' . esc_html( $label ) . '</a>'
+				. '<a class="affilicard-card__cta"' . $this->trackingAttributes( $cta_tracking ) . ' href="' . esc_url( $url ) . '" target="_blank" rel="nofollow sponsored noopener" style="' . esc_attr( $btn_style ) . '">' . esc_html( $label ) . '</a>'
 				. '</li>';
 		}
 		return '' === $rows ? '' : '<ul class="affilicard-card__listings">' . $rows . '</ul>';
+	}
+
+	/**
+	 * 計測用の data 属性文字列を組み立てる。
+	 *
+	 * 値が空文字の項目は属性ごと省略する（空文字を出すと計測基盤側に空の
+	 * パラメータが届くため）。キーは呼び出し元が渡すリテラルのみで、外部
+	 * 入力は値だけ。値は esc_attr を通す。
+	 *
+	 * @param array<string, string> $pairs data-affilicard- に続くサフィックス => 値
+	 */
+	private function trackingAttributes( array $pairs ): string {
+		$out = '';
+		foreach ( $pairs as $suffix => $value ) {
+			$value = (string) $value;
+			if ( '' === $value ) {
+				continue;
+			}
+			$out .= ' data-affilicard-' . $suffix . '="' . esc_attr( $value ) . '"';
+		}
+		return $out;
 	}
 
 	/**
