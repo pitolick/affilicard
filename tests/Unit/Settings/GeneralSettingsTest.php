@@ -316,4 +316,22 @@ final class GeneralSettingsTest extends TestCase {
 		$result = GeneralSettings::update( array( 'throttle_overrides' => array( 'rakuten' => -100 ) ) );
 		$this->assertSame( array( 'rakuten' => 0 ), $result['throttle_overrides'] );
 	}
+
+	public function test_stocktake_の既定値は有効かつ180日(): void {
+		WP_Mock::userFunction( 'get_option' )->andReturn( array() );
+
+		$this->assertTrue( GeneralSettings::isStocktakeEnabled() );
+		$this->assertSame( 180, GeneralSettings::stocktakeDays() );
+	}
+
+	public function test_stocktake_days_は_0以下を1へクランプする(): void {
+		WP_Mock::userFunction( 'get_option' )->andReturn( array() );
+		WP_Mock::userFunction( 'update_option' )->andReturn( true );
+
+		$saved = GeneralSettings::update( array( 'stocktake_days' => 0 ) );
+		$this->assertSame( 1, $saved['stocktake_days'] );
+
+		$saved = GeneralSettings::update( array( 'stocktake_days' => -30 ) );
+		$this->assertSame( 1, $saved['stocktake_days'] );
+	}
 }
