@@ -386,6 +386,33 @@ final class EnqueuerTest extends TestCase {
 	}
 
 	/**
+	 * as_schedule_single_action() の戻り値 0 には「unique 重複でスキップ」と「投入失敗」の
+	 * 2 つの意味があり、いずれも新たな pending を作っていないため depth cap の枠を消費しては
+	 * ならない（spec §1-3: 実測 775 件中 201 件しか積めなかった一因）。depthCap=3 でも、
+	 * 常に 0 が返る（＝毎回スキップ/失敗）状況なら depth は増えないので、5 回とも
+	 * 「積もうとする」= true が返り続けることを検証する。
+	 */
+	public function test_enqueueSweep_は_重複スキップ時に深さを消費しない(): void {
+		$this->stubRakutenPlatform();
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )->andReturn( array() );
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 );
+		// 常に 0（＝重複または失敗）を返す
+		WP_Mock::userFunction( 'as_schedule_single_action' )->andReturn( 0 );
+
+		$enqueuer = new Enqueuer( 3, 0, array( 'rakuten' ) );
+		$listing  = array(
+			'platform'        => 'rakuten-kobo',
+			'last_fetched_at' => '',
+		);
+		$def      = $this->platform( 'rakuten-kobo', 24 );
+
+		// depthCap=3。重複で消費しないなら 5 回とも「積もうとする」＝ true が返り続ける。
+		for ( $i = 0; $i < 5; $i++ ) {
+			$this->assertTrue( $enqueuer->enqueueSweep( $i + 1, 'rakuten-kobo', 'rakuten', $def, $listing, time() ) );
+		}
+	}
+
+	/**
 	 * v2.4.0 症状1/3（thundering herd）対策: 自己再投入は jitter 無しだと同一 account を
 	 * 奪い合う listing 群が寸分違わず同一タイムスタンプへ再集結してしまうため、
 	 * enqueueSweep と同様に wp_rand(0, RESCHEDULE_JITTER_SECONDS) を $whenSec に加算する。

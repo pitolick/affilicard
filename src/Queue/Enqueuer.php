@@ -193,8 +193,15 @@ final class Enqueuer {
 			$when = time() + wp_rand( 0, $this->maxJitterSeconds ); // 間隔不明時は従来 jitter
 		}
 
-		as_schedule_single_action( $when, self::HOOK_REFRESH, $args, $this->group( $account ), true, self::PRIORITY_SWEEP );
-		++$this->depthMemo;
+		$actionId = (int) as_schedule_single_action( $when, self::HOOK_REFRESH, $args, $this->group( $account ), true, self::PRIORITY_SWEEP );
+
+		// 戻り値 0 には「unique 重複でスキップ」と「投入失敗」の 2 つの意味がある。
+		// どちらも新たな pending を作っていないため深さは消費しない。投入失敗は
+		// 呼び出し側（sweep）がカーソル保持で回復する（spec §4-3）。
+		if ( 0 !== $actionId ) {
+			++$this->depthMemo;
+		}
+
 		return true;
 	}
 
