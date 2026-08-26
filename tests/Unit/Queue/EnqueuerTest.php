@@ -694,4 +694,46 @@ final class EnqueuerTest extends TestCase {
 
 		$this->assertSame( 4, ( new Enqueuer() )->queueDepth() );
 	}
+
+	public function test_enqueueBatch_は_account_group_と_sweep_優先度で1件のジョブを積む(): void {
+		$captured = null;
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->andReturnUsing(
+				function ( $when, $hook, $args, $group, $unique, $priority ) use ( &$captured ) {
+					$captured = compact( 'hook', 'args', 'group', 'unique', 'priority' );
+					return 4242;
+				}
+			);
+
+		$enqueuer = new Enqueuer();
+		$items    = array(
+			array(
+				'post_id'  => 11,
+				'platform' => 'rakuten-kobo',
+			),
+			array(
+				'post_id'  => 12,
+				'platform' => 'rakuten-kobo',
+			),
+		);
+
+		$actionId = $enqueuer->enqueueBatch( 'rakuten', $items );
+
+		$this->assertSame( 4242, $actionId );
+		$this->assertSame( Enqueuer::HOOK_REFRESH_BATCH, $captured['hook'] );
+		$this->assertSame( 'affilicard-rakuten', $captured['group'] );
+		$this->assertSame( Enqueuer::PRIORITY_SWEEP, $captured['priority'] );
+		$this->assertTrue( $captured['unique'] );
+		$this->assertSame( 'rakuten', $captured['args']['account'] );
+		$this->assertCount( 2, $captured['args']['items'] );
+	}
+
+	public function test_enqueueBatch_は_items_が空なら何も積まず0を返す(): void {
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$enqueuer = new Enqueuer();
+
+		$this->assertSame( 0, $enqueuer->enqueueBatch( 'rakuten', array() ) );
+	}
 }

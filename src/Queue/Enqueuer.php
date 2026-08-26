@@ -28,11 +28,12 @@ use Affilicard\Provider\ProviderRegistry;
  */
 final class Enqueuer {
 
-	public const HOOK_REFRESH    = 'affilicard_refresh_listing';
-	public const HOOK_AUTOCREATE = 'affilicard_autocreate';
-	public const PRIORITY_FORCE  = 0;
-	public const PRIORITY_MANUAL = 10;
-	public const PRIORITY_SWEEP  = 20;
+	public const HOOK_REFRESH       = 'affilicard_refresh_listing';
+	public const HOOK_REFRESH_BATCH = 'affilicard_refresh_batch';
+	public const HOOK_AUTOCREATE    = 'affilicard_autocreate';
+	public const PRIORITY_FORCE     = 0;
+	public const PRIORITY_MANUAL    = 10;
+	public const PRIORITY_SWEEP     = 20;
 
 	/**
 	 * throttle/backoff の自己再投入（rescheduleRefresh/rescheduleAutoCreate）に加える
@@ -207,6 +208,36 @@ final class Enqueuer {
 		);
 
 		as_schedule_single_action( time(), self::HOOK_AUTOCREATE, $args, $this->group( $account ), true, self::PRIORITY_FORCE );
+	}
+
+	/**
+	 * account 単位のバッチジョブを積む。1 ジョブが複数 listing を担当し、
+	 * ハンドラ側がジョブ内でレート間隔を守りながら順次 fetch する。
+	 *
+	 * per-listing ジョブ（HOOK_REFRESH）は異常系の受け皿として残るため、
+	 * ここでは正常系の投入だけを担う。
+	 *
+	 * @param list<array{post_id: int, platform: string}> $items
+	 * @return int action ID。0 は未投入（items が空・重複・投入失敗）。
+	 */
+	public function enqueueBatch( string $account, array $items, int $when = 0 ): int {
+		if ( array() === $items ) {
+			return 0;
+		}
+
+		$args = array(
+			'account' => $account,
+			'items'   => array_values( $items ),
+		);
+
+		return (int) as_schedule_single_action(
+			$when > 0 ? $when : time(),
+			self::HOOK_REFRESH_BATCH,
+			$args,
+			$this->group( $account ),
+			true,
+			self::PRIORITY_SWEEP
+		);
 	}
 
 	/**
