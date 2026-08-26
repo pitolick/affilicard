@@ -311,10 +311,29 @@ final class QueueController {
 		return is_array( $ids ) ? $ids : array();
 	}
 
+	/**
+	 * 一括取消（clearAll/cancelPending）が走査する group 一覧。
+	 *
+	 * Task 12・Ruling 8: $accountCodes（'affilicard-{account}'）だけでなく、
+	 * 掃引トリガー（affilicard_sweep）の group（'affilicard-sweep'。account では
+	 * ないため $accountCodes に含まれない）も対象に加える。これが無いと「キューを
+	 * 全て削除」「未処理をキャンセル」を押しても pending の掃引トリガーが残り、
+	 * 管理 UI から掃引チェーンを止める手段が無くなる。
+	 *
+	 * @return list<string>
+	 */
+	private function pendingCancellationGroups(): array {
+		$groups = array();
+		foreach ( $this->accountCodes as $account ) {
+			$groups[] = $this->group( $account );
+		}
+		$groups[] = $this->group( Enqueuer::SWEEP_GROUP_ACCOUNT );
+		return $groups;
+	}
+
 	private function cancelPendingActionsForAllGroups(): int {
 		$count = 0;
-		foreach ( $this->accountCodes as $account ) {
-			$group  = $this->group( $account );
+		foreach ( $this->pendingCancellationGroups() as $group ) {
 			$ids    = as_get_scheduled_actions(
 				array(
 					'group'    => $group,

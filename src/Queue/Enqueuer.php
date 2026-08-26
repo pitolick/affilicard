@@ -39,6 +39,14 @@ final class Enqueuer {
 	public const PRIORITY_SWEEP     = 20;
 
 	/**
+	 * enqueueSweepTrigger() が使う group の疑似 account コード（実際の account では
+	 * ない。group('sweep') = 'affilicard-sweep'）。QueueController の一括取消
+	 * （Task 12・Ruling 8）が accountCodes に加えて sweep group も対象にする際、
+	 * マジック文字列 'sweep' の重複を避けるために公開する。
+	 */
+	public const SWEEP_GROUP_ACCOUNT = 'sweep';
+
+	/**
 	 * throttle/backoff の自己再投入（rescheduleRefresh/rescheduleAutoCreate）に加える
 	 * jitter の最大秒数。同一 account を奪い合う listing 群が jitter 無しだと寸分違わず
 	 * 同一タイムスタンプへ再集結し、thundering herd（症状1: ignored 誘発）＋ claim 順
@@ -136,10 +144,14 @@ final class Enqueuer {
 	 * として unique 判定に一致し、true のままだと必ず抑止されてジョブが痕跡なく消滅する
 	 * （rescheduleRefresh 等の自己再投入と同じ理由）。
 	 *
+	 * @param int $when 積む時刻（unix秒）。0（既定）は time()（即時）。Ruling 8: pause 中や
+	 *             queue_depth_cap に張り付いて前進できない状態では、即時の積み直しが同じ
+	 *             空振りクエリを無限に繰り返す（completed アクションのチャーン）ため、
+	 *             呼び出し側が将来時刻を渡して間隔を空けられるようにする。
 	 * @return int action ID。0 は未投入（unique 重複・投入失敗）。
 	 */
-	public function enqueueSweepTrigger( bool $unique = true ): int {
-		return (int) as_schedule_single_action( time(), self::HOOK_SWEEP, array(), $this->group( 'sweep' ), $unique, self::PRIORITY_SWEEP );
+	public function enqueueSweepTrigger( bool $unique = true, int $when = 0 ): int {
+		return (int) as_schedule_single_action( $when > 0 ? $when : time(), self::HOOK_SWEEP, array(), $this->group( self::SWEEP_GROUP_ACCOUNT ), $unique, self::PRIORITY_SWEEP );
 	}
 
 	/**

@@ -644,6 +644,44 @@ final class QueueMaintenanceTest extends TestCase {
 	}
 
 	/**
+	 * Task 12・Ruling 8: queueAtCapacity() は sweep() 冒頭の cap チェック
+	 * （$depth >= $cap でループ 1 巡目から打ち切り＝cursor 前進ゼロ）と同じ判定を
+	 * sweep() を呼ばずに事前確認できる。呼び出し側（Plugin::handleSweepAction）は
+	 * これが true の間 sweep() を呼ばず遅延して積み直す。
+	 */
+	public function test_queueAtCapacity_depthがcap以上ならtrue(): void {
+		$this->stubQueueDepth( 5 );
+
+		$maintenance = new QueueMaintenance(
+			Mockery::mock( ProductRepositoryInterface::class ),
+			new Enqueuer(),
+			$this->registry(),
+			new SweepCursor(),
+			new StocktakePolicy(),
+			0,
+			5
+		);
+
+		$this->assertTrue( $maintenance->queueAtCapacity() );
+	}
+
+	public function test_queueAtCapacity_depthがcap未満ならfalse(): void {
+		$this->stubQueueDepth( 4 );
+
+		$maintenance = new QueueMaintenance(
+			Mockery::mock( ProductRepositoryInterface::class ),
+			new Enqueuer(),
+			$this->registry(),
+			new SweepCursor(),
+			new StocktakePolicy(),
+			0,
+			5
+		);
+
+		$this->assertFalse( $maintenance->queueAtCapacity() );
+	}
+
+	/**
 	 * 継続ジョブ（バッチ）の投入に失敗しても（as_schedule_single_action が 0 を返しても）
 	 * 走査したところまでのカーソルは保存される。カーソルが無いまま投入だけが失われると、
 	 * その位置以降の商品が次の WP-Cron まで丸ごと更新されない（spec §4-2）。

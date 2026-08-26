@@ -232,6 +232,27 @@ final class EnqueuerTest extends TestCase {
 	}
 
 	/**
+	 * Task 12・Ruling 8: $when > 0 を渡すと time() ではなくその時刻に積む。
+	 * pause 中／queue_depth_cap に張り付いた状態での遅延再投入に使う。
+	 */
+	public function test_enqueueSweepTrigger_whenを渡すとその時刻に積む(): void {
+		$when = time() + 600;
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				$when,
+				Enqueuer::HOOK_SWEEP,
+				array(),
+				'affilicard-sweep',
+				false,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 0 );
+
+		( new Enqueuer() )->enqueueSweepTrigger( false, $when );
+		$this->assertConditionsMet();
+	}
+
+	/**
 	 * v2.4.0 症状1/3（thundering herd）対策: 自己再投入は jitter 無しだと同一 account を
 	 * 奪い合う listing 群が寸分違わず同一タイムスタンプへ再集結してしまうため、
 	 * wp_rand(0, RESCHEDULE_JITTER_SECONDS) を $whenSec に加算する。

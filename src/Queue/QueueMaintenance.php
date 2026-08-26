@@ -74,6 +74,25 @@ final class QueueMaintenance {
 	) {}
 
 	/**
+	 * Ruling 8: 次に sweep() を呼んでも前進できるか。sweep() 内部の cap チェックは
+	 * ループ先頭で 1 度だけ計算した depth（$this->enqueuer->queueDepth()）を使うため、
+	 * それが既に depthCap 以上であれば、最初の商品に到達する前に必ず打ち切られ
+	 * カーソルが 1 件も進まないまま false を返す（このメソッドと sweep() 冒頭の
+	 * cap チェックはロジックを同期させておくこと）。
+	 *
+	 * pending のバッチ深さが cap に張り付いた状態（例: キュー一時停止中に
+	 * BatchRefreshHandler が pause 温存の自己再投入を繰り返し、pending が cap を
+	 * 下回らない）で呼び出し側が sweep() を即時に呼び直し続けると、cursor が
+	 * 一切進まないまま get_posts / as_get_scheduled_actions の空振りクエリだけが
+	 * 無限に繰り返される（completed アクションのチャーン。spec が消そうとした
+	 * 症状そのもの）。呼び出し側はこれが true の間、sweep() を呼ばずに遅延して
+	 * 再投入すること（Task 12・Ruling 8）。
+	 */
+	public function queueAtCapacity(): bool {
+		return $this->enqueuer->queueDepth() >= $this->depthCap;
+	}
+
+	/**
 	 * 公開商品をカーソル順に $maxProducts 件走査し、対象 listing を account 別の
 	 * バッチジョブとして積む。
 	 *

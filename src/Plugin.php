@@ -60,6 +60,15 @@ final class Plugin {
 
 	public const SEEDED_AT_OPTION = 'affilicard_seeded_at';
 
+	/**
+	 * affilicard_sweep が pause 中／queue_depth_cap 到達で前進できないときに、
+	 * 継続トリガーを遅延して積み直すまでの待機秒数（Task 12・Ruling 8）。
+	 * BatchRefreshHandler::PAUSE_RETRY_SECONDS と同じ 10 分。遅延しすぎると cap が
+	 * 空いた後の再開が遅れるが、次の WP-Cron（affilicard_refresh_all）が必ず新規の
+	 * unique=true トリガーを積むため、この値を厳密にチューニングする必要はない。
+	 */
+	public const SWEEP_STALLED_RETRY_SECONDS = 600;
+
 	public static function boot(): void {
 		$instance = new self();
 		$instance->bootInstance();
@@ -172,8 +181,11 @@ final class Plugin {
 		add_action( 'init', array( RefreshScheduler::class, 'reconcile' ) );
 
 		// キュー: 掃引（sweep）アクション本体。QueueMaintenance::sweep() を呼び、戻り値が
-		// false（未完走。queue_depth_cap 到達や続きがある場合）なら同じアクションを
-		// 即時に積み直して継続する（Task 12・Ruling 3）。
+		// false（未完走。続きがある場合）なら同じアクションを即時に積み直して継続する
+		// （Task 12・Ruling 3）。ただし pause 中／queue_depth_cap に張り付いていて前進
+		// できない状態では sweep() を呼ばずに遅延して積み直す（Ruling 8。即時だと cursor
+		// が一切進まないまま同じ空振りクエリを無限に繰り返し、completed アクションの
+		// チャーンを再発させてしまう）。判定・分岐は handleSweepAction() に切り出す。
 		// I1: depth cap backstop が affilicard 以外の pending action（WooCommerce 等）に
 		// 誤反応しないよう、$automaticAccountCodes で account group 別集計に限定した
 		// 専用 Enqueuer を使う（REST 等が使う共有 $enqueuer とは accountCodes のスコープが
@@ -191,7 +203,7 @@ final class Plugin {
 					sweepLeadSeconds: PriceFreshness::sweepLeadSeconds( GeneralSettings::refreshIntervalHours() ),
 					depthCap: $depthCap
 				);
-				self::handleSweepCompletion( $maintenance->sweep(), $sweepEnqueuer );
+				self::handleSweepAction( GeneralSettings::isQueuePaused(), $maintenance, $sweepEnqueuer );
 			}
 		);
 
@@ -290,18 +302,47 @@ final class Plugin {
 	}
 
 	/**
-	 * affilicard_sweep ハンドラの完走判定を切り出したもの（Task 12・Ruling 3）。
-	 * QueueMaintenance::sweep() が false（未完走。queue_depth_cap 到達や続きがある場合）を
-	 * 返したときだけ、同じ掃引トリガーを unique=false で即時に積み直して継続する。
-	 * true（完走）のときは何もしない——ここを誤ると継続更新が止まる。
+	 * affilicard_sweep ハンドラの完走判定を切り出したもの（Task 12・Ruling 3/8）。
+	 * $completed が false のときだけ、同じ掃引トリガーを unique=false で積み直して
+	 * 継続する。true（完走）のときは何もしない——ここを誤ると継続更新が止まる。
 	 *
 	 * QueueMaintenance は final class で Mockery モック不可なため、bool の completed を
 	 * 引数に取る形で切り出し、この分岐だけを直接ユニットテストできるようにしている。
+	 *
+	 * @param int $delaySeconds 継続トリガーを積む遅延秒数。0（既定）は即時。
+	 *            Ruling 8: pause 中／queue_depth_cap に張り付いていて前進できない状態
+	 *            （呼び出し元は handleSweepAction() 経由）では 0 より大きい値を渡すこと。
 	 */
-	public static function handleSweepCompletion( bool $completed, Enqueuer $sweepEnqueuer ): void {
+	public static function handleSweepCompletion( bool $completed, Enqueuer $sweepEnqueuer, int $delaySeconds = 0 ): void {
 		if ( ! $completed ) {
-			$sweepEnqueuer->enqueueSweepTrigger( false );
+			$sweepEnqueuer->enqueueSweepTrigger( false, $delaySeconds > 0 ? time() + $delaySeconds : 0 );
 		}
+	}
+
+	/**
+	 * affilicard_sweep ハンドラの本体（Task 12・Ruling 8）。
+	 *
+	 * これは私（コントローラ）の Ruling 3 の不備を修正するもの: 「false なら即時に
+	 * 積み直す」だけでは、queue_depth_cap に張り付いて 1 件も前進できない状態
+	 * （$maintenance->queueAtCapacity()）や、キュー一時停止中（$paused）でも
+	 * sweep() を即座に呼び直し続けてしまう。前者は cursor が一切進まないまま
+	 * get_posts / as_get_scheduled_actions の空振りクエリを無限に繰り返し、
+	 * 後者は BatchRefreshHandler が pause 中バッチを自己再投入し続けるため pending
+	 * 深さが永久に cap を下回らず、いずれも completed アクションのチャーンという
+	 * spec が消そうとした症状そのものを再発させる。
+	 *
+	 * この2条件のときは sweep() を呼ばずに SWEEP_STALLED_RETRY_SECONDS 秒後へ遅延して
+	 * 積み直す（unique=false のためジョブは失われない）。それ以外は通常どおり
+	 * sweep() を呼び、その戻り値を handleSweepCompletion() へ渡す（即時の継続 or
+	 * 完走で何もしない）。
+	 */
+	public static function handleSweepAction( bool $paused, QueueMaintenance $maintenance, Enqueuer $sweepEnqueuer ): void {
+		if ( $paused || $maintenance->queueAtCapacity() ) {
+			self::handleSweepCompletion( false, $sweepEnqueuer, self::SWEEP_STALLED_RETRY_SECONDS );
+			return;
+		}
+
+		self::handleSweepCompletion( $maintenance->sweep(), $sweepEnqueuer );
 	}
 
 	/**
