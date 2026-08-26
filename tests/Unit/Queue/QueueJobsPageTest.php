@@ -124,6 +124,94 @@ final class QueueJobsPageTest extends TestCase {
 		$this->assertSame( 'rakuten', $_GET['s'] );
 	}
 
+	/**
+	 * spec 2026-08-25 Important 3: onLoad() は `affilicard_refresh_batch` の Arguments 列を
+	 * 要約する `action_scheduler_list_table_column_args` フィルタを登録する。AS の
+	 * `ActionScheduler_ListTable::column_args()` は $row（$query 相当。accepted_args=2
+	 * で $row を受け取る必要がある）付きで apply_filters するため、accepted_args=2 で
+	 * 登録すること自体を検証する。
+	 */
+	public function test_onLoad_action_scheduler_list_table_column_argsフィルタを登録する(): void {
+		unset( $_GET['s'] );
+		WP_Mock::userFunction( 'is_textdomain_loaded' )->with( 'action-scheduler' )->andReturn( true );
+
+		WP_Mock::expectFilterAdded(
+			'action_scheduler_list_table_column_args',
+			array( QueueJobsPage::class, 'summarizeBatchArgs' ),
+			10,
+			2
+		);
+
+		QueueJobsPage::onLoad();
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * summarizeBatchArgs() は `affilicard_refresh_batch` 以外の hook では AS の既定描画
+	 * （$html）をそのまま通す（per-listing の HOOK_REFRESH 等、他ジョブの表示に影響しない）。
+	 */
+	public function test_summarizeBatchArgs_batch以外のhookはhtmlをそのまま返す(): void {
+		$this->assertSame(
+			'<ul><li>original</li></ul>',
+			QueueJobsPage::summarizeBatchArgs(
+				'<ul><li>original</li></ul>',
+				array(
+					'hook' => 'affilicard_refresh_listing',
+					'args' => array(
+						'post_id'  => 1,
+						'platform' => 'rakuten-kobo',
+					),
+				)
+			)
+		);
+	}
+
+	/**
+	 * spec Important 3 の中心: `affilicard_refresh_batch` の Arguments 列を
+	 * 「account / 件数」の要約に畳む（22 件のネストした配列ダンプを展開しない）。
+	 */
+	public function test_summarizeBatchArgs_batchジョブはaccountと件数の要約に畳む(): void {
+		$items = array();
+		for ( $i = 1; $i <= 22; $i++ ) {
+			$items[] = array(
+				'post_id'  => $i,
+				'platform' => 'rakuten-kobo',
+			);
+		}
+
+		$result = QueueJobsPage::summarizeBatchArgs(
+			'<ul><li>...22 件分のダンプ...</li></ul>',
+			array(
+				'hook' => \Affilicard\Queue\Enqueuer::HOOK_REFRESH_BATCH,
+				'args' => array(
+					'account' => 'rakuten',
+					'items'   => $items,
+				),
+			)
+		);
+
+		$this->assertStringContainsString( 'rakuten', $result );
+		$this->assertStringContainsString( '22', $result );
+		$this->assertStringNotContainsString( '...22 件分のダンプ...', $result );
+	}
+
+	/**
+	 * args が欠落・不正な形（account 無し・items が配列でない等）でもフェイタルせず、
+	 * 空/0件としての要約を返す（malformed action を開いても運用画面が壊れない）。
+	 */
+	public function test_summarizeBatchArgs_argsが不正でもフェイタルせず0件として扱う(): void {
+		$result = QueueJobsPage::summarizeBatchArgs(
+			'<ul></ul>',
+			array(
+				'hook' => \Affilicard\Queue\Enqueuer::HOOK_REFRESH_BATCH,
+				'args' => array(),
+			)
+		);
+
+		$this->assertStringContainsString( '0', $result );
+	}
+
 	public function test_maybeLoadJapaneseTranslations_既にロード済みならget_localeもload_textdomainも呼ばない(): void {
 		unset( $_GET['s'] );
 		WP_Mock::userFunction( 'is_textdomain_loaded' )->with( 'action-scheduler' )->andReturn( true );

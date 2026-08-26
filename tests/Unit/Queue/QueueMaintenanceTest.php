@@ -882,6 +882,144 @@ final class QueueMaintenanceTest extends TestCase {
 			);
 	}
 
+	/**
+	 * spec §4-1 Important 2: バッチサイズは AS の `action_scheduler_queue_runner_time_limit`
+	 * フィルタ（既定 30 秒。AS 自身も同じフィルタを適用する）から安全マージン 5 秒を引いた
+	 * 実効秒数を、account の実効レート間隔（楽天 1.1s）で割って算出する。フィルタで
+	 * time limit を 15 秒に引き下げると、実効 10 秒 ÷ 1.1s = floor(9.09) = 9 件で
+	 * flush されるようになる（既定の 22 件より小さい）。
+	 */
+	public function test_sweep_バッチサイズはtime_limitフィルタから算出される(): void {
+		$this->stubCursor( 0 );
+		$this->stubGeneralSettings();
+		$this->stubQueueDepth( 0 );
+		$this->stubFilterCleanup();
+		$this->stubCompletion();
+		$this->stubRakutenPlatform();
+		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
+
+		WP_Mock::onFilter( 'action_scheduler_queue_runner_time_limit' )
+			->with( 30 )
+			->reply( 15 );
+
+		WP_Mock::userFunction( 'get_posts' )->andReturn( range( 1, 9 ) );
+
+		$stale = gmdate( 'c', time() - 25 * 3600 );
+		$repo  = Mockery::mock( ProductRepositoryInterface::class );
+		foreach ( range( 1, 9 ) as $id ) {
+			$repo->shouldReceive( 'find' )->once()->with( $id )->andReturn(
+				$this->product(
+					$id,
+					array(
+						array(
+							'platform'        => 'rakuten-kobo',
+							'enabled'         => true,
+							'update_mode'     => 'auto',
+							'auto_update'     => true,
+							'external_id'     => 'e' . $id,
+							'last_fetched_at' => $stale,
+						),
+					)
+				)
+			);
+		}
+
+		// 9 件たまったところで 1 回だけバッチ投入する（time limit 15 秒 → 実効 10 秒 ÷ 1.1s = 9 件）。
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 600 );
+
+		$result = ( new QueueMaintenance( $repo, new Enqueuer(), $this->registry(), new SweepCursor() ) )->sweep();
+
+		$this->assertTrue( $result );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * spec §4-1 Important 2 / §8-2: 算出結果は `affilicard_refresh_batch_size`
+	 * フィルタで上書き可能。既定なら 2 件は末尾で 1 回のバッチにまとめられるところ、
+	 * フィルタでバッチサイズを 1 に強制すると 1 件ごとに個別のバッチジョブへ分割される
+	 * ——コードリリース無しで安全マージンを調整できることの回帰テスト。
+	 */
+	public function test_sweep_バッチサイズはaffilicard_refresh_batch_sizeフィルタで上書きできる(): void {
+		$this->stubCursor( 0 );
+		$this->stubGeneralSettings();
+		$this->stubQueueDepth( 0 );
+		$this->stubFilterCleanup();
+		$this->stubCompletion();
+		$this->stubRakutenPlatform();
+		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
+
+		// 既定の算出結果（time limit 30・安全マージン 5・楽天 1.1s）は 22 件。
+		WP_Mock::onFilter( 'affilicard_refresh_batch_size' )
+			->with( 22, 'rakuten' )
+			->reply( 1 );
+
+		WP_Mock::userFunction( 'get_posts' )->andReturn( array( 41, 42 ) );
+
+		$stale = gmdate( 'c', time() - 25 * 3600 );
+		$repo  = Mockery::mock( ProductRepositoryInterface::class );
+		foreach ( array( 41, 42 ) as $id ) {
+			$repo->shouldReceive( 'find' )->once()->with( $id )->andReturn(
+				$this->product(
+					$id,
+					array(
+						array(
+							'platform'        => 'rakuten-kobo',
+							'enabled'         => true,
+							'update_mode'     => 'auto',
+							'auto_update'     => true,
+							'external_id'     => 'e' . $id,
+							'last_fetched_at' => $stale,
+						),
+					)
+				)
+			);
+		}
+
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH_BATCH,
+				array(
+					'account' => 'rakuten',
+					'items'   => array(
+						array(
+							'post_id'  => 41,
+							'platform' => 'rakuten-kobo',
+						),
+					),
+				),
+				'affilicard-rakuten',
+				true,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 601 );
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH_BATCH,
+				array(
+					'account' => 'rakuten',
+					'items'   => array(
+						array(
+							'post_id'  => 42,
+							'platform' => 'rakuten-kobo',
+						),
+					),
+				),
+				'affilicard-rakuten',
+				true,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 602 );
+
+		$result = ( new QueueMaintenance( $repo, new Enqueuer(), $this->registry(), new SweepCursor() ) )->sweep();
+
+		$this->assertTrue( $result );
+		$this->assertConditionsMet();
+	}
+
 	public function test_registerRetentionFilters_completedとfailedの両フィルタを登録する(): void {
 		WP_Mock::expectFilterAdded(
 			'action_scheduler_retention_period',

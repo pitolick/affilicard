@@ -15,9 +15,21 @@ use WP_Mock\Tools\TestCase;
 
 final class ProductListColumnsTest extends TestCase {
 
+	/**
+	 * wp_date() への呼び出し（[format, timestamp]）を記録する。setUp() の stub は
+	 * 全テスト共通で UTC 相当（gmdate と同じ基準）の戻り値を返すため、gmdate() を直接
+	 * 呼んでいても出力文字列だけでは区別できない。「最終掲載日」列が実際に wp_date() を
+	 * 経由しているか（= 隣接する最終同期列と同じタイムゾーン基準に揃っているか）は、
+	 * この記録で呼び出し自体を検証する（final-fix-report.md Minor）。
+	 *
+	 * @var list<array{0: string, 1: int|null}>
+	 */
+	private array $wpDateCalls = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		$this->wpDateCalls = array();
 		WP_Mock::userFunction( '__' )
 			->andReturnUsing(
 				static function ( $text ) {
@@ -42,11 +54,14 @@ final class ProductListColumnsTest extends TestCase {
 					return (string) $text;
 				}
 			);
-		// 日付整形（Y-m-d H:i）用。UTC 固定（gmdate と同じ基準）で PHP 実行環境の
+		// 日付整形（Y-m-d H:i / Y-m-d）用。UTC 固定（gmdate と同じ基準）で PHP 実行環境の
 		// デフォルトタイムゾーン設定に依存しないようにする（CardRendererTest と同じ手法）。
+		// 呼び出し自体は $wpDateCalls に記録し、どのカラムが wp_date() を経由したかを
+		// 個別テストで検証できるようにする。
 		WP_Mock::userFunction( 'wp_date' )
 			->andReturnUsing(
-				static function ( $format, $timestamp = null ) {
+				function ( $format, $timestamp = null ) {
+					$this->wpDateCalls[] = array( (string) $format, null !== $timestamp ? (int) $timestamp : null );
 					return gmdate( (string) $format, null !== $timestamp ? (int) $timestamp : time() );
 				}
 			);
@@ -557,6 +572,35 @@ final class ProductListColumnsTest extends TestCase {
 		$output = (string) ob_get_clean();
 
 		$this->assertSame( '2026-08-01', $output );
+	}
+
+	/**
+	 * spec 2026-08-25 Minor: 「最終掲載日」列は隣の「最終同期」列
+	 * （renderLastVerifiedColumn が wp_date('Y-m-d H:i', ...) を使う）と同じ基準——
+	 * `gmdate()`（UTC 固定）ではなく `wp_date()`（サイトのタイムゾーン）——で整形される。
+	 * 以前は gmdate() を直接呼んでおり、JST サイトで JST 08:00 に公開した商品が
+	 * UTC では前日 23:00 になるため、この列だけ 1 日前の日付が出ていた
+	 * （final-fix-report.md Minor）。出力文字列だけでは gmdate/wp_date を区別できない
+	 * （setUp() の stub がどちらも UTC 相当を返すため）ので、$wpDateCalls で
+	 * `wp_date('Y-m-d', $ts)` が実際に呼ばれたことを直接検証する。
+	 */
+	public function test_renderColumn_last_publishedはwp_dateでサイトのタイムゾーンに整形される(): void {
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 906, ProductPostType::META_LAST_PUBLISHED_AT, true )
+			->andReturn( '2026-08-01T00:00:00+00:00' );
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array( 'stocktake_enabled' => false ) );
+
+		ob_start();
+		ProductListColumns::renderColumn( ProductListColumns::COLUMN_LAST_PUBLISHED, 906 );
+		ob_end_clean();
+
+		$this->assertContains(
+			array( 'Y-m-d', strtotime( '2026-08-01T00:00:00+00:00' ) ),
+			$this->wpDateCalls,
+			'renderLastPublishedColumn() は wp_date(\'Y-m-d\', $ts) を呼ぶべき（gmdate() 直接呼び出しは不可）'
+		);
 	}
 
 	/**

@@ -47,11 +47,19 @@ final class QueueMaintenance {
 	public const OPTION_LAST_COMPLETED = 'affilicard_last_sweep_completed_at';
 
 	/**
-	 * 1 バッチジョブに詰める listing 件数の既定。AS の
-	 * `action_scheduler_queue_runner_time_limit`（既定 30 秒）内に account の実効レート
-	 * 間隔で収まる件数から算出する（spec §4-1。楽天 1.1s・安全マージン 25 秒で 22 件）。
+	 * AS の `action_scheduler_queue_runner_time_limit` フィルタが未登録のときに使う既定値
+	 * （秒）。AS 自身（ActionScheduler_Abstract_QueueRunner::get_time_limit()）と同じ既定値・
+	 * 同じフィルタ名を使うことで、サイトがランナーの時間予算を変更していれば
+	 * batchSizeFor() の算出にもそのまま反映される（spec §4-1 Important 2）。
 	 */
-	private const BATCH_SIZE = 22;
+	private const DEFAULT_TIME_LIMIT_SECONDS = 30;
+
+	/**
+	 * バッチサイズ算出時の安全マージン（秒）。BatchRefreshHandler の既定
+	 * safetyMarginSeconds と同じ値（spec §4-1 の例: 楽天 1.1s・time limit 30 秒・
+	 * 安全マージン 5 秒→実効 25 秒で 22 件）。
+	 */
+	private const DEFAULT_SAFETY_MARGIN_SECONDS = 5;
 
 	public function __construct(
 		private ProductRepositoryInterface $repository,
@@ -70,7 +78,13 @@ final class QueueMaintenance {
 		 * をここで静的に読まず、呼び出し側（Plugin）が Enqueuer と同じ値を注入する
 		 * （Task 12: cap の出所を Enqueuer と QueueMaintenance の 2 箇所に分散させない）。
 		 */
-		private int $depthCap = 500
+		private int $depthCap = 500,
+		/**
+		 * batchSizeFor() が account の実効レート間隔（RateLimiter::effectiveIntervalMs）を
+		 * 求めるために使う。final class のため Mockery でモック不可（実インスタンス＋WP
+		 * 関数スタブでテストする）。
+		 */
+		private RateLimiter $rateLimiter = new RateLimiter()
 	) {}
 
 	/**
@@ -173,9 +187,10 @@ final class QueueMaintenance {
 			$depth = $this->enqueuer->queueDepth();
 		}
 
-		$buckets  = array(); // account => list<array{post_id: int, platform: string}>
-		$lastSeen = $after;
-		$capped   = false;
+		$buckets    = array(); // account => list<array{post_id: int, platform: string}>
+		$batchSizes = array(); // account => algo で算出したバッチサイズ（sweep 内でメモ化）
+		$lastSeen   = $after;
+		$capped     = false;
 
 		foreach ( $ids as $id ) {
 			if ( $depth >= $cap ) {
@@ -237,7 +252,11 @@ final class QueueMaintenance {
 					'platform' => $platform,
 				);
 
-				if ( count( $buckets[ $account ] ) >= self::BATCH_SIZE ) {
+				if ( ! isset( $batchSizes[ $account ] ) ) {
+					$batchSizes[ $account ] = $this->batchSizeFor( $account );
+				}
+
+				if ( count( $buckets[ $account ] ) >= $batchSizes[ $account ] ) {
 					if ( 0 !== $this->enqueuer->enqueueBatch( $account, $buckets[ $account ] ) ) {
 						++$depth;
 					}
@@ -246,7 +265,7 @@ final class QueueMaintenance {
 			}
 		}
 
-		// 端数を流す（BATCH_SIZE に満たなかった残り）。
+		// 端数を流す（バッチサイズに満たなかった残り）。
 		foreach ( $buckets as $account => $items ) {
 			if ( array() !== $items ) {
 				$this->enqueuer->enqueueBatch( $account, $items );
@@ -265,6 +284,47 @@ final class QueueMaintenance {
 		// 再開できる）。
 		$this->cursor->set( $lastSeen );
 		return false;
+	}
+
+	/**
+	 * account 単位のバッチサイズ。AS の `action_scheduler_queue_runner_time_limit`
+	 * フィルタ（既定 30 秒。AS 自身も同じフィルタを適用する。
+	 * ActionScheduler_Abstract_QueueRunner::get_time_limit()）から安全マージンを引いた
+	 * 実効秒数を、account の実効レート間隔（RateLimiter::effectiveIntervalMs）で割って
+	 * 算出する（spec §4-1 Important 2。楽天 1.1s・time limit 30 秒・安全マージン 5 秒→
+	 * 実効 25 秒で 22 件）。
+	 *
+	 * 算出結果は `affilicard_refresh_batch_size` フィルタで上書き可能にする（spec §8-2:
+	 * 実環境の fetch 所要時間を測って安全マージンを調整する運用を、コードリリース無しで
+	 * 行えるようにするため）。最終値は 1 件未満にならないようクランプする（0 だと
+	 * バッチが永久に flush されず listing が積みっぱなしになる）。
+	 */
+	private function batchSizeFor( string $account ): int {
+		$timeLimit  = (int) apply_filters( 'action_scheduler_queue_runner_time_limit', self::DEFAULT_TIME_LIMIT_SECONDS ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- AS 自身が定義・適用する既存フィルタを読むだけで、affilicard がここで新しく hook を定義しているわけではない。
+		$intervalMs = $this->intervalMsFor( $account );
+
+		$effectiveSeconds = max( 0, $timeLimit - self::DEFAULT_SAFETY_MARGIN_SECONDS );
+		$intervalSeconds  = $intervalMs / 1000;
+		$size             = $intervalSeconds > 0 ? (int) floor( $effectiveSeconds / $intervalSeconds ) : $effectiveSeconds;
+		$size             = max( 1, $size );
+
+		return max( 1, (int) apply_filters( 'affilicard_refresh_batch_size', $size, $account ) );
+	}
+
+	/**
+	 * account の実効レート間隔（ms）。BatchRefreshHandler::intervalMsFor() と同じロジック
+	 * （providerRegistry で accountCode() 一致の provider を探し minRequestIntervalMs を
+	 * 求め、GeneralSettings::throttleOverrideMs で上書き）。
+	 */
+	private function intervalMsFor( string $account ): int {
+		$floorMs = 0;
+		foreach ( $this->providerRegistry->all() as $provider ) {
+			if ( $provider->accountCode() === $account ) {
+				$floorMs = $provider->minRequestIntervalMs();
+				break;
+			}
+		}
+		return $this->rateLimiter->effectiveIntervalMs( $floorMs, GeneralSettings::throttleOverrideMs( $account ) );
 	}
 
 	/**

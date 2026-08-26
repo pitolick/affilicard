@@ -301,6 +301,13 @@ final class ProductListColumns {
 	 * `PublicationDate::get()`（UTC epoch 秒）を `Y-m-d` で表示する。値が無ければ
 	 * 他カラムと同じ em dash。
 	 *
+	 * 表示は `wp_date()` でサイトのタイムゾーンに整形する（隣接する renderLastVerifiedColumn()
+	 * の「最終同期」列と同じ基準に揃える）。以前は `gmdate()`（UTC 固定）を使っており、
+	 * JST サイトで JST 08:00 に公開した商品が UTC では前日 23:00 になるため「最終掲載日」列
+	 * だけ 1 日前の日付が出ていた（final-fix-report.md Minor）。棚卸し判定（下記
+	 * isRetired()）と保存値そのものは UTC epoch 秒のまま変更しない——ずれていたのは
+	 * このメソッドの表示整形だけであり、判定ロジックには手を入れない。
+	 *
 	 * `StocktakePolicy::isRetired()` は最終掲載日が無い（null）ときこそ棚卸し基準日
 	 * （`GeneralSettings`/`PluginUpgrade::OPTION_STOCKTAKE_BASELINE`）にフォールバック
 	 * して判定する設計であり、「最終掲載日が無い＝判定不能」ではない。最終掲載日メタは
@@ -315,7 +322,7 @@ final class ProductListColumns {
 		if ( null === $ts ) {
 			echo '<span aria-hidden="true">—</span>';
 		} else {
-			echo esc_html( gmdate( 'Y-m-d', $ts ) );
+			echo esc_html( wp_date( 'Y-m-d', $ts ) );
 		}
 
 		if ( ( new StocktakePolicy() )->isRetired( $post_id, time() ) ) {

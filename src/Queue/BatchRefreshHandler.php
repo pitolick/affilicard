@@ -35,6 +35,13 @@ final class BatchRefreshHandler {
 		private RateLimiter $limiter,
 		private ListingRefresher $refresher,
 		private ProviderRegistry $registry,
+		/**
+		 * time limit の既定値（秒）。実際に使う値は handle() が
+		 * `action_scheduler_queue_runner_time_limit` フィルタ（AS 自身も同じフィルタを
+		 * 適用する。ActionScheduler_Abstract_QueueRunner::get_time_limit()）を通して
+		 * 決める——この値はフィルタが登録されていない場合の既定にすぎない（spec §4-1
+		 * Important 2）。
+		 */
 		private int $timeLimitSeconds = 30,
 		private int $safetyMarginSeconds = 5
 	) {}
@@ -55,7 +62,11 @@ final class BatchRefreshHandler {
 			return;
 		}
 
-		$deadline    = new JobDeadline( time(), $this->timeLimitSeconds, $this->safetyMarginSeconds );
+		// AS ランナーの時間予算は `action_scheduler_queue_runner_time_limit` フィルタで
+		// サイト側から調整され得る。AS 自身（get_time_limit()）と同じフィルタを読むことで、
+		// ランナーが伸縮されても JobDeadline の期限判定がそれに追従する（spec §4-1 Important 2）。
+		$timeLimit   = (int) apply_filters( 'action_scheduler_queue_runner_time_limit', $this->timeLimitSeconds ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- AS 自身が定義・適用する既存フィルタを読むだけで、affilicard がここで新しく hook を定義しているわけではない。
+		$deadline    = new JobDeadline( time(), $timeLimit, $this->safetyMarginSeconds );
 		$intervalMs  = $this->intervalMsFor( $account );
 		$intervalSec = (int) ceil( $intervalMs / 1000 );
 		// 1 件あたりの最悪所要 = レート待ち + Provider の HTTP タイムアウト（DMM/楽天とも 10 秒）。

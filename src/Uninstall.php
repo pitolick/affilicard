@@ -27,6 +27,10 @@ final class Uninstall {
 		'affilicard_legacy_creds_purged',
 		'affilicard_plugin_version',
 		'affilicard_stocktake_baseline',
+		// Affilicard\Queue\SweepCursor::OPTION_KEY のリテラル値（spec 2026-08-25 §4-2/§6-2）。
+		'affilicard_sweep_cursor',
+		// Affilicard\Queue\QueueMaintenance::OPTION_LAST_COMPLETED のリテラル値（spec §4-4/§6-2）。
+		'affilicard_last_sweep_completed_at',
 	);
 
 	/**
@@ -117,6 +121,14 @@ final class Uninstall {
 	 * （provider コード単位から account コード単位へ統一。レート制限は共有 API＝account
 	 * 単位でかかるため）。AS 自身のテーブルは他プラグインと共有し得るため drop しない
 	 * （`as_unschedule_all_actions` の呼び出しのみ・AS 未ロードなら function_exists で guard）。
+	 *
+	 * v3.5.0: 掃引トリガー（affilicard_sweep）の group（'affilicard-sweep'。account では
+	 * ない疑似コード。Enqueuer::SWEEP_GROUP_ACCOUNT）も同様に unschedule する
+	 * （QueueController::pendingCancellationGroups() の一括取消と同じ対象。ここが漏れると
+	 * アンインストール後も pending な掃引継続ジョブが残ってしまう）。'affilicard-sweep' を
+	 * Enqueuer::group(Enqueuer::SWEEP_GROUP_ACCOUNT) 経由で組み立てないのは、OPTION_KEYS と
+	 * 同じ理由（vendor/ 不在フォールバックでは Enqueuer クラスが未 autoload で Fatal error に
+	 * なる）でリテラルのまま持つ必要があるため。
 	 */
 	private static function cleanupQueue(): void {
 		$canUnschedule = function_exists( 'as_unschedule_all_actions' );
@@ -126,6 +138,10 @@ final class Uninstall {
 				as_unschedule_all_actions( '', array(), 'affilicard-' . $account );
 			}
 			delete_option( 'affilicard_ratelimit_' . $account );
+		}
+
+		if ( $canUnschedule ) {
+			as_unschedule_all_actions( '', array(), 'affilicard-sweep' );
 		}
 	}
 

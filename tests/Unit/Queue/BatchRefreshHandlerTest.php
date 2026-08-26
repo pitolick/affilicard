@@ -605,4 +605,73 @@ final class BatchRefreshHandlerTest extends TestCase {
 
 		$this->assertConditionsMet();
 	}
+
+	/**
+	 * spec §4-1 Important 2: time limit は `action_scheduler_queue_runner_time_limit`
+	 * フィルタ（AS 自身も同じフィルタを適用する）を読む。コンストラクタ既定値（30秒）は
+	 * フィルタ未登録時のフォールバックにすぎない。ここではフィルタで 5 秒へ引き下げ、
+	 * constructor 引数は既定（30, margin 5）のまま——test_1件も処理していなければ…と
+	 * 同じ「timeLimit === safetyMargin → remaining は常に 0」状況をフィルタ経由で再現し、
+	 * 1件目は前進保証で処理・2件目は期限で弾かれて積み直されることを確認する。
+	 */
+	public function test_time_limitはaction_scheduler_queue_runner_time_limitフィルタで上書きされる(): void {
+		$this->stubGeneralSettings();
+		$this->mockRateLimiterWpdb( 1 ); // 1件目は即座に CAS 獲得成功（待たない）。
+
+		// constructor の既定 timeLimitSeconds は 30 のまま。handle() 内部の
+		// apply_filters('action_scheduler_queue_runner_time_limit', 30) を 5 に上書きする。
+		WP_Mock::onFilter( 'action_scheduler_queue_runner_time_limit' )
+			->with( 30 )
+			->reply( 5 );
+
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'refreshOne' )->once()->with( 1, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
+		$refresher->shouldReceive( 'refreshOne' )->with( 2, 'rakuten-kobo' )->never();
+
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_refresh_gaveup_1_rakuten-kobo' )
+			->andReturn( true );
+
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 ); // requeueRemaining の jitter。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never(); // enqueueManual は呼ばれない。
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH_BATCH,
+				array(
+					'account' => 'rakuten',
+					'items'   => array(
+						array(
+							'post_id'  => 2,
+							'platform' => 'rakuten-kobo',
+						),
+					),
+				),
+				'affilicard-rakuten',
+				false,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 55 );
+
+		// 30, 5 は「フィルタが登録されていなければこの値を使う」既定値。実際に効くのは
+		// フィルタが返す 5 の方（timeLimit(5) - margin(5) = remaining 常に 0）。
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 30, 5 );
+
+		$handler->handle(
+			$this->args(
+				array(
+					'post_id'  => 1,
+					'platform' => 'rakuten-kobo',
+				),
+				array(
+					'post_id'  => 2,
+					'platform' => 'rakuten-kobo',
+				)
+			)
+		);
+
+		$this->assertConditionsMet();
+	}
 }

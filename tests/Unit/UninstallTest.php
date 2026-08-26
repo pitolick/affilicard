@@ -135,6 +135,11 @@ final class UninstallTest extends TestCase {
 		$this->assertContains( \Affilicard\Plugin::SEEDED_AT_OPTION, Uninstall::OPTION_KEYS );
 		$this->assertContains( \Affilicard\Upgrade\PluginUpgrade::OPTION_VERSION, Uninstall::OPTION_KEYS );
 		$this->assertContains( \Affilicard\Upgrade\PluginUpgrade::OPTION_STOCKTAKE_BASELINE, Uninstall::OPTION_KEYS );
+		// 本ブランチ（spec 2026-08-25 §4-2/§4-4/§6-2）で追加した 2 option。ここに追記漏れると
+		// アンインストール→再インストールで前回の走査位置・完走時刻が残留する
+		// （final-fix-report.md Important 1）。
+		$this->assertContains( \Affilicard\Queue\SweepCursor::OPTION_KEY, Uninstall::OPTION_KEYS );
+		$this->assertContains( \Affilicard\Queue\QueueMaintenance::OPTION_LAST_COMPLETED, Uninstall::OPTION_KEYS );
 	}
 
 	public function test_run_deletes_provider_credentials_via_wpdb_like(): void {
@@ -194,10 +199,29 @@ final class UninstallTest extends TestCase {
 			->once()
 			->with( '', array(), 'affilicard-rakuten' )
 			->andReturn( null );
+		// v3.5.0: 掃引トリガー（affilicard_sweep）の group（'affilicard-sweep'）も
+		// account 別 group と同様に unschedule する。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )
+			->once()
+			->with( '', array(), 'affilicard-sweep' )
+			->andReturn( null );
 
 		Uninstall::run();
 
 		$this->assertConditionsMet();
+	}
+
+	/**
+	 * v3.5.0 / spec 2026-08-25 §4-2: cleanupQueue() が unschedule する 'affilicard-sweep'
+	 * は Enqueuer::group( Enqueuer::SWEEP_GROUP_ACCOUNT ) と同じ値である（両者がドリフトしない
+	 * ことをテスト側で突き合わせる。Uninstall.php 自身は vendor/ 不在フォールバックのため
+	 * Enqueuer クラスを参照できずリテラルで持つ——final-fix-report.md Important 1 と同じ理由）。
+	 */
+	public function test_sweepグループのリテラルはEnqueuerのgroup組み立てと一致する(): void {
+		$this->assertSame(
+			( new \Affilicard\Queue\Enqueuer() )->group( \Affilicard\Queue\Enqueuer::SWEEP_GROUP_ACCOUNT ),
+			'affilicard-sweep'
+		);
 	}
 
 	/**
