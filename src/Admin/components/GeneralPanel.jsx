@@ -12,6 +12,11 @@ import { triggerRefresh } from '../api/refresh';
 import { refreshIntervalOptions } from '../refreshIntervals';
 import { CronHelpBox } from './CronHelpBox';
 
+// 運用ドキュメント（WP-Cron のままで足りるかの判断基準／サーバー cron への移行手順）
+// への導線。QueuePanel.jsx の警告 Notice と同じリンク先。
+const OPERATIONS_DOC_URL =
+	'https://github.com/pitolick/affilicard/blob/main/docs/operations-refresh-queue.md';
+
 export function GeneralPanel() {
 	const [settings, setSettings] = useState(null);
 	const [saving, setSaving] = useState(false);
@@ -106,6 +111,21 @@ export function GeneralPanel() {
 					label={__('自動更新を有効化 (WP-Cron)', 'affilicard')}
 					checked={Boolean(settings.cron_enabled)}
 					onChange={(v) => update({ cron_enabled: v })}
+					help={
+						<>
+							{__(
+								'WP-Cron のままで足りるか、サーバー cron へ移行すべきかの判断基準は運用ドキュメントを参照してください。',
+								'affilicard'
+							)}{' '}
+							<a
+								href={OPERATIONS_DOC_URL}
+								target="_blank"
+								rel="noreferrer"
+							>
+								{__('運用ドキュメントを見る', 'affilicard')}
+							</a>
+						</>
+					}
 				/>
 
 				<SelectControl

@@ -67,6 +67,22 @@ describe( 'GeneralPanel', () => {
 		);
 	} );
 
+	test( 'links to the operations doc near the cron toggle regardless of cron_enabled', async () => {
+		fetchSettings.mockResolvedValue( {
+			cache_ttl_seconds: 86400,
+			default_product_type: 'generic',
+			cron_enabled: false,
+		} );
+		render( <GeneralPanel /> );
+
+		const link = await screen.findByRole( 'link', {
+			name: /運用ドキュメント/,
+		} );
+		expect( link.getAttribute( 'href' ) ).toEqual(
+			expect.stringContaining( 'operations-refresh-queue.md' )
+		);
+	} );
+
 	test( 'does not show CronHelpBox when cron_enabled is false', async () => {
 		fetchSettings.mockResolvedValue( {
 			cache_ttl_seconds: 86400,
