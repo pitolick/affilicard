@@ -204,6 +204,9 @@ final class BatchRefreshHandlerTest extends TestCase {
 
 		// 自己再投入（Enqueuer::enqueueBatch → HOOK_REFRESH_BATCH）で温存する。
 		// bare return だと AS がこのアクションを complete 扱いにしてジョブが消滅してしまう。
+		// unique=false: 実行中の自分自身と account・items が一致するため、true のままだと
+		// AS の unique 判定（PENDING/RUNNING 双方が対象）に抑止され戻り値 0 のまま
+		// ジョブが痕跡なく消滅する（spec §4-1 Ruling 4）。
 		WP_Mock::userFunction( 'as_schedule_single_action' )
 			->once()
 			->with(
@@ -219,7 +222,7 @@ final class BatchRefreshHandlerTest extends TestCase {
 					),
 				),
 				'affilicard-rakuten',
-				true,
+				false,
 				Enqueuer::PRIORITY_SWEEP
 			)
 			->andReturn( 42 );
@@ -246,20 +249,223 @@ final class BatchRefreshHandlerTest extends TestCase {
 	}
 
 	/**
-	 * 設計要点1・2:「期限チェックは待機の前」「期限が近いとき未処理分が積み直される」。
-	 * timeLimitSeconds=safetyMarginSeconds として deadline を即時ゼロにし、1件目の
-	 * canAfford() チェックが最初から失敗する状況を作る。RateLimiter::tryAcquire() や
-	 * ListingRefresher::refreshOne() には一切到達せず（＝待機に入る前に弾かれる）、
-	 * 全件が新しいバッチジョブとして即時積み直される。
+	 * 前進保証（spec §4-1 Ruling 6）:「そのジョブでまだ1件も処理していない場合は、
+	 * 期限を賄えなくても最低1件は試みる」。timeLimitSeconds=safetyMarginSeconds として
+	 * JobDeadline::remaining() を常に 0 にし、perItemSeconds（12秒）を一切賄えない状況を
+	 * 作る。1件目（まだ何も処理していない）は期限チェックを素通りして強制的に試み
+	 * refreshOne が実行されるが、2件目（1件目で processedAny=true になった後）は
+	 * 通常どおり期限で弾かれ、jitter 付き・unique=false で積み直される。
 	 */
-	public function test_期限に間に合わない場合は待たずに未処理分を積み直す(): void {
+	public function test_1件も処理していなければ期限が賄えなくても最初の1件は試みる(): void {
 		$this->stubGeneralSettings();
-		// tryAcquire/refreshOne どちらにも到達しないため、どちらもモック不要（呼ばれたら
-		// Mockery が未期待の呼び出しとして失敗させる）。
+		$this->mockRateLimiterWpdb( 1 ); // 1件目は即座に CAS 獲得成功（待たない）。
+
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'refreshOne' )->once()->with( 1, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
+		$refresher->shouldReceive( 'refreshOne' )->with( 2, 'rakuten-kobo' )->never();
+
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_refresh_gaveup_1_rakuten-kobo' )
+			->andReturn( true );
+
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 ); // requeueRemaining の jitter。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never(); // enqueueManual は呼ばれない。
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH_BATCH,
+				array(
+					'account' => 'rakuten',
+					'items'   => array(
+						array(
+							'post_id'  => 2,
+							'platform' => 'rakuten-kobo',
+						),
+					),
+				),
+				'affilicard-rakuten',
+				false,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 7 );
+
+		// timeLimitSeconds === safetyMarginSeconds → JobDeadline::remaining() は常に 0。
+		// perItemSeconds（rakuten 1100ms→2秒 + Provider タイムアウト10秒=12秒）を
+		// 一切賄えないが、1件目は前進保証でゲートを素通りする。
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 5, 5 );
+
+		$handler->handle(
+			$this->args(
+				array(
+					'post_id'  => 1,
+					'platform' => 'rakuten-kobo',
+				),
+				array(
+					'post_id'  => 2,
+					'platform' => 'rakuten-kobo',
+				)
+			)
+		);
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * spec §4-1 Ruling 5:「クランプに掛かった（要求した待機が残り時間で切り詰められた）
+	 * 場合は、待たずに未処理分を積み直して終了する」。1件目（rakuten 1100ms interval で
+	 * 即座に CAS 獲得成功・待機なし）で processedAny=true にしたうえで、2件目は
+	 * remaining=13秒（outer ゲート canAfford(12) はぎりぎり通過）に対し next_ms を
+	 * 約50秒先に設定し、要求した待機（約50秒）が clampWait で 13秒まで切り詰められる
+	 * 状況を作る。切り詰められた＝要求より減った場合は usleep を一切行わず即座に
+	 * 積み直すため、実待機なしで決定的に検証できる。
+	 */
+	public function test_クランプで待機が切り詰められたら待たずに積み直す(): void {
+		$this->stubGeneralSettings();
+		$nowMs = (int) round( microtime( true ) * 1000 );
+		$this->mockRateLimiterWpdb( 1, 0 ); // 1件目は獲得成功、2件目は未獲得。
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_ratelimit_rakuten', 0 )
+			->andReturn( $nowMs + 48900 ); // next_ms ≈ 今+50秒 → raw waitSec は remaining(13秒) を大きく上回る。
+
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'refreshOne' )->once()->with( 1, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
+		$refresher->shouldReceive( 'refreshOne' )->with( 2, 'rakuten-kobo' )->never();
+
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_refresh_gaveup_1_rakuten-kobo' )
+			->andReturn( true );
+
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 ); // requeueRemaining の jitter。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH_BATCH,
+				array(
+					'account' => 'rakuten',
+					'items'   => array(
+						array(
+							'post_id'  => 2,
+							'platform' => 'rakuten-kobo',
+						),
+					),
+				),
+				'affilicard-rakuten',
+				false,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 8 );
+
+		// remaining=13秒（timeLimit13/margin0）。2件目は outer ゲート（perItemSeconds=12）は
+		// 通過するが、実際に計算される待機（約50秒）はクランプで13秒まで切り詰められる＝
+		// 要求より減る＝待たずに積み直す。
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 13, 0 );
+
+		$handler->handle(
+			$this->args(
+				array(
+					'post_id'  => 1,
+					'platform' => 'rakuten-kobo',
+				),
+				array(
+					'post_id'  => 2,
+					'platform' => 'rakuten-kobo',
+				)
+			)
+		);
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 本改修の主目的である「ジョブ内で待って枠を取り、fetch する」経路（waitSec > 0 →
+	 * usleep → 2回目の tryAcquire で取得成功 → refreshOne 実行）を検証する。next_ms を
+	 * CAS 呼び出し直前の実時刻より約1秒先に設定し、実待機を1秒未満に抑えつつ決定的に
+	 * 「待ってから取得できる」経路を再現する。
+	 */
+	public function test_レート枠が一時的に取れないときは待って再取得しrefreshOneを実行する(): void {
+		$this->stubGeneralSettings();
+		$nowMs = (int) round( microtime( true ) * 1000 );
+		$this->mockRateLimiterWpdb( 0, 1 ); // 1回目は未獲得（待つ）、2回目は獲得成功。
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_ratelimit_rakuten', 0 )
+			->andReturn( $nowMs - 1100 + 1000 ); // next_ms ≈ 今+1秒 → waitSec は小さい正の値。
+
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'refreshOne' )->once()->with( 9, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
+
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_refresh_gaveup_9_rakuten-kobo' )
+			->andReturn( true );
+
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 30, 5 );
+
+		$handler->handle(
+			$this->args(
+				array(
+					'post_id'  => 9,
+					'platform' => 'rakuten-kobo',
+				)
+			)
+		);
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * TERMINAL_FAILURE（恒久失敗）は give-up マーカーを立てて次へ進む（per-listing へは
+	 * 落とさない）。これまでのテストは SUCCESS/TRANSIENT_FAILURE のみで一度も
+	 * TERMINAL_FAILURE 経路を通していなかった。
+	 */
+	public function test_TERMINAL_FAILUREはgiveupマーカーを立てて次へ進む(): void {
+		$this->stubGeneralSettings();
+		$this->mockRateLimiterWpdb( 1 ); // 即座に CAS 獲得成功（待たない）。
+
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'refreshOne' )->once()->with( 3, 'rakuten-kobo' )->andReturn( WorkOutcome::TERMINAL_FAILURE );
+
+		WP_Mock::userFunction( 'set_transient' )
+			->once()
+			->with( 'affilicard_refresh_gaveup_3_rakuten-kobo', 1, 3 * DAY_IN_SECONDS )
+			->andReturn( true );
+		WP_Mock::userFunction( 'delete_transient' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 30, 5 );
+
+		$handler->handle(
+			$this->args(
+				array(
+					'post_id'  => 3,
+					'platform' => 'rakuten-kobo',
+				)
+			)
+		);
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * Critical 2（spec §4-3）: enqueueBatch（unique=false での自己再投入・積み直し）が
+	 * 0（投入失敗）を返した場合、握り潰さず対象 listing を per-listing（enqueueManual）へ
+	 * 個別にフォールバックする。pause 経路（requeueOrFallback の最も単純な入口）で
+	 * enqueueBatch 自体の投入が失敗した状況を再現する。
+	 */
+	public function test_バッチ再投入が失敗したらper_listingへ個別にフォールバックする(): void {
+		$this->stubGeneralSettings( array( 'queue_paused' => true ) );
+
 		$refresher = Mockery::mock( ListingRefresher::class );
 		$refresher->shouldReceive( 'refreshOne' )->never();
 
-		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never(); // enqueueManual は呼ばれない。
 		WP_Mock::userFunction( 'as_schedule_single_action' )
 			->once()
 			->with(
@@ -279,15 +485,42 @@ final class BatchRefreshHandlerTest extends TestCase {
 					),
 				),
 				'affilicard-rakuten',
-				true,
+				false,
 				Enqueuer::PRIORITY_SWEEP
 			)
-			->andReturn( 7 );
+			->andReturn( 0 ); // 投入失敗。
 
-		// timeLimitSeconds === safetyMarginSeconds → JobDeadline::remaining() は常に 0。
-		// perItemSeconds（rakuten 1100ms→2秒 + Provider タイムアウト10秒=12秒）を
-		// 一切賄えないため、1件目のループ冒頭で即座に積み直して終了する。
-		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 5, 5 );
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->twice()->andReturn( true );
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 1,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten',
+				true,
+				Enqueuer::PRIORITY_MANUAL
+			)
+			->andReturn( 101 );
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 2,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten',
+				true,
+				Enqueuer::PRIORITY_MANUAL
+			)
+			->andReturn( 102 );
+
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 30, 5 );
 
 		$handler->handle(
 			$this->args(

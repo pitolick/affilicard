@@ -51,7 +51,7 @@ final class BatchRefreshHandler {
 
 		// pause 中はジョブを失わずに温存する（bare return だと AS が complete 扱いにしてジョブが消滅する）。
 		if ( GeneralSettings::isQueuePaused() ) {
-			$this->enqueuer->enqueueBatch( $account, $items, time() + self::PAUSE_RETRY_SECONDS );
+			$this->requeueOrFallback( $account, $items, time() + self::PAUSE_RETRY_SECONDS );
 			return;
 		}
 
@@ -61,6 +61,15 @@ final class BatchRefreshHandler {
 		// 1 件あたりの最悪所要 = レート待ち + Provider の HTTP タイムアウト（DMM/楽天とも 10 秒）。
 		$perItemSeconds = $intervalSec + self::PROVIDER_TIMEOUT_SECONDS;
 
+		// 前進保証（spec §4-1 Ruling 6）: このジョブでまだ 1 件も処理していない状態で
+		// perItemSeconds が期限枠（timeLimitSeconds - safetyMarginSeconds）を超えていると、
+		// 毎回 index 0 で期限チェックに弾かれ「1件も処理せず積み直す」を無限に繰り返す
+		// （throttle_overrides に上限が無く、管理画面から容易に踏める）。まだ何も処理して
+		// いない最初の 1 件だけは、期限を賄えなくても強制的に試みる。最悪 perItemSeconds
+		// ぶん time limit を超えるが、AS は次のバッチで回復するため「1 件も処理できない」
+		// より無害。2 件目以降は通常どおり期限で弾く。
+		$processedAny = false;
+
 		foreach ( $items as $index => $item ) {
 			$postId   = isset( $item['post_id'] ) ? (int) $item['post_id'] : 0;
 			$platform = isset( $item['platform'] ) ? (string) $item['platform'] : '';
@@ -68,27 +77,40 @@ final class BatchRefreshHandler {
 				continue;
 			}
 
+			$mustAttempt = ! $processedAny;
+
 			// 待機に入る「前に」期限を確認する。賄えないなら未処理分を積み直して終了する
 			// （待機に入ってから期限を超えると AS ランナーの時間予算を食い潰したうえ、
-			// 積み直しも行われずそのバッチの残りが失われる）。
-			if ( ! $deadline->canAfford( time(), $perItemSeconds ) ) {
+			// 積み直しも行われずそのバッチの残りが失われる）。前進保証が働く 1 件目は
+			// このゲートを素通りする。
+			if ( ! $mustAttempt && ! $deadline->canAfford( time(), $perItemSeconds ) ) {
 				$this->requeueRemaining( $account, $items, $index );
 				return;
 			}
 
+			$processedAny = true;
+
 			$nowMs   = (int) round( microtime( true ) * 1000 );
 			$acquire = $this->limiter->tryAcquire( $account, $intervalMs, $nowMs );
 			if ( ! $acquire['ok'] ) {
-				$waitSec = max( 0, (int) ceil( $acquire['next_ms'] / 1000 ) - time() );
-				// 待機秒を残り時間でクランプする。クランプに掛かった（＝待つと期限を超える）場合は
-				// 待たずに未処理分（この listing を含む）を積み直して終了する。
-				$waitSec = $deadline->clampWait( time(), $waitSec );
-				if ( 0 === $waitSec && ! $deadline->canAfford( time(), $perItemSeconds ) ) {
+				$rawWaitSec = max( 0, (int) ceil( $acquire['next_ms'] / 1000 ) - time() );
+				// 待機秒を残り時間でクランプする。要求した待機がクランプで減った
+				// （＝そのまま待つと期限を超える）場合は、待たずに未処理分（この listing を
+				// 含む）を積み直して終了する（spec §4-1）。前進保証が働く 1 件目は例外的に
+				// 待つ（最悪 time limit を超えるが、AS が次のバッチで回復するため
+				// 「1件も処理できない」よりまし）。
+				$waitSec = $deadline->clampWait( time(), $rawWaitSec );
+				if ( $waitSec < $rawWaitSec && ! $mustAttempt ) {
 					$this->requeueRemaining( $account, $items, $index );
 					return;
 				}
 				if ( $waitSec > 0 ) {
 					usleep( $waitSec * 1000000 );
+				}
+				// 待った後に期限が賄えるか再確認する（usleep で消費した実時間を反映する）。
+				if ( ! $mustAttempt && ! $deadline->canAfford( time(), $perItemSeconds ) ) {
+					$this->requeueRemaining( $account, $items, $index );
+					return;
 				}
 				$nowMs   = (int) round( microtime( true ) * 1000 );
 				$acquire = $this->limiter->tryAcquire( $account, $intervalMs, $nowMs );
@@ -120,16 +142,59 @@ final class BatchRefreshHandler {
 	}
 
 	/**
-	 * $fromIndex 以降の未処理分を新しいバッチジョブとして積み直す。
+	 * $fromIndex 以降の未処理分を新しいバッチジョブとして積み直す。jitter を付けて
+	 * 同一 account の複数バッチが同一タイムスタンプへ再集結する thundering herd を避ける
+	 * （Enqueuer::RESCHEDULE_JITTER_SECONDS と同じ考え方。spec §4-1 Ruling 6）。
 	 *
 	 * @param list<array{post_id:int, platform:string}> $items
 	 */
 	private function requeueRemaining( string $account, array $items, int $fromIndex ): void {
 		$remaining = array_slice( $items, $fromIndex );
-		if ( array() === $remaining ) {
+		$when      = time() + wp_rand( 0, Enqueuer::RESCHEDULE_JITTER_SECONDS );
+		$this->requeueOrFallback( $account, $remaining, $when );
+	}
+
+	/**
+	 * 自己再投入・積み直し専用の enqueueBatch ラッパー。
+	 *
+	 * unique=false で積む（spec §4-1 Ruling 4）。AS の unique=true は PENDING/RUNNING
+	 * 双方に対して hook+group+args(JSON) の完全一致で挿入を抑止する。自己再投入・積み直しは
+	 * 実行中の自分自身と account・items が一致するため、unique=true のままだと必ず抑止され
+	 * 戻り値 0（未投入）のままジョブが痕跡なく消滅する。
+	 *
+	 * 0（投入失敗）が返った場合は握り潰さずログに残し（spec §4-3「投入失敗はログに残す」）、
+	 * 対象 listing を per-listing（enqueueManual）へ個別にフォールバックする。バッチとしての
+	 * 再投入に失敗しても listing 自体は失わない（spec §4-1 Ruling 4/5 レビュー対応）。
+	 *
+	 * @param list<array{post_id:int, platform:string}> $items
+	 */
+	private function requeueOrFallback( string $account, array $items, int $when ): void {
+		if ( array() === $items ) {
 			return;
 		}
-		$this->enqueuer->enqueueBatch( $account, $remaining, time() );
+
+		$actionId = $this->enqueuer->enqueueBatch( $account, $items, $when, false );
+		if ( 0 !== $actionId ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- バッチ再投入の失敗は AS 側で完全に不可視（run は緑のまま）になるため、運用が気づけるようログに残す（spec §4-3）。
+		error_log(
+			sprintf(
+				'affilicard: バッチジョブの再投入に失敗しました（account=%s, items=%d件）。per-listing へ個別にフォールバックします。',
+				$account,
+				count( $items )
+			)
+		);
+
+		foreach ( $items as $item ) {
+			$postId   = isset( $item['post_id'] ) ? (int) $item['post_id'] : 0;
+			$platform = isset( $item['platform'] ) ? (string) $item['platform'] : '';
+			if ( 0 === $postId || '' === $platform ) {
+				continue;
+			}
+			$this->enqueuer->enqueueManual( $postId, $platform, $account );
+		}
 	}
 
 	private function intervalMsFor( string $account ): int {

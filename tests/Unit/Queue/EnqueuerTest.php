@@ -736,4 +736,35 @@ final class EnqueuerTest extends TestCase {
 
 		$this->assertSame( 0, $enqueuer->enqueueBatch( 'rakuten', array() ) );
 	}
+
+	/**
+	 * ハンドラの自己再投入・積み直し用に unique=false を明示指定できることを確認する
+	 * （spec §4-1 Ruling 4）。AS の unique=true は PENDING/RUNNING 双方に対して
+	 * hook+group+args(JSON) の完全一致で挿入を抑止するため、実行中の自分自身と
+	 * account・items が一致する自己再投入では常に抑止され、ジョブが痕跡なく消滅する。
+	 */
+	public function test_enqueueBatch_はunique_falseを明示できる(): void {
+		$captured = null;
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->andReturnUsing(
+				function ( $when, $hook, $args, $group, $unique, $priority ) use ( &$captured ) {
+					$captured = compact( 'unique' );
+					return 9999;
+				}
+			);
+
+		$enqueuer = new Enqueuer();
+		$items    = array(
+			array(
+				'post_id'  => 21,
+				'platform' => 'rakuten-kobo',
+			),
+		);
+
+		$actionId = $enqueuer->enqueueBatch( 'rakuten', $items, 0, false );
+
+		$this->assertSame( 9999, $actionId );
+		$this->assertFalse( $captured['unique'] );
+	}
 }

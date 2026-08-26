@@ -217,10 +217,19 @@ final class Enqueuer {
 	 * per-listing ジョブ（HOOK_REFRESH）は異常系の受け皿として残るため、
 	 * ここでは正常系の投入だけを担う。
 	 *
+	 * $unique の既定は true（sweep 等、新規に投入する呼び出し向け＝同一 items 集合の
+	 * 二重投入を防ぐ）。**ハンドラ自身による自己再投入・積み直し（pause 温存・期限超過に
+	 * よる未処理分の積み直し）は false を渡すこと**。AS の unique 判定は PENDING/RUNNING
+	 * 双方に対して hook + group + args(JSON) の完全一致で挿入を抑止し 0 を返す
+	 * （ActionScheduler_DBStore::isActionUnique）。自己再投入は実行中の自分自身と
+	 * account・items が一致するため、true のままだと必ず抑止されてジョブが痕跡なく
+	 * 消滅する（rescheduleRefresh が同じ理由で unique=false を採っているのと同じ事情）。
+	 * 単一ワーカー実行中の 1 回だけ呼ばれるので false でも増殖しない。
+	 *
 	 * @param list<array{post_id: int, platform: string}> $items
 	 * @return int action ID。0 は未投入（items が空・重複・投入失敗）。
 	 */
-	public function enqueueBatch( string $account, array $items, int $when = 0 ): int {
+	public function enqueueBatch( string $account, array $items, int $when = 0, bool $unique = true ): int {
 		if ( array() === $items ) {
 			return 0;
 		}
@@ -235,7 +244,7 @@ final class Enqueuer {
 			self::HOOK_REFRESH_BATCH,
 			$args,
 			$this->group( $account ),
-			true,
+			$unique,
 			self::PRIORITY_SWEEP
 		);
 	}
