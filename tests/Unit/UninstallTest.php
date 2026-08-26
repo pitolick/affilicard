@@ -133,6 +133,8 @@ final class UninstallTest extends TestCase {
 		$this->assertContains( \Affilicard\Platform\PlatformConfig::OPTION_KEY, Uninstall::OPTION_KEYS );
 		$this->assertContains( \Affilicard\Settings\GeneralSettings::OPTION_KEY, Uninstall::OPTION_KEYS );
 		$this->assertContains( \Affilicard\Plugin::SEEDED_AT_OPTION, Uninstall::OPTION_KEYS );
+		$this->assertContains( \Affilicard\Upgrade\PluginUpgrade::OPTION_VERSION, Uninstall::OPTION_KEYS );
+		$this->assertContains( \Affilicard\Upgrade\PluginUpgrade::OPTION_STOCKTAKE_BASELINE, Uninstall::OPTION_KEYS );
 	}
 
 	public function test_run_deletes_provider_credentials_via_wpdb_like(): void {

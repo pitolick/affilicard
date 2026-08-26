@@ -25,6 +25,8 @@ final class Uninstall {
 		'affilicard_general',
 		'affilicard_seeded_at',
 		'affilicard_legacy_creds_purged',
+		'affilicard_plugin_version',
+		'affilicard_stocktake_baseline',
 	);
 
 	/**
