@@ -6,6 +6,7 @@ namespace Affilicard\Rest;
 use Affilicard\Account\AccountRegistry;
 use Affilicard\Queue\ActionStoreInterface;
 use Affilicard\Queue\Enqueuer;
+use Affilicard\Queue\QueueMaintenance;
 use Affilicard\Queue\QueueStats;
 use Affilicard\Settings\GeneralSettings;
 use WP_REST_Request;
@@ -146,9 +147,13 @@ final class QueueController {
 
 		return new WP_REST_Response(
 			array(
-				'summary' => $summary,
-				'depth'   => $this->queueStats->depth(),
-				'paused'  => GeneralSettings::isQueuePaused(),
+				'summary'                 => $summary,
+				'depth'                   => $this->queueStats->depth(),
+				'paused'                  => GeneralSettings::isQueuePaused(),
+				// cron 健全性の可視化（Task 12）: 最後に掃引が完走した時刻（ISO8601 UTC）。
+				// 分割実行の途中（QueueMaintenance::sweep() が false を返す間）は書き換わらない。
+				// 一度も完走していなければ空文字列。
+				'last_sweep_completed_at' => (string) get_option( QueueMaintenance::OPTION_LAST_COMPLETED, '' ),
 			),
 			200
 		);

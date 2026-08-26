@@ -560,7 +560,9 @@ final class QueueMaintenanceTest extends TestCase {
 		WP_Mock::userFunction( 'update_option' )->once()->with( SweepCursor::OPTION_KEY, 5, false );
 		WP_Mock::userFunction( 'delete_option' )->never();
 
-		$result = ( new QueueMaintenance( $repo, new Enqueuer(), $this->registry(), new SweepCursor() ) )->sweep( 200 );
+		// Task 12: cap は GeneralSettings を静的に読まず注入する。stubGeneralSettings の
+		// queue_depth_cap は無関係（他の GeneralSettings 読み出しのための緩いスタブ）。
+		$result = ( new QueueMaintenance( $repo, new Enqueuer(), $this->registry(), new SweepCursor(), depthCap: 1 ) )->sweep( 200 );
 
 		$this->assertFalse( $result );
 		$this->assertConditionsMet();
@@ -605,6 +607,34 @@ final class QueueMaintenanceTest extends TestCase {
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 555 );
 
 		WP_Mock::userFunction( 'update_option' )->once()->with( SweepCursor::OPTION_KEY, 22, false );
+		WP_Mock::userFunction( 'delete_option' )->never();
+
+		// Task 12: cap は GeneralSettings を静的に読まず注入する。stubGeneralSettings の
+		// queue_depth_cap は無関係（stocktake_enabled=false 等、他の読み出しのための緩いスタブ）。
+		$result = ( new QueueMaintenance( $repo, new Enqueuer(), $this->registry(), new SweepCursor(), depthCap: 1 ) )->sweep( 200 );
+
+		$this->assertFalse( $result );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * Task 12: depthCap を注入しない場合は GeneralSettings のデフォルト値（500）と
+	 * 同じコンストラクタ既定値が使われる。cap の出所を Enqueuer と QueueMaintenance の
+	 * 2 箇所に分散させず、Plugin が両方へ同じ値を注入する契約に寄せたため、この既定値が
+	 * ずれると（例えば 0 になる等）、depthCap を省略した呼び出しが常に「即 cap 到達」に
+	 * なってしまう。
+	 */
+	public function test_sweep_depthCap未指定時は既定500が使われる(): void {
+		$this->stubCursor( 5 );
+		$this->stubGeneralSettings();
+		$this->stubQueueDepth( 500 ); // 開始時点で既定 cap(500) に到達済み
+		$this->stubFilterCleanup();
+		WP_Mock::userFunction( 'get_posts' )->andReturn( array( 10, 11 ) );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldNotReceive( 'find' );
+
+		WP_Mock::userFunction( 'update_option' )->once()->with( SweepCursor::OPTION_KEY, 5, false );
 		WP_Mock::userFunction( 'delete_option' )->never();
 
 		$result = ( new QueueMaintenance( $repo, new Enqueuer(), $this->registry(), new SweepCursor() ) )->sweep( 200 );

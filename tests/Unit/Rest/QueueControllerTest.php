@@ -8,6 +8,7 @@ use Affilicard\Account\DmmAccount;
 use Affilicard\Account\RakutenAccount;
 use Affilicard\Queue\ActionStoreInterface;
 use Affilicard\Queue\Enqueuer;
+use Affilicard\Queue\QueueMaintenance;
 use Affilicard\Queue\QueueStats;
 use Affilicard\Rest\QueueController;
 use Affilicard\Settings\GeneralSettings;
@@ -114,6 +115,9 @@ final class QueueControllerTest extends TestCase {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array( 'queue_paused' => true ) );
+		WP_Mock::userFunction( 'get_option' )
+			->with( QueueMaintenance::OPTION_LAST_COMPLETED, '' )
+			->andReturn( '2026-08-26T00:00:00+00:00' );
 
 		$res  = $this->controller()->stats( new WP_REST_Request() );
 		$data = $res->get_data();
@@ -134,6 +138,26 @@ final class QueueControllerTest extends TestCase {
 		$this->assertSame( 0, $data['summary']['dmm']['complete'] );
 		$this->assertSame( 0, $data['depth'] );
 		$this->assertTrue( $data['paused'] );
+		// cron 健全性の可視化（Task 12）: 最後に掃引が完走した時刻。
+		$this->assertSame( '2026-08-26T00:00:00+00:00', $data['last_sweep_completed_at'] );
+	}
+
+	/**
+	 * Task 12: 一度も掃引が完走していない（option 未設定）場合は空文字列を返す。
+	 * JS 側はこれを「未実行」として扱う。
+	 */
+	public function test_stats_last_sweep_completed_at未設定なら空文字列を返す(): void {
+		$this->stubEmptyQueueForAllProviders();
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_option' )
+			->with( QueueMaintenance::OPTION_LAST_COMPLETED, '' )
+			->andReturn( '' );
+
+		$data = $this->controller()->stats( new WP_REST_Request() )->get_data();
+
+		$this->assertSame( '', $data['last_sweep_completed_at'] );
 	}
 
 	public function test_pause_pausedtrueでGeneralSettingsを更新し新状態を返す(): void {

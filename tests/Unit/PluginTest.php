@@ -274,6 +274,155 @@ final class PluginTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	/**
+	 * Task 12: HOOK_REFRESH_BATCH のラッパ（クロージャ）と affilicard_sweep ハンドラが
+	 * Plugin::boot() から確実に登録されることを固定する。これが欠けると Enqueuer が積んだ
+	 * バッチジョブ／掃引トリガーが Action Scheduler 上に滞留したまま一切実行されない。
+	 */
+	public function test_boot_registers_batch_refresh_and_sweep_action_hooks(): void {
+		WP_Mock::userFunction( 'is_admin', array( 'return' => false ) );
+		WP_Mock::userFunction( 'register_activation_hook', array( 'return' => true ) );
+		WP_Mock::userFunction( 'register_deactivation_hook', array( 'return' => true ) );
+
+		WP_Mock::expectActionAdded(
+			\Affilicard\Queue\Enqueuer::HOOK_REFRESH_BATCH,
+			Mockery::type( 'Closure' ),
+			10,
+			2
+		);
+		WP_Mock::expectActionAdded(
+			\Affilicard\Queue\Enqueuer::HOOK_SWEEP,
+			Mockery::type( 'Closure' )
+		);
+
+		Plugin::boot();
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 先行タスクからの申し送り: BatchRefreshHandler::handle(array $args) は AS フックへ
+	 * 直付けできない（Action Scheduler は do_action_ref_array($hook, array_values($args))
+	 * で args を位置引数に展開するため、直付けすると第1引数に文字列 'account' が渡り
+	 * TypeError になる）。boot() が配線するクロージャは WP_Mock では捕捉して直接呼び出せない
+	 * ため（add_action/add_filter は WP_Mock 組み込みの hook 追跡機構が常に使われ、
+	 * userFunction() では横取りできない）、実体である handleBatchRefreshAction() を直接
+	 * 呼び出し、[account, items] の位置引数が正しく配列へ組み直されて
+	 * BatchRefreshHandler::handle() に届くことを、pause 分岐
+	 * （GeneralSettings::isQueuePaused()）経由の as_schedule_single_action 呼び出し引数
+	 * （group='affilicard-rakuten' 等）で確認する。
+	 */
+	public function test_handleBatchRefreshAction_位置引数を配列へ正しく組み直す(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( \Affilicard\Settings\GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array( 'queue_paused' => true ) );
+
+		$items = array(
+			array(
+				'post_id'  => 1,
+				'platform' => 'rakuten-kobo',
+			),
+		);
+
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::type( 'int' ),
+				\Affilicard\Queue\Enqueuer::HOOK_REFRESH_BATCH,
+				array(
+					'account' => 'rakuten',
+					'items'   => $items,
+				),
+				'affilicard-rakuten',
+				false,
+				\Affilicard\Queue\Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 500 );
+
+		$handler = new \Affilicard\Queue\BatchRefreshHandler(
+			new \Affilicard\Queue\Enqueuer(),
+			new \Affilicard\Queue\RateLimiter(),
+			Mockery::mock( \Affilicard\Cron\ListingRefresher::class ),
+			new \Affilicard\Provider\ProviderRegistry()
+		);
+
+		Plugin::handleBatchRefreshAction( $handler, 'rakuten', $items );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 位置引数が文字列でない（AS から届く $account/$items の型が想定外の）場合でも
+	 * 落ちずに空扱いへフォールバックすることを固定する（(string) キャスト・is_array ガード）。
+	 */
+	public function test_handleBatchRefreshAction_itemsが配列でない場合は空扱いで即returnする(): void {
+		WP_Mock::userFunction( 'get_option' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$handler = new \Affilicard\Queue\BatchRefreshHandler(
+			new \Affilicard\Queue\Enqueuer(),
+			new \Affilicard\Queue\RateLimiter(),
+			Mockery::mock( \Affilicard\Cron\ListingRefresher::class ),
+			new \Affilicard\Provider\ProviderRegistry()
+		);
+
+		Plugin::handleBatchRefreshAction( $handler, 'rakuten', null );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * Task 12・Ruling 3: WP-Cron（affilicard_refresh_all）のハンドラは掃引トリガー
+	 * （affilicard_sweep）を unique=true で 1 件積むだけにする（多重起動防止）。
+	 * boot() 内のクロージャは WP_Mock では捕捉できないため（上記と同じ理由）、
+	 * 実体である triggerSweep() を直接呼び出して確認する。
+	 */
+	public function test_triggerSweep_affilicard_sweepをunique_trueで積む(): void {
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::type( 'int' ),
+				\Affilicard\Queue\Enqueuer::HOOK_SWEEP,
+				array(),
+				'affilicard-sweep',
+				true,
+				\Affilicard\Queue\Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 400 );
+
+		Plugin::triggerSweep( new \Affilicard\Queue\Enqueuer() );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * Task 12・Ruling 3（核心）: QueueMaintenance::sweep() が false（未完走）を返したときだけ、
+	 * 同じ掃引トリガーを unique=false で即時に積み直して継続する。ここを誤ると継続更新が
+	 * 止まるため、false→積む／true→積まない の両方を固定する。
+	 */
+	public function test_handleSweepCompletion_falseなら継続トリガーをunique_falseで積む(): void {
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::type( 'int' ),
+				\Affilicard\Queue\Enqueuer::HOOK_SWEEP,
+				array(),
+				'affilicard-sweep',
+				false,
+				\Affilicard\Queue\Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 0 );
+
+		Plugin::handleSweepCompletion( false, new \Affilicard\Queue\Enqueuer() );
+
+		$this->assertConditionsMet();
+	}
+
+	public function test_handleSweepCompletion_trueなら継続トリガーを積まない(): void {
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		Plugin::handleSweepCompletion( true, new \Affilicard\Queue\Enqueuer() );
+
+		$this->assertConditionsMet();
+	}
+
 	public function test_on_transition_refreshes_on_future_to_publish(): void {
 		$post = (object) array(
 			'ID'        => 77,

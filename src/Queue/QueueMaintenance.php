@@ -61,10 +61,16 @@ final class QueueMaintenance {
 		private StocktakePolicy $stocktake = new StocktakePolicy(),
 		/**
 		 * 掃引の再取得判定（PriceFreshness::needsRefetch）を表示期限より前倒しで発火
-		 * させるリード秒数。呼び出し側（Plugin）からの受け渡しは Task 12 で行うため、
-		 * 既定 0（前倒しなし＝従来挙動）のまま。
+		 * させるリード秒数。呼び出し側（Plugin）が PriceFreshness::sweepLeadSeconds()
+		 * で算出した値を渡す（Task 12）。既定 0 は前倒しなし（従来挙動）。
 		 */
-		private int $sweepLeadSeconds = 0
+		private int $sweepLeadSeconds = 0,
+		/**
+		 * 1 回の sweep で積める AS pending 件数の上限（queue_depth_cap）。GeneralSettings
+		 * をここで静的に読まず、呼び出し側（Plugin）が Enqueuer と同じ値を注入する
+		 * （Task 12: cap の出所を Enqueuer と QueueMaintenance の 2 箇所に分散させない）。
+		 */
+		private int $depthCap = 500
 	) {}
 
 	/**
@@ -144,7 +150,7 @@ final class QueueMaintenance {
 		$cap   = 0;
 		$depth = 0;
 		if ( array() !== $ids ) {
-			$cap   = GeneralSettings::queueDepthCap();
+			$cap   = $this->depthCap;
 			$depth = $this->enqueuer->queueDepth();
 		}
 

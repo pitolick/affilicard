@@ -17,6 +17,27 @@ import { fetchSettings, updateSettings } from '../api/settings';
 const QUEUE_JOBS_URL =
 	'edit.php?post_type=affilicard_product&page=affilicard-queue-jobs';
 
+// cron 健全性の警告（掃引が想定間隔の何倍を超えたら警告するか）と、警告に添える
+// 運用ドキュメントへのリンク（Task 12）。
+const SWEEP_STALE_MULTIPLIER = 3;
+const OPERATIONS_DOC_URL =
+	'https://github.com/pitolick/affilicard/blob/main/docs/operations-refresh-queue.md';
+
+/**
+ * QueueController::stats() が返す ISO8601（UTC）の掃引完走時刻から、現在までの
+ * 経過時間（時間単位・小数）を計算する。空文字列・不正な日時は null（未実行）。
+ */
+function hoursSinceSweep(lastCompletedAt, now = Date.now()) {
+	if (!lastCompletedAt) {
+		return null;
+	}
+	const then = Date.parse(lastCompletedAt);
+	if (Number.isNaN(then)) {
+		return null;
+	}
+	return Math.max(0, (now - then) / (1000 * 60 * 60));
+}
+
 export function QueuePanel() {
 	const [stats, setStats] = useState(null);
 	const [settings, setSettings] = useState(null);
@@ -82,6 +103,16 @@ export function QueuePanel() {
 	// 各 account の表示ラベルも REST payload（summary[code].label）に含まれるため、
 	// JS 側で account コード→ラベルの対応表をハードコードする必要はない。
 	const accountCodes = Object.keys(stats.summary ?? {});
+
+	// cron 健全性の可視化（Task 12）: 最後に掃引が完走した時刻からの経過時間。
+	// 想定間隔（refresh_interval_hours）の SWEEP_STALE_MULTIPLIER 倍を超えて経過して
+	// いれば、サーバー cron が止まっている可能性が高いため警告を出す。
+	const sweepHoursAgo = hoursSinceSweep(stats.last_sweep_completed_at);
+	const refreshIntervalHours = Number(settings.refresh_interval_hours) || 0;
+	const sweepIsStale =
+		sweepHoursAgo !== null &&
+		refreshIntervalHours > 0 &&
+		sweepHoursAgo > refreshIntervalHours * SWEEP_STALE_MULTIPLIER;
 
 	const runAction = async (action, successMessage) => {
 		setBusy(true);
@@ -235,6 +266,27 @@ export function QueuePanel() {
 						'affilicard'
 					)}
 				</p>
+				<p>
+					{__('最後の掃引', 'affilicard')}:{' '}
+					{sweepHoursAgo === null
+						? __('未実行', 'affilicard')
+						: `${Math.floor(sweepHoursAgo)}時間前`}
+				</p>
+				{sweepIsStale && (
+					<Notice status="warning" isDismissible={false}>
+						{__(
+							'掃引が想定間隔（更新間隔の3倍）を超えて実行されていません。サーバー cron が正しく動作しているか確認してください。',
+							'affilicard'
+						)}{' '}
+						<a
+							href={OPERATIONS_DOC_URL}
+							target="_blank"
+							rel="noreferrer"
+						>
+							{__('運用ドキュメントを見る', 'affilicard')}
+						</a>
+					</Notice>
+				)}
 
 				{accountCodes.length === 0 && (
 					<p className="description">
