@@ -7,6 +7,8 @@ use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductListColumns;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Queue\Enqueuer;
+use Affilicard\Settings\GeneralSettings;
+use Mockery;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
 
@@ -59,6 +61,7 @@ final class ProductListColumnsTest extends TestCase {
 
 	public function tearDown(): void {
 		WP_Mock::tearDown();
+		Mockery::close();
 		parent::tearDown();
 	}
 
@@ -74,11 +77,12 @@ final class ProductListColumnsTest extends TestCase {
 
 		$keys = array_keys( $result );
 		$this->assertSame(
-			array( 'cb', 'title', ProductListColumns::COLUMN_KEY, ProductListColumns::COLUMN_LAST_VERIFIED, 'author', 'date' ),
+			array( 'cb', 'title', ProductListColumns::COLUMN_KEY, ProductListColumns::COLUMN_LAST_VERIFIED, ProductListColumns::COLUMN_LAST_PUBLISHED, 'author', 'date' ),
 			$keys
 		);
 		$this->assertSame( 'Fallback', $result[ ProductListColumns::COLUMN_KEY ] );
 		$this->assertSame( '最終同期', $result[ ProductListColumns::COLUMN_LAST_VERIFIED ] );
+		$this->assertSame( '最終掲載日', $result[ ProductListColumns::COLUMN_LAST_PUBLISHED ] );
 	}
 
 	public function test_renderColumn_echoes_warning_icon_when_listings_have_fallback(): void {
@@ -390,5 +394,146 @@ final class ProductListColumnsTest extends TestCase {
 
 		$this->assertStringContainsString( '失敗理由', $output );
 		$this->assertStringNotContainsString( 'TAIL_MARKER_MUST_BE_TRUNCATED', $output );
+	}
+
+	/**
+	 * Task 11: 商品一覧の「最終掲載日」列とソート。
+	 *
+	 * 値は ISO8601（UTC）の meta なので、meta_value の文字列比較がそのまま
+	 * 時系列順になる（辞書順＝時系列順）。ソート用フィルタの登録先はコラム自身の
+	 * 名前を値として使う（WP コアの `manage_*_sortable_columns` の慣例どおり）。
+	 */
+	public function test_最終掲載日はソート可能列として登録される(): void {
+		$columns = ProductListColumns::sortableColumns( array() );
+
+		$this->assertArrayHasKey( ProductListColumns::COLUMN_LAST_PUBLISHED, $columns );
+		$this->assertSame( ProductListColumns::COLUMN_LAST_PUBLISHED, $columns[ ProductListColumns::COLUMN_LAST_PUBLISHED ] );
+	}
+
+	public function test_ソート指定時にmeta_keyとorderbyを設定する(): void {
+		$query = Mockery::mock( \WP_Query::class );
+		$query->shouldReceive( 'is_main_query' )->andReturn( true );
+		$query->shouldReceive( 'get' )->with( 'orderby' )->andReturn( ProductListColumns::COLUMN_LAST_PUBLISHED );
+		$query->shouldReceive( 'set' )->once()->with( 'meta_key', ProductPostType::META_LAST_PUBLISHED_AT );
+		$query->shouldReceive( 'set' )->once()->with( 'orderby', 'meta_value' );
+
+		WP_Mock::userFunction( 'is_admin' )->andReturn( true );
+
+		ProductListColumns::applySortQuery( $query );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 管理画面外（フロント）のクエリまで meta ソートに巻き込まないためのガード。
+	 * is_admin() が false の場合、is_main_query() すら呼ばずに早期 return する。
+	 */
+	public function test_applySortQuery_admin以外では何もしない(): void {
+		$query = Mockery::mock( \WP_Query::class );
+
+		WP_Mock::userFunction( 'is_admin' )->andReturn( false );
+
+		ProductListColumns::applySortQuery( $query );
+
+		$this->assertConditionsMet();
+	}
+
+	/** サイドバーウィジェット等、管理画面内でもメインクエリでなければ何もしない。 */
+	public function test_applySortQuery_メインクエリ以外では何もしない(): void {
+		$query = Mockery::mock( \WP_Query::class );
+		$query->shouldReceive( 'is_main_query' )->andReturn( false );
+
+		WP_Mock::userFunction( 'is_admin' )->andReturn( true );
+
+		ProductListColumns::applySortQuery( $query );
+
+		$this->assertConditionsMet();
+	}
+
+	/** orderby が最終掲載日以外（他列でのソート・未指定）なら meta_key/orderby を書き換えない。 */
+	public function test_applySortQuery_orderbyが一致しない場合は何もしない(): void {
+		$query = Mockery::mock( \WP_Query::class );
+		$query->shouldReceive( 'is_main_query' )->andReturn( true );
+		$query->shouldReceive( 'get' )->with( 'orderby' )->andReturn( 'title' );
+
+		WP_Mock::userFunction( 'is_admin' )->andReturn( true );
+
+		ProductListColumns::applySortQuery( $query );
+
+		$this->assertConditionsMet();
+	}
+
+	/** register() が sortable_columns フィルタと pre_get_posts アクションを配線すること。 */
+	public function test_register_wires_sortable_columns_filter_and_pre_get_posts_action(): void {
+		WP_Mock::expectFilterAdded(
+			'manage_edit-' . ProductPostType::POST_TYPE . '_sortable_columns',
+			array( ProductListColumns::class, 'sortableColumns' )
+		);
+		WP_Mock::expectActionAdded(
+			'pre_get_posts',
+			array( ProductListColumns::class, 'applySortQuery' )
+		);
+
+		ProductListColumns::register();
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * PublicationDate::get() が有効な値を返し、StocktakePolicy::isRetired() が
+	 * false（棚卸し対象外）の場合、日付のみ（アーカイブアイコン無し）で表示される。
+	 */
+	public function test_renderColumn_last_published_shows_date_without_archive_icon_when_not_retired(): void {
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 901, ProductPostType::META_LAST_PUBLISHED_AT, true )
+			->andReturn( '2026-08-01T00:00:00+00:00' );
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array( 'stocktake_enabled' => false ) );
+
+		ob_start();
+		ProductListColumns::renderColumn( ProductListColumns::COLUMN_LAST_PUBLISHED, 901 );
+		$output = (string) ob_get_clean();
+
+		$this->assertSame( '2026-08-01', $output );
+	}
+
+	/**
+	 * StocktakePolicy::isRetired() が true（棚卸し対象）の場合、日付に加えて
+	 * dashicons-archive の警告アイコンを付記する。
+	 */
+	public function test_renderColumn_last_published_shows_archive_icon_when_retired(): void {
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 902, ProductPostType::META_LAST_PUBLISHED_AT, true )
+			->andReturn( '2020-01-01T00:00:00+00:00' );
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					'stocktake_enabled' => true,
+					'stocktake_days'    => 180,
+				)
+			);
+
+		ob_start();
+		ProductListColumns::renderColumn( ProductListColumns::COLUMN_LAST_PUBLISHED, 902 );
+		$output = (string) ob_get_clean();
+
+		$this->assertStringContainsString( '2020-01-01', $output );
+		$this->assertStringContainsString( 'dashicons-archive', $output );
+		$this->assertStringContainsString( '棚卸し対象', $output );
+	}
+
+	/** PublicationDate::get() が null（未掲載）を返す場合は em dash のみ。 */
+	public function test_renderColumn_last_published_shows_em_dash_when_no_timestamp(): void {
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 903, ProductPostType::META_LAST_PUBLISHED_AT, true )
+			->andReturn( '' );
+
+		ob_start();
+		ProductListColumns::renderColumn( ProductListColumns::COLUMN_LAST_PUBLISHED, 903 );
+		$output = (string) ob_get_clean();
+
+		$this->assertSame( '<span aria-hidden="true">—</span>', $output );
 	}
 }

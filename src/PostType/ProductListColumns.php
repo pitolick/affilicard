@@ -6,6 +6,8 @@ namespace Affilicard\PostType;
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Queue\Enqueuer;
+use Affilicard\Stocktake\PublicationDate;
+use Affilicard\Stocktake\StocktakePolicy;
 use Affilicard\Util\JsonField;
 
 /**
@@ -20,16 +22,26 @@ use Affilicard\Util\JsonField;
  * title 属性に付記する（Task 18）。`fetch_error` は provider 由来の外部文字列のため、
  * `wp_strip_all_tags()` によるタグ除去＋長さ制限（200文字）でサニタイズしたうえで、
  * 出力直前に `esc_attr()` で最終エスケープする二重防御を行う（spec §9-3）。
+ *
+ * 「最終掲載日」列（Task 11）は棚卸し状況を一覧で把握する唯一の導線。値は
+ * `ProductPostType::META_LAST_PUBLISHED_AT`（ISO8601, UTC）で、辞書順＝時系列順のため
+ * `meta_value` の文字列比較でそのままソートできる。棚卸し対象（`StocktakePolicy::isRetired()`）
+ * であれば日付の横にアーカイブアイコンを付記する。なお「最終同期」列（`COLUMN_LAST_VERIFIED`）の
+ * ソートはスコープ外（値が listing の JSON 配列内にあり、meta ソートに乗せるには派生 meta の
+ * 追加と既存商品のマイグレーションが必要で割に合わないため。spec §5-8）。
  */
 final class ProductListColumns {
 
-	public const COLUMN_KEY           = 'affilicard_fallback';
-	public const COLUMN_LAST_VERIFIED = 'affilicard_last_verified';
+	public const COLUMN_KEY            = 'affilicard_fallback';
+	public const COLUMN_LAST_VERIFIED  = 'affilicard_last_verified';
+	public const COLUMN_LAST_PUBLISHED = 'affilicard_last_published';
 
 	public static function register(): void {
 		$hook_post_type = ProductPostType::POST_TYPE;
 		add_filter( "manage_{$hook_post_type}_posts_columns", array( self::class, 'addColumn' ) );
 		add_action( "manage_{$hook_post_type}_posts_custom_column", array( self::class, 'renderColumn' ), 10, 2 );
+		add_filter( "manage_edit-{$hook_post_type}_sortable_columns", array( self::class, 'sortableColumns' ) );
+		add_action( 'pre_get_posts', array( self::class, 'applySortQuery' ) );
 	}
 
 	/**
@@ -41,8 +53,9 @@ final class ProductListColumns {
 		foreach ( $columns as $key => $label ) {
 			$new[ $key ] = $label;
 			if ( 'title' === $key ) {
-				$new[ self::COLUMN_KEY ]           = __( 'Fallback', 'affilicard' );
-				$new[ self::COLUMN_LAST_VERIFIED ] = __( '最終同期', 'affilicard' );
+				$new[ self::COLUMN_KEY ]            = __( 'Fallback', 'affilicard' );
+				$new[ self::COLUMN_LAST_VERIFIED ]  = __( '最終同期', 'affilicard' );
+				$new[ self::COLUMN_LAST_PUBLISHED ] = __( '最終掲載日', 'affilicard' );
 			}
 		}
 		return $new;
@@ -56,9 +69,42 @@ final class ProductListColumns {
 			case self::COLUMN_LAST_VERIFIED:
 				self::renderLastVerifiedColumn( $post_id );
 				return;
+			case self::COLUMN_LAST_PUBLISHED:
+				self::renderLastPublishedColumn( $post_id );
+				return;
 			default:
 				return;
 		}
+	}
+
+	/**
+	 * 「最終掲載日」列をソート可能列として登録する（`manage_edit-{post_type}_sortable_columns`）。
+	 * 値は ISO8601（UTC）文字列のため、meta_value の文字列比較がそのまま時系列順になる。
+	 *
+	 * @param array<string, string> $columns
+	 * @return array<string, string>
+	 */
+	public static function sortableColumns( array $columns ): array {
+		$columns[ self::COLUMN_LAST_PUBLISHED ] = self::COLUMN_LAST_PUBLISHED;
+		return $columns;
+	}
+
+	/**
+	 * 「最終掲載日」列でのソート指定を meta クエリへ変換する（`pre_get_posts`）。
+	 *
+	 * 管理画面のメインクエリ以外（フロント表示・サイドバーウィジェット等）まで
+	 * meta ソートに巻き込まないよう、`is_admin()` かつ `$query->is_main_query()` の
+	 * ときだけ作用する。
+	 */
+	public static function applySortQuery( \WP_Query $query ): void {
+		if ( ! is_admin() || ! $query->is_main_query() ) {
+			return;
+		}
+		if ( self::COLUMN_LAST_PUBLISHED !== $query->get( 'orderby' ) ) {
+			return;
+		}
+		$query->set( 'meta_key', ProductPostType::META_LAST_PUBLISHED_AT );
+		$query->set( 'orderby', 'meta_value' );
 	}
 
 	private static function renderFallbackColumn( int $post_id ): void {
@@ -206,5 +252,24 @@ final class ProductListColumns {
 			return;
 		}
 		echo '<span aria-hidden="true">—</span>';
+	}
+
+	/**
+	 * `PublicationDate::get()`（UTC epoch 秒）を `Y-m-d` で表示する。値が無ければ
+	 * 他カラムと同じ em dash。棚卸し対象（`StocktakePolicy::isRetired()` が true）
+	 * であれば、自動更新を停止中であることを示すアーカイブアイコンを日付の横に付記する。
+	 */
+	private static function renderLastPublishedColumn( int $post_id ): void {
+		$ts = ( new PublicationDate() )->get( $post_id );
+		if ( null === $ts ) {
+			echo '<span aria-hidden="true">—</span>';
+			return;
+		}
+		echo esc_html( gmdate( 'Y-m-d', $ts ) );
+
+		if ( ( new StocktakePolicy() )->isRetired( $post_id, time() ) ) {
+			echo ' <span class="dashicons dashicons-archive" title="'
+				. esc_attr__( '棚卸し対象（自動更新を停止中）', 'affilicard' ) . '"></span>';
+		}
 	}
 }
