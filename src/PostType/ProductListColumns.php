@@ -25,16 +25,27 @@ use Affilicard\Util\JsonField;
  *
  * 「最終掲載日」列（Task 11）は棚卸し状況を一覧で把握する唯一の導線。値は
  * `ProductPostType::META_LAST_PUBLISHED_AT`（ISO8601, UTC）で、辞書順＝時系列順のため
- * `meta_value` の文字列比較でそのままソートできる。棚卸し対象（`StocktakePolicy::isRetired()`）
- * であれば日付の横にアーカイブアイコンを付記する。なお「最終同期」列（`COLUMN_LAST_VERIFIED`）の
- * ソートはスコープ外（値が listing の JSON 配列内にあり、meta ソートに乗せるには派生 meta の
- * 追加と既存商品のマイグレーションが必要で割に合わないため。spec §5-8）。
+ * `meta_value` の文字列比較でそのままソートできる。ソート実装（`applySortQuery()`）は
+ * 値を持たない投稿（未同期の既存商品が大半）が結果から消えないよう EXISTS/NOT EXISTS を
+ * OR で束ねた LEFT JOIN 相当の meta_query を使う（詳細は同メソッドの docblock）。
+ * `StocktakePolicy::isRetired()` が true（棚卸し対象。最終掲載日が無ければ棚卸し基準日へ
+ * フォールバックして判定）であれば日付（無ければ em dash）の横にアーカイブアイコンを付記する。
+ * なお「最終同期」列（`COLUMN_LAST_VERIFIED`）のソートはスコープ外（値が listing の JSON
+ * 配列内にあり、meta ソートに乗せるには派生 meta の追加と既存商品のマイグレーションが
+ * 必要で割に合わないため。spec §5-8）。
  */
 final class ProductListColumns {
 
 	public const COLUMN_KEY            = 'affilicard_fallback';
 	public const COLUMN_LAST_VERIFIED  = 'affilicard_last_verified';
 	public const COLUMN_LAST_PUBLISHED = 'affilicard_last_published';
+
+	/**
+	 * meta_query 内で「最終掲載日」ソート節を指し示す名前。EXISTS/NOT EXISTS の2節を
+	 * OR で束ねて同じ alias を共有させ、orderby 側から名指しで参照するために使う
+	 * （applySortQuery() 参照）。
+	 */
+	private const SORT_CLAUSE_KEY = 'affilicard_last_published_clause';
 
 	public static function register(): void {
 		$hook_post_type = ProductPostType::POST_TYPE;
@@ -94,17 +105,49 @@ final class ProductListColumns {
 	 *
 	 * 管理画面のメインクエリ以外（フロント表示・サイドバーウィジェット等）まで
 	 * meta ソートに巻き込まないよう、`is_admin()` かつ `$query->is_main_query()` の
-	 * ときだけ作用する。
+	 * ときだけ作用する。`pre_get_posts` はグローバルなフックのため、対象 post_type
+	 * （商品 CPT）以外の一覧（例: 固定ページ一覧に同名の orderby が来た場合）には
+	 * 作用しないことも合わせて確認する。
+	 *
+	 * `meta_key` + `orderby=meta_value` という古典的パターンは暗黙に
+	 * `compare=EXISTS` の INNER JOIN になり、そのメタを持たない投稿が結果集合から
+	 * 消えてしまう。最終掲載日メタ（`ProductPostType::META_LAST_PUBLISHED_AT`）は
+	 * `PublishTrigger::syncPost()` でしか書かれず、既存カタログの大多数はまだ
+	 * このメタを持たない。にもかかわらずそれらが一覧からごっそり消えるのでは
+	 * 「棚卸し状況を一覧で把握する」というこの列の目的そのものが壊れる
+	 * （最も確認したい「掲載日が無く棚卸し対象になっている商品」が見えなくなる）。
+	 * そのため EXISTS/NOT EXISTS の2節を `relation => OR` で束ねた名前付き節にし、
+	 * `orderby` 側でその節名を参照する（WordPress の標準パターン）。これにより
+	 * 実クエリでは共有 alias が LEFT JOIN され、値の無い投稿もソート結果に残る。
 	 */
 	public static function applySortQuery( \WP_Query $query ): void {
 		if ( ! is_admin() || ! $query->is_main_query() ) {
 			return;
 		}
+		if ( ProductPostType::POST_TYPE !== $query->get( 'post_type' ) ) {
+			return;
+		}
 		if ( self::COLUMN_LAST_PUBLISHED !== $query->get( 'orderby' ) ) {
 			return;
 		}
-		$query->set( 'meta_key', ProductPostType::META_LAST_PUBLISHED_AT );
-		$query->set( 'orderby', 'meta_value' );
+
+		$order = 'ASC' === strtoupper( (string) $query->get( 'order' ) ) ? 'ASC' : 'DESC';
+
+		$query->set(
+			'meta_query',
+			array(
+				'relation'            => 'OR',
+				self::SORT_CLAUSE_KEY => array(
+					'key'     => ProductPostType::META_LAST_PUBLISHED_AT,
+					'compare' => 'EXISTS',
+				),
+				array(
+					'key'     => ProductPostType::META_LAST_PUBLISHED_AT,
+					'compare' => 'NOT EXISTS',
+				),
+			)
+		);
+		$query->set( 'orderby', array( self::SORT_CLAUSE_KEY => $order ) );
 	}
 
 	private static function renderFallbackColumn( int $post_id ): void {
@@ -256,16 +299,24 @@ final class ProductListColumns {
 
 	/**
 	 * `PublicationDate::get()`（UTC epoch 秒）を `Y-m-d` で表示する。値が無ければ
-	 * 他カラムと同じ em dash。棚卸し対象（`StocktakePolicy::isRetired()` が true）
-	 * であれば、自動更新を停止中であることを示すアーカイブアイコンを日付の横に付記する。
+	 * 他カラムと同じ em dash。
+	 *
+	 * `StocktakePolicy::isRetired()` は最終掲載日が無い（null）ときこそ棚卸し基準日
+	 * （`GeneralSettings`/`PluginUpgrade::OPTION_STOCKTAKE_BASELINE`）にフォールバック
+	 * して判定する設計であり、「最終掲載日が無い＝判定不能」ではない。最終掲載日メタは
+	 * `PublishTrigger::syncPost()` でしか書かれず既存カタログの大多数が未保有のため、
+	 * ここで判定を打ち切ると棚卸し対象の大半が一覧で一切区別できなくなる（spec §5-2）。
+	 * そのため isRetired() は $ts の有無に関わらず必ず呼び、アーカイブアイコンの表示可否
+	 * だけをその結果に委ねる。
 	 */
 	private static function renderLastPublishedColumn( int $post_id ): void {
 		$ts = ( new PublicationDate() )->get( $post_id );
+
 		if ( null === $ts ) {
 			echo '<span aria-hidden="true">—</span>';
-			return;
+		} else {
+			echo esc_html( gmdate( 'Y-m-d', $ts ) );
 		}
-		echo esc_html( gmdate( 'Y-m-d', $ts ) );
 
 		if ( ( new StocktakePolicy() )->isRetired( $post_id, time() ) ) {
 			echo ' <span class="dashicons dashicons-archive" title="'

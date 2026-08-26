@@ -8,6 +8,7 @@ use Affilicard\PostType\ProductListColumns;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Settings\GeneralSettings;
+use Affilicard\Upgrade\PluginUpgrade;
 use Mockery;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
@@ -410,12 +411,55 @@ final class ProductListColumnsTest extends TestCase {
 		$this->assertSame( ProductListColumns::COLUMN_LAST_PUBLISHED, $columns[ ProductListColumns::COLUMN_LAST_PUBLISHED ] );
 	}
 
-	public function test_ソート指定時にmeta_keyとorderbyを設定する(): void {
+	/**
+	 * レビュー対応（Important 1）: `meta_key` + `orderby=meta_value` という古典的
+	 * パターンは暗黙に `compare=EXISTS` の INNER JOIN になり、最終掲載日メタを
+	 * 持たない投稿（既存カタログの大半）が結果集合から消える。代わりに
+	 * EXISTS/NOT EXISTS を `relation => OR` で束ねた名前付き節を `meta_query` に
+	 * 設定し、`orderby` はその節名を参照する形にする（WP_Query はモックのため、
+	 * `set()` に渡される引数の形そのものを検証する）。
+	 */
+	public function test_ソート指定時にmeta_queryとorderbyを設定する(): void {
 		$query = Mockery::mock( \WP_Query::class );
 		$query->shouldReceive( 'is_main_query' )->andReturn( true );
+		$query->shouldReceive( 'get' )->with( 'post_type' )->andReturn( ProductPostType::POST_TYPE );
 		$query->shouldReceive( 'get' )->with( 'orderby' )->andReturn( ProductListColumns::COLUMN_LAST_PUBLISHED );
-		$query->shouldReceive( 'set' )->once()->with( 'meta_key', ProductPostType::META_LAST_PUBLISHED_AT );
-		$query->shouldReceive( 'set' )->once()->with( 'orderby', 'meta_value' );
+		$query->shouldReceive( 'get' )->with( 'order' )->andReturn( 'ASC' );
+		$query->shouldReceive( 'set' )->once()->with(
+			'meta_query',
+			array(
+				'relation'                         => 'OR',
+				'affilicard_last_published_clause' => array(
+					'key'     => ProductPostType::META_LAST_PUBLISHED_AT,
+					'compare' => 'EXISTS',
+				),
+				array(
+					'key'     => ProductPostType::META_LAST_PUBLISHED_AT,
+					'compare' => 'NOT EXISTS',
+				),
+			)
+		);
+		$query->shouldReceive( 'set' )->once()->with( 'orderby', array( 'affilicard_last_published_clause' => 'ASC' ) );
+
+		WP_Mock::userFunction( 'is_admin' )->andReturn( true );
+
+		ProductListColumns::applySortQuery( $query );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * order（asc/desc）が無指定・不正な値のときは DESC にフォールバックする
+	 * （WP_Query 自体の既定と揃える）。
+	 */
+	public function test_ソート指定時にorder未指定ならDESCにフォールバックする(): void {
+		$query = Mockery::mock( \WP_Query::class );
+		$query->shouldReceive( 'is_main_query' )->andReturn( true );
+		$query->shouldReceive( 'get' )->with( 'post_type' )->andReturn( ProductPostType::POST_TYPE );
+		$query->shouldReceive( 'get' )->with( 'orderby' )->andReturn( ProductListColumns::COLUMN_LAST_PUBLISHED );
+		$query->shouldReceive( 'get' )->with( 'order' )->andReturn( '' );
+		$query->shouldReceive( 'set' )->once()->with( 'meta_query', Mockery::type( 'array' ) );
+		$query->shouldReceive( 'set' )->once()->with( 'orderby', array( 'affilicard_last_published_clause' => 'DESC' ) );
 
 		WP_Mock::userFunction( 'is_admin' )->andReturn( true );
 
@@ -450,10 +494,27 @@ final class ProductListColumnsTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
-	/** orderby が最終掲載日以外（他列でのソート・未指定）なら meta_key/orderby を書き換えない。 */
+	/**
+	 * レビュー対応（Important 1 の付随修正）: `pre_get_posts` はグローバルフックのため、
+	 * 商品 CPT 以外の一覧（例: 固定ページ一覧）に同名の orderby が来ても作用しない。
+	 */
+	public function test_applySortQuery_対象post_type以外では何もしない(): void {
+		$query = Mockery::mock( \WP_Query::class );
+		$query->shouldReceive( 'is_main_query' )->andReturn( true );
+		$query->shouldReceive( 'get' )->with( 'post_type' )->andReturn( 'page' );
+
+		WP_Mock::userFunction( 'is_admin' )->andReturn( true );
+
+		ProductListColumns::applySortQuery( $query );
+
+		$this->assertConditionsMet();
+	}
+
+	/** orderby が最終掲載日以外（他列でのソート・未指定）なら meta_query/orderby を書き換えない。 */
 	public function test_applySortQuery_orderbyが一致しない場合は何もしない(): void {
 		$query = Mockery::mock( \WP_Query::class );
 		$query->shouldReceive( 'is_main_query' )->andReturn( true );
+		$query->shouldReceive( 'get' )->with( 'post_type' )->andReturn( ProductPostType::POST_TYPE );
 		$query->shouldReceive( 'get' )->with( 'orderby' )->andReturn( 'title' );
 
 		WP_Mock::userFunction( 'is_admin' )->andReturn( true );
@@ -524,16 +585,58 @@ final class ProductListColumnsTest extends TestCase {
 		$this->assertStringContainsString( '棚卸し対象', $output );
 	}
 
-	/** PublicationDate::get() が null（未掲載）を返す場合は em dash のみ。 */
-	public function test_renderColumn_last_published_shows_em_dash_when_no_timestamp(): void {
+	/**
+	 * レビュー対応（Critical 1）: 最終掲載日が無く、棚卸し自体が無効化されているケース。
+	 * `StocktakePolicy::isRetired()` は無条件に呼ばれるが（Critical 1 修正）、
+	 * 無効化されていれば常に false を返すため em dash のみで、アーカイブアイコンは
+	 * 付かない。
+	 */
+	public function test_renderColumn_last_published_shows_em_dash_without_archive_icon_when_no_timestamp_and_stocktake_disabled(): void {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 903, ProductPostType::META_LAST_PUBLISHED_AT, true )
 			->andReturn( '' );
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array( 'stocktake_enabled' => false ) );
 
 		ob_start();
 		ProductListColumns::renderColumn( ProductListColumns::COLUMN_LAST_PUBLISHED, 903 );
 		$output = (string) ob_get_clean();
 
 		$this->assertSame( '<span aria-hidden="true">—</span>', $output );
+	}
+
+	/**
+	 * レビュー対応（Critical 1）: 最終掲載日メタを持たない商品（既存カタログの大半。
+	 * `META_LAST_PUBLISHED_AT` は `PublishTrigger::syncPost()` でしか書かれない）でも、
+	 * `StocktakePolicy::isRetired()` は棚卸し基準日（`PluginUpgrade::OPTION_STOCKTAKE_BASELINE`）
+	 * にフォールバックして判定する。旧実装は $ts が null の時点で早期 return しており
+	 * isRetired() に到達しなかったため、この一覧上で棚卸し対象を一切区別できない
+	 * バグがあった（spec §5-2 違反）。ここでは基準日経由で棚卸し対象と判定される
+	 * ケースで、em dash に加えてアーカイブアイコンが表示されることを固定する。
+	 */
+	public function test_renderColumn_last_published_shows_archive_icon_when_no_timestamp_but_baseline_retired(): void {
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 904, ProductPostType::META_LAST_PUBLISHED_AT, true )
+			->andReturn( '' );
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					'stocktake_enabled' => true,
+					'stocktake_days'    => 180,
+				)
+			);
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_STOCKTAKE_BASELINE, '' )
+			->andReturn( '2020-01-01T00:00:00+00:00' );
+
+		ob_start();
+		ProductListColumns::renderColumn( ProductListColumns::COLUMN_LAST_PUBLISHED, 904 );
+		$output = (string) ob_get_clean();
+
+		$this->assertStringContainsString( '—', $output );
+		$this->assertStringContainsString( 'dashicons-archive', $output );
+		$this->assertStringContainsString( '棚卸し対象', $output );
 	}
 }
