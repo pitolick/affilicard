@@ -127,7 +127,7 @@ final class QueueMaintenanceTest extends TestCase {
 	}
 
 	public function test_sweep_get_postsにmaxProductsとID昇順カーソルクエリを渡す(): void {
-		$this->stubCursor( 0 );
+		$this->stubCursor( 7 );
 		$this->stubFilterCleanup();
 
 		WP_Mock::userFunction( 'get_posts' )->once()->with(
@@ -139,7 +139,13 @@ final class QueueMaintenanceTest extends TestCase {
 						&& 5 === $args['posts_per_page']
 						&& 'ID' === $args['orderby']
 						&& 'ASC' === $args['order']
-						&& true === $args['no_found_rows'];
+						&& true === $args['no_found_rows']
+						// レビュー Critical 1: これが無いと posts_where を含む句フィルタが
+						// WP_Query 側で一切適用されず、カーソルが SQL に反映されない。
+						&& false === $args['suppress_filters']
+						// レビュー Important 3: posts_where フィルタが自クエリだけを
+						// 識別するための private query var。値がカーソルと一致すること。
+						&& 7 === $args['affilicard_sweep_after'];
 				}
 			)
 		)->andReturn( array() );
@@ -161,6 +167,10 @@ final class QueueMaintenanceTest extends TestCase {
 	/**
 	 * Ruling 1: カーソル絞り込みを posts_where フィルタで SQL に落とし、使用後は
 	 * 必ず remove_filter で外す（他のクエリに漏らさない）。
+	 *
+	 * Important 3: フィルタは private query var（affilicard_sweep_after）で自クエリ
+	 * だけを識別する。$query がこの query var を持たない（＝他プラグインが窓内で
+	 * 副次的に走らせた無関係なクエリ）場合は $where を書き換えないことも検証する。
 	 */
 	public function test_sweep_posts_whereフィルタでカーソル以降のみに絞り使用後に外す(): void {
 		$this->stubCursor( 42 );
@@ -168,9 +178,11 @@ final class QueueMaintenanceTest extends TestCase {
 
 		// add_filter は WP_Mock の組み込み polyfill（\WP_Mock::onFilterAdded 経由）が
 		// 常に使われ、WP_Mock::userFunction() では横取りできない。'posts_where' へ
-		// Closure が登録されたことは expectFilterAdded で確認する（宣言はテスト末尾で
-		// tearDown の Mockery::close() が検証する intercept モックとして働く）。
-		WP_Mock::expectFilterAdded( 'posts_where', Mockery::type( 'Closure' ) );
+		// priority=10・accepted_args=2 で Closure が登録されたことは expectFilterAdded
+		// で確認する（宣言はテスト末尾で tearDown の Mockery::close() が検証する
+		// intercept モックとして働く）。accepted_args=2 は $query（Important 3 の
+		// クエリ識別に使う）を受け取るために必須。
+		WP_Mock::expectFilterAdded( 'posts_where', Mockery::type( 'Closure' ), 10, 2 );
 
 		// remove_filter には組み込み polyfill が無いため WP_Mock::userFunction() で
 		// 横取りできる。sweep() は add_filter と remove_filter に同一の $whereCursor
@@ -179,7 +191,7 @@ final class QueueMaintenanceTest extends TestCase {
 		$removedCallback = null;
 		WP_Mock::userFunction( 'remove_filter' )
 			->once()
-			->with( 'posts_where', Mockery::type( 'Closure' ) )
+			->with( 'posts_where', Mockery::type( 'Closure' ), 10 )
 			->andReturnUsing(
 				function ( $tag, $cb ) use ( &$removedCallback ) {
 					$removedCallback = $cb;
@@ -205,7 +217,16 @@ final class QueueMaintenanceTest extends TestCase {
 			->andReturn( ' AND wp_posts.ID > 42' );
 		$GLOBALS['wpdb'] = $wpdb;
 
-		$this->assertSame( 'WHERE 1=1 AND wp_posts.ID > 42', $capturedCallback( 'WHERE 1=1' ) );
+		// 自クエリ（affilicard_sweep_after が sweep 時のカーソルと一致）には WHERE を足す。
+		$ownQuery = Mockery::mock();
+		$ownQuery->shouldReceive( 'get' )->with( 'affilicard_sweep_after', null )->andReturn( 42 );
+		$this->assertSame( 'WHERE 1=1 AND wp_posts.ID > 42', $capturedCallback( 'WHERE 1=1', $ownQuery ) );
+
+		// 他クエリ（query var を持たない＝他プラグインが窓内で副次的に走らせたクエリ）
+		// には一切手を加えない（Important 3）。
+		$otherQuery = Mockery::mock();
+		$otherQuery->shouldReceive( 'get' )->with( 'affilicard_sweep_after', null )->andReturn( null );
+		$this->assertSame( 'WHERE unrelated = 1', $capturedCallback( 'WHERE unrelated = 1', $otherQuery ) );
 
 		unset( $GLOBALS['wpdb'] );
 		$this->assertConditionsMet();

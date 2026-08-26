@@ -91,28 +91,44 @@ final class QueueMaintenance {
 		// カーソル以前の商品が含まれるぶん 1 回に進む件数が目減りし、カーソルが末尾に
 		// 近づくほど 1 回あたり 0〜数件しか進まなくなる。posts_where で SQL に落とし、
 		// posts_per_page => $maxProducts が「カーソル以降の $maxProducts 件」を意味する
-		// ようにする。他のクエリに漏れると重大な副作用になるため、使用後は必ず
-		// remove_filter で外す（get_posts が例外を投げても外れるよう try/finally）。
-		$whereCursor = static function ( string $where ) use ( $after ): string {
+		// ようにする。
+		//
+		// - 'suppress_filters' => false が無いと WP_Query::get_posts() は
+		// posts_where を含む句フィルタを一切適用しない（get_posts() 自身の既定値は
+		// suppress_filters=true）。これが無いとフィルタは実クエリで一度も呼ばれず、
+		// カーソルが SQL に反映されないまま同じ先頭 $maxProducts 件を無限に
+		// 再走査してしまう（レビュー Critical 1）。
+		// - 'affilicard_sweep_after' を private query var として渡し、フィルタ側で
+		// $query->get() が一致するときだけ WHERE を書き換える。$where だけを見て
+		// 無条件に足すと、remove_filter までの短い窓の間に他プラグインが副次的に
+		// 走らせた無関係な WP_Query の結果まで黙って削ってしまう（レビュー Important 3）。
+		// - 他のクエリに漏れると重大な副作用になるため、使用後は必ず remove_filter で
+		// 外す（get_posts が例外を投げても外れるよう try/finally）。
+		$whereCursor = static function ( string $where, $query ) use ( $after ): string {
+			if ( $after !== $query->get( 'affilicard_sweep_after', null ) ) {
+				return $where;
+			}
 			global $wpdb;
 			return $where . $wpdb->prepare( " AND {$wpdb->posts}.ID > %d", $after );
 		};
 
-		add_filter( 'posts_where', $whereCursor );
+		add_filter( 'posts_where', $whereCursor, 10, 2 );
 		try {
 			$ids = get_posts(
 				array(
-					'post_type'      => ProductPostType::POST_TYPE,
-					'post_status'    => 'publish',
-					'fields'         => 'ids',
-					'posts_per_page' => $maxProducts,
-					'orderby'        => 'ID',
-					'order'          => 'ASC',
-					'no_found_rows'  => true,
+					'post_type'              => ProductPostType::POST_TYPE,
+					'post_status'            => 'publish',
+					'fields'                 => 'ids',
+					'posts_per_page'         => $maxProducts,
+					'orderby'                => 'ID',
+					'order'                  => 'ASC',
+					'no_found_rows'          => true,
+					'suppress_filters'       => false,
+					'affilicard_sweep_after' => $after,
 				)
 			);
 		} finally {
-			remove_filter( 'posts_where', $whereCursor );
+			remove_filter( 'posts_where', $whereCursor, 10 );
 		}
 
 		if ( ! is_array( $ids ) ) {
