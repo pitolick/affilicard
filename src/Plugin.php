@@ -42,6 +42,7 @@ use Affilicard\Rest\RestController;
 use Affilicard\Rest\SettingsController;
 use Affilicard\Settings\DashboardWidget;
 use Affilicard\Settings\GeneralSettings;
+use Affilicard\Stocktake\PublicationDate;
 use Affilicard\Types\EbookType;
 use Affilicard\Types\GenericType;
 use Affilicard\Types\ProductTypeRegistry;
@@ -225,7 +226,7 @@ final class Plugin {
 		// transition_post_status は publish→publish の再保存も含め毎回発火するため、
 		// onTransition 側のガード（newStatus==='publish'）だけで全 publish ケースを既にカバーする。
 		// onUpdated も配線すると二重発火するため配線しない）。
-		$publishTrigger = new PublishTrigger( $repository, $enqueuer, $providers );
+		$publishTrigger = new PublishTrigger( $repository, $enqueuer, $providers, new PublicationDate() );
 		add_action( 'transition_post_status', array( $publishTrigger, 'onTransition' ), 10, 3 );
 
 		// 予約投稿（product CPT・future）→ publish 昇格時に、対象商品の ELIGIBLE な auto listing を

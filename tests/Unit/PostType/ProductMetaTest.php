@@ -164,6 +164,20 @@ final class ProductMetaTest extends TestCase {
 		$this->assertSame( '', $cb( '' ) );
 	}
 
+	public function test_registers_last_published_at_as_read_only_meta(): void {
+		$reg = $this->captureRegistrations();
+
+		$this->assertArrayHasKey( ProductPostType::META_LAST_PUBLISHED_AT, $reg );
+		[ $post_type, $args ] = $reg[ ProductPostType::META_LAST_PUBLISHED_AT ];
+		$this->assertSame( ProductPostType::POST_TYPE, $post_type );
+		$this->assertSame( 'string', $args['type'] );
+		$this->assertTrue( $args['single'] );
+		$this->assertTrue( $args['show_in_rest'] );
+		$this->assertIsCallable( $args['auth_callback'] );
+		// auth_callback が false を返す＝REST / 編集画面から書き換えられない（棚卸し判定を守るための read-only）。
+		$this->assertFalse( ( $args['auth_callback'] )() );
+	}
+
 	public function test_registers_mask_meta_fields(): void {
 		$reg = $this->captureRegistrations();
 

@@ -22,6 +22,9 @@ final class ProductPostType {
 	public const META_MASK_BLUR      = 'affilicard_mask_blur';
 	public const META_MASK_R18       = 'affilicard_mask_r18';
 	public const META_MASK_LABEL     = 'affilicard_mask_label';
+	// 棚卸し: 記事の公開・更新で商品が掲載面に載った最後の時刻（記録時点の現在時刻、UTC ISO8601）。
+	// 書き込みは Affilicard\Stocktake\PublicationDate::touch() に一元化し、read-only meta として登録する（ProductMeta::register()）。
+	public const META_LAST_PUBLISHED_AT = 'affilicard_last_published_at';
 
 	/**
 	 * プラットフォーム別の外部 ID を保存する meta キーを生成する。

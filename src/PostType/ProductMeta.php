@@ -149,5 +149,18 @@ final class ProductMeta {
 				},
 			)
 		);
+
+		register_post_meta(
+			ProductPostType::POST_TYPE,
+			ProductPostType::META_LAST_PUBLISHED_AT,
+			array(
+				'type'          => 'string',
+				'single'        => true,
+				'show_in_rest'  => true,
+				// 棚卸し判定の基礎データのため read-only。書き込みは PublicationDate::touch() 経由のみとし、
+				// 利用者が REST / 編集画面から直接書き換えて棚卸し判定を意図せず狂わせることを防ぐ。
+				'auth_callback' => static fn (): bool => false,
+			)
+		);
 	}
 }
