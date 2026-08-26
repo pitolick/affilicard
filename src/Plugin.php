@@ -46,6 +46,7 @@ use Affilicard\Types\EbookType;
 use Affilicard\Types\GenericType;
 use Affilicard\Types\ProductTypeRegistry;
 use Affilicard\Types\VodType;
+use Affilicard\Upgrade\PluginUpgrade;
 
 /**
  * プラグインのブートストラップ。
@@ -68,6 +69,16 @@ final class Plugin {
 		// 現在イテレート中の plugins_loaded@0 バケットに追加され得ず（PHP/WP の do_action は
 		// イテレート中のバケットへの追加コールバックを拾わない）、AS が一切初期化されない不具合がある。
 		ActionSchedulerLoader::boot();
+
+		// バージョン移行: register_activation_hook は自動更新・管理画面からの更新では
+		// 実行されないため、plugins_loaded で保存済みバージョンとの差分を都度チェックする
+		// （有効化したまま更新したサイトでも棚卸し基準日の初期化等が確実に走るようにする）。
+		add_action(
+			'plugins_loaded',
+			static function (): void {
+				PluginUpgrade::maybeUpgrade( AFFILICARD_VERSION );
+			}
+		);
 
 		// CPT 登録
 		add_action( 'init', array( ProductPostType::class, 'register' ) );
