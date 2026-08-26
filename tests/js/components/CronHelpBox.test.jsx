@@ -6,10 +6,17 @@ import { render, screen } from '@testing-library/react';
 import { CronHelpBox } from '../../../src/Admin/components/CronHelpBox';
 
 describe( 'CronHelpBox', () => {
-	test( 'renders the wp cron command in a code block', () => {
+	test( 'renders the wp-cron sweep-event command in a code block', () => {
 		render( <CronHelpBox /> );
 		expect(
-			screen.getByText( 'wp cron event run affilicard_refresh_listings' )
+			screen.getByText( 'wp cron event run affilicard_refresh_all' )
+		).toBeInTheDocument();
+	} );
+
+	test( 'renders the action-scheduler queue-runner command in a code block', () => {
+		render( <CronHelpBox /> );
+		expect(
+			screen.getByText( 'wp action-scheduler run --batches=1' )
 		).toBeInTheDocument();
 	} );
 

@@ -60,9 +60,7 @@ describe( 'GeneralPanel', () => {
 
 		await waitFor( () =>
 			expect(
-				screen.getByText(
-					'wp cron event run affilicard_refresh_listings'
-				)
+				screen.getByText( 'wp cron event run affilicard_refresh_all' )
 			).toBeInTheDocument()
 		);
 	} );
@@ -98,9 +96,7 @@ describe( 'GeneralPanel', () => {
 		);
 
 		expect(
-			screen.queryByText(
-				'wp cron event run affilicard_refresh_listings'
-			)
+			screen.queryByText( 'wp cron event run affilicard_refresh_all' )
 		).not.toBeInTheDocument();
 	} );
 
@@ -117,9 +113,7 @@ describe( 'GeneralPanel', () => {
 
 		await waitFor( () =>
 			expect(
-				screen.getByText(
-					'wp cron event run affilicard_refresh_listings'
-				)
+				screen.getByText( 'wp cron event run affilicard_refresh_all' )
 			).toBeInTheDocument()
 		);
 	} );
@@ -172,5 +166,78 @@ describe( 'GeneralPanel', () => {
 		expect(
 			container.querySelector( '.affilicard-general-panel__actions' )
 		).toBeInTheDocument();
+	} );
+} );
+
+describe( '棚卸し設定', () => {
+	test( '棚卸しトグルと期間入力が表示され、既定値を反映する', async () => {
+		fetchSettings.mockResolvedValue( {
+			cache_ttl_seconds: 86400,
+			default_product_type: 'generic',
+			cron_enabled: false,
+			stocktake_enabled: true,
+			stocktake_days: 180,
+		} );
+		render( <GeneralPanel /> );
+
+		const toggle = await screen.findByLabelText( /棚卸しを有効化/ );
+		expect( toggle.checked ).toBe( true );
+
+		const daysInput = screen.getByLabelText( /棚卸し期間 \(日\)/ );
+		expect( daysInput.value ).toBe( '180' );
+	} );
+
+	test( '棚卸しトグルを切り替えると保存時に stocktake_enabled が反映される', async () => {
+		const initial = {
+			cache_ttl_seconds: 86400,
+			default_product_type: 'generic',
+			cron_enabled: false,
+			stocktake_enabled: true,
+			stocktake_days: 180,
+		};
+		fetchSettings.mockResolvedValue( initial );
+		updateSettings.mockResolvedValue( initial );
+		render( <GeneralPanel /> );
+
+		const toggle = await screen.findByLabelText( /棚卸しを有効化/ );
+		fireEvent.click( toggle );
+
+		const saveButton = await screen.findByRole( 'button', {
+			name: '保存',
+		} );
+		fireEvent.click( saveButton );
+
+		await waitFor( () =>
+			expect( updateSettings ).toHaveBeenCalledWith(
+				expect.objectContaining( { stocktake_enabled: false } )
+			)
+		);
+	} );
+
+	test( '棚卸し期間に 1 未満・非数値を入力すると 1 にクランプされる', async () => {
+		fetchSettings.mockResolvedValue( {
+			cache_ttl_seconds: 86400,
+			default_product_type: 'generic',
+			cron_enabled: false,
+			stocktake_enabled: true,
+			stocktake_days: 180,
+		} );
+		render( <GeneralPanel /> );
+
+		const daysInput = await screen.findByLabelText(
+			/棚卸し期間 \(日\)/
+		);
+
+		fireEvent.change( daysInput, { target: { value: '0' } } );
+		expect( daysInput.value ).toBe( '1' );
+
+		fireEvent.change( daysInput, { target: { value: '-30' } } );
+		expect( daysInput.value ).toBe( '1' );
+
+		fireEvent.change( daysInput, { target: { value: '' } } );
+		expect( daysInput.value ).toBe( '1' );
+
+		fireEvent.change( daysInput, { target: { value: '90' } } );
+		expect( daysInput.value ).toBe( '90' );
 	} );
 } );

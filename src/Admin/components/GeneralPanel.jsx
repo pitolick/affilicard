@@ -146,6 +146,34 @@ export function GeneralPanel() {
 				{settings.cron_enabled && <CronHelpBox />}
 
 				<ToggleControl
+					label={__('棚卸しを有効化', 'affilicard')}
+					checked={Boolean(settings.stocktake_enabled)}
+					onChange={(v) => update({ stocktake_enabled: v })}
+					help={__(
+						'記事に掲載されなくなって指定日数が過ぎた商品の自動更新を止めます。記事を更新すれば対象に戻ります。',
+						'affilicard'
+					)}
+				/>
+
+				<TextControl
+					label={__('棚卸し期間 (日)', 'affilicard')}
+					type="number"
+					min="1"
+					value={String(settings.stocktake_days ?? 180)}
+					onChange={(v) => {
+						const days = parseInt(v, 10);
+						update({
+							stocktake_days:
+								Number.isFinite(days) && days >= 1 ? days : 1,
+						});
+					}}
+					help={__(
+						'記事に掲載されなくなってこの日数が過ぎた商品を、自動更新の対象から外します（既定 180 日・最小 1 日）。記事を更新すれば対象に戻ります。',
+						'affilicard'
+					)}
+				/>
+
+				<ToggleControl
 					label={__('商品画像を表示しない', 'affilicard')}
 					checked={Boolean(settings.hide_product_images)}
 					onChange={(v) => update({ hide_product_images: v })}

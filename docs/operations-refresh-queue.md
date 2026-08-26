@@ -234,7 +234,9 @@ AS の API/hook を経由しない直接書き換えは、AS 内部の状態（�
 - **棚卸し後の挙動**: 更新が止まると 24 時間で価格が非表示になります（カード本体・書影・CTA リンクは従来どおり描画され、アフィリエイト導線は維持されます）
 - **商品一覧**: 「最終掲載日」列（ソート可能）で棚卸し状況を確認できます
 
-**無効化・期間変更**: 現時点では専用の管理画面トグルはありません。affilicard の設定 REST エンドポイント（`PUT /wp-json/affilicard/v1/settings`。`manage_options` 権限が必要）で `stocktake_enabled` / `stocktake_days` を送信して変更します。
+**無効化・期間変更**: affilicard 設定 → 一般設定パネルの「棚卸しを有効化」トグルと「棚卸し期間 (日)」で変更できます（期間は 1 日未満を入力できません。保存側も `max(1, …)` でクランプします）。
+
+管理画面を経由せず変更したい場合は、affilicard の設定 REST エンドポイント（`PUT /wp-json/affilicard/v1/settings`。`manage_options` 権限が必要）で `stocktake_enabled` / `stocktake_days` を送信することもできます。
 
 ```bash
 curl -X PUT "https://example.com/wp-json/affilicard/v1/settings" \
@@ -243,7 +245,7 @@ curl -X PUT "https://example.com/wp-json/affilicard/v1/settings" \
   -d '{"stocktake_enabled": false, "stocktake_days": 90}'
 ```
 
-`wp option get/update affilicard_general` で `affilicard_general` オプションを直接編集することもできますが、その場合は `stocktake_days` の 1 未満クランプなど `GeneralSettings::update()` 側のサニタイズを経由しないため、上記 REST エンドポイント経由を推奨します。
+`wp option get/update affilicard_general` で `affilicard_general` オプションを直接編集することもできますが、その場合は `stocktake_days` の 1 未満クランプなど `GeneralSettings::update()` 側のサニタイズを経由しないため、管理画面または REST エンドポイント経由を推奨します。
 
 ---
 
