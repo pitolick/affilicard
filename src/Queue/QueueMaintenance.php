@@ -316,9 +316,9 @@ final class QueueMaintenance {
 			return true;
 		}
 
-		// 未完走。カーソルを保存して次の sweep に委ねる（バッチ投入に失敗しても
-		// カーソルは既に走査した進捗どおりに保存されるため、次回 sweep が続きから
-		// 再開できる）。
+		// 未完走。カーソルを保存して次の sweep に委ねる。通常は走査した進捗どおりの
+		// 位置だが、バッチ投入に失敗していた場合は上で「作業が失われた最初の商品の
+		// 手前」まで巻き戻した値になっており、次回 sweep がそこから積み直す。
 		$this->cursor->set( $lastSeen );
 		return false;
 	}
@@ -351,7 +351,7 @@ final class QueueMaintenance {
 		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- 掃引のバッチ投入失敗は AS 側で完全に不可視（run は緑のまま）になるため、運用が気づけるようログに残す（spec §4-3）。
 		error_log(
 			sprintf(
-				'affilicard: 掃引のバッチ投入に失敗しました（account=%s, items=%d件）。カーソルを保持し次回の掃引で再試行します。',
+				'affilicard: 掃引のバッチ投入に失敗しました（account=%s, items=%d件）。カーソルを未投入商品の手前へ巻き戻し、次回の掃引で再試行します。',
 				$account,
 				count( $items )
 			)
