@@ -60,7 +60,7 @@ describe( 'GeneralPanel', () => {
 
 		await waitFor( () =>
 			expect(
-				screen.getByText( 'wp cron event run affilicard_refresh_all' )
+				screen.getByText( 'wp cron event run --due-now' )
 			).toBeInTheDocument()
 		);
 	} );
@@ -96,7 +96,7 @@ describe( 'GeneralPanel', () => {
 		);
 
 		expect(
-			screen.queryByText( 'wp cron event run affilicard_refresh_all' )
+			screen.queryByText( 'wp cron event run --due-now' )
 		).not.toBeInTheDocument();
 	} );
 
@@ -113,7 +113,7 @@ describe( 'GeneralPanel', () => {
 
 		await waitFor( () =>
 			expect(
-				screen.getByText( 'wp cron event run affilicard_refresh_all' )
+				screen.getByText( 'wp cron event run --due-now' )
 			).toBeInTheDocument()
 		);
 	} );
@@ -150,6 +150,30 @@ describe( 'GeneralPanel', () => {
 		expect(
 			screen.getByLabelText( /キャッシュ TTL/ )
 		).toBeInTheDocument();
+	} );
+
+	// GeneralSettings::DEFAULTS (PHP) の既定値と表示を一致させる回帰テスト。
+	// fetchSettings が失敗すると settings は {} になるため、`Boolean(settings.x)` のような
+	// フォールバック無しの読み出しはサーバー既定が true のトグルを誤って false 表示してしまう
+	// （CodeRabbit 指摘）。
+	test( '取得失敗時、サーバー側の既定値（true）がトグルに反映される', async () => {
+		fetchSettings.mockRejectedValue( new Error( 'fail' ) );
+		render( <GeneralPanel /> );
+
+		const cronToggle = await screen.findByLabelText( /自動更新を有効化/ );
+		expect( cronToggle.checked ).toBe( true );
+		// cron_enabled が既定 true として扱われるなら、CronHelpBox も表示されるはず。
+		expect(
+			screen.getByText( 'wp cron event run --due-now' )
+		).toBeInTheDocument();
+
+		const stocktakeToggle = await screen.findByLabelText(
+			/棚卸しを有効化/
+		);
+		expect( stocktakeToggle.checked ).toBe( true );
+
+		const daysInput = screen.getByLabelText( /棚卸し期間 \(日\)/ );
+		expect( daysInput.value ).toBe( '180' );
 	} );
 
 	test( 'wraps controls in a section and buttons in an actions row', async () => {

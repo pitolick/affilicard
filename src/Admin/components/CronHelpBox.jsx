@@ -1,8 +1,11 @@
 import { __ } from '@wordpress/i18n';
 
-// 掃引の起点となる WP-Cron イベント（RefreshScheduler::HOOK_ALL 相当）。
-// 旧実装は実在しない `affilicard_refresh_listings` を案内していた不具合の修正。
-const SWEEP_EVENT_CMD = 'wp cron event run affilicard_refresh_all';
+// 掃引の起点となる WP-Cron イベント（RefreshScheduler::HOOK_ALL 相当）を発火するコマンド。
+// `wp cron event run <hook>` は予定時刻に関係なくイベントを直ちに実行してしまうため、
+// 期限到来したイベントだけを動かす `--due-now` を使う（短い OS Cron 間隔で回すと、
+// 未到来のイベントまで即時実行され refresh_interval_hours の間隔設定を無視して
+// 掃引・商品走査が過剰に増える。docs/operations-refresh-queue.md と揃える）。
+const SWEEP_EVENT_CMD = 'wp cron event run --due-now';
 // 積まれたキュージョブ（価格取得）を実際に実行する Action Scheduler ランナー。
 // 掃引イベントの発火だけでは価格が取得されないため、両方が必要
 // （docs/operations-refresh-queue.md §2-1 参照）。

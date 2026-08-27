@@ -36,6 +36,12 @@ export function GeneralPanel() {
 
 	const update = (patch) => setSettings({ ...settings, ...patch });
 
+	// GeneralSettings::DEFAULTS（PHP 側）の既定値と揃える。fetchSettings が失敗すると
+	// settings は {} になるため、`Boolean(settings.x)` のようなフォールバック無しの読み出しは
+	// サーバー既定が true のトグルを誤って false 表示してしまう（CodeRabbit 指摘）。
+	const cronEnabled = settings.cron_enabled ?? true;
+	const stocktakeEnabled = settings.stocktake_enabled ?? true;
+
 	const onSave = async () => {
 		setSaving(true);
 		setNotice(null);
@@ -109,7 +115,7 @@ export function GeneralPanel() {
 
 				<ToggleControl
 					label={__('自動更新を有効化 (WP-Cron)', 'affilicard')}
-					checked={Boolean(settings.cron_enabled)}
+					checked={cronEnabled}
 					onChange={(v) => update({ cron_enabled: v })}
 					help={
 						<>
@@ -143,11 +149,11 @@ export function GeneralPanel() {
 					)}
 				/>
 
-				{settings.cron_enabled && <CronHelpBox />}
+				{cronEnabled && <CronHelpBox />}
 
 				<ToggleControl
 					label={__('棚卸しを有効化', 'affilicard')}
-					checked={Boolean(settings.stocktake_enabled)}
+					checked={stocktakeEnabled}
 					onChange={(v) => update({ stocktake_enabled: v })}
 					help={__(
 						'記事に掲載されなくなって指定日数が過ぎた商品の自動更新を止めます。記事を更新すれば対象に戻ります。',

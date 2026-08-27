@@ -9,7 +9,7 @@ describe( 'CronHelpBox', () => {
 	test( 'renders the wp-cron sweep-event command in a code block', () => {
 		render( <CronHelpBox /> );
 		expect(
-			screen.getByText( 'wp cron event run affilicard_refresh_all' )
+			screen.getByText( 'wp cron event run --due-now' )
 		).toBeInTheDocument();
 	} );
 
