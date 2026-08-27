@@ -143,6 +143,51 @@ final class BatchRefreshHandlerTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	public function test_post_idやplatformが欠けたitemはスキップして次へ進む(): void {
+		$this->stubGeneralSettings();
+		$this->mockRateLimiterWpdb( 1 ); // 有効な 1 件だけが枠を取る。
+
+		// 不正な 3 件は refreshOne に到達せず、有効な 1 件だけが処理される。
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'refreshOne' )
+			->once()
+			->with( 7, 'rakuten-kobo' )
+			->andReturn( WorkOutcome::SUCCESS );
+
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_refresh_gaveup_7_rakuten-kobo' )
+			->andReturn( true );
+
+		// スキップは「取りこぼし」ではないため、積み直しも per-listing 委譲も起きない。
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 30, 5 );
+
+		$handler->handle(
+			$this->args(
+				array(
+					'post_id'  => 0,
+					'platform' => 'rakuten-kobo',
+				),
+				array(
+					'post_id'  => 7,
+					'platform' => 'rakuten-kobo',
+				),
+				array(
+					'post_id'  => 8,
+					'platform' => '',
+				),
+				array(
+					'platform' => 'rakuten-kobo',
+				)
+			)
+		);
+
+		$this->assertConditionsMet();
+	}
+
 	public function test_一時失敗したlistingだけがper_listingへ落ちる(): void {
 		$this->stubGeneralSettings();
 		$this->mockRateLimiterWpdb( 1, 1 ); // 2件とも CAS 獲得成功（待たない）。
