@@ -146,6 +146,72 @@ $out_post       = $make_post( array( 'productId' => $out_id ) );
 $future_post    = $make_post( array( 'productId' => $future_id ) );
 $display_order_post = $make_post( array( 'productId' => $display_order_id ) );
 
+// 「最終掲載日」列のソート検証用（レビュー Major 3）。meta_query の EXISTS/NOT EXISTS が
+// 実 SQL で LEFT JOIN として機能し、値を持たない商品が結果から消えずに正しい順序
+// （NULL は MySQL の既定で ASC=先頭・DESC=末尾）で並ぶことを確認するため、
+// meta の有無・新旧が異なる 3 商品を用意する。タイトルの一意な接頭辞
+// （E2E-PubDateSort）は管理画面の検索ボックスで他 spec の商品と混ざらないように
+// 絞り込むために使う。
+//
+// global-setup はこのファイルを test:e2e 実行のたびに（DB をリセットせず）流すため、
+// 同名タイトルが毎回蓄積すると admin 一覧の検索結果が 3 件を超え、ページングで
+// 対象行が 1 ページに収まらなくなる。新しく作る前に、前回までの実行分を掃除する。
+foreach (
+	get_posts(
+		array(
+			'post_type'      => 'affilicard_product',
+			'post_status'    => 'any',
+			's'              => 'E2E-PubDateSort',
+			'fields'         => 'ids',
+			'posts_per_page' => -1,
+		)
+	) as $stale_pub_date_sort_id
+) {
+	wp_delete_post( $stale_pub_date_sort_id, true );
+}
+
+$pub_date_sort_new_id = $repo->save(
+	array(
+		'title'        => 'E2E-PubDateSort 新しい',
+		'status'       => 'publish',
+		'product_type' => 'generic',
+		'stock_status' => 'available',
+		'listings'     => $listing( 'https://example.com/aff-pubdate-new' ),
+	)
+);
+update_post_meta(
+	$pub_date_sort_new_id,
+	\Affilicard\PostType\ProductPostType::META_LAST_PUBLISHED_AT,
+	gmdate( 'c' )
+);
+
+$pub_date_sort_old_id = $repo->save(
+	array(
+		'title'        => 'E2E-PubDateSort 古い',
+		'status'       => 'publish',
+		'product_type' => 'generic',
+		'stock_status' => 'available',
+		'listings'     => $listing( 'https://example.com/aff-pubdate-old' ),
+	)
+);
+update_post_meta(
+	$pub_date_sort_old_id,
+	\Affilicard\PostType\ProductPostType::META_LAST_PUBLISHED_AT,
+	gmdate( 'c', time() - 200 * DAY_IN_SECONDS )
+);
+
+// 最終掲載日 meta を一切持たない商品（既存カタログの大多数を模す。このメタは
+// PublishTrigger::syncPost() でしか書かれないため、未同期の既存商品が大半になる）。
+$pub_date_sort_unset_id = $repo->save(
+	array(
+		'title'        => 'E2E-PubDateSort 未設定',
+		'status'       => 'publish',
+		'product_type' => 'generic',
+		'stock_status' => 'available',
+		'listings'     => $listing( 'https://example.com/aff-pubdate-unset' ),
+	)
+);
+
 echo 'SEED_JSON:' . wp_json_encode(
 	array(
 		'availablePostId'    => $available_post,
@@ -155,5 +221,8 @@ echo 'SEED_JSON:' . wp_json_encode(
 		'futureProductId'    => $future_id,
 		'draftProductId'     => $draft_id,
 		'displayOrderPostId' => $display_order_post,
+		'pubDateSortNewId'   => $pub_date_sort_new_id,
+		'pubDateSortOldId'   => $pub_date_sort_old_id,
+		'pubDateSortUnsetId' => $pub_date_sort_unset_id,
 	)
 ) . "\n";

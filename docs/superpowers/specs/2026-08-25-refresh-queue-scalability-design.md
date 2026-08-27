@@ -331,7 +331,7 @@ GA4 等の外部分析基盤と連携する案も検討したが、**利用者�
 
 | キー | 型 | 説明 |
 | --- | --- | --- |
-| `affilicard_stocktake_baseline` | string（ISO8601・UTC） | 棚卸し基準日。初回有効化時に `add_option` で 1 度だけ記録 |
+| `affilicard_stocktake_baseline` | string（ISO8601・UTC） | 棚卸し基準日。本機能を含むバージョンへのアップグレード時に、バージョン付きのアップグレードルーチン（`register_activation_hook` ではない。§5-3 参照）が `add_option` で 1 度だけ記録する |
 | `affilicard_last_sweep_completed_at` | string（ISO8601・UTC） | 最後に sweep が完走した時刻（§4-4） |
 
 ---

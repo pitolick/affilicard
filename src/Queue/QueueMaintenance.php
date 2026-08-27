@@ -110,18 +110,28 @@ final class QueueMaintenance {
 	 * 公開商品をカーソル順に $maxProducts 件走査し、対象 listing を account 別の
 	 * バッチジョブとして積む。
 	 *
-	 * カーソルの扱い（spec §4-2）:
-	 * - 最後の商品まで到達したら（今回の走査件数が $maxProducts 未満）カーソルを消し、
-	 *   完走時刻（OPTION_LAST_COMPLETED）を記録して true を返す
+	 * カーソルの扱い（spec §4-2・レビュー Major 1/2 反映後）:
+	 * - 最後の商品まで到達し（今回の走査件数が $maxProducts 未満）、かつ走査した
+	 *   バッチが 1 件も失われていなければ、カーソルを消し完走時刻
+	 *   （OPTION_LAST_COMPLETED）を記録して true を返す
 	 * - `queue_depth_cap`（GeneralSettings）に達したら、そこで走査を打ち切りカーソルを
 	 *   保持する。cap は「1 回の sweep で積める量の上限」であって「更新できる商品数の
 	 *   天井」ではない——次回の sweep がカーソル位置から再開する
 	 * - 上記以外の理由（続きがある）でも、カーソルを保持して false を返す
-	 * - バッチ投入（enqueueBatch）の失敗はここでは握り潰さない（呼び出し先がログに
-	 *   残す）が、投入の成否に関わらずカーソルは進捗どおりに保存される。投入に失敗
-	 *   しても走査位置そのものは失われない
+	 * - バッチ投入（`Enqueuer::enqueueBatch()`）が 0 を返しても、それが unique 重複
+	 *   （既に pending があり作業は失われていない）なのか投入失敗（作業が失われる）
+	 *   なのかを `Enqueuer::hasScheduledBatch()` で判別する（spec §4-3）。**重複は
+	 *   無視してよいが、投入失敗は「最後まで到達した」とは扱わない**——その
+	 *   バケットの最初の商品の手前へカーソルを巻き戻し、false を返す。これにより
+	 *   次の sweep（false 時は即時に再スケジュールされる）が同じ listing を
+	 *   再度対象にできる（巻き戻さずに完走扱いにすると、次の定期 sweep まで
+	 *   その listing が更新されなくなる）
+	 * - 端数バケット（BATCH_SIZE に満たず走査末尾で流すもの）も、投入前に
+	 *   `queue_depth_cap` の残り容量を確認する。残り容量が無いバケットは投入を
+	 *   試みず、同様にカーソルを巻き戻す（完全バッチの cap チェックと同じ扱いに揃える）
 	 *
-	 * @return bool 最後の商品まで到達したら true（完走）。false は継続あり。
+	 * @return bool 最後の商品まで到達し、かつすべてのバッチが確定的に投入（成功
+	 *         または既存 pending との重複）されていれば true（完走）。false は継続あり。
 	 */
 	public function sweep( int $maxProducts = 200 ): bool {
 		$after = $this->cursor->get();
@@ -187,10 +197,15 @@ final class QueueMaintenance {
 			$depth = $this->enqueuer->queueDepth();
 		}
 
-		$buckets    = array(); // account => list<array{post_id: int, platform: string}>
-		$batchSizes = array(); // account => algo で算出したバッチサイズ（sweep 内でメモ化）
-		$lastSeen   = $after;
-		$capped     = false;
+		$buckets      = array(); // account => list<array{post_id: int, platform: string}>
+		$bucketStarts = array(); // account => 現在の未flushバケットに最初に加わった post_id
+		$batchSizes   = array(); // account => algo で算出したバッチサイズ（sweep 内でメモ化）
+		$lastSeen     = $after;
+		$capped       = false;
+		// レビュー Major 1/2: 「作業が失われた」最初の post_id（投入失敗、または
+		// queue_depth_cap 不足で投入を試みられなかった端数バケット）。null のままなら
+		// 走査した範囲はすべて確定的に投入済み（成功 or 既存 pending との重複）。
+		$firstUnconfirmedId = null;
 
 		foreach ( $ids as $id ) {
 			if ( $depth >= $cap ) {
@@ -247,6 +262,13 @@ final class QueueMaintenance {
 					continue;
 				}
 
+				if ( array() === ( $buckets[ $account ] ?? array() ) ) {
+					// この account のバケットが空から埋まり始める瞬間の post_id を記録する。
+					// 投入失敗/容量不足でこのバケットが失われたとき、カーソルをこの手前へ
+					// 巻き戻すために使う（レビュー Major 1/2）。
+					$bucketStarts[ $account ] = $id;
+				}
+
 				$buckets[ $account ][] = array(
 					'post_id'  => $id,
 					'platform' => $platform,
@@ -257,22 +279,37 @@ final class QueueMaintenance {
 				}
 
 				if ( count( $buckets[ $account ] ) >= $batchSizes[ $account ] ) {
-					if ( 0 !== $this->enqueuer->enqueueBatch( $account, $buckets[ $account ] ) ) {
-						++$depth;
-					}
+					$this->flushBucket( $account, $buckets[ $account ], $bucketStarts[ $account ], $depth, $firstUnconfirmedId );
 					$buckets[ $account ] = array();
 				}
 			}
 		}
 
-		// 端数を流す（バッチサイズに満たなかった残り）。
+		// 端数を流す（バッチサイズに満たなかった残り）。完全バッチ（上のループ内）と
+		// 異なり、ここは cap を再確認していなかった（レビュー Major 2）。残り容量が
+		// 無ければ投入を試みず、次の sweep に委ねる（$firstUnconfirmedId 経由）。
 		foreach ( $buckets as $account => $items ) {
-			if ( array() !== $items ) {
-				$this->enqueuer->enqueueBatch( $account, $items );
+			if ( array() === $items ) {
+				continue;
 			}
+
+			if ( $depth >= $cap ) {
+				$firstUnconfirmedId = null === $firstUnconfirmedId
+					? $bucketStarts[ $account ]
+					: min( $firstUnconfirmedId, $bucketStarts[ $account ] );
+				continue;
+			}
+
+			$this->flushBucket( $account, $items, $bucketStarts[ $account ], $depth, $firstUnconfirmedId );
 		}
 
-		$completed = ! $capped && count( $ids ) < $maxProducts;
+		if ( null !== $firstUnconfirmedId ) {
+			// 作業が失われた最初の商品の手前へカーソルを巻き戻す。次の sweep が
+			// そこから再走査し、投入できなかった listing を積み直す（レビュー Major 1/2）。
+			$lastSeen = $firstUnconfirmedId - 1;
+		}
+
+		$completed = ! $capped && null === $firstUnconfirmedId && count( $ids ) < $maxProducts;
 		if ( $completed ) {
 			$this->cursor->clear();
 			update_option( self::OPTION_LAST_COMPLETED, gmdate( 'c' ), false );
@@ -284,6 +321,43 @@ final class QueueMaintenance {
 		// 再開できる）。
 		$this->cursor->set( $lastSeen );
 		return false;
+	}
+
+	/**
+	 * 1 account 分のバケットを投入する。成功したら $depth を増やす。
+	 *
+	 * `enqueueBatch()` が 0 を返した場合、`Enqueuer::hasScheduledBatch()` で
+	 * 「unique 重複でスキップ（作業は失われていない）」なのか「投入失敗（作業が
+	 * 失われる）」なのかを判別する（spec §4-3。戻り値だけでは区別できない）。
+	 * 失敗の場合だけログに残し（AS 側では完全に不可視になるため）、
+	 * $firstUnconfirmedId をこのバケットの開始 post_id 未満に更新する
+	 * （呼び出し側がこれを見てカーソルを巻き戻す）。
+	 *
+	 * @param list<array{post_id: int, platform: string}> $items
+	 */
+	private function flushBucket( string $account, array $items, int $bucketStart, int &$depth, ?int &$firstUnconfirmedId ): void {
+		$actionId = $this->enqueuer->enqueueBatch( $account, $items );
+		if ( 0 !== $actionId ) {
+			++$depth;
+			return;
+		}
+
+		if ( $this->enqueuer->hasScheduledBatch( $account, $items ) ) {
+			// 既にキューにある（unique 重複）。作業は失われていないため何もしない
+			// （depth もこれ以上消費しない＝cap の枠を無駄に使わない）。
+			return;
+		}
+
+		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- 掃引のバッチ投入失敗は AS 側で完全に不可視（run は緑のまま）になるため、運用が気づけるようログに残す（spec §4-3）。
+		error_log(
+			sprintf(
+				'affilicard: 掃引のバッチ投入に失敗しました（account=%s, items=%d件）。カーソルを保持し次回の掃引で再試行します。',
+				$account,
+				count( $items )
+			)
+		);
+
+		$firstUnconfirmedId = null === $firstUnconfirmedId ? $bucketStart : min( $firstUnconfirmedId, $bucketStart );
 	}
 
 	/**

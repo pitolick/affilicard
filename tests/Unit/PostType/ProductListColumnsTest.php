@@ -427,12 +427,18 @@ final class ProductListColumnsTest extends TestCase {
 	}
 
 	/**
-	 * レビュー対応（Important 1）: `meta_key` + `orderby=meta_value` という古典的
-	 * パターンは暗黙に `compare=EXISTS` の INNER JOIN になり、最終掲載日メタを
-	 * 持たない投稿（既存カタログの大半）が結果集合から消える。代わりに
-	 * EXISTS/NOT EXISTS を `relation => OR` で束ねた名前付き節を `meta_query` に
-	 * 設定し、`orderby` はその節名を参照する形にする（WP_Query はモックのため、
-	 * `set()` に渡される引数の形そのものを検証する）。
+	 * レビュー対応（Important 1・レビュー Major 3 で名前付き節を EXISTS→NOT EXISTS へ
+	 * 訂正）: `meta_key` + `orderby=meta_value` という古典的パターンは暗黙に
+	 * `compare=EXISTS` の INNER JOIN になり、最終掲載日メタを持たない投稿
+	 * （既存カタログの大半）が結果集合から消える。代わりに EXISTS/NOT EXISTS を
+	 * `relation => OR` で束ねた meta_query を設定し、`orderby` は **NOT EXISTS 側**の
+	 * 節名を参照する形にする（`WP_Meta_Query` は NOT EXISTS のときだけ meta_key
+	 * 一致を JOIN の ON 句へ埋め込むため、その alias だけが ORDER BY で参照できる
+	 * 確定値になる。EXISTS 側を参照すると、対象 meta を持たない投稿の並び順が
+	 * その投稿の無関係な他 meta の値に化けて不定になる——wp-env の実 SQL でしか
+	 * 検出できないため e2e で固定した。詳細は ProductListColumns::applySortQuery()
+	 * の docblock）。WP_Query はモックのため、ここでは `set()` に渡される引数の
+	 * 形そのものを検証する。
 	 */
 	public function test_ソート指定時にmeta_queryとorderbyを設定する(): void {
 		$query = Mockery::mock( \WP_Query::class );
@@ -444,11 +450,11 @@ final class ProductListColumnsTest extends TestCase {
 			'meta_query',
 			array(
 				'relation'                         => 'OR',
-				'affilicard_last_published_clause' => array(
+				array(
 					'key'     => ProductPostType::META_LAST_PUBLISHED_AT,
 					'compare' => 'EXISTS',
 				),
-				array(
+				'affilicard_last_published_clause' => array(
 					'key'     => ProductPostType::META_LAST_PUBLISHED_AT,
 					'compare' => 'NOT EXISTS',
 				),

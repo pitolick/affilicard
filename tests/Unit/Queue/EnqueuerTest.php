@@ -634,4 +634,55 @@ final class EnqueuerTest extends TestCase {
 		$this->assertSame( 9999, $actionId );
 		$this->assertFalse( $captured['unique'] );
 	}
+
+	/**
+	 * レビュー Major 1（spec §4-3）: `enqueueBatch()` の戻り値 0 は「unique 重複で
+	 * スキップ」と「投入失敗」のどちらもあり得るため区別できない。
+	 * `hasScheduledBatch()` は `enqueueBatch()` と同一の hook/args/group で
+	 * `as_has_scheduled_action()` を呼び、呼び出し側（QueueMaintenance::sweep()）が
+	 * 両者を判別できるようにする。
+	 */
+	public function test_hasScheduledBatch_はenqueueBatchと同一のhook_args_groupで問い合わせる(): void {
+		$captured = null;
+		WP_Mock::userFunction( 'as_has_scheduled_action' )
+			->once()
+			->andReturnUsing(
+				function ( $hook, $args, $group ) use ( &$captured ) {
+					$captured = compact( 'hook', 'args', 'group' );
+					return true;
+				}
+			);
+
+		$enqueuer = new Enqueuer();
+		$items    = array(
+			array(
+				'post_id'  => 11,
+				'platform' => 'rakuten-kobo',
+			),
+		);
+
+		$this->assertTrue( $enqueuer->hasScheduledBatch( 'rakuten', $items ) );
+		$this->assertSame( Enqueuer::HOOK_REFRESH_BATCH, $captured['hook'] );
+		$this->assertSame( 'affilicard-rakuten', $captured['group'] );
+		$this->assertSame( 'rakuten', $captured['args']['account'] );
+		$this->assertSame( $items, $captured['args']['items'] );
+	}
+
+	public function test_hasScheduledBatch_はas_has_scheduled_actionがfalseならfalseを返す(): void {
+		WP_Mock::userFunction( 'as_has_scheduled_action' )->once()->andReturn( false );
+
+		$enqueuer = new Enqueuer();
+
+		$this->assertFalse(
+			$enqueuer->hasScheduledBatch(
+				'rakuten',
+				array(
+					array(
+						'post_id'  => 1,
+						'platform' => 'rakuten-kobo',
+					),
+				)
+			)
+		);
+	}
 }

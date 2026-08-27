@@ -206,6 +206,28 @@ final class Enqueuer {
 	}
 
 	/**
+	 * account/items が同一のバッチジョブが既に pending/in-progress として
+	 * キューにあるかどうか。
+	 *
+	 * `enqueueBatch()` が 0 を返した場合、それが「unique 重複でスキップ（作業は
+	 * 失われていない）」なのか「投入失敗（作業が失われる）」なのかは戻り値だけでは
+	 * 判別できない（spec §4-3）。呼び出し側（QueueMaintenance::sweep()）はこのメソッドで
+	 * 投入前後の状態を確認し、true なら重複（何もしない）、false なら失敗（カーソルを
+	 * 巻き戻す）と判断する。
+	 *
+	 * @param list<array{post_id: int, platform: string}> $items enqueueBatch() に渡すのと
+	 *        同一の items（args の一致判定に使うため、順序も含め同一である必要がある）。
+	 */
+	public function hasScheduledBatch( string $account, array $items ): bool {
+		$args = array(
+			'account' => $account,
+			'items'   => array_values( $items ),
+		);
+
+		return (bool) as_has_scheduled_action( self::HOOK_REFRESH_BATCH, $args, $this->group( $account ) );
+	}
+
+	/**
 	 * throttle/backoff によるハンドラの自己再投入。
 	 *
 	 * unique=false: ハンドラ実行中の自分自身が in-progress として重複判定されるため、

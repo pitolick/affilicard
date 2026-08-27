@@ -65,6 +65,45 @@ final class QueueMaintenanceTest extends TestCase {
 		return $registry;
 	}
 
+	/**
+	 * affilicard_platforms option を rakuten-kobo（account=rakuten）・dmm-books
+	 * （account=dmm）の2件で stub する。レビュー Major 2（端数バッチの queue_depth_cap
+	 * 再確認漏れ）は account 別にバケットが分かれることが前提のため、複数 account を
+	 * 必要とするテストで使う。
+	 */
+	private function stubTwoPlatforms(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( \Affilicard\Platform\PlatformConfig::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					array(
+						'code'          => 'rakuten-kobo',
+						'name'          => '楽天Kobo',
+						'provider'      => 'rakuten-kobo',
+						'displayOrder'  => 3,
+						'enabled'       => true,
+						'priceTtlHours' => 24,
+					),
+					array(
+						'code'          => 'dmm-books',
+						'name'          => 'DMMブックス',
+						'provider'      => 'dmm-ebook',
+						'displayOrder'  => 1,
+						'enabled'       => true,
+						'priceTtlHours' => 24,
+					),
+				)
+			);
+	}
+
+	/** RakutenProvider（account='rakuten'）＋ DmmProvider（account='dmm'）を登録した ProviderRegistry。 */
+	private function registryWithDmm(): ProviderRegistry {
+		$registry = new ProviderRegistry();
+		$registry->register( new RakutenProvider() );
+		$registry->register( new \Affilicard\Provider\Dmm\DmmProvider() );
+		return $registry;
+	}
+
 	/** @param list<array<string, mixed>> $listings */
 	private function product( int $id, array $listings ): array {
 		return array(
@@ -682,11 +721,12 @@ final class QueueMaintenanceTest extends TestCase {
 	}
 
 	/**
-	 * 継続ジョブ（バッチ）の投入に失敗しても（as_schedule_single_action が 0 を返しても）
-	 * 走査したところまでのカーソルは保存される。カーソルが無いまま投入だけが失われると、
-	 * その位置以降の商品が次の WP-Cron まで丸ごと更新されない（spec §4-2）。
+	 * レビュー Major 1: `enqueueBatch()` の戻り値 0 は「unique 重複でスキップ」と
+	 * 「投入失敗」の 2 つの意味を持つため、`as_has_scheduled_action()` で判別する
+	 * （spec §4-3）。ここは投入失敗（重複ではない）のケース: 作業が失われるため、
+	 * カーソルは「進捗どおり（10）」ではなく「最初の未投入商品の手前（9）」へ巻き戻る。
 	 */
-	public function test_sweep_バッチ投入に失敗してもカーソルは保存される(): void {
+	public function test_sweep_バッチ投入に失敗した場合は最初の未投入商品の手前へカーソルを巻き戻す(): void {
 		$this->stubCursor( 0 );
 		$this->stubGeneralSettings();
 		$this->stubQueueDepth( 0 );
@@ -712,14 +752,207 @@ final class QueueMaintenanceTest extends TestCase {
 			)
 		);
 
-		// 0 = 投入失敗（もしくは重複）。それでもカーソルは進捗どおりに保存される。
+		// 0 = 投入失敗。as_has_scheduled_action=false（既存の pending が無い＝重複ではない）
+		// のため、作業が失われる本物の失敗として扱われる。
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 0 );
+		WP_Mock::userFunction( 'as_has_scheduled_action' )->once()->andReturn( false );
 
-		WP_Mock::userFunction( 'update_option' )->once()->with( SweepCursor::OPTION_KEY, 10, false );
+		// 進捗どおりの 10 ではなく、投入できなかった最初の商品（10）の手前＝9 を保存する。
+		WP_Mock::userFunction( 'update_option' )->once()->with( SweepCursor::OPTION_KEY, 9, false );
 		WP_Mock::userFunction( 'delete_option' )->never();
 
 		// maxProducts=1 と一致させ、cap 以外の理由（続きがある）で未完走になる経路を通す。
 		$result = ( new QueueMaintenance( $repo, new Enqueuer(), $this->registry(), new SweepCursor() ) )->sweep( 1 );
+
+		$this->assertFalse( $result );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * レビュー Major 1（続き）: `enqueueBatch()` が 0 を返しても、
+	 * `as_has_scheduled_action()` が true（既に pending として登録済み＝unique 重複）
+	 * なら作業は失われていないため、投入失敗として扱わない。カーソルは巻き戻さず
+	 * 通常どおり進捗を保存し、最終ページであれば完走扱いにもなる。
+	 */
+	public function test_sweep_投入がunique重複の場合は投入失敗として扱わず完走できる(): void {
+		$this->stubCursor( 0 );
+		$this->stubGeneralSettings();
+		$this->stubQueueDepth( 0 );
+		$this->stubFilterCleanup();
+		WP_Mock::userFunction( 'get_posts' )->andReturn( array( 10 ) );
+		$this->stubRakutenPlatform();
+		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->once()->with( 10 )->andReturn(
+			$this->product(
+				10,
+				array(
+					array(
+						'platform'        => 'rakuten-kobo',
+						'enabled'         => true,
+						'update_mode'     => 'auto',
+						'auto_update'     => true,
+						'external_id'     => 'e1',
+						'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ),
+					),
+				)
+			)
+		);
+
+		// 0 = 既に同じジョブが pending（unique 重複）。作業は失われていない。
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 0 );
+		WP_Mock::userFunction( 'as_has_scheduled_action' )->once()->andReturn( true );
+
+		WP_Mock::userFunction( 'delete_option' )->once()->with( SweepCursor::OPTION_KEY );
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->with( QueueMaintenance::OPTION_LAST_COMPLETED, Mockery::type( 'string' ), false );
+
+		// maxProducts を大きく取り、走査済み件数がページ上限を下回る「最終ページ」経路にする。
+		$result = ( new QueueMaintenance( $repo, new Enqueuer(), $this->registry(), new SweepCursor() ) )->sweep( 200 );
+
+		$this->assertTrue( $result );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * レビュー Major 1 の核心シナリオ（実バグの回帰テスト）: 最終ページ
+	 * （走査件数 < maxProducts）に到達していても、バッチ投入の失敗（重複ではない）を
+	 * 完走として扱ってはならない。修正前は `enqueueBatch()` の戻り値を見ずにカーソルを
+	 * 消して完走時刻を記録していたため、この listing は次回の定期 sweep（既定 3 時間後）
+	 * まで更新されなかった。
+	 */
+	public function test_sweep_最終ページでも投入失敗を完走として扱わない(): void {
+		$this->stubCursor( 0 );
+		$this->stubGeneralSettings();
+		$this->stubQueueDepth( 0 );
+		$this->stubFilterCleanup();
+		// 走査件数(1) < maxProducts(200) ＝ 修正前なら「最終ページ＝完走」と判定される条件。
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 10 ) );
+		$this->stubRakutenPlatform();
+		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->once()->with( 10 )->andReturn(
+			$this->product(
+				10,
+				array(
+					array(
+						'platform'        => 'rakuten-kobo',
+						'enabled'         => true,
+						'update_mode'     => 'auto',
+						'auto_update'     => true,
+						'external_id'     => 'e1',
+						'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ),
+					),
+				)
+			)
+		);
+
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 0 );
+		WP_Mock::userFunction( 'as_has_scheduled_action' )->once()->andReturn( false );
+
+		// 完走扱いにはならない。クリアも完走時刻記録も起きず、未投入だった商品
+		// post_id=10 の手前である 9 をカーソルとして保存する。
+		WP_Mock::userFunction( 'update_option' )->once()->with( SweepCursor::OPTION_KEY, 9, false );
+		WP_Mock::userFunction( 'delete_option' )->never();
+
+		$result = ( new QueueMaintenance( $repo, new Enqueuer(), $this->registry(), new SweepCursor() ) )->sweep( 200 );
+
+		$this->assertFalse( $result );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * レビュー Major 2: 完全バッチ（main loop 内で BATCH_SIZE 到達により流すもの）だけが
+	 * $depth を確認しており、ループ終了後に流す端数バッチ（BATCH_SIZE 未満のまま残った
+	 * bucket）は queue_depth_cap を再確認していなかった。残り容量が 1 件しか無いのに
+	 * rakuten・dmm 2 account 分の端数バッチが両方投入されると cap を超える。
+	 *
+	 * cap=1・開始 depth=0 の状態で rakuten の端数バッチ（1 件）を投入すると depth が
+	 * 1 になり cap に到達するため、続く dmm の端数バッチは as_schedule_single_action へ
+	 * 到達せず、その最初の商品（11）の手前（10）へカーソルが巻き戻る。
+	 */
+	public function test_sweep_端数バッチはqueue_depth_capを再確認して超過分は投入しない(): void {
+		$this->stubCursor( 0 );
+		$this->stubGeneralSettings( array( 'queue_depth_cap' => 1 ) );
+		$this->stubQueueDepth( 0 ); // 開始時点は空。
+		$this->stubFilterCleanup();
+		$this->stubTwoPlatforms();
+		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
+
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 10, 11 ) );
+
+		$stale = gmdate( 'c', time() - 25 * 3600 );
+		$repo  = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->once()->with( 10 )->andReturn(
+			$this->product(
+				10,
+				array(
+					array(
+						'platform'        => 'rakuten-kobo',
+						'enabled'         => true,
+						'update_mode'     => 'auto',
+						'auto_update'     => true,
+						'external_id'     => 'e10',
+						'last_fetched_at' => $stale,
+					),
+				)
+			)
+		);
+		$repo->shouldReceive( 'find' )->once()->with( 11 )->andReturn(
+			$this->product(
+				11,
+				array(
+					array(
+						'platform'        => 'dmm-books',
+						'enabled'         => true,
+						'update_mode'     => 'auto',
+						'auto_update'     => true,
+						'external_id'     => 'e11',
+						'last_fetched_at' => $stale,
+					),
+				)
+			)
+		);
+
+		// rakuten の端数バッチ（1 件・post_id=10）だけが投入され、depth が cap(1) に達する。
+		// dmm 分の呼び出しがあれば「一致する期待が無い」として WP_Mock が検出するため、
+		// ここでの ->once()->with(...) が「dmm は as_schedule_single_action に到達しない」
+		// ことの検証を兼ねる。
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH_BATCH,
+				array(
+					'account' => 'rakuten',
+					'items'   => array(
+						array(
+							'post_id'  => 10,
+							'platform' => 'rakuten-kobo',
+						),
+					),
+				),
+				'affilicard-rakuten',
+				true,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 701 );
+
+		WP_Mock::userFunction( 'update_option' )->once()->with( SweepCursor::OPTION_KEY, 10, false );
+		WP_Mock::userFunction( 'delete_option' )->never();
+
+		$maintenance = new QueueMaintenance(
+			$repo,
+			new Enqueuer(),
+			$this->registryWithDmm(),
+			new SweepCursor(),
+			depthCap: 1
+		);
+
+		$result = $maintenance->sweep( 200 );
 
 		$this->assertFalse( $result );
 		$this->assertConditionsMet();

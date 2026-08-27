@@ -117,8 +117,26 @@ final class ProductListColumns {
 	 * 「棚卸し状況を一覧で把握する」というこの列の目的そのものが壊れる
 	 * （最も確認したい「掲載日が無く棚卸し対象になっている商品」が見えなくなる）。
 	 * そのため EXISTS/NOT EXISTS の2節を `relation => OR` で束ねた名前付き節にし、
-	 * `orderby` 側でその節名を参照する（WordPress の標準パターン）。これにより
-	 * 実クエリでは共有 alias が LEFT JOIN され、値の無い投稿もソート結果に残る。
+	 * `orderby` 側でその節名を参照する（WordPress の標準パターン）。
+	 *
+	 * **`orderby` で参照する節は EXISTS ではなく NOT EXISTS 側でなければならない。**
+	 * 単体テスト（`WP_Query::set()` に渡す引数の形だけを見る）ではこの違いは
+	 * 検出できず、wp-env 上の実 SQL で初めて表面化した（tests/e2e/product-list-sort.spec.js。
+	 * レビュー Major 3）。`WP_Meta_Query` は `compare=NOT EXISTS` のときだけ
+	 * `meta_key` の一致条件を JOIN の ON 句へ埋め込む（`LEFT JOIN wp_postmeta AS mt1
+	 * ON (post_id = mt1.post_id AND mt1.meta_key = '…')`）ため、その alias の
+	 * `meta_value` は「値があればその値・無ければ NULL」に確定する。一方
+	 * `compare=EXISTS` の JOIN は `meta_key` 条件を ON ではなく WHERE 側に置く
+	 * （`LEFT JOIN wp_postmeta ON (post_id = post_id)` のみ、`meta_key` 一致は
+	 * WHERE で判定）ため、対象 meta を持たない投稿では「その投稿が持つ他の meta
+	 * 行すべて」が JOIN 結果に紛れ込む。`GROUP BY wp_posts.ID` で 1 行へ畳まれる際に
+	 * ORDER BY がどの行の `meta_value` を拾うかは不定（`affilicard_product_type` 等
+	 * 無関係な meta の値が使われることがあり、MySQL の実行計画に依存する）。
+	 * 実際に EXISTS 側の alias を `orderby` に使うと、最終掲載日を持たない商品が
+	 * 意図しない位置に紛れ込む（e2e で実測）。NOT EXISTS 側は「WHERE で
+	 * unique な包含判定を担う」役割と「ORDER BY で使える確定値を提供する」役割を
+	 * 偶然にも兼ねられる——EXISTS 節はこの並び替えでは値としては一切参照せず、
+	 * 包含判定（OR の片翼）にのみ使う。
 	 */
 	public static function applySortQuery( \WP_Query $query ): void {
 		if ( ! is_admin() || ! $query->is_main_query() ) {
@@ -137,11 +155,11 @@ final class ProductListColumns {
 			'meta_query',
 			array(
 				'relation'            => 'OR',
-				self::SORT_CLAUSE_KEY => array(
+				array(
 					'key'     => ProductPostType::META_LAST_PUBLISHED_AT,
 					'compare' => 'EXISTS',
 				),
-				array(
+				self::SORT_CLAUSE_KEY => array(
 					'key'     => ProductPostType::META_LAST_PUBLISHED_AT,
 					'compare' => 'NOT EXISTS',
 				),
