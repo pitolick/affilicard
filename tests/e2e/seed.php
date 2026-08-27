@@ -1,6 +1,12 @@
 <?php
 /**
  * E2E シードスクリプト。`wp eval-file` でコンテナ内実行する。
+ *
+ * **このファイルには `declare(strict_types=1);` を置けない。** `wp eval-file` は
+ * ファイルの内容を `eval()` で実行するため（wp-cli/eval-command の EvalFile_Command）、
+ * strict_types 宣言が PHP の要求する「スクリプトの最初の文」になり得ず
+ * `Fatal error: strict_types declaration must be the very first statement in the script`
+ * で落ちる。リポジトリ全体の規約（PHP 8.1+ / strict types）の唯一の例外。
  * プラグインの Repository を使うのでシェルクォート問題が発生しない。
  * 出力: 1 行 `SEED_JSON:{...}` （global-setup がこの行を拾う）
  */
