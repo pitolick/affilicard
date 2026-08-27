@@ -65,8 +65,24 @@ final class BatchRefreshHandler {
 		// AS ランナーの時間予算は `action_scheduler_queue_runner_time_limit` フィルタで
 		// サイト側から調整され得る。AS 自身（get_time_limit()）と同じフィルタを読むことで、
 		// ランナーが伸縮されても JobDeadline の期限判定がそれに追従する（spec §4-1 Important 2）。
-		$timeLimit   = (int) apply_filters( 'action_scheduler_queue_runner_time_limit', $this->timeLimitSeconds ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- AS 自身が定義・適用する既存フィルタを読むだけで、affilicard がここで新しく hook を定義しているわけではない。
-		$deadline    = new JobDeadline( time(), $timeLimit, $this->safetyMarginSeconds );
+		$timeLimit = (int) apply_filters( 'action_scheduler_queue_runner_time_limit', $this->timeLimitSeconds ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- AS 自身が定義・適用する既存フィルタを読むだけで、affilicard がここで新しく hook を定義しているわけではない。
+
+		// 期限は「このジョブ自身の開始時刻」ではなく「AS ランナー全体の開始時刻」から起算する。
+		// AS はランナー生成時刻（ActionScheduler_Abstract_QueueRunner::$created_time）から実行
+		// 時間を計測し、1 回のランナー起動で複数アクションを連続実行する。このジョブ自身の
+		// 開始時刻を起点にすると、先行アクションが消費した時間を無視して残り時間を過大評価
+		// してしまい、usleep() や fetch が AS ランナー全体の時間予算を超えて、未処理分の
+		// 積み直し前にランナーごと打ち切られる（＝バッチの残りが失われる）おそれがある
+		// （CodeRabbit レビュー指摘）。$created_time は private・関連メソッド
+		// （get_execution_time()/get_time_limit()/time_likely_to_be_exceeded()）はいずれも
+		// protected で、AS は残り時間を取得する public API を公開していない
+		// （vendor/woocommerce/action-scheduler で確認済み）。代わりに AS 自身が内部で使う
+		// public フック `action_scheduler_before_process_queue` でランナー起動時刻を捕捉する
+		// （RunnerClock::register() 参照）。このジョブが AS を介さず直接呼ばれた場合
+		// （フックが一度も発火していない。主にユニットテスト）は自身の開始時刻へ
+		// フォールバックする（従来の挙動）。
+		$startedAt   = RunnerClock::startedAt() ?? time();
+		$deadline    = new JobDeadline( $startedAt, $timeLimit, $this->safetyMarginSeconds );
 		$intervalMs  = $this->intervalMsFor( $account );
 		$intervalSec = (int) ceil( $intervalMs / 1000 );
 		// 1 件あたりの最悪所要 = レート待ち + Provider の HTTP タイムアウト（DMM/楽天とも 10 秒）。

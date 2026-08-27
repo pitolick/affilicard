@@ -153,6 +153,10 @@ sweep → account 単位のバッチジョブを積む（1 ジョブ = N listing
 
 **期限チェックを待機の前に置くこと**が要件である。待機に入ってから期限を超えると、AS ランナーの時間予算を食い潰したうえに未処理分の積み直しも行われず、そのバッチの残りが失われる。
 
+> **追記（CodeRabbit レビュー対応・実装時に判明）**: 上記 2 の「ジョブ開始時刻」は**このジョブ自身（`handle()` 呼び出し）の開始時刻ではなく、AS ランナー全体の起動時刻**でなければならない。AS はランナー生成時刻（`ActionScheduler_Abstract_QueueRunner::$created_time`）から実行時間を計測し、1 回のランナー起動で複数アクションを連続実行する。ジョブ自身の開始時刻を起点にすると、先行アクションが消費した時間を無視して残り時間を過大評価し、`usleep()` や fetch が AS ランナー全体の時間予算を超えて、未処理分の積み直し前にランナーごと打ち切られる（＝バッチの残りが失われる）おそれがある——本改修が最も避けたかった失敗モードそのものである。
+>
+> `$created_time` は private・`get_execution_time()`/`get_time_limit()`/`time_likely_to_be_exceeded()` はいずれも protected で、AS はランナーの残り時間を取得する public API を公開していない（`vendor/woocommerce/action-scheduler/classes/abstracts/ActionScheduler_Abstract_QueueRunner.php` で確認済み）。代わりに、AS 自身が内部で恒常的に使っている public フック `action_scheduler_before_process_queue`（`ActionScheduler_QueueRunner::run()`／`ActionScheduler_WPCLI_QueueRunner::run()` の両方で、バッチ処理ループに入る直前に無条件で 1 回だけ発火する。AS 自身も `ActionScheduler_RecurringActionScheduler`・`ActionScheduler_wpCommentLogger` の配線にこのフックを使っており、実装詳細ではなく安定した拡張ポイントである）でランナー起動時刻を捕捉する（`RunnerClock` クラス）。`$created_time` そのものではないが、コンストラクタからこのフック発火までの処理はごく短時間で、実用上は同一ランナー起動の開始時刻として扱ってよい。プロセス内の静的状態として保持し、DB option にはしない（AS ランナーとその中で実行される affilicard のジョブは同一 PHP プロセス内で同期的に実行されるため永続化は不要で、毎分の WP-Cron ごとに DB 書き込みを増やすだけになる）。ジョブが AS を介さず直接呼ばれた場合（フックが一度も発火していない。主にユニットテスト）は、このジョブ自身の開始時刻へフォールバックする（従来の挙動）。
+
 **1 件あたりの所要時間の見積もりは、Provider の HTTP タイムアウトを前提にする**。DMM（`DmmProvider.php`）・楽天（`RakutenClient.php`）とも `timeout => 10` を既に設定済みであるため、1 件の最悪所要時間は「レート待ち＋10 秒」として期限判定に用いる。Provider 側のタイムアウトを変更する場合は、この見積もりも合わせて見直すこと。
 
 **ジョブ内で待つことについて**: 原設計は「AS ランナーを sleep で塞がない」ことを明示的な判断としていた（`RateLimiter` の docblock）。本 spec はこれを**バッチジョブの内側に限って**改める。理由は、待ち時間が 1.0〜1.1 秒と短く、かつ待たない場合のコスト（空振り 90%）が待つコストを大きく上回ることが実測で判明したためである。per-listing ジョブ側の挙動は**変更しない**（従来どおり再投入）。異常系は少数で、既存のリトライ機構との整合を優先する。

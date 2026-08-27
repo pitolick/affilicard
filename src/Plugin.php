@@ -32,6 +32,7 @@ use Affilicard\Queue\QueueMaintenance;
 use Affilicard\Queue\QueueStats;
 use Affilicard\Queue\RateLimiter;
 use Affilicard\Queue\RefreshHandler;
+use Affilicard\Queue\RunnerClock;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Rest\CardPreviewController;
 use Affilicard\Rest\CredentialsController;
@@ -80,6 +81,12 @@ final class Plugin {
 		// 現在イテレート中の plugins_loaded@0 バケットに追加され得ず（PHP/WP の do_action は
 		// イテレート中のバケットへの追加コールバックを拾わない）、AS が一切初期化されない不具合がある。
 		ActionSchedulerLoader::boot();
+
+		// AS ランナーの起動時刻を記録する（BatchRefreshHandler の JobDeadline が「このジョブ
+		// 自身の開始時刻」ではなく「AS ランナー全体の残り時間」を見て期限判定できるようにする
+		// ため。RunnerClock のクラス docblock 参照。CodeRabbit レビュー対応）。AS 自身がロード
+		// された直後、ランナーが実際に走り出すより十分前に登録すれば足りる。
+		RunnerClock::register();
 
 		// バージョン移行: register_activation_hook は自動更新・管理画面からの更新では
 		// 実行されないため、plugins_loaded で保存済みバージョンとの差分を都度チェックする

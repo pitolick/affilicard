@@ -9,6 +9,7 @@ use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Queue\BatchRefreshHandler;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\RateLimiter;
+use Affilicard\Queue\RunnerClock;
 use Affilicard\Queue\WorkOutcome;
 use Affilicard\Settings\GeneralSettings;
 use Mockery;
@@ -35,9 +36,14 @@ final class BatchRefreshHandlerTest extends TestCase {
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		// RunnerClock はプロセス内の静的状態を持つ。他のテストクラスから漏れた状態で
+		// 本ファイルの大半のテスト（RunnerClock 未使用＝startedAt()==null 前提）が
+		// 非決定的に失敗しないよう、既定状態（未記録）へ戻す。
+		RunnerClock::set( null );
 	}
 
 	public function tearDown(): void {
+		RunnerClock::set( null );
 		WP_Mock::tearDown();
 		if ( isset( $GLOBALS['wpdb'] ) ) {
 			unset( $GLOBALS['wpdb'] );
@@ -657,6 +663,122 @@ final class BatchRefreshHandlerTest extends TestCase {
 
 		// 30, 5 は「フィルタが登録されていなければこの値を使う」既定値。実際に効くのは
 		// フィルタが返す 5 の方（timeLimit(5) - margin(5) = remaining 常に 0）。
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 30, 5 );
+
+		$handler->handle(
+			$this->args(
+				array(
+					'post_id'  => 1,
+					'platform' => 'rakuten-kobo',
+				),
+				array(
+					'post_id'  => 2,
+					'platform' => 'rakuten-kobo',
+				)
+			)
+		);
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * Major（CodeRabbit レビュー）: JobDeadline は「このジョブ自身の開始時刻」ではなく
+	 * 「AS ランナー全体の開始時刻」（RunnerClock 経由）を起点に期限を判定しなければ
+	 * ならない。AS は 1 回のランナー起動で複数アクションを連続実行するため、先行アクションが
+	 * 時間を消費していれば、このジョブ自身の開始時刻を起点にした期限計算は残り時間を
+	 * 過大評価し、usleep() や fetch が AS ランナー全体の時間予算を超えて、積み直し前に
+	 * ランナーごと打ち切られる（＝バッチの残りが失われる）おそれがある。
+	 *
+	 * ランナーが実際には「24 秒前」に起動していたと RunnerClock に記録し（time limit 30・
+	 * 安全マージン 5 → 実効期限は起動から 25 秒＝残りわずか 1 秒）、ジョブ自身の開始時刻
+	 * （＝この handle() 呼び出しの「今」）はまったく経過していない状況を作る。
+	 *
+	 * 修正前の実装（RunnerClock を見ず、ジョブ自身の time() を起点にする）ならこの状況でも
+	 * 「（ジョブ開始からの）残り 25 秒」と誤認し、レート待ち＋Provider タイムアウトの
+	 * 見積もり（12 秒）を賄えると判断して 2 件目まで試みてしまう。RunnerClock を正しく
+	 * 使っていれば、残り 1 秒では 12 秒を賄えないと判定し、2 件目は待たずに積み直される。
+	 */
+	public function test_ジョブ自身ではなくASランナー全体の開始時刻を起点に期限を判定する(): void {
+		RunnerClock::set( time() - 24 );
+
+		$this->stubGeneralSettings();
+		$this->mockRateLimiterWpdb( 1 ); // 1件目は即座に CAS 獲得成功（待たない）。
+
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'refreshOne' )->once()->with( 1, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
+		$refresher->shouldReceive( 'refreshOne' )->with( 2, 'rakuten-kobo' )->never();
+
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_refresh_gaveup_1_rakuten-kobo' )
+			->andReturn( true );
+
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 ); // requeueRemaining の jitter。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never(); // enqueueManual は呼ばれない。
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH_BATCH,
+				array(
+					'account' => 'rakuten',
+					'items'   => array(
+						array(
+							'post_id'  => 2,
+							'platform' => 'rakuten-kobo',
+						),
+					),
+				),
+				'affilicard-rakuten',
+				false,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 33 );
+
+		// 既定の time limit（30秒）・安全マージン（5秒）——ジョブ自身の「今」だけを見れば
+		// 残り25秒あるように見える値。RunnerClock を無視する実装だとこのテストは red になる。
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 30, 5 );
+
+		$handler->handle(
+			$this->args(
+				array(
+					'post_id'  => 1,
+					'platform' => 'rakuten-kobo',
+				),
+				array(
+					'post_id'  => 2,
+					'platform' => 'rakuten-kobo',
+				)
+			)
+		);
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * RunnerClock が一度も記録されていない（AS を介さずハンドラを直接呼ぶ状況。本テスト
+	 * ファイルの他のテストと同じ状況）では、従来どおりジョブ自身の開始時刻へフォール
+	 * バックする。既存の全テストが green であること自体がこの回帰の主な担保だが、
+	 * ここでは明示的に RunnerClock::startedAt() が null であることを固定したうえで、
+	 * time limit を十分に確保すれば 2 件とも処理されることを確認する。
+	 */
+	public function test_RunnerClock未記録ならジョブ自身の開始時刻へフォールバックする(): void {
+		$this->assertNull( RunnerClock::startedAt() );
+
+		$this->stubGeneralSettings();
+		$this->mockRateLimiterWpdb( 1, 1 ); // 2件とも CAS 獲得成功（待たない）。
+
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'refreshOne' )->twice()->andReturn( WorkOutcome::SUCCESS );
+
+		WP_Mock::userFunction( 'delete_transient' )
+			->twice()
+			->with( Mockery::pattern( '/^affilicard_refresh_gaveup_[12]_rakuten-kobo$/' ) )
+			->andReturn( true );
+
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+
 		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 30, 5 );
 
 		$handler->handle(

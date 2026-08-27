@@ -207,6 +207,27 @@ final class PluginTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	/**
+	 * Major（CodeRabbit レビュー）: BatchRefreshHandler の JobDeadline が「ジョブ自身の
+	 * 開始時刻」ではなく「AS ランナー全体の開始時刻」を見て期限判定できるよう、
+	 * RunnerClock::register() が boot() から確実に呼ばれ、AS 自身が内部で使う public フック
+	 * `action_scheduler_before_process_queue` に markStarted が配線されることを固定する。
+	 */
+	public function test_boot_registers_runner_clock_hook(): void {
+		WP_Mock::userFunction( 'is_admin', array( 'return' => false ) );
+		WP_Mock::userFunction( 'register_activation_hook', array( 'return' => true ) );
+		WP_Mock::userFunction( 'register_deactivation_hook', array( 'return' => true ) );
+
+		WP_Mock::expectActionAdded(
+			'action_scheduler_before_process_queue',
+			array( \Affilicard\Queue\RunnerClock::class, 'markStarted' )
+		);
+
+		Plugin::boot();
+
+		$this->assertConditionsMet();
+	}
+
 	public function test_boot_registers_block_init_hook(): void {
 		WP_Mock::userFunction( 'is_admin', array( 'return' => false ) );
 		WP_Mock::userFunction( 'register_activation_hook', array( 'return' => true ) );

@@ -1294,8 +1294,11 @@ final class PublicationDateTest extends TestCase {
 		ProductMeta::register();
 
 		$this->assertIsArray( $captured );
-		$this->assertTrue( $captured['show_in_rest'] );
-		// auth_callback が false を返す＝REST / 編集画面から書き換えられない。
+		// REST に露出させない。露出させたまま auth_callback を false にすると Gutenberg が
+		// 読み取った meta を保存時に送り返し、投稿保存が丸ごと 403 rest_cannot_update で失敗する
+		// （実装時に実測。§6-1 の当初案「REST では読めるが書けない」は不可と判明した）。
+		$this->assertFalse( $captured['show_in_rest'] );
+		// auth_callback が false を返す＝REST 以外の書き込み経路（Custom Fields 等）も拒否する。
 		$this->assertFalse( ( $captured['auth_callback'] )() );
 	}
 
@@ -1322,7 +1325,9 @@ Expected: FAIL（クラス未定義）
 	public const META_LAST_PUBLISHED_AT = 'affilicard_last_published_at';
 ```
 
-登録は `src/PostType/ProductMeta.php`（`register_post_meta` を集約している専用クラス）の `register()` に **read-only** で追加する。REST では読めるが書けない。
+登録は `src/PostType/ProductMeta.php`（`register_post_meta` を集約している専用クラス）の `register()` に **read-only** で追加する。
+
+> **当初案（`show_in_rest => true` ＋ 拒否する `auth_callback`）は不可。** WP に「REST では読めるが書けない meta」は存在しない。`show_in_rest => true` のまま `auth_callback` を `false` にすると、REST 応答の `meta` に載った値を Gutenberg の `useEntityProp` が読み取り、保存時にそのまま送り返すため、商品 CPT の投稿保存が丸ごと `403 rest_cannot_update` で失敗する（実装時に実測。詳細は spec §6-1 を参照）。読み取り側は PHP（`PublicationDate::get()` と商品一覧の列）だけで REST に出す必要が無いため、`show_in_rest => false` にして非露出にする。
 
 ```php
 		register_post_meta(
@@ -1331,8 +1336,11 @@ Expected: FAIL（クラス未定義）
 			array(
 				'type'          => 'string',
 				'single'        => true,
-				'show_in_rest'  => true,
-				// 利用者が直接書き換えると棚卸し判定が意図せず変わるため編集を拒否する。
+				// REST 非露出。読み取りは PHP 側（PublicationDate::get() / 商品一覧列）のみのため
+				// REST に出す必要が無く、非露出にすることで編集も同時に防げる。
+				'show_in_rest'  => false,
+				// 併せて cap でも拒否する（REST 以外の書き込み経路を塞ぐ）。書き込みは
+				// PublicationDate::touch() に一元化する。
 				'auth_callback' => static fn (): bool => false,
 			)
 		);
