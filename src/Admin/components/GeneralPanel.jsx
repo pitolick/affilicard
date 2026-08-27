@@ -17,12 +17,25 @@ import { CronHelpBox } from './CronHelpBox';
 const OPERATIONS_DOC_URL =
 	'https://github.com/pitolick/affilicard/blob/main/docs/operations-refresh-queue.md';
 
+// 棚卸し期間 (日) の確定値を計算する（GeneralSettings::update() の max(1, ...) と同じ
+// クランプをブラウザ側でも行う）。1 未満・非数値は 1 にフォールバックする。
+// 呼び出すのは blur・保存などの「確定」タイミングのみ。編集中の入力欄には適用しない
+// （即時クランプすると「全選択して消す→入力する」という通常の編集操作が壊れ、消した瞬間に
+// 1 が入り込んで続く入力と連結されてしまう。CodeRabbit 指摘）。
+function clampStocktakeDays(raw) {
+	const days = parseInt(raw, 10);
+	return Number.isFinite(days) && days >= 1 ? days : 1;
+}
+
 export function GeneralPanel() {
 	const [settings, setSettings] = useState(null);
 	const [saving, setSaving] = useState(false);
 	const [notice, setNotice] = useState(null);
 	// false | 'normal' | 'force' — どちらの一括更新ボタンが実行中かを追跡する。
 	const [refreshing, setRefreshing] = useState(false);
+	// 棚卸し期間入力欄の編集中ドラフト。null なら未編集（settings の値を表示）、
+	// 文字列ならその生の入力値を表示する（空文字・1 未満も含め、確定までクランプしない）。
+	const [stocktakeDaysDraft, setStocktakeDaysDraft] = useState(null);
 
 	useEffect(() => {
 		fetchSettings()
@@ -42,12 +55,35 @@ export function GeneralPanel() {
 	const cronEnabled = settings.cron_enabled ?? true;
 	const stocktakeEnabled = settings.stocktake_enabled ?? true;
 
+	const stocktakeDaysValue =
+		stocktakeDaysDraft !== null
+			? stocktakeDaysDraft
+			: String(settings.stocktake_days ?? 180);
+
+	const commitStocktakeDays = () => {
+		if (stocktakeDaysDraft === null) {
+			return;
+		}
+		update({ stocktake_days: clampStocktakeDays(stocktakeDaysDraft) });
+		setStocktakeDaysDraft(null);
+	};
+
 	const onSave = async () => {
 		setSaving(true);
 		setNotice(null);
+		// blur を経ずに保存された場合（ドラフトが残ったまま）も確定時クランプを適用する。
+		// setStocktakeDaysDraft は非同期なので、送信するペイロードはここで直接組み立てる。
+		const payload =
+			stocktakeDaysDraft !== null
+				? {
+						...settings,
+						stocktake_days: clampStocktakeDays(stocktakeDaysDraft),
+					}
+				: settings;
 		try {
-			const next = await updateSettings(settings);
+			const next = await updateSettings(payload);
 			setSettings(next);
+			setStocktakeDaysDraft(null);
 			setNotice({
 				type: 'success',
 				message: __('保存しました', 'affilicard'),
@@ -165,14 +201,9 @@ export function GeneralPanel() {
 					label={__('棚卸し期間 (日)', 'affilicard')}
 					type="number"
 					min="1"
-					value={String(settings.stocktake_days ?? 180)}
-					onChange={(v) => {
-						const days = parseInt(v, 10);
-						update({
-							stocktake_days:
-								Number.isFinite(days) && days >= 1 ? days : 1,
-						});
-					}}
+					value={stocktakeDaysValue}
+					onChange={(v) => setStocktakeDaysDraft(v)}
+					onBlur={commitStocktakeDays}
 					help={__(
 						'記事に掲載されなくなってこの日数が過ぎた商品を、自動更新の対象から外します（既定 180 日・最小 1 日）。記事を更新すれば対象に戻ります。',
 						'affilicard'

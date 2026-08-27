@@ -238,7 +238,10 @@ describe( '棚卸し設定', () => {
 		);
 	} );
 
-	test( '棚卸し期間に 1 未満・非数値を入力すると 1 にクランプされる', async () => {
+	// CodeRabbit 指摘: 即時クランプだと「全選択して消す→入力する」という通常の編集操作が
+	// 壊れる（消した瞬間に 1 が入り、続く入力が連結されて 190 のような値になる）。
+	// 編集中は空文字・1 未満のドラフトをそのまま保持し、確定時（blur・保存）だけクランプする。
+	test( '棚卸し期間の入力中は空文字や 1 未満の値をそのまま表示する（即時クランプしない）', async () => {
 		fetchSettings.mockResolvedValue( {
 			cache_ttl_seconds: 86400,
 			default_product_type: 'generic',
@@ -253,15 +256,100 @@ describe( '棚卸し設定', () => {
 		);
 
 		fireEvent.change( daysInput, { target: { value: '0' } } );
+		expect( daysInput.value ).toBe( '0' );
+
+		fireEvent.change( daysInput, { target: { value: '-30' } } );
+		expect( daysInput.value ).toBe( '-30' );
+
+		fireEvent.change( daysInput, { target: { value: '' } } );
+		expect( daysInput.value ).toBe( '' );
+	} );
+
+	test( '180 を全選択して削除してから 90 を入力しても値が連結されない', async () => {
+		fetchSettings.mockResolvedValue( {
+			cache_ttl_seconds: 86400,
+			default_product_type: 'generic',
+			cron_enabled: false,
+			stocktake_enabled: true,
+			stocktake_days: 180,
+		} );
+		render( <GeneralPanel /> );
+
+		const daysInput = await screen.findByLabelText(
+			/棚卸し期間 \(日\)/
+		);
+		expect( daysInput.value ).toBe( '180' );
+
+		// 全選択して削除（ブラウザ操作の再現）。
+		fireEvent.change( daysInput, { target: { value: '' } } );
+		expect( daysInput.value ).toBe( '' );
+
+		// 続けて 90 を入力する。
+		fireEvent.change( daysInput, { target: { value: '9' } } );
+		fireEvent.change( daysInput, { target: { value: '90' } } );
+		expect( daysInput.value ).toBe( '90' );
+	} );
+
+	test( '棚卸し期間はフォーカスを外す（blur）と 1 未満・非数値が 1 にクランプされる', async () => {
+		fetchSettings.mockResolvedValue( {
+			cache_ttl_seconds: 86400,
+			default_product_type: 'generic',
+			cron_enabled: false,
+			stocktake_enabled: true,
+			stocktake_days: 180,
+		} );
+		render( <GeneralPanel /> );
+
+		const daysInput = await screen.findByLabelText(
+			/棚卸し期間 \(日\)/
+		);
+
+		fireEvent.change( daysInput, { target: { value: '0' } } );
+		fireEvent.blur( daysInput );
 		expect( daysInput.value ).toBe( '1' );
 
 		fireEvent.change( daysInput, { target: { value: '-30' } } );
+		fireEvent.blur( daysInput );
 		expect( daysInput.value ).toBe( '1' );
 
 		fireEvent.change( daysInput, { target: { value: '' } } );
+		fireEvent.blur( daysInput );
 		expect( daysInput.value ).toBe( '1' );
 
 		fireEvent.change( daysInput, { target: { value: '90' } } );
+		fireEvent.blur( daysInput );
 		expect( daysInput.value ).toBe( '90' );
+	} );
+
+	test( '棚卸し期間を空のまま保存すると、blur を経なくても 1 として送信される', async () => {
+		const initial = {
+			cache_ttl_seconds: 86400,
+			default_product_type: 'generic',
+			cron_enabled: false,
+			stocktake_enabled: true,
+			stocktake_days: 180,
+		};
+		fetchSettings.mockResolvedValue( initial );
+		updateSettings.mockResolvedValue( {
+			...initial,
+			stocktake_days: 1,
+		} );
+		render( <GeneralPanel /> );
+
+		const daysInput = await screen.findByLabelText(
+			/棚卸し期間 \(日\)/
+		);
+		fireEvent.change( daysInput, { target: { value: '' } } );
+
+		const saveButton = await screen.findByRole( 'button', {
+			name: '保存',
+		} );
+		fireEvent.click( saveButton );
+
+		await waitFor( () =>
+			expect( updateSettings ).toHaveBeenCalledWith(
+				expect.objectContaining( { stocktake_days: 1 } )
+			)
+		);
 	} );
 } );
