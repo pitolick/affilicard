@@ -323,7 +323,9 @@ GA4 等の外部分析基盤と連携する案も検討したが、**利用者�
 | --- | --- | --- |
 | `affilicard_last_published_at` | string（ISO8601・UTC） | 最終掲載日。ISO8601 は辞書順＝時系列順のため meta_value の文字列ソートで正しく並ぶ |
 
-**read-only とする。** `register_post_meta()` の `auth_callback` で編集を拒否し、REST でも読み取りのみとする。利用者が直接編集すると棚卸し判定が意図せず変わるため。
+**read-only とする。** 利用者が直接編集すると棚卸し判定が意図せず変わるため、`register_post_meta()` は `show_in_rest => false` ＋ `auth_callback` 拒否で登録し、書き込みは `PublicationDate::touch()` に一元化する。
+
+> **当初案（REST では読めるが書けない）は不可。** WP に「REST に露出しつつ書き込みだけ拒否する meta」は存在しない。`show_in_rest => true` のまま `auth_callback` を `false` にすると、REST 応答の `meta` に載った値を Gutenberg の `useEntityProp` が読み取り、保存時にそのまま送り返すため、**商品 CPT の投稿保存が丸ごと `403 rest_cannot_update` で失敗する**（実測: e2e `product-metabox.spec.js` の公開待ちがタイムアウト、エディタには "Sorry, you are not allowed to edit the affilicard_last_published_at custom field."）。読み取り側は PHP（`PublicationDate::get()` と商品一覧の列）だけで REST に出す必要が無いため、非露出にして編集も同時に防ぐ。
 
 ### 6-2. 新規 option
 

@@ -13,7 +13,7 @@ use Affilicard\PostType\ProductPostType;
  * 判定したいのは「最後に掲載面へ手が入ったのはいつか」である（spec §5-1）。
  *
  * meta（ProductPostType::META_LAST_PUBLISHED_AT）は ProductMeta::register() で
- * read-only 登録する。ここが唯一の書き込み経路になる。
+ * REST 非露出（show_in_rest=false）＋ auth_callback 拒否として登録する。ここが唯一の書き込み経路になる。
  */
 final class PublicationDate {
 
