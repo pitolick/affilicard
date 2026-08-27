@@ -1,5 +1,7 @@
 # 価格同期スケーラビリティ 実装計画
 
+> **本計画は実装前に書かれたものです。** 実装中、複数の箇所がコントローラの裁定（CodeRabbit レビュー対応を含む）で計画時点の記述から変更されています（カーソル判定の SQL 化・`Enqueuer::enqueueBatch()` への `$unique` 引数追加・`JobDeadline` の起点を AS ランナー全体の開始時刻へ変更・バッチサイズの動的算出化・`QueueMaintenance::sweep()` のカーソル巻き戻し・棚卸し設定の管理画面 UI 追加・`PluginUpgrade` の `add_option()` 戻り値の解釈 など）。以下のタスク本文には変更前の記述のまま残っている箇所があります。**最終的な仕様は [`docs/superpowers/specs/2026-08-25-refresh-queue-scalability-design.md`](../specs/2026-08-25-refresh-queue-scalability-design.md) が正**（spec が binding authority）で、実装（`src/`）はそれに従っています。本ドキュメントは意思決定の経緯を追う記録として残していますが、仕様書として読まないでください。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 価格同期の空振り 90% を潰して実効スループットを一桁上げ、記事の掲載日を基礎とした棚卸しで更新需要そのものを抑える。
@@ -61,6 +63,8 @@
 **Interfaces:**
 - Consumes: 既存の `Enqueuer::group()` / `PRIORITY_SWEEP`
 - Produces: `Enqueuer::HOOK_REFRESH_BATCH`（string 定数）、`Enqueuer::enqueueBatch( string $account, array $items, int $when = 0 ): int`（戻り値は action ID。0 は未投入）
+
+> **実装との差分:** 最終的な `enqueueBatch()` には `bool $unique = true` 引数が追加されています（`Enqueuer::enqueueBatch( string $account, array $items, int $when = 0, bool $unique = true ): int`）。既定 true は sweep 等の新規投入向けで、ハンドラ自身による自己再投入・積み直し（pause 温存／期限超過による未処理分の積み直し）は `false` を渡します。AS の unique 判定は PENDING/RUNNING 双方に対して hook + group + args(JSON) の完全一致で挿入を抑止するため、自己再投入で true のままだと実行中の自分自身と一致してジョブが痕跡なく消滅するのが理由です（詳細は `src/Queue/Enqueuer.php` の docblock）。
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -136,7 +140,7 @@ Expected: FAIL（`Error: Call to undefined method ... enqueueBatch()` および 
 	 * @param list<array{post_id: int, platform: string}> $items
 	 * @return int action ID。0 は未投入（items が空・重複・投入失敗）。
 	 */
-	public function enqueueBatch( string $account, array $items, int $when = 0 ): int {
+	public function enqueueBatch( string $account, array $items, int $when = 0, bool $unique = true ): int {
 		if ( array() === $items ) {
 			return 0;
 		}
@@ -151,11 +155,13 @@ Expected: FAIL（`Error: Call to undefined method ... enqueueBatch()` および 
 			self::HOOK_REFRESH_BATCH,
 			$args,
 			$this->group( $account ),
-			true,
+			$unique,
 			self::PRIORITY_SWEEP
 		);
 	}
 ```
+
+（`$unique` 引数は後続の裁定で追加されたもので、実装は上記の「実装との差分」注記を参照。この Step で最初に書かれたのは `$unique` 無し・常に `true` 固定の版でした。）
 
 - [ ] **Step 4: テストを実行して成功を確認する**
 
@@ -595,6 +601,10 @@ final class BatchRefreshHandler {
 
 `PlatformConfig` は本実装では未使用なら `use` を落とすこと（phpcs が未使用 import を検出する）。
 
+> **実装との差分（CodeRabbit レビュー対応・実装時に判明。spec §4-1 追記参照）:** 上記コードの `$deadline = new JobDeadline( time(), ... )` は「このジョブ自身（`handle()` 呼び出し）の開始時刻」を起点にしていますが、これは誤りでした。AS はランナー生成時刻から実行時間を計測し、1 回のランナー起動で複数アクションを連続実行するため、ジョブ自身の開始時刻を起点にすると先行アクションが消費した時間を無視して残り時間を過大評価し、未処理分の積み直し前にランナーごと打ち切られて（＝バッチの残りが失われて）しまいます。最終実装では `RunnerClock::startedAt() ?? time()`（`action_scheduler_before_process_queue` フックで捕捉した AS ランナー全体の起動時刻。フック未発火時＝AS を介さない直接呼び出しはこのジョブ自身の開始時刻へフォールバック）を起点にします（`src/Queue/RunnerClock.php` / `src/Queue/BatchRefreshHandler.php`）。
+>
+> あわせて、`requeueRemaining()` 内の `enqueueBatch( $account, $remaining, time() )` および pause 分岐の `enqueueBatch( $account, $items, time() + 600 )` はいずれも自己再投入のため、最終実装では `$unique = false` を渡します（Task 1 の「実装との差分」参照）。0（投入失敗）が返った場合はログに残したうえで per-listing（`enqueueManual`）へ個別にフォールバックする処理も追加されています。ここに示したコードはこの Task の最初の最小実装であり、これらの変更は後続のレビュー対応でのみ加わりました。最終形は `src/Queue/BatchRefreshHandler.php` を参照してください。
+
 - [ ] **Step 4: テストを実行して成功を確認する**
 
 Run: `docker run --rm -v "$PWD":/app -w /app php:8.2-cli vendor/bin/phpunit tests/Unit/Queue/BatchRefreshHandlerTest.php`
@@ -893,23 +903,42 @@ Expected: FAIL（`sweep()` が引数を取らない／戻り値が void）
 	public function sweep( int $maxProducts = 200 ): bool {
 		$after = $this->cursor->get();
 
-		$ids = get_posts(
-			array(
-				'post_type'      => ProductPostType::POST_TYPE,
-				'post_status'    => 'publish',
-				'fields'         => 'ids',
-				'posts_per_page' => $maxProducts,
-				'orderby'        => 'ID',
-				'order'          => 'ASC',
-				'no_found_rows'  => true,
-				// カーソルより後ろの ID だけを取る。
-				'post__not_in'   => array(),
-			)
-		);
+		// カーソルより後ろの ID だけを取る。取得後に array_filter で絞り込む案は
+		// 採らない——取得済みの先頭にカーソル以前の商品が含まれるぶん 1 回に進む
+		// 件数が目減りし、カーソルが末尾に近づくほど 1 回あたり 0〜数件しか進まなく
+		// なるため。posts_where フィルタで SQL に落とし、posts_per_page => $maxProducts
+		// が「カーソル以降の $maxProducts 件」を意味するようにする
+		// （'suppress_filters' => false と private query var 'affilicard_sweep_after'
+		// が必須。詳細は src/Queue/QueueMaintenance.php の docblock を参照）。
+		$whereCursor = static function ( string $where, $query ) use ( $after ): string {
+			if ( $after !== $query->get( 'affilicard_sweep_after', null ) ) {
+				return $where;
+			}
+			global $wpdb;
+			return $where . $wpdb->prepare( " AND {$wpdb->posts}.ID > %d", $after );
+		};
+
+		add_filter( 'posts_where', $whereCursor, 10, 2 );
+		try {
+			$ids = get_posts(
+				array(
+					'post_type'              => ProductPostType::POST_TYPE,
+					'post_status'            => 'publish',
+					'fields'                 => 'ids',
+					'posts_per_page'         => $maxProducts,
+					'orderby'                => 'ID',
+					'order'                  => 'ASC',
+					'no_found_rows'          => true,
+					'suppress_filters'       => false,
+					'affilicard_sweep_after' => $after,
+				)
+			);
+		} finally {
+			remove_filter( 'posts_where', $whereCursor, 10 );
+		}
 		if ( ! is_array( $ids ) ) {
 			return true;
 		}
-		$ids = array_values( array_filter( $ids, static fn( $id ) => (int) $id > $after ) );
 
 		$now      = time();
 		$buckets  = array(); // account => list<array{post_id, platform}>
@@ -982,6 +1011,13 @@ Expected: FAIL（`sweep()` が引数を取らない／戻り値が void）
 ```
 
 `$this->stocktake` と `$this->sweepLeadSeconds` は Task 10 / 既存の配線で注入する。Task 6 の時点では `StocktakePolicy` が未実装のため、**この行はコメントアウトして Task 10 で有効化**するか、Task 10 を先に実施すること。順序を入れ替える場合は Task 10 → Task 6 の順にする。
+
+> **実装との差分:** 上記コードはこの Task の最初の最小実装であり、レビュー対応で次の点が変更されています（cursor の SQL 化は既に上のコードへ反映済み）。最終形は `src/Queue/QueueMaintenance.php` を参照してください。
+>
+> - **バッチサイズ**: 固定値 `BATCH_SIZE = 22` ではなく、`batchSizeFor( $account )` で account の実効レート間隔と AS の `action_scheduler_queue_runner_time_limit` フィルタ値（既定 30 秒）から安全マージンを引いて動的に算出します（例: 楽天 1.1s・time limit 30 秒・安全マージン 5 秒→実効 25 秒で 22 件。たまたま既定例と一致する）。算出結果は `affilicard_refresh_batch_size` フィルタで上書き可能です（spec §4-1）
+> - **queue_depth_cap**: 上記コードには cap チェックが存在しませんが、最終実装は sweep 冒頭で 1 度だけ `queueDepth()` を取得し、ループ内で `depth >= cap` に達したらそこで走査を打ち切ってカーソルを保持します（cap は「1 回の sweep で積める量の上限」であって「更新できる商品数の天井」ではない。次回の sweep がカーソル位置から再開する。spec §4-2）
+> - **投入失敗時のカーソル巻き戻し**: `enqueueBatch()` が 0 を返しても、`Enqueuer::hasScheduledBatch()` で「unique 重複（作業は失われていない）」か「投入失敗（作業が失われる）」かを判別します。重複は無視してよいですが、投入失敗は「最後まで到達した」と扱わず、そのバケットの最初の商品の手前へカーソルを巻き戻して `false` を返します。巻き戻さずに完走扱いにすると、次の定期 sweep までその listing が更新されなくなるためです（spec §4-3）
+> - **`enqueueBatch()` の呼び出し**: 上記コードの `$this->enqueuer->enqueueBatch( $account, $buckets[ $account ] )` は新規投入のため `$unique` は既定の `true` のままで問題ありません（Task 1 の「実装との差分」参照）
 
 - [ ] **Step 4: テストを実行して成功を確認する**
 
@@ -1121,6 +1157,8 @@ final class PluginUpgrade {
 		);
 ```
 
+> **実装との差分（CodeRabbit レビュー対応）:** 上記コードは `add_option()` の戻り値を確認していません。`add_option()` は「既に値が存在する（＝正常）」場合と「保存に失敗した（＝異常）」場合のどちらでも `false` を返すため、区別せずに `update_option( self::OPTION_VERSION, ... )` へ進むと、保存失敗（異常）でもバージョンが進んでしまい、次回以降 `maybeUpgrade()` が冒頭の早期 return で素通りして棚卸し基準日が永久に作られません。最終実装は `ensureStocktakeBaseline()` という private メソッドに切り出し、`add_option()` が false を返したときだけ `get_option()` で実在（空文字以外）を確認して両者を切り分けます。基準日の存在を確認できなかった場合はバージョンを更新せず、次回の `plugins_loaded` で再試行します（`src/Upgrade/PluginUpgrade.php` 参照）。
+
 - [ ] **Step 4: テストを実行して成功を確認する**
 
 Run: `docker run --rm -v "$PWD":/app -w /app php:8.2-cli vendor/bin/phpunit tests/Unit/Upgrade/PluginUpgradeTest.php`
@@ -1144,6 +1182,8 @@ git commit -m "feat: バージョン移行ルーチンと棚卸し基準日の�
 **Interfaces:**
 - Consumes: なし
 - Produces: `GeneralSettings::isStocktakeEnabled(): bool`、`GeneralSettings::stocktakeDays(): int`
+
+> **実装との差分:** 本 Task には無いが、実装では `src/Admin/components/GeneralPanel.jsx` に棚卸し設定（有効/無効・日数）を操作する管理画面 UI が追加されています。PHP 側の設定項目だけを追加してユーザー操作の導線を持たないままにはしていません。
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -1704,11 +1744,13 @@ git commit -m "feat: 商品一覧に最終掲載日の列とソートを追加"
 
 ```php
 public function test_バッチアクションのハンドラが登録される(): void {
-	WP_Mock::expectActionAdded( Enqueuer::HOOK_REFRESH_BATCH, Mockery::type( 'array' ), 10, 1 );
+	WP_Mock::expectActionAdded( Enqueuer::HOOK_REFRESH_BATCH, Mockery::type( 'Closure' ), 10, 2 );
 
 	Plugin::boot();
 }
 ```
+
+> **実装との差分:** コールバックは `array` ではなく `Closure`（下記 Step 3 のクロージャそのもの）で、accepted-argument 数は `1` ではなく `2`（`$account, $items` の 2 引数）です。Action Scheduler は `do_action_ref_array( $hook, array_values( $args ) )` で args を位置引数に展開するため、`BatchRefreshHandler::handle( array $args )` を直付けすると第 1 引数に文字列 `'account'` が渡り `TypeError` になります。そのためクロージャで `[account, items]` を受けて配列へ組み直すラッパを挟んでおり（`Plugin::handleBatchRefreshAction()`）、これが AS フックへ渡すコールバックです。実際のテストは `tests/Unit/PluginTest.php` の `test_boot_registers_batch_refresh_and_sweep_action_hooks()` を参照してください。
 
 ```javascript
 it( '最終掃引時刻を表示する', () => {
