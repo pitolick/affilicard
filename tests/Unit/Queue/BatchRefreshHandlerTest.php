@@ -1070,6 +1070,85 @@ final class BatchRefreshHandlerTest extends TestCase {
 	}
 
 	/**
+	 * CodeRabbit レビュー Major（再フォローアップ）: 前進保証（$mustAttempt）が働く1件目の
+	 * 待機上限に `$deadline->remaining( $startedAt )` を使っていた。$startedAt を渡す限り
+	 * `remaining()` は常に `timeLimitSeconds − safetyMarginSeconds`（固定の総予算）にしかならず、
+	 * 経過時間を一切反映しない。そのため AS ランナーが先行アクションで時間をほぼ消費し
+	 * 終えていても、1件目は「固定の総予算」までフルに待ってしまう。**AS は待機中にランナーを
+	 * 終了しうる**——その場合、未処理分を `requeueRemaining()` する前に処理が打ち切られ、
+	 * バッチの残りが失われる（本改修が最も避けたかった取りこぼしそのもの）。
+	 *
+	 * 前進保証の趣旨は「1件も処理できないまま積み直す状態が延々と続くのを防ぐ」ことで
+	 * あって、「ランナーの残り時間を無視してよい」という意味ではない。ランナーの残り時間が
+	 * 足りないなら待たずに積み直すのが正しく、次のランナーがそのジョブを拾って処理する
+	 * ため前進保証は失われない。
+	 *
+	 * `RunnerClock::set( time() − 20 )` でランナーが「20秒前」に起動していたと記録する
+	 * （timeLimit=30・margin=5 → $startedAt 基準の固定総予算は25秒、実際の残り時間は
+	 * 25−20=5秒）。raw waitSec を10秒相当にする——固定総予算(25秒)以下だが実際の残り
+	 * 時間(5秒)は超える、という CodeRabbit 指摘どおりの状況を作る。
+	 *
+	 * 修正前（$startedAt 基準）: rawWaitSec(10) ≤ remaining($startedAt)=25 のため上限を
+	 * 超えたと判定されず、実際に約10秒 usleep してしまう——ランナーの残り時間はすでに
+	 * 5秒しか無いにもかかわらず（このテストをそのまま修正前のコードに対して実行すると
+	 * 約10秒の real usleep の後、2回目の tryAcquire・requeueRemaining の期待値が
+	 * 未スタブ呼び出しとして失敗することを確認済み。RED再現）。
+	 * 修正後（実際の残り時間基準）: rawWaitSec(10) > remaining(now)=5 のため、待たずに
+	 * 即座に `requeueRemaining()` で積み直す。
+	 */
+	public function test_ランナー終盤では前進保証の1件目でも実際の残り時間を超える待機は待たずに積み直す(): void {
+		RunnerClock::set( time() - 20 );
+
+		$this->stubGeneralSettings();
+		$nowMs = (int) round( microtime( true ) * 1000 );
+		$this->mockRateLimiterWpdb( 0 ); // 1回目（唯一の呼び出し）は未獲得。待たずに積み直すため2回目には進まない。
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_ratelimit_rakuten', 0 )
+			->andReturn( $nowMs - 1100 + 11000 ); // next_ms ≈ 今+10秒 → raw waitSec ≈ 10秒。
+
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'refreshOne' )->never();
+
+		WP_Mock::userFunction( 'delete_transient' )->never();
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 ); // requeueRemaining の jitter。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never(); // enqueueManual は呼ばれない。
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH_BATCH,
+				array(
+					'account' => 'rakuten',
+					'items'   => array(
+						array(
+							'post_id'  => 1,
+							'platform' => 'rakuten-kobo',
+						),
+					),
+				),
+				'affilicard-rakuten',
+				false,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 21 );
+
+		// timeLimitSeconds=30・safetyMarginSeconds=5 → $startedAt 基準の固定総予算は25秒だが、
+		// RunnerClock により実際の残り時間は5秒しかない。
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 30, 5 );
+
+		$handler->handle(
+			$this->args(
+				array(
+					'post_id'  => 1,
+					'platform' => 'rakuten-kobo',
+				)
+			)
+		);
+
+		$this->assertConditionsMet();
+	}
+
+	/**
 	 * CodeRabbit レビュー Minor（続き）: 前進保証が及ばない2件目以降は、従来どおり
 	 * 待機がクランプされ、要求より減った場合は待たずに積み直される。Minor の修正は
 	 * `$mustAttempt` のときだけフルに待つ変更であり、2件目以降の挙動（クランプ＋

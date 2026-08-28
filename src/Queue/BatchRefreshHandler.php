@@ -134,17 +134,21 @@ final class BatchRefreshHandler {
 					// tryAcquire に進み、結局 per-listing へ落ちて「1件も処理できないまま
 					// 積み直す」を防ぐという前進保証の目的が達成できない。
 					//
-					// ただし青天井ではない（CodeRabbit レビュー指摘）。throttle_overrides に
-					// 大きい値（例: 20000ms）が設定されていると $rawWaitSec が数十秒に達し得て、
-					// AS ランナーの時間予算を丸ごと占有し後続アクションを食い潰してしまう。
-					// 上限は「このジョブ自身の開始時刻（$startedAt）を基準に評価した総予算」
-					// （$deadline->remaining( $startedAt )）——"now" 基準の remaining() を
-					// 上限に使うと、他の item が先に消費した分でこの上限自体が 0 になり得て
-					// 前進保証そのものが機能しなくなる（直前に直した Minor と同じ症状を
-					// 再発させる）ため、経過時間の影響を受けない $startedAt を基準にする。
-					// 上限を超える場合は待たずに「枠が空く近く」へ積み直す——積み直した先で
-					// 改めてこの item が 1 件目として試みられるため、前進保証そのものは保たれる。
-					if ( $rawWaitSec > $deadline->remaining( $startedAt ) ) {
+					// ただし青天井ではない（CodeRabbit レビュー指摘）。上限には「実際の残り
+					// 時間」（$deadline->remaining( time() )）を使う。$startedAt を基準にすると
+					// remaining() は常に timeLimitSeconds − safetyMarginSeconds という固定値に
+					// しかならず経過時間を一切反映しない（CodeRabbit レビュー再指摘）。AS ランナー
+					// が先行アクションで時間をほぼ消費し終えていても 1 件目が「固定の総予算」まで
+					// フルに待ってしまい、AS は待機中にランナーを終了し得るため、
+					// requeueRemaining() 前に打ち切られてバッチの残りが失われる
+					// （本改修が最も避けたかった取りこぼしそのもの）。
+					//
+					// 前進保証の趣旨は「1 件も処理できないまま積み直す状態が延々と続く」のを
+					// 防ぐことであって「ランナーの残り時間を無視してよい」という意味ではない。
+					// ランナーの残り時間が足りないなら待たずに積み直すのが正しい——積み直した
+					// 先（次のランナー）で改めてこの item が 1 件目として試みられ、そちらは
+					// フルな時間予算を持つため、前進保証そのものは失われない。
+					if ( $rawWaitSec > $deadline->remaining( time() ) ) {
 						$this->requeueRemaining( $account, $items, $index );
 						return;
 					}
