@@ -568,7 +568,7 @@ final class EnqueuerTest extends TestCase {
 			->once()
 			->andReturnUsing(
 				function ( $when, $hook, $args, $group, $unique, $priority ) use ( &$captured ) {
-					$captured = compact( 'hook', 'args', 'group', 'unique', 'priority' );
+					$captured = compact( 'when', 'hook', 'args', 'group', 'unique', 'priority' );
 					return 4242;
 				}
 			);
@@ -585,15 +585,22 @@ final class EnqueuerTest extends TestCase {
 			),
 		);
 
-		$actionId = $enqueuer->enqueueBatch( 'rakuten', $items );
+		// $when は固定値を渡して素通しされることを確かめる（既定 0 のときの time() は
+		// 実行時刻に依存して固定できないため、明示値で契約を固定する）。
+		$when = 1735689600;
+
+		$actionId = $enqueuer->enqueueBatch( 'rakuten', $items, $when );
 
 		$this->assertSame( 4242, $actionId );
+		$this->assertSame( $when, $captured['when'] );
 		$this->assertSame( Enqueuer::HOOK_REFRESH_BATCH, $captured['hook'] );
 		$this->assertSame( 'affilicard-rakuten', $captured['group'] );
 		$this->assertSame( Enqueuer::PRIORITY_SWEEP, $captured['priority'] );
 		$this->assertTrue( $captured['unique'] );
 		$this->assertSame( 'rakuten', $captured['args']['account'] );
-		$this->assertCount( 2, $captured['args']['items'] );
+		// 件数だけでなく順序を含めて完全一致であることを固定する（ハンドラは
+		// items の並び順に処理し、requeueRemaining() が index で切り出すため）。
+		$this->assertSame( $items, $captured['args']['items'] );
 	}
 
 	public function test_enqueueBatch_は_items_が空なら何も積まず0を返す(): void {
