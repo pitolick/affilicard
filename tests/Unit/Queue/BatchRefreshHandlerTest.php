@@ -939,11 +939,13 @@ final class BatchRefreshHandlerTest extends TestCase {
 	 * 結局 per-listing（enqueueManual）へ落ちて「前進保証」の趣旨（1件も処理できない
 	 * まま積み直すのを防ぐ）が達成できない。
 	 *
-	 * timeLimitSeconds===safetyMarginSeconds で remaining() を常に 0 にし、
-	 * クランプされれば waitSec が 0 になり `if ($waitSec > 0)` を満たさず usleep が
-	 * 一度も呼ばれないはずの状況を作る。修正後は mustAttempt の間はクランプを経ず
+	 * raw waitSec（1秒）を「このジョブ自身の開始時刻を基準にした総予算」（$startedAt 時点の
+	 * remaining() ＝ timeLimitSeconds − safetyMarginSeconds。既定値なら25秒）を大きく
+	 * 下回る値にし、上限（フォローアップの CodeRabbit レビュー指摘で追加）には掛からない
+	 * 状況を作る。クランプされれば waitSec が 0 になり `if ($waitSec > 0)` を満たさず
+	 * usleep が一度も呼ばれないはずの状況で、修正後は mustAttempt の間はクランプを経ず
 	 * 生の待機秒（正の値）で usleep が呼ばれ、2回目の tryAcquire で枠を取得して
-	 * refreshOne まで到達する。
+	 * refreshOne まで到達することを確認する。
 	 *
 	 * WP_Mock（Patchwork）は内部 PHP 関数（usleep・time 等）の上書きを許さないため、
 	 * usleep の呼び出し自体を直接アサートできない。代わりに $wpdb->query()
@@ -990,8 +992,70 @@ final class BatchRefreshHandlerTest extends TestCase {
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
 
-		// timeLimitSeconds === safetyMarginSeconds → remaining() は常に 0。
-		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 5, 5 );
+		// timeLimitSeconds=30・safetyMarginSeconds=5（既定）→ 上限（$startedAt 基準の
+		// remaining()）は25秒。raw waitSec（1秒）は十分に下回るため上限には掛からない。
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 30, 5 );
+
+		$handler->handle(
+			$this->args(
+				array(
+					'post_id'  => 1,
+					'platform' => 'rakuten-kobo',
+				)
+			)
+		);
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * CodeRabbit レビュー Major（フォローアップ）: 前進保証（$mustAttempt）が働く1件目の
+	 * 待機に上限が無いと、`throttle_overrides` に大きい値（例: 20000ms）が設定されている
+	 * サイトでは raw waitSec が数十秒に達し、その間 AS ランナーを丸ごと占有して後続
+	 * アクションの時間予算を食い潰してしまう。前進保証は「1件も処理できないまま積み直す」
+	 * のを防ぐのが目的であり、「いくらでも待ってよい」という意味ではない。
+	 *
+	 * timeLimitSeconds=15・safetyMarginSeconds=5 → 上限（$startedAt 基準の remaining()）は
+	 * 10秒。raw waitSec を20秒相当（next_ms ≈ 今+20秒）にして上限を上回らせる。上限を
+	 * 超える場合は待たずに（usleep を経ず）即座に requeueRemaining() で積み直されることを、
+	 * 2回目の tryAcquire・refreshOne が一切呼ばれないことで確認する。
+	 */
+	public function test_前進保証の1件目でも待機が上限を超えれば待たずに積み直す(): void {
+		$this->stubGeneralSettings();
+		$nowMs = (int) round( microtime( true ) * 1000 );
+		$this->mockRateLimiterWpdb( 0 ); // 1回目（唯一の呼び出し）は未獲得。上限超過で2回目には進まない。
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_ratelimit_rakuten', 0 )
+			->andReturn( $nowMs - 1100 + 20000 ); // next_ms ≈ 今+20秒 → raw waitSec ≈ 20秒（上限10秒を超過）。
+
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'refreshOne' )->never();
+
+		WP_Mock::userFunction( 'delete_transient' )->never();
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 ); // requeueRemaining の jitter。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never(); // enqueueManual は呼ばれない。
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH_BATCH,
+				array(
+					'account' => 'rakuten',
+					'items'   => array(
+						array(
+							'post_id'  => 1,
+							'platform' => 'rakuten-kobo',
+						),
+					),
+				),
+				'affilicard-rakuten',
+				false,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 9 );
+
+		// timeLimitSeconds=15・safetyMarginSeconds=5 → 上限（$startedAt 基準の remaining()）は10秒。
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 15, 5 );
 
 		$handler->handle(
 			$this->args(

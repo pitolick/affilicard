@@ -127,19 +127,37 @@ final class BatchRefreshHandler {
 			$acquire = $this->limiter->tryAcquire( $account, $intervalMs, $nowMs );
 			if ( ! $acquire['ok'] ) {
 				$rawWaitSec = max( 0, (int) ceil( $acquire['next_ms'] / 1000 ) - time() );
-				// 待機秒を残り時間でクランプする。要求した待機がクランプで減った
-				// （＝そのまま待つと期限を超える）場合は、待たずに未処理分（この listing を
-				// 含む）を積み直して終了する（spec §4-1）。前進保証が働く 1 件目は
-				// クランプを経ず生の待機秒（$rawWaitSec）だけフルに待つ（CodeRabbit レビュー
-				// 指摘）——1 件目は期限ゲート（canAfford）自体を素通りして必ず試みる設計
-				// なので、待機だけクランプされると待ち足りずに枠を取れないまま2回目の
-				// tryAcquire に進み、結局 per-listing へ落ちて「1件も処理できないまま
-				// 積み直す」を防ぐという前進保証の目的が達成できない（最悪 time limit を
-				// 超えるが、AS が次のバッチで回復するため「1件も処理できない」よりまし）。
-				$waitSec = $mustAttempt ? $rawWaitSec : $deadline->clampWait( time(), $rawWaitSec );
-				if ( $waitSec < $rawWaitSec && ! $mustAttempt ) {
-					$this->requeueRemaining( $account, $items, $index );
-					return;
+				if ( $mustAttempt ) {
+					// 前進保証が働く 1 件目はクランプを経ず生の待機秒（$rawWaitSec）で待つ
+					// ——1 件目は期限ゲート（canAfford）自体を素通りして必ず試みる設計
+					// なので、待機だけクランプされると待ち足りずに枠を取れないまま2回目の
+					// tryAcquire に進み、結局 per-listing へ落ちて「1件も処理できないまま
+					// 積み直す」を防ぐという前進保証の目的が達成できない。
+					//
+					// ただし青天井ではない（CodeRabbit レビュー指摘）。throttle_overrides に
+					// 大きい値（例: 20000ms）が設定されていると $rawWaitSec が数十秒に達し得て、
+					// AS ランナーの時間予算を丸ごと占有し後続アクションを食い潰してしまう。
+					// 上限は「このジョブ自身の開始時刻（$startedAt）を基準に評価した総予算」
+					// （$deadline->remaining( $startedAt )）——"now" 基準の remaining() を
+					// 上限に使うと、他の item が先に消費した分でこの上限自体が 0 になり得て
+					// 前進保証そのものが機能しなくなる（直前に直した Minor と同じ症状を
+					// 再発させる）ため、経過時間の影響を受けない $startedAt を基準にする。
+					// 上限を超える場合は待たずに「枠が空く近く」へ積み直す——積み直した先で
+					// 改めてこの item が 1 件目として試みられるため、前進保証そのものは保たれる。
+					if ( $rawWaitSec > $deadline->remaining( $startedAt ) ) {
+						$this->requeueRemaining( $account, $items, $index );
+						return;
+					}
+					$waitSec = $rawWaitSec;
+				} else {
+					// 待機秒を残り時間でクランプする。要求した待機がクランプで減った
+					// （＝そのまま待つと期限を超える）場合は、待たずに未処理分（この
+					// listing を含む）を積み直して終了する（spec §4-1）。
+					$waitSec = $deadline->clampWait( time(), $rawWaitSec );
+					if ( $waitSec < $rawWaitSec ) {
+						$this->requeueRemaining( $account, $items, $index );
+						return;
+					}
 				}
 				if ( $waitSec > 0 ) {
 					usleep( $waitSec * 1000000 );
