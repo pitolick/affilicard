@@ -1908,7 +1908,7 @@ git commit -m "chore: リリース 3.5.0"
 
 - **Task 6（sweep 改修）は Task 10（StocktakePolicy）に依存する**。Task 6 内で棚卸し判定を呼ぶため、Task 10 を先に実施するか、Task 6 では該当行をコメントアウトして Task 10 で有効化する
 - Task 12（配線）は Task 3・7 の完了後でなければ動作確認できない
-- Task 4（HTTP タイムアウト）は独立しているため、いつ実施してもよい
+- Task 4（`as_schedule_single_action()` 戻り値の扱いと depth cap の会計）は独立しているため、いつ実施してもよい
 
 ## 本番検証（マージ前に実施）
 

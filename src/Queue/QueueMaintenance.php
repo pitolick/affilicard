@@ -279,24 +279,31 @@ final class QueueMaintenance {
 				}
 
 				if ( count( $buckets[ $account ] ) >= $batchSizes[ $account ] ) {
-					$this->flushBucket( $account, $buckets[ $account ], $bucketStarts[ $account ], $depth, $firstUnconfirmedId );
+					// レビュー Major（完全バッチの cap 未確認）: 1 商品が複数 account の
+					// listing を持つ場合、この if は同じ商品の処理中に複数回入りうる。
+					// ループ先頭の cap チェックは次の商品まで働かないため、ここでも
+					// flushBucket() の前に cap の残り容量を確認する（端数バッチと同じ
+					// 扱いに揃える。§spec 参照）。
+					if ( $depth >= $cap ) {
+						$this->markUnconfirmed( $bucketStarts[ $account ], $firstUnconfirmedId );
+					} else {
+						$this->flushBucket( $account, $buckets[ $account ], $bucketStarts[ $account ], $depth, $firstUnconfirmedId );
+					}
 					$buckets[ $account ] = array();
 				}
 			}
 		}
 
 		// 端数を流す（バッチサイズに満たなかった残り）。完全バッチ（上のループ内）と
-		// 異なり、ここは cap を再確認していなかった（レビュー Major 2）。残り容量が
-		// 無ければ投入を試みず、次の sweep に委ねる（$firstUnconfirmedId 経由）。
+		// 同じく、投入前に queue_depth_cap の残り容量を確認する。残り容量が無ければ
+		// 投入を試みず、次の sweep に委ねる（$firstUnconfirmedId 経由）。
 		foreach ( $buckets as $account => $items ) {
 			if ( array() === $items ) {
 				continue;
 			}
 
 			if ( $depth >= $cap ) {
-				$firstUnconfirmedId = null === $firstUnconfirmedId
-					? $bucketStarts[ $account ]
-					: min( $firstUnconfirmedId, $bucketStarts[ $account ] );
+				$this->markUnconfirmed( $bucketStarts[ $account ], $firstUnconfirmedId );
 				continue;
 			}
 
@@ -357,6 +364,15 @@ final class QueueMaintenance {
 			)
 		);
 
+		$this->markUnconfirmed( $bucketStart, $firstUnconfirmedId );
+	}
+
+	/**
+	 * 作業が失われた（投入失敗、または queue_depth_cap 不足で投入自体を試みなかった）
+	 * バケットの開始 post_id で $firstUnconfirmedId を更新する。複数バケットから
+	 * 呼ばれうるため、既存値より手前（小さい）方の値を残す（spec §4-2・レビュー Major 1/2）。
+	 */
+	private function markUnconfirmed( int $bucketStart, ?int &$firstUnconfirmedId ): void {
 		$firstUnconfirmedId = null === $firstUnconfirmedId ? $bucketStart : min( $firstUnconfirmedId, $bucketStart );
 	}
 

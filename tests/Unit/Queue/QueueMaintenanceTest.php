@@ -959,6 +959,103 @@ final class QueueMaintenanceTest extends TestCase {
 	}
 
 	/**
+	 * CodeRabbit レビュー Major: 完全バッチ（main loop 内で BATCH_SIZE 到達により
+	 * その場で flush するもの）は、端数バッチと異なり flushBucket() 呼び出し前に
+	 * queue_depth_cap を確認していなかった。ループ先頭の cap チェックは次の商品に
+	 * 到達するまで働かないため、1 商品が複数 account（例: 楽天・DMM）の listing を
+	 * 持つ場合、同じ商品を処理している最中に 2 回目の flushBucket() が cap 超過後も
+	 * 実行されてしまう。
+	 *
+	 * cap=1・開始 depth=0・両 account ともバッチサイズ 1（filter で強制）にし、1 商品
+	 * （id=10）に楽天・DMM 両方の stale な自動 listing を持たせる。楽天の listing が
+	 * 先に処理され flush で depth が cap(1) に到達するため、続く DMM の listing は
+	 * （修正後は）as_schedule_single_action へ到達せず、その開始商品（10）の手前
+	 * （9）へカーソルが巻き戻る。
+	 */
+	public function test_sweep_完全バッチもqueue_depth_capを再確認して超過分は投入しない(): void {
+		$this->stubCursor( 0 );
+		$this->stubGeneralSettings( array( 'queue_depth_cap' => 1 ) );
+		$this->stubQueueDepth( 0 ); // 開始時点は空。
+		$this->stubFilterCleanup();
+		$this->stubTwoPlatforms();
+		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
+
+		// 既定の算出結果（time limit 30・安全マージン 5）は楽天 22 件・DMM 25 件。
+		// どちらもバッチサイズ 1 に強制し、1 件目の listing で即座に flush 条件を満たす
+		// ようにする。
+		WP_Mock::onFilter( 'affilicard_refresh_batch_size' )->with( 22, 'rakuten' )->reply( 1 );
+		WP_Mock::onFilter( 'affilicard_refresh_batch_size' )->with( 25, 'dmm' )->reply( 1 );
+
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 10 ) );
+
+		$stale = gmdate( 'c', time() - 25 * 3600 );
+		$repo  = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->once()->with( 10 )->andReturn(
+			$this->product(
+				10,
+				array(
+					array(
+						'platform'        => 'rakuten-kobo',
+						'enabled'         => true,
+						'update_mode'     => 'auto',
+						'auto_update'     => true,
+						'external_id'     => 'e10r',
+						'last_fetched_at' => $stale,
+					),
+					array(
+						'platform'        => 'dmm-books',
+						'enabled'         => true,
+						'update_mode'     => 'auto',
+						'auto_update'     => true,
+						'external_id'     => 'e10d',
+						'last_fetched_at' => $stale,
+					),
+				)
+			)
+		);
+
+		// 楽天の完全バッチ（1 件・post_id=10）だけが投入され、depth が cap(1) に達する。
+		// DMM 分の呼び出しがあれば「一致する期待が無い」として WP_Mock が検出するため、
+		// ここでの ->once()->with(...) が「DMM は as_schedule_single_action に到達しない」
+		// ことの検証を兼ねる。
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH_BATCH,
+				array(
+					'account' => 'rakuten',
+					'items'   => array(
+						array(
+							'post_id'  => 10,
+							'platform' => 'rakuten-kobo',
+						),
+					),
+				),
+				'affilicard-rakuten',
+				true,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 801 );
+
+		WP_Mock::userFunction( 'update_option' )->once()->with( SweepCursor::OPTION_KEY, 9, false );
+		WP_Mock::userFunction( 'delete_option' )->never();
+
+		$maintenance = new QueueMaintenance(
+			$repo,
+			new Enqueuer(),
+			$this->registryWithDmm(),
+			new SweepCursor(),
+			depthCap: 1
+		);
+
+		$result = $maintenance->sweep( 200 );
+
+		$this->assertFalse( $result );
+		$this->assertConditionsMet();
+	}
+
+	/**
 	 * 設計要点 5: 棚卸し対象の商品は listing 単位ではなく商品単位で丸ごと除外する
 	 * （PlatformConfig::find 等、listing ループに一切到達しない）。
 	 */
