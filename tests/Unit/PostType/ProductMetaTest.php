@@ -164,6 +164,47 @@ final class ProductMetaTest extends TestCase {
 		$this->assertSame( '', $cb( '' ) );
 	}
 
+	public function test_registers_last_published_at_as_read_only_meta(): void {
+		$reg = $this->captureRegistrations();
+
+		$this->assertArrayHasKey( ProductPostType::META_LAST_PUBLISHED_AT, $reg );
+		[ $post_type, $args ] = $reg[ ProductPostType::META_LAST_PUBLISHED_AT ];
+		$this->assertSame( ProductPostType::POST_TYPE, $post_type );
+		$this->assertSame( 'string', $args['type'] );
+		$this->assertTrue( $args['single'] );
+		// REST に露出させない。露出させたまま auth_callback を false にすると Gutenberg が
+		// 読み取った meta を保存時に送り返し、投稿保存が丸ごと 403 rest_cannot_update で失敗する。
+		$this->assertFalse( $args['show_in_rest'] );
+		$this->assertIsCallable( $args['auth_callback'] );
+		// cap でも拒否する（REST 以外の書き込み経路を塞ぐ）。書き込みは PublicationDate::touch() のみ。
+		$this->assertFalse( ( $args['auth_callback'] )() );
+	}
+
+	/**
+	 * REST に露出する meta は必ず編集者が書き込める（auth_callback が true を返す）こと。
+	 *
+	 * Gutenberg の useEntityProp は REST 応答の `meta` を丸ごと読み取り、保存時に丸ごと送り返す。
+	 * そのため「REST には出るが書き込みは拒否」という meta が 1 つでもあると、その CPT の
+	 * 投稿保存すべてが 403 rest_cannot_update で失敗する（実測: e2e の商品サイドバー保存が全滅）。
+	 * read-only にしたい meta は show_in_rest=false にすること。
+	 */
+	public function test_every_rest_exposed_meta_is_writable_by_editors(): void {
+		WP_Mock::userFunction( 'current_user_can' )->with( 'edit_posts' )->andReturn( true );
+
+		foreach ( $this->captureRegistrations() as $key => $entry ) {
+			[ , $args ] = $entry;
+			if ( empty( $args['show_in_rest'] ) ) {
+				continue;
+			}
+			$this->assertTrue(
+				( $args['auth_callback'] )(),
+				"meta '{$key}' は REST に露出しているのに auth_callback が書き込みを拒否している。"
+					. ' Gutenberg の保存が 403 rest_cannot_update で失敗するため、'
+					. ' read-only にしたいなら show_in_rest=false にすること。'
+			);
+		}
+	}
+
 	public function test_registers_mask_meta_fields(): void {
 		$reg = $this->captureRegistrations();
 

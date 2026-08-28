@@ -149,5 +149,25 @@ final class ProductMeta {
 				},
 			)
 		);
+
+		register_post_meta(
+			ProductPostType::POST_TYPE,
+			ProductPostType::META_LAST_PUBLISHED_AT,
+			array(
+				'type'          => 'string',
+				'single'        => true,
+				// REST 非露出。棚卸し判定の基礎データのため read-only にしたいが、WP に「REST で
+				// 読めるが書けない meta」は存在しない。show_in_rest=true のまま auth_callback を
+				// false にすると REST 応答の `meta` に載り、Gutenberg の useEntityProp が読み取って
+				// 保存時にそのまま送り返すため、投稿保存が丸ごと 403 rest_cannot_update
+				// （Sorry, you are not allowed to edit the affilicard_last_published_at custom field）
+				// で失敗する。読み取り側は PHP（PublicationDate::get() / 商品一覧列）だけなので
+				// REST へ出す必要が無く、非露出にすることで編集も同時に防げる。
+				'show_in_rest'  => false,
+				// 併せて cap でも拒否する。REST 以外の書き込み経路（Custom Fields メタボックス等）を塞ぐ。
+				// 書き込みは PublicationDate::touch()（update_post_meta 直呼び）に一元化する。
+				'auth_callback' => static fn (): bool => false,
+			)
+		);
 	}
 }

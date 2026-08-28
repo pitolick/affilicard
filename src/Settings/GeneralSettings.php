@@ -28,6 +28,8 @@ final class GeneralSettings {
 		'retention_failed_days'  => 7,
 		// すべてのカードで商品画像を描画しない。
 		'hide_product_images'    => false,
+		'stocktake_enabled'      => true,
+		'stocktake_days'         => 180,
 	);
 
 	private const MIN_TTL = 60;
@@ -87,6 +89,14 @@ final class GeneralSettings {
 
 	public static function retentionFailedDays(): int {
 		return (int) self::get()['retention_failed_days'];
+	}
+
+	public static function isStocktakeEnabled(): bool {
+		return (bool) self::get()['stocktake_enabled'];
+	}
+
+	public static function stocktakeDays(): int {
+		return max( 1, (int) self::get()['stocktake_days'] );
 	}
 
 	/**
@@ -160,6 +170,11 @@ final class GeneralSettings {
 		$retention_done_hours  = isset( $values['retention_done_hours'] ) ? max( 1, (int) $values['retention_done_hours'] ) : self::DEFAULTS['retention_done_hours'];
 		$retention_failed_days = isset( $values['retention_failed_days'] ) ? max( 1, (int) $values['retention_failed_days'] ) : self::DEFAULTS['retention_failed_days'];
 
+		$stocktake_enabled = isset( $values['stocktake_enabled'] ) ? (bool) $values['stocktake_enabled'] : (bool) self::DEFAULTS['stocktake_enabled'];
+		// 0 や負数を許すと基準日との比較が常に真になり、全商品が即座に棚卸しされて
+		// 価格が一斉に消える。無効化は stocktake_enabled が担うため 0 に意味を持たせない。
+		$stocktake_days = isset( $values['stocktake_days'] ) ? max( 1, (int) $values['stocktake_days'] ) : (int) self::DEFAULTS['stocktake_days'];
+
 		return array(
 			'cache_ttl_seconds'      => $ttl,
 			'default_product_type'   => $type,
@@ -172,6 +187,8 @@ final class GeneralSettings {
 			'retention_done_hours'   => $retention_done_hours,
 			'retention_failed_days'  => $retention_failed_days,
 			'hide_product_images'    => $hide_product_images,
+			'stocktake_enabled'      => $stocktake_enabled,
+			'stocktake_days'         => $stocktake_days,
 		);
 	}
 }

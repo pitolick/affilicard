@@ -6,6 +6,8 @@ namespace Affilicard\PostType;
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Queue\Enqueuer;
+use Affilicard\Stocktake\PublicationDate;
+use Affilicard\Stocktake\StocktakePolicy;
 use Affilicard\Util\JsonField;
 
 /**
@@ -20,16 +22,37 @@ use Affilicard\Util\JsonField;
  * title 属性に付記する（Task 18）。`fetch_error` は provider 由来の外部文字列のため、
  * `wp_strip_all_tags()` によるタグ除去＋長さ制限（200文字）でサニタイズしたうえで、
  * 出力直前に `esc_attr()` で最終エスケープする二重防御を行う（spec §9-3）。
+ *
+ * 「最終掲載日」列（Task 11）は棚卸し状況を一覧で把握する唯一の導線。値は
+ * `ProductPostType::META_LAST_PUBLISHED_AT`（ISO8601, UTC）で、辞書順＝時系列順のため
+ * `meta_value` の文字列比較でそのままソートできる。ソート実装（`applySortQuery()`）は
+ * 値を持たない投稿（未同期の既存商品が大半）が結果から消えないよう EXISTS/NOT EXISTS を
+ * OR で束ねた LEFT JOIN 相当の meta_query を使う（詳細は同メソッドの docblock）。
+ * `StocktakePolicy::isRetired()` が true（棚卸し対象。最終掲載日が無ければ棚卸し基準日へ
+ * フォールバックして判定）であれば日付（無ければ em dash）の横にアーカイブアイコンを付記する。
+ * なお「最終同期」列（`COLUMN_LAST_VERIFIED`）のソートはスコープ外（値が listing の JSON
+ * 配列内にあり、meta ソートに乗せるには派生 meta の追加と既存商品のマイグレーションが
+ * 必要で割に合わないため。spec §5-8）。
  */
 final class ProductListColumns {
 
-	public const COLUMN_KEY           = 'affilicard_fallback';
-	public const COLUMN_LAST_VERIFIED = 'affilicard_last_verified';
+	public const COLUMN_KEY            = 'affilicard_fallback';
+	public const COLUMN_LAST_VERIFIED  = 'affilicard_last_verified';
+	public const COLUMN_LAST_PUBLISHED = 'affilicard_last_published';
+
+	/**
+	 * meta_query 内で「最終掲載日」ソート節を指し示す名前。EXISTS/NOT EXISTS の2節を
+	 * OR で束ねて同じ alias を共有させ、orderby 側から名指しで参照するために使う
+	 * （applySortQuery() 参照）。
+	 */
+	private const SORT_CLAUSE_KEY = 'affilicard_last_published_clause';
 
 	public static function register(): void {
 		$hook_post_type = ProductPostType::POST_TYPE;
 		add_filter( "manage_{$hook_post_type}_posts_columns", array( self::class, 'addColumn' ) );
 		add_action( "manage_{$hook_post_type}_posts_custom_column", array( self::class, 'renderColumn' ), 10, 2 );
+		add_filter( "manage_edit-{$hook_post_type}_sortable_columns", array( self::class, 'sortableColumns' ) );
+		add_action( 'pre_get_posts', array( self::class, 'applySortQuery' ) );
 	}
 
 	/**
@@ -41,8 +64,9 @@ final class ProductListColumns {
 		foreach ( $columns as $key => $label ) {
 			$new[ $key ] = $label;
 			if ( 'title' === $key ) {
-				$new[ self::COLUMN_KEY ]           = __( 'Fallback', 'affilicard' );
-				$new[ self::COLUMN_LAST_VERIFIED ] = __( '最終同期', 'affilicard' );
+				$new[ self::COLUMN_KEY ]            = __( 'Fallback', 'affilicard' );
+				$new[ self::COLUMN_LAST_VERIFIED ]  = __( '最終同期', 'affilicard' );
+				$new[ self::COLUMN_LAST_PUBLISHED ] = __( '最終掲載日', 'affilicard' );
 			}
 		}
 		return $new;
@@ -56,9 +80,92 @@ final class ProductListColumns {
 			case self::COLUMN_LAST_VERIFIED:
 				self::renderLastVerifiedColumn( $post_id );
 				return;
+			case self::COLUMN_LAST_PUBLISHED:
+				self::renderLastPublishedColumn( $post_id );
+				return;
 			default:
 				return;
 		}
+	}
+
+	/**
+	 * 「最終掲載日」列をソート可能列として登録する（`manage_edit-{post_type}_sortable_columns`）。
+	 * 値は ISO8601（UTC）文字列のため、meta_value の文字列比較がそのまま時系列順になる。
+	 *
+	 * @param array<string, string> $columns
+	 * @return array<string, string>
+	 */
+	public static function sortableColumns( array $columns ): array {
+		$columns[ self::COLUMN_LAST_PUBLISHED ] = self::COLUMN_LAST_PUBLISHED;
+		return $columns;
+	}
+
+	/**
+	 * 「最終掲載日」列でのソート指定を meta クエリへ変換する（`pre_get_posts`）。
+	 *
+	 * 管理画面のメインクエリ以外（フロント表示・サイドバーウィジェット等）まで
+	 * meta ソートに巻き込まないよう、`is_admin()` かつ `$query->is_main_query()` の
+	 * ときだけ作用する。`pre_get_posts` はグローバルなフックのため、対象 post_type
+	 * （商品 CPT）以外の一覧（例: 固定ページ一覧に同名の orderby が来た場合）には
+	 * 作用しないことも合わせて確認する。
+	 *
+	 * `meta_key` + `orderby=meta_value` という古典的パターンは暗黙に
+	 * `compare=EXISTS` の INNER JOIN になり、そのメタを持たない投稿が結果集合から
+	 * 消えてしまう。最終掲載日メタ（`ProductPostType::META_LAST_PUBLISHED_AT`）は
+	 * `PublishTrigger::syncPost()` でしか書かれず、既存カタログの大多数はまだ
+	 * このメタを持たない。にもかかわらずそれらが一覧からごっそり消えるのでは
+	 * 「棚卸し状況を一覧で把握する」というこの列の目的そのものが壊れる
+	 * （最も確認したい「掲載日が無く棚卸し対象になっている商品」が見えなくなる）。
+	 * そのため EXISTS/NOT EXISTS の2節を `relation => OR` で束ねた名前付き節にし、
+	 * `orderby` 側でその節名を参照する（WordPress の標準パターン）。
+	 *
+	 * **`orderby` で参照する節は EXISTS ではなく NOT EXISTS 側でなければならない。**
+	 * 単体テスト（`WP_Query::set()` に渡す引数の形だけを見る）ではこの違いは
+	 * 検出できず、wp-env 上の実 SQL で初めて表面化した（tests/e2e/product-list-sort.spec.js。
+	 * レビュー Major 3）。`WP_Meta_Query` は `compare=NOT EXISTS` のときだけ
+	 * `meta_key` の一致条件を JOIN の ON 句へ埋め込む（`LEFT JOIN wp_postmeta AS mt1
+	 * ON (post_id = mt1.post_id AND mt1.meta_key = '…')`）ため、その alias の
+	 * `meta_value` は「値があればその値・無ければ NULL」に確定する。一方
+	 * `compare=EXISTS` の JOIN は `meta_key` 条件を ON ではなく WHERE 側に置く
+	 * （`LEFT JOIN wp_postmeta ON (post_id = post_id)` のみ、`meta_key` 一致は
+	 * WHERE で判定）ため、対象 meta を持たない投稿では「その投稿が持つ他の meta
+	 * 行すべて」が JOIN 結果に紛れ込む。`GROUP BY wp_posts.ID` で 1 行へ畳まれる際に
+	 * ORDER BY がどの行の `meta_value` を拾うかは不定（`affilicard_product_type` 等
+	 * 無関係な meta の値が使われることがあり、MySQL の実行計画に依存する）。
+	 * 実際に EXISTS 側の alias を `orderby` に使うと、最終掲載日を持たない商品が
+	 * 意図しない位置に紛れ込む（e2e で実測）。NOT EXISTS 側は「WHERE で
+	 * unique な包含判定を担う」役割と「ORDER BY で使える確定値を提供する」役割を
+	 * 偶然にも兼ねられる——EXISTS 節はこの並び替えでは値としては一切参照せず、
+	 * 包含判定（OR の片翼）にのみ使う。
+	 */
+	public static function applySortQuery( \WP_Query $query ): void {
+		if ( ! is_admin() || ! $query->is_main_query() ) {
+			return;
+		}
+		if ( ProductPostType::POST_TYPE !== $query->get( 'post_type' ) ) {
+			return;
+		}
+		if ( self::COLUMN_LAST_PUBLISHED !== $query->get( 'orderby' ) ) {
+			return;
+		}
+
+		$order = 'ASC' === strtoupper( (string) $query->get( 'order' ) ) ? 'ASC' : 'DESC';
+
+		$query->set(
+			'meta_query',
+			array(
+				'relation'            => 'OR',
+				array(
+					'key'     => ProductPostType::META_LAST_PUBLISHED_AT,
+					'compare' => 'EXISTS',
+				),
+				self::SORT_CLAUSE_KEY => array(
+					'key'     => ProductPostType::META_LAST_PUBLISHED_AT,
+					'compare' => 'NOT EXISTS',
+				),
+			)
+		);
+		$query->set( 'orderby', array( self::SORT_CLAUSE_KEY => $order ) );
 	}
 
 	private static function renderFallbackColumn( int $post_id ): void {
@@ -206,5 +313,39 @@ final class ProductListColumns {
 			return;
 		}
 		echo '<span aria-hidden="true">—</span>';
+	}
+
+	/**
+	 * `PublicationDate::get()`（UTC epoch 秒）を `Y-m-d` で表示する。値が無ければ
+	 * 他カラムと同じ em dash。
+	 *
+	 * 表示は `wp_date()` でサイトのタイムゾーンに整形する（隣接する renderLastVerifiedColumn()
+	 * の「最終同期」列と同じ基準に揃える）。以前は `gmdate()`（UTC 固定）を使っており、
+	 * JST サイトで JST 08:00 に公開した商品が UTC では前日 23:00 になるため「最終掲載日」列
+	 * だけ 1 日前の日付が出ていた（final-fix-report.md Minor）。棚卸し判定（下記
+	 * isRetired()）と保存値そのものは UTC epoch 秒のまま変更しない——ずれていたのは
+	 * このメソッドの表示整形だけであり、判定ロジックには手を入れない。
+	 *
+	 * `StocktakePolicy::isRetired()` は最終掲載日が無い（null）ときこそ棚卸し基準日
+	 * （`GeneralSettings`/`PluginUpgrade::OPTION_STOCKTAKE_BASELINE`）にフォールバック
+	 * して判定する設計であり、「最終掲載日が無い＝判定不能」ではない。最終掲載日メタは
+	 * `PublishTrigger::syncPost()` でしか書かれず既存カタログの大多数が未保有のため、
+	 * ここで判定を打ち切ると棚卸し対象の大半が一覧で一切区別できなくなる（spec §5-2）。
+	 * そのため isRetired() は $ts の有無に関わらず必ず呼び、アーカイブアイコンの表示可否
+	 * だけをその結果に委ねる。
+	 */
+	private static function renderLastPublishedColumn( int $post_id ): void {
+		$ts = ( new PublicationDate() )->get( $post_id );
+
+		if ( null === $ts ) {
+			echo '<span aria-hidden="true">—</span>';
+		} else {
+			echo esc_html( wp_date( 'Y-m-d', $ts ) );
+		}
+
+		if ( ( new StocktakePolicy() )->isRetired( $post_id, time() ) ) {
+			echo ' <span class="dashicons dashicons-archive" title="'
+				. esc_attr__( '棚卸し対象（自動更新を停止中）', 'affilicard' ) . '"></span>';
+		}
 	}
 }

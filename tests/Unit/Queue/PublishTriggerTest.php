@@ -4,11 +4,13 @@ declare(strict_types=1);
 namespace Affilicard\Tests\Unit\Queue;
 
 use Affilicard\Platform\PlatformConfig;
+use Affilicard\PostType\ProductPostType;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Provider\Rakuten\RakutenProvider;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\PublishTrigger;
 use Affilicard\Repository\ProductRepositoryInterface;
+use Affilicard\Stocktake\PublicationDate;
 use Mockery;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
@@ -114,7 +116,7 @@ final class PublishTriggerTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->once()->with( 12 )->andReturn( $this->product( 12 ) );
 
-		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->resolveProductIds( '<!-- wp:affilicard/product-card /-->' );
+		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->resolveProductIds( '<!-- wp:affilicard/product-card /-->' );
 
 		$this->assertSame( array( 12 ), $ids );
 	}
@@ -133,7 +135,7 @@ final class PublishTriggerTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'findBySlug' )->once()->with( 'sample-manga' )->andReturn( $this->product( 21 ) );
 
-		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->resolveProductIds( '<!-- wp:affilicard/product-card /-->' );
+		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->resolveProductIds( '<!-- wp:affilicard/product-card /-->' );
 
 		$this->assertSame( array( 21 ), $ids );
 	}
@@ -155,7 +157,7 @@ final class PublishTriggerTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'findByExternalId' )->once()->with( 'rakuten-kobo', 'deadbeef01' )->andReturn( $this->product( 33 ) );
 
-		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->resolveProductIds( '<!-- wp:affilicard/product-card /-->' );
+		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->resolveProductIds( '<!-- wp:affilicard/product-card /-->' );
 
 		$this->assertSame( array( 33 ), $ids );
 	}
@@ -180,7 +182,7 @@ final class PublishTriggerTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->once()->with( 44 )->andReturn( $this->product( 44 ) );
 
-		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->resolveProductIds( '<!-- wp:core/group -->...<!-- /wp:core/group -->' );
+		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->resolveProductIds( '<!-- wp:core/group -->...<!-- /wp:core/group -->' );
 
 		$this->assertSame( array( 44 ), $ids );
 	}
@@ -199,7 +201,7 @@ final class PublishTriggerTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->once()->with( 999 )->andReturn( null );
 
-		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->resolveProductIds( '<!-- wp:affilicard/product-card /-->' );
+		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->resolveProductIds( '<!-- wp:affilicard/product-card /-->' );
 
 		$this->assertSame( array(), $ids );
 	}
@@ -210,9 +212,51 @@ final class PublishTriggerTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldNotReceive( 'find' );
 
-		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->resolveProductIds( '' );
+		$ids = ( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->resolveProductIds( '' );
 
 		$this->assertSame( array(), $ids );
+	}
+
+	/**
+	 * syncPost（最終掲載日の記録）のテスト。
+	 */
+	public function test_onTransition_公開時に解決した商品の最終掲載日を記録する(): void {
+		WP_Mock::userFunction( 'wp_is_post_autosave' )->andReturn( false );
+		WP_Mock::userFunction( 'wp_is_post_revision' )->andReturn( false );
+		WP_Mock::userFunction( 'parse_blocks' )->andReturn(
+			array(
+				array(
+					'blockName'   => 'affilicard/product-card',
+					'attrs'       => array( 'productId' => 50 ),
+					'innerBlocks' => array(),
+				),
+			)
+		);
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		// listings 空なので forceEnqueueEligibleListings 側は何も enqueue しない。
+		$repo->shouldReceive( 'find' )->with( 50 )->andReturn( $this->product( 50 ) );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->once()
+			->with( 50, ProductPostType::META_LAST_PUBLISHED_AT, true )
+			->andReturn( '' );
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->with( 50, ProductPostType::META_LAST_PUBLISHED_AT, Mockery::type( 'string' ) );
+
+		$post = $this->post(
+			array(
+				'ID'           => 104,
+				'post_type'    => 'post',
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:affilicard/product-card /-->',
+			)
+		);
+
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->onTransition( 'publish', 'draft', $post );
+
+		$this->assertConditionsMet();
 	}
 
 	/**
@@ -231,7 +275,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onTransition( 'draft', 'auto-draft', $post );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->onTransition( 'draft', 'auto-draft', $post );
 
 		$this->assertConditionsMet();
 	}
@@ -251,7 +295,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onTransition( 'publish', 'draft', $post );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->onTransition( 'publish', 'draft', $post );
 
 		$this->assertConditionsMet();
 	}
@@ -272,7 +316,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onTransition( 'publish', 'draft', $post );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->onTransition( 'publish', 'draft', $post );
 
 		$this->assertConditionsMet();
 	}
@@ -293,6 +337,10 @@ final class PublishTriggerTest extends TestCase {
 
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->with( 12 )->andReturn( $this->product( 12, array( $this->eligibleListing() ) ) );
+
+		// 最終掲載日の記録（PublicationDate::touch）。このテストの主眼はenqueueForcedなので緩く許容する。
+		WP_Mock::userFunction( 'get_post_meta' )->andReturn( '' );
+		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
 
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once()
 			->with(
@@ -337,7 +385,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onTransition( 'publish', 'draft', $post );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->onTransition( 'publish', 'draft', $post );
 
 		$this->assertConditionsMet();
 	}
@@ -368,6 +416,10 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
+		// 最終掲載日の記録（PublicationDate::touch）。このテストの主眼はenqueueForcedしないことなので緩く許容する。
+		WP_Mock::userFunction( 'get_post_meta' )->andReturn( '' );
+		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
+
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
 
@@ -380,7 +432,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onTransition( 'publish', 'draft', $post );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->onTransition( 'publish', 'draft', $post );
 
 		$this->assertConditionsMet();
 	}
@@ -406,6 +458,10 @@ final class PublishTriggerTest extends TestCase {
 			$this->product( 14, array( $this->eligibleListing( array( 'platform' => 'unknown-platform' ) ) ) )
 		);
 
+		// 最終掲載日の記録（PublicationDate::touch）。このテストの主眼はenqueueForcedしないことなので緩く許容する。
+		WP_Mock::userFunction( 'get_post_meta' )->andReturn( '' );
+		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
+
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
 
 		$post = $this->post(
@@ -417,7 +473,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onTransition( 'publish', 'draft', $post );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->onTransition( 'publish', 'draft', $post );
 
 		$this->assertConditionsMet();
 	}
@@ -449,7 +505,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onTransition( 'publish', 'draft', $post );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->onTransition( 'publish', 'draft', $post );
 
 		$this->assertConditionsMet();
 	}
@@ -474,6 +530,10 @@ final class PublishTriggerTest extends TestCase {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->with( 12 )->andReturn( $this->product( 12, array( $this->eligibleListing() ) ) );
 
+		// 最終掲載日の記録（PublicationDate::touch）。このテストの主眼はenqueueForcedなので緩く許容する。
+		WP_Mock::userFunction( 'get_post_meta' )->andReturn( '' );
+		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
+
 		// enqueueForced は base args と force args の 2 回 unschedule する。
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->twice();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 301 );
@@ -495,7 +555,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onUpdated( 200, $after, $before );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->onUpdated( 200, $after, $before );
 
 		$this->assertConditionsMet();
 	}
@@ -521,7 +581,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onUpdated( 201, $after, $before );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->onUpdated( 201, $after, $before );
 
 		$this->assertConditionsMet();
 	}
@@ -549,7 +609,7 @@ final class PublishTriggerTest extends TestCase {
 			)
 		);
 
-		( new PublishTrigger( $repo, new Enqueuer(), $this->registry() ) )->onUpdated( 202, $after, $before );
+		( new PublishTrigger( $repo, new Enqueuer(), $this->registry(), new PublicationDate() ) )->onUpdated( 202, $after, $before );
 
 		$this->assertConditionsMet();
 	}

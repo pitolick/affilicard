@@ -7,6 +7,7 @@ use Affilicard\Platform\PlatformConfig;
 use Affilicard\Pricing\ListingEligibility;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Repository\ProductRepositoryInterface;
+use Affilicard\Stocktake\PublicationDate;
 
 /**
  * 記事（投稿）の公開/更新をトリガーに、本文中の `affilicard/product-card` ブロックが
@@ -21,13 +22,17 @@ use Affilicard\Repository\ProductRepositoryInterface;
  * ListingRefresher::refreshOne() は v2.4.0 で update_mode/enabled のみ実行時に再チェック
  * するが auto_update は見ないため、auto_update=false の listing を積まないことについては
  * enqueue 側のこのフィルタが引き続き唯一のゲートになる。
+ *
+ * 併せて、解決できた商品には棚卸し用の最終掲載日（PublicationDate::touch()）を記録する。
+ * 記事が参照する＝掲載面に載っているとみなせるタイミングはここ（公開/更新）だけのため。
  */
 final class PublishTrigger {
 
 	public function __construct(
 		private ProductRepositoryInterface $repository,
 		private Enqueuer $enqueuer,
-		private ProviderRegistry $providerRegistry
+		private ProviderRegistry $providerRegistry,
+		private PublicationDate $publicationDate
 	) {}
 
 	/**
@@ -61,6 +66,7 @@ final class PublishTrigger {
 		}
 
 		foreach ( $this->resolveProductIds( (string) $post->post_content ) as $productId ) {
+			$this->publicationDate->touch( $productId, time() );
 			$this->forceEnqueueEligibleListings( $productId );
 		}
 	}

@@ -6,6 +6,7 @@ namespace Affilicard\Rest;
 use Affilicard\Account\AccountRegistry;
 use Affilicard\Queue\ActionStoreInterface;
 use Affilicard\Queue\Enqueuer;
+use Affilicard\Queue\QueueMaintenance;
 use Affilicard\Queue\QueueStats;
 use Affilicard\Settings\GeneralSettings;
 use WP_REST_Request;
@@ -146,9 +147,13 @@ final class QueueController {
 
 		return new WP_REST_Response(
 			array(
-				'summary' => $summary,
-				'depth'   => $this->queueStats->depth(),
-				'paused'  => GeneralSettings::isQueuePaused(),
+				'summary'                 => $summary,
+				'depth'                   => $this->queueStats->depth(),
+				'paused'                  => GeneralSettings::isQueuePaused(),
+				// cron 健全性の可視化（Task 12）: 最後に掃引が完走した時刻（ISO8601 UTC）。
+				// 分割実行の途中（QueueMaintenance::sweep() が false を返す間）は書き換わらない。
+				// 一度も完走していなければ空文字列。
+				'last_sweep_completed_at' => (string) get_option( QueueMaintenance::OPTION_LAST_COMPLETED, '' ),
 			),
 			200
 		);
@@ -306,10 +311,29 @@ final class QueueController {
 		return is_array( $ids ) ? $ids : array();
 	}
 
+	/**
+	 * 一括取消（clearAll/cancelPending）が走査する group 一覧。
+	 *
+	 * Task 12・Ruling 8: $accountCodes（'affilicard-{account}'）だけでなく、
+	 * 掃引トリガー（affilicard_sweep）の group（'affilicard-sweep'。account では
+	 * ないため $accountCodes に含まれない）も対象に加える。これが無いと「キューを
+	 * 全て削除」「未処理をキャンセル」を押しても pending の掃引トリガーが残り、
+	 * 管理 UI から掃引チェーンを止める手段が無くなる。
+	 *
+	 * @return list<string>
+	 */
+	private function pendingCancellationGroups(): array {
+		$groups = array();
+		foreach ( $this->accountCodes as $account ) {
+			$groups[] = $this->group( $account );
+		}
+		$groups[] = $this->group( Enqueuer::SWEEP_GROUP_ACCOUNT );
+		return $groups;
+	}
+
 	private function cancelPendingActionsForAllGroups(): int {
 		$count = 0;
-		foreach ( $this->accountCodes as $account ) {
-			$group  = $this->group( $account );
+		foreach ( $this->pendingCancellationGroups() as $group ) {
 			$ids    = as_get_scheduled_actions(
 				array(
 					'group'    => $group,

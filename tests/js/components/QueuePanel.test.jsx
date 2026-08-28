@@ -45,10 +45,15 @@ const baseStats = {
 	},
 	depth: 4,
 	paused: false,
+	// 掃引が直近に完走した想定（Task 12）。個別テストで上書きして未実行/超過ケースを検証する。
+	last_sweep_completed_at: new Date(
+		Date.now() - 30 * 60 * 1000
+	).toISOString(),
 };
 
 const baseSettings = {
 	queue_paused: false,
+	refresh_interval_hours: 3,
 	throttle_overrides: { rakuten: 1500 },
 	retention_done_hours: 24,
 	retention_failed_days: 7,
@@ -98,6 +103,95 @@ describe('QueuePanel', () => {
 		// 完了件数（症状4 の可視化ギャップ対応）も account 行に表示する。
 		expect(screen.getByText('完了: 42')).toBeInTheDocument();
 		expect(screen.getByText('キューの深さ: 4')).toBeInTheDocument();
+	});
+
+	// cron 健全性の可視化（Task 12）: 最後の掃引からの経過時間と、想定間隔（3倍）を
+	// 超えた場合の警告表示を検証する。「now」を固定せず Date.now() 起点で相対時刻を
+	// 組み立てることで、実行タイミングに依存しないテストにする。
+	test('shows how many hours ago the last sweep completed', async () => {
+		const fiveHoursAgo = new Date(
+			Date.now() - 5 * 60 * 60 * 1000
+		).toISOString();
+		fetchQueueStats.mockResolvedValue({
+			...baseStats,
+			last_sweep_completed_at: fiveHoursAgo,
+		});
+		fetchSettings.mockResolvedValue({
+			...baseSettings,
+			refresh_interval_hours: 3,
+		});
+
+		render(<QueuePanel />);
+
+		await waitFor(() =>
+			expect(screen.getByText(/最後の掃引/)).toBeInTheDocument()
+		);
+		expect(screen.getByText(/5時間前/)).toBeInTheDocument();
+	});
+
+	test('shows "未実行" when the sweep has never completed', async () => {
+		fetchQueueStats.mockResolvedValue({
+			...baseStats,
+			last_sweep_completed_at: '',
+		});
+
+		render(<QueuePanel />);
+
+		await waitFor(() =>
+			expect(screen.getByText(/最後の掃引/)).toBeInTheDocument()
+		);
+		expect(screen.getByText(/未実行/)).toBeInTheDocument();
+		expect(
+			screen.queryByRole('link', { name: /運用ドキュメント/ })
+		).not.toBeInTheDocument();
+	});
+
+	test('warns with a link to the operations doc when the sweep is far overdue', async () => {
+		// refresh_interval_hours=3 の3倍=9h。10h経過は超過している。
+		const tenHoursAgo = new Date(
+			Date.now() - 10 * 60 * 60 * 1000
+		).toISOString();
+		fetchQueueStats.mockResolvedValue({
+			...baseStats,
+			last_sweep_completed_at: tenHoursAgo,
+		});
+		fetchSettings.mockResolvedValue({
+			...baseSettings,
+			refresh_interval_hours: 3,
+		});
+
+		render(<QueuePanel />);
+
+		await waitFor(() =>
+			expect(screen.getByText(/運用ドキュメント/)).toBeInTheDocument()
+		);
+		const link = screen.getByRole('link', { name: /運用ドキュメント/ });
+		expect(link.getAttribute('href')).toEqual(
+			expect.stringContaining('operations-refresh-queue.md')
+		);
+	});
+
+	test('does not warn when the sweep is within the expected interval', async () => {
+		const oneHourAgo = new Date(
+			Date.now() - 1 * 60 * 60 * 1000
+		).toISOString();
+		fetchQueueStats.mockResolvedValue({
+			...baseStats,
+			last_sweep_completed_at: oneHourAgo,
+		});
+		fetchSettings.mockResolvedValue({
+			...baseSettings,
+			refresh_interval_hours: 3,
+		});
+
+		render(<QueuePanel />);
+
+		await waitFor(() =>
+			expect(screen.getByText(/最後の掃引/)).toBeInTheDocument()
+		);
+		expect(
+			screen.queryByRole('link', { name: /運用ドキュメント/ })
+		).not.toBeInTheDocument();
 	});
 
 	test('toggling the pause switch calls setPaused with the new value', async () => {

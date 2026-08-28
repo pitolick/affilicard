@@ -8,6 +8,7 @@ use Affilicard\Account\DmmAccount;
 use Affilicard\Account\RakutenAccount;
 use Affilicard\Queue\ActionStoreInterface;
 use Affilicard\Queue\Enqueuer;
+use Affilicard\Queue\QueueMaintenance;
 use Affilicard\Queue\QueueStats;
 use Affilicard\Rest\QueueController;
 use Affilicard\Settings\GeneralSettings;
@@ -33,6 +34,9 @@ final class QueueControllerTest extends TestCase {
 
 	private const RAKUTEN_GROUP = 'affilicard-rakuten';
 	private const DMM_GROUP     = 'affilicard-dmm';
+	// Task 12・Ruling 8: 掃引トリガー（affilicard_sweep）の group。account ではないため
+	// $accountCodes には含まれないが、一括取消（clearAll/cancelPending）の対象になる。
+	private const SWEEP_GROUP = 'affilicard-sweep';
 
 	/** @var list<string> */
 	private array $accounts = array( 'rakuten', 'dmm' );
@@ -114,6 +118,9 @@ final class QueueControllerTest extends TestCase {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array( 'queue_paused' => true ) );
+		WP_Mock::userFunction( 'get_option' )
+			->with( QueueMaintenance::OPTION_LAST_COMPLETED, '' )
+			->andReturn( '2026-08-26T00:00:00+00:00' );
 
 		$res  = $this->controller()->stats( new WP_REST_Request() );
 		$data = $res->get_data();
@@ -134,6 +141,26 @@ final class QueueControllerTest extends TestCase {
 		$this->assertSame( 0, $data['summary']['dmm']['complete'] );
 		$this->assertSame( 0, $data['depth'] );
 		$this->assertTrue( $data['paused'] );
+		// cron 健全性の可視化（Task 12）: 最後に掃引が完走した時刻。
+		$this->assertSame( '2026-08-26T00:00:00+00:00', $data['last_sweep_completed_at'] );
+	}
+
+	/**
+	 * Task 12: 一度も掃引が完走していない（option 未設定）場合は空文字列を返す。
+	 * JS 側はこれを「未実行」として扱う。
+	 */
+	public function test_stats_last_sweep_completed_at未設定なら空文字列を返す(): void {
+		$this->stubEmptyQueueForAllProviders();
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_option' )
+			->with( QueueMaintenance::OPTION_LAST_COMPLETED, '' )
+			->andReturn( '' );
+
+		$data = $this->controller()->stats( new WP_REST_Request() )->get_data();
+
+		$this->assertSame( '', $data['last_sweep_completed_at'] );
 	}
 
 	public function test_pause_pausedtrueでGeneralSettingsを更新し新状態を返す(): void {
@@ -202,17 +229,30 @@ final class QueueControllerTest extends TestCase {
 				'ids'
 			)
 			->andReturn( array( 4 ) );
+		// Task 12・Ruling 8: 一括取消は掃引トリガー（affilicard-sweep group）も対象にする。
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->with(
+				array(
+					'group'    => self::SWEEP_GROUP,
+					'status'   => 'pending',
+					'per_page' => -1,
+				),
+				'ids'
+			)
+			->andReturn( array( 5 ) );
 
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )
 			->once()->with( '', array(), self::RAKUTEN_GROUP );
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )
 			->once()->with( '', array(), self::DMM_GROUP );
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )
+			->once()->with( '', array(), self::SWEEP_GROUP );
 
 		$res = $this->controller()->clearAll( new WP_REST_Request() );
 
 		$this->assertSame( 200, $res->get_status() );
 		$this->assertTrue( $res->get_data()['ok'] );
-		$this->assertSame( 4, $res->get_data()['cleared'] );
+		$this->assertSame( 5, $res->get_data()['cleared'] );
 	}
 
 	public function test_cancelPending_provider毎にpendingをunscheduleしcancelledを返す(): void {
@@ -236,16 +276,29 @@ final class QueueControllerTest extends TestCase {
 				'ids'
 			)
 			->andReturn( array() );
+		// Task 12・Ruling 8: 一括取消は掃引トリガー（affilicard-sweep group）も対象にする。
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->with(
+				array(
+					'group'    => self::SWEEP_GROUP,
+					'status'   => 'pending',
+					'per_page' => -1,
+				),
+				'ids'
+			)
+			->andReturn( array( 9, 10 ) );
 
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )
 			->once()->with( '', array(), self::RAKUTEN_GROUP );
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )
 			->once()->with( '', array(), self::DMM_GROUP );
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )
+			->once()->with( '', array(), self::SWEEP_GROUP );
 
 		$res = $this->controller()->cancelPending( new WP_REST_Request() );
 
 		$this->assertTrue( $res->get_data()['ok'] );
-		$this->assertSame( 1, $res->get_data()['cancelled'] );
+		$this->assertSame( 3, $res->get_data()['cancelled'] );
 	}
 
 	public function test_deleteFailed_provider毎にfailedをstoreから削除しdeletedを返す(): void {

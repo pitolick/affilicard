@@ -4,7 +4,6 @@ declare(strict_types=1);
 namespace Affilicard\Tests\Unit\Queue;
 
 use Affilicard\Platform\PlatformConfig;
-use Affilicard\Platform\PlatformDefinition;
 use Affilicard\Provider\ManualProvider;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Provider\Rakuten\RakutenProvider;
@@ -23,15 +22,6 @@ final class EnqueuerTest extends TestCase {
 		WP_Mock::tearDown();
 		\Mockery::close();
 		parent::tearDown();
-	}
-
-	private function platform( string $code, int $ttl ): PlatformDefinition {
-		return PlatformDefinition::fromArray(
-			array(
-				'code'          => $code,
-				'priceTtlHours' => $ttl,
-			)
-		);
 	}
 
 	/** affilicard_platforms option を rakuten-kobo 1件で stub する。 */
@@ -199,196 +189,73 @@ final class EnqueuerTest extends TestCase {
 	}
 
 	/**
-	 * 掃引の再取得判定は last_fetched_at（最終試行時刻）基準。last_verified_at が
-	 * 古い/空・price が空（＝失敗が続いている listing）でも、直近の試行
-	 * （last_fetched_at）が TTL 内ならスキップする（毎掃引の連打を防ぐ）。
+	 * Task 12 Ruling 3: 掃引トリガーは args 無し・group='affilicard-sweep'・
+	 * priority=PRIORITY_SWEEP で積む。$unique の既定は true（WP-Cron からの開始トリガーが
+	 * 多重起動しないようにする）。
 	 */
-	public function test_enqueueSweep_last_fetched_atがTTL内はlast_verified_atや価格に関わらずスキップしfalse(): void {
-		$def     = $this->platform( 'rakuten-kobo', 24 ); // priceTtlHours=24
-		$now     = 1_000_000;
-		$listing = array(
-			'price'            => '', // 失敗続きで価格未確定
-			'last_verified_at' => '', // 一度も成功していない
-			'last_fetched_at'  => gmdate( 'c', $now - 3600 ), // 直近の試行はTTL内
-		);
-		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
-
-		$result = ( new Enqueuer() )->enqueueSweep( 12, 'rakuten-kobo', 'rakuten', $def, $listing, $now );
-		$this->assertFalse( $result );
-	}
-
-	/**
-	 * 掃引リード（sweepLeadSeconds）を持つ Enqueuer は、表示 TTL（24h）内でも期限より手前で
-	 * 再取得を発火する。20h 前の listing は lead=5h（しきい値 24-5=19h）なら投入対象になる
-	 * （リード無しなら 20h < 24h でスキップ＝別テストで担保）。表示 TTL は変えず、価格が期限に
-	 * 達する前に再確認を終わらせるための機構。
-	 */
-	public function test_enqueueSweep_リード付きは表示TTL内でも期限前に再取得投入する(): void {
-		$def     = $this->platform( 'rakuten-kobo', 24 );
-		$now     = 1_000_000;
-		$listing = array(
-			'price'            => '500',
-			'last_verified_at' => gmdate( 'c', $now - 20 * 3600 ),
-			'last_fetched_at'  => gmdate( 'c', $now - 20 * 3600 ), // 20h 前（TTL 24h 内だが lead しきい値 19h 超）
-		);
-		WP_Mock::userFunction( 'as_get_scheduled_actions' )->andReturn( array() );
-		WP_Mock::userFunction( 'wp_rand' )->with( 0, 300 )->andReturn( 0 );
+	public function test_enqueueSweepTrigger_既定はunique_trueでaffilicard_sweepを積む(): void {
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(
 				\Mockery::type( 'int' ),
-				Enqueuer::HOOK_REFRESH,
-				array(
-					'post_id'  => 12,
-					'platform' => 'rakuten-kobo',
-				),
-				'affilicard-rakuten',
+				Enqueuer::HOOK_SWEEP,
+				array(),
+				'affilicard-sweep',
 				true,
 				Enqueuer::PRIORITY_SWEEP
-			)->andReturn( 202 );
+			)
+			->andReturn( 303 );
 
-		$enqueuer = new Enqueuer( 500, 300, array(), $this->registryWithRakuten(), 5 * 3600 );
-		$this->assertTrue(
-			$enqueuer->enqueueSweep( 12, 'rakuten-kobo', 'rakuten', $def, $listing, $now )
-		);
-	}
-
-	public function test_enqueueSweep_last_fetched_atがTTL超過は深さ内でjitter付priority20投入しtrue(): void {
-		$def     = $this->platform( 'rakuten-kobo', 24 );
-		$now     = 1_000_000;
-		$listing = array(
-			'price'            => '',
-			'last_verified_at' => '',
-			'last_fetched_at'  => gmdate( 'c', $now - 25 * 3600 ),
-		); // 直近の試行がTTL超過
-		WP_Mock::userFunction( 'as_get_scheduled_actions' )->andReturn( array() ); // 深さ 0
-		WP_Mock::userFunction( 'wp_rand' )->with( 0, 300 )->andReturn( 42 );
-		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
-			->with(
-				\Mockery::type( 'int' ),
-				Enqueuer::HOOK_REFRESH,
-				array(
-					'post_id'  => 12,
-					'platform' => 'rakuten-kobo',
-				),
-				'affilicard-rakuten',
-				true,
-				Enqueuer::PRIORITY_SWEEP
-			)->andReturn( 101 );
-
-		$result = ( new Enqueuer() )->enqueueSweep( 12, 'rakuten-kobo', 'rakuten', $def, $listing, $now );
-		$this->assertTrue( $result );
-	}
-
-	/**
-	 * last_fetched_at が無い（初回・移行直後のデータ等）listing は常に再取得対象。
-	 */
-	public function test_enqueueSweep_last_fetched_at欠落は投入対象でtrue(): void {
-		$def     = $this->platform( 'rakuten-kobo', 24 );
-		$now     = 1_000_000;
-		$listing = array( 'price' => '500' ); // last_fetched_at 無し
-		WP_Mock::userFunction( 'as_get_scheduled_actions' )->andReturn( array() ); // 深さ 0
-		WP_Mock::userFunction( 'wp_rand' )->with( 0, 300 )->andReturn( 0 );
-		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 101 );
-
-		$result = ( new Enqueuer() )->enqueueSweep( 12, 'rakuten-kobo', 'rakuten', $def, $listing, $now );
-		$this->assertTrue( $result );
-	}
-
-	/**
-	 * enqueueSweep は listing 毎に queueDepth() を再クエリせず、インスタンス内で
-	 * memoize した深さを使う（O(N) の as_get_scheduled_actions クエリ回避）。
-	 * enqueue 成功のたびに memo をインクリメントするので、cap 到達判定は
-	 * sweep 内で引き続き正しく効く。
-	 */
-	public function test_enqueueSweep_深さは初回のみクエリしmemoの増分でcapを守る(): void {
-		$def     = $this->platform( 'rakuten-kobo', 24 );
-		$now     = 1_000_000;
-		$listing = array(
-			'price'           => '500',
-			'last_fetched_at' => gmdate( 'c', $now - 25 * 3600 ),
-		); // 直近の試行がTTL超過
-
-		// 深さクエリは 1 回だけ（listing 3件を捌いても再クエリしない）。既存 pending=1。
-		WP_Mock::userFunction( 'as_get_scheduled_actions' )->once()->andReturn( array( 1 ) );
-		WP_Mock::userFunction( 'wp_rand' )->with( 0, 300 )->andReturn( 0 );
-		// cap=2・既存深さ=1 → 1件目は積める（memo は 2 に増分）。2・3件目は cap 到達でスキップ。
-		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 200 );
-
-		$enqueuer = new Enqueuer( 2 );
-
-		$result1 = $enqueuer->enqueueSweep( 1, 'rakuten-kobo', 'rakuten', $def, $listing, $now );
-		$result2 = $enqueuer->enqueueSweep( 2, 'rakuten-kobo', 'rakuten', $def, $listing, $now );
-		$result3 = $enqueuer->enqueueSweep( 3, 'rakuten-kobo', 'rakuten', $def, $listing, $now );
-
-		$this->assertTrue( $result1 );
-		$this->assertFalse( $result2 );
-		$this->assertFalse( $result3 );
+		$this->assertSame( 303, ( new Enqueuer() )->enqueueSweepTrigger() );
 		$this->assertConditionsMet();
 	}
 
 	/**
-	 * A: 決定的スタガリング。accountIntervalSeconds を渡した Enqueuer は、同一 account の
-	 * sweep ジョブを実効レート間隔（ここでは 2 秒）ぶんずつ確定的にずらして積む。ランダム
-	 * jitter（wp_rand）は使わない。$when が base, base+2, base+4 と 2 秒刻みになることを
-	 * 相対差で厳密に検証する（絶対値は time() 依存のため差分で確認）。
+	 * QueueMaintenance::sweep() が false（未完走）を返したときの継続トリガーは
+	 * unique=false で積む必要がある——実行中の自分自身が in-progress として
+	 * unique 判定に一致するため、true のままだと必ず抑止されジョブが消滅する
+	 * （rescheduleRefresh 等の自己再投入と同じ理由）。
 	 */
-	public function test_enqueueSweep_accountIntervalSeconds指定時は間隔ぶん確定スタガリングしwp_randを使わない(): void {
-		$def     = $this->platform( 'rakuten-kobo', 24 );
-		$now     = 1_000_000;
-		$listing = array(
-			'price'           => '500',
-			'last_fetched_at' => gmdate( 'c', $now - 25 * 3600 ), // 直近の試行が TTL 超過
-		);
-		WP_Mock::userFunction( 'as_get_scheduled_actions' )->once()->andReturn( array() ); // depth 0（memo）
-		WP_Mock::userFunction( 'wp_rand' )->never(); // 決定的スタガリングは jitter を使わない
+	public function test_enqueueSweepTrigger_unique_falseを明示指定できる(): void {
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				\Mockery::type( 'int' ),
+				Enqueuer::HOOK_SWEEP,
+				array(),
+				'affilicard-sweep',
+				false,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 0 );
 
-		$whens = array();
-		WP_Mock::userFunction( 'as_schedule_single_action' )
-			->times( 3 )
-			->andReturnUsing(
-				function ( $when ) use ( &$whens ) {
-					$whens[] = $when;
-					return 100 + count( $whens );
-				}
-			);
-
-		$enqueuer = new Enqueuer(
-			500,
-			300,
-			array(),
-			$this->registryWithRakuten(),
-			0,
-			array( 'rakuten' => 2 )
-		);
-
-		$this->assertTrue( $enqueuer->enqueueSweep( 1, 'rakuten-kobo', 'rakuten', $def, $listing, $now ) );
-		$this->assertTrue( $enqueuer->enqueueSweep( 2, 'rakuten-kobo', 'rakuten', $def, $listing, $now ) );
-		$this->assertTrue( $enqueuer->enqueueSweep( 3, 'rakuten-kobo', 'rakuten', $def, $listing, $now ) );
-
-		$this->assertCount( 3, $whens );
-		$this->assertSame( 2, $whens[1] - $whens[0], '2件目は base+2 に積まれる' );
-		$this->assertSame( 2, $whens[2] - $whens[1], '3件目は base+4 に積まれる' );
+		$this->assertSame( 0, ( new Enqueuer() )->enqueueSweepTrigger( false ) );
 		$this->assertConditionsMet();
 	}
 
-	public function test_enqueueSweep_depthCap到達でスキップしfalse(): void {
-		$def     = $this->platform( 'rakuten-kobo', 24 );
-		$now     = 1_000_000;
-		$listing = array(
-			'price'           => '500',
-			'last_fetched_at' => gmdate( 'c', $now - 25 * 3600 ),
-		); // 直近の試行がTTL超過
-		WP_Mock::userFunction( 'as_get_scheduled_actions' )->andReturn( array( 1, 2 ) ); // 深さ 2
-		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+	/**
+	 * Task 12・Ruling 8: $when > 0 を渡すと time() ではなくその時刻に積む。
+	 * pause 中／queue_depth_cap に張り付いた状態での遅延再投入に使う。
+	 */
+	public function test_enqueueSweepTrigger_whenを渡すとその時刻に積む(): void {
+		$when = time() + 600;
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				$when,
+				Enqueuer::HOOK_SWEEP,
+				array(),
+				'affilicard-sweep',
+				false,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 0 );
 
-		$result = ( new Enqueuer( 2 ) )->enqueueSweep( 12, 'rakuten-kobo', 'rakuten', $def, $listing, $now );
-		$this->assertFalse( $result );
+		( new Enqueuer() )->enqueueSweepTrigger( false, $when );
+		$this->assertConditionsMet();
 	}
 
 	/**
 	 * v2.4.0 症状1/3（thundering herd）対策: 自己再投入は jitter 無しだと同一 account を
 	 * 奪い合う listing 群が寸分違わず同一タイムスタンプへ再集結してしまうため、
-	 * enqueueSweep と同様に wp_rand(0, RESCHEDULE_JITTER_SECONDS) を $whenSec に加算する。
+	 * wp_rand(0, RESCHEDULE_JITTER_SECONDS) を $whenSec に加算する。
 	 * wp_rand を固定値にモックし、加算後の時刻で呼ばれることを厳密に検証する。
 	 */
 	public function test_rescheduleRefresh_jitterを加算した時刻にpriority10で再投入する_uniqueはfalse(): void {
@@ -693,5 +560,136 @@ final class EnqueuerTest extends TestCase {
 			->andReturn( array( 1, 2, 3, 4 ) );
 
 		$this->assertSame( 4, ( new Enqueuer() )->queueDepth() );
+	}
+
+	public function test_enqueueBatch_は_account_group_と_sweep_優先度で1件のジョブを積む(): void {
+		$captured = null;
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->andReturnUsing(
+				function ( $when, $hook, $args, $group, $unique, $priority ) use ( &$captured ) {
+					$captured = compact( 'when', 'hook', 'args', 'group', 'unique', 'priority' );
+					return 4242;
+				}
+			);
+
+		$enqueuer = new Enqueuer();
+		$items    = array(
+			array(
+				'post_id'  => 11,
+				'platform' => 'rakuten-kobo',
+			),
+			array(
+				'post_id'  => 12,
+				'platform' => 'rakuten-kobo',
+			),
+		);
+
+		// $when は固定値を渡して素通しされることを確かめる（既定 0 のときの time() は
+		// 実行時刻に依存して固定できないため、明示値で契約を固定する）。
+		$when = 1735689600;
+
+		$actionId = $enqueuer->enqueueBatch( 'rakuten', $items, $when );
+
+		$this->assertSame( 4242, $actionId );
+		$this->assertSame( $when, $captured['when'] );
+		$this->assertSame( Enqueuer::HOOK_REFRESH_BATCH, $captured['hook'] );
+		$this->assertSame( 'affilicard-rakuten', $captured['group'] );
+		$this->assertSame( Enqueuer::PRIORITY_SWEEP, $captured['priority'] );
+		$this->assertTrue( $captured['unique'] );
+		$this->assertSame( 'rakuten', $captured['args']['account'] );
+		// 件数だけでなく順序を含めて完全一致であることを固定する（ハンドラは
+		// items の並び順に処理し、requeueRemaining() が index で切り出すため）。
+		$this->assertSame( $items, $captured['args']['items'] );
+	}
+
+	public function test_enqueueBatch_は_items_が空なら何も積まず0を返す(): void {
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$enqueuer = new Enqueuer();
+
+		$this->assertSame( 0, $enqueuer->enqueueBatch( 'rakuten', array() ) );
+	}
+
+	/**
+	 * ハンドラの自己再投入・積み直し用に unique=false を明示指定できることを確認する
+	 * （spec §4-1 Ruling 4）。AS の unique=true は PENDING/RUNNING 双方に対して
+	 * hook+group+args(JSON) の完全一致で挿入を抑止するため、実行中の自分自身と
+	 * account・items が一致する自己再投入では常に抑止され、ジョブが痕跡なく消滅する。
+	 */
+	public function test_enqueueBatch_はunique_falseを明示できる(): void {
+		$captured = null;
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->andReturnUsing(
+				function ( $when, $hook, $args, $group, $unique, $priority ) use ( &$captured ) {
+					$captured = compact( 'unique' );
+					return 9999;
+				}
+			);
+
+		$enqueuer = new Enqueuer();
+		$items    = array(
+			array(
+				'post_id'  => 21,
+				'platform' => 'rakuten-kobo',
+			),
+		);
+
+		$actionId = $enqueuer->enqueueBatch( 'rakuten', $items, 0, false );
+
+		$this->assertSame( 9999, $actionId );
+		$this->assertFalse( $captured['unique'] );
+	}
+
+	/**
+	 * レビュー Major 1（spec §4-3）: `enqueueBatch()` の戻り値 0 は「unique 重複で
+	 * スキップ」と「投入失敗」のどちらもあり得るため区別できない。
+	 * `hasScheduledBatch()` は `enqueueBatch()` と同一の hook/args/group で
+	 * `as_has_scheduled_action()` を呼び、呼び出し側（QueueMaintenance::sweep()）が
+	 * 両者を判別できるようにする。
+	 */
+	public function test_hasScheduledBatch_はenqueueBatchと同一のhook_args_groupで問い合わせる(): void {
+		$captured = null;
+		WP_Mock::userFunction( 'as_has_scheduled_action' )
+			->once()
+			->andReturnUsing(
+				function ( $hook, $args, $group ) use ( &$captured ) {
+					$captured = compact( 'hook', 'args', 'group' );
+					return true;
+				}
+			);
+
+		$enqueuer = new Enqueuer();
+		$items    = array(
+			array(
+				'post_id'  => 11,
+				'platform' => 'rakuten-kobo',
+			),
+		);
+
+		$this->assertTrue( $enqueuer->hasScheduledBatch( 'rakuten', $items ) );
+		$this->assertSame( Enqueuer::HOOK_REFRESH_BATCH, $captured['hook'] );
+		$this->assertSame( 'affilicard-rakuten', $captured['group'] );
+		$this->assertSame( 'rakuten', $captured['args']['account'] );
+		$this->assertSame( $items, $captured['args']['items'] );
+	}
+
+	public function test_hasScheduledBatch_はas_has_scheduled_actionがfalseならfalseを返す(): void {
+		WP_Mock::userFunction( 'as_has_scheduled_action' )->once()->andReturn( false );
+
+		$enqueuer = new Enqueuer();
+
+		$this->assertFalse(
+			$enqueuer->hasScheduledBatch(
+				'rakuten',
+				array(
+					array(
+						'post_id'  => 1,
+						'platform' => 'rakuten-kobo',
+					),
+				)
+			)
+		);
 	}
 }

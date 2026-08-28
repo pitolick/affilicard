@@ -207,6 +207,27 @@ final class PluginTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	/**
+	 * Major（CodeRabbit レビュー）: BatchRefreshHandler の JobDeadline が「ジョブ自身の
+	 * 開始時刻」ではなく「AS ランナー全体の開始時刻」を見て期限判定できるよう、
+	 * RunnerClock::register() が boot() から確実に呼ばれ、AS 自身が内部で使う public フック
+	 * `action_scheduler_before_process_queue` に markStarted が配線されることを固定する。
+	 */
+	public function test_boot_registers_runner_clock_hook(): void {
+		WP_Mock::userFunction( 'is_admin', array( 'return' => false ) );
+		WP_Mock::userFunction( 'register_activation_hook', array( 'return' => true ) );
+		WP_Mock::userFunction( 'register_deactivation_hook', array( 'return' => true ) );
+
+		WP_Mock::expectActionAdded(
+			'action_scheduler_before_process_queue',
+			array( \Affilicard\Queue\RunnerClock::class, 'markStarted' )
+		);
+
+		Plugin::boot();
+
+		$this->assertConditionsMet();
+	}
+
 	public function test_boot_registers_block_init_hook(): void {
 		WP_Mock::userFunction( 'is_admin', array( 'return' => false ) );
 		WP_Mock::userFunction( 'register_activation_hook', array( 'return' => true ) );
@@ -270,6 +291,297 @@ final class PluginTest extends TestCase {
 		);
 
 		Plugin::boot();
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * Task 12: HOOK_REFRESH_BATCH のラッパ（クロージャ）と affilicard_sweep ハンドラが
+	 * Plugin::boot() から確実に登録されることを固定する。これが欠けると Enqueuer が積んだ
+	 * バッチジョブ／掃引トリガーが Action Scheduler 上に滞留したまま一切実行されない。
+	 */
+	public function test_boot_registers_batch_refresh_and_sweep_action_hooks(): void {
+		WP_Mock::userFunction( 'is_admin', array( 'return' => false ) );
+		WP_Mock::userFunction( 'register_activation_hook', array( 'return' => true ) );
+		WP_Mock::userFunction( 'register_deactivation_hook', array( 'return' => true ) );
+
+		WP_Mock::expectActionAdded(
+			\Affilicard\Queue\Enqueuer::HOOK_REFRESH_BATCH,
+			Mockery::type( 'Closure' ),
+			10,
+			2
+		);
+		WP_Mock::expectActionAdded(
+			\Affilicard\Queue\Enqueuer::HOOK_SWEEP,
+			Mockery::type( 'Closure' )
+		);
+
+		Plugin::boot();
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 先行タスクからの申し送り: BatchRefreshHandler::handle(array $args) は AS フックへ
+	 * 直付けできない（Action Scheduler は do_action_ref_array($hook, array_values($args))
+	 * で args を位置引数に展開するため、直付けすると第1引数に文字列 'account' が渡り
+	 * TypeError になる）。boot() が配線するクロージャは WP_Mock では捕捉して直接呼び出せない
+	 * ため（add_action/add_filter は WP_Mock 組み込みの hook 追跡機構が常に使われ、
+	 * userFunction() では横取りできない）、実体である handleBatchRefreshAction() を直接
+	 * 呼び出し、[account, items] の位置引数が正しく配列へ組み直されて
+	 * BatchRefreshHandler::handle() に届くことを、pause 分岐
+	 * （GeneralSettings::isQueuePaused()）経由の as_schedule_single_action 呼び出し引数
+	 * （group='affilicard-rakuten' 等）で確認する。
+	 */
+	public function test_handleBatchRefreshAction_位置引数を配列へ正しく組み直す(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( \Affilicard\Settings\GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array( 'queue_paused' => true ) );
+
+		$items = array(
+			array(
+				'post_id'  => 1,
+				'platform' => 'rakuten-kobo',
+			),
+		);
+
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::type( 'int' ),
+				\Affilicard\Queue\Enqueuer::HOOK_REFRESH_BATCH,
+				array(
+					'account' => 'rakuten',
+					'items'   => $items,
+				),
+				'affilicard-rakuten',
+				false,
+				\Affilicard\Queue\Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 500 );
+
+		$handler = new \Affilicard\Queue\BatchRefreshHandler(
+			new \Affilicard\Queue\Enqueuer(),
+			new \Affilicard\Queue\RateLimiter(),
+			Mockery::mock( \Affilicard\Cron\ListingRefresher::class ),
+			new \Affilicard\Provider\ProviderRegistry()
+		);
+
+		Plugin::handleBatchRefreshAction( $handler, 'rakuten', $items );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 位置引数が文字列でない（AS から届く $account/$items の型が想定外の）場合でも
+	 * 落ちずに空扱いへフォールバックすることを固定する（(string) キャスト・is_array ガード）。
+	 */
+	public function test_handleBatchRefreshAction_itemsが配列でない場合は空扱いで即returnする(): void {
+		WP_Mock::userFunction( 'get_option' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$handler = new \Affilicard\Queue\BatchRefreshHandler(
+			new \Affilicard\Queue\Enqueuer(),
+			new \Affilicard\Queue\RateLimiter(),
+			Mockery::mock( \Affilicard\Cron\ListingRefresher::class ),
+			new \Affilicard\Provider\ProviderRegistry()
+		);
+
+		Plugin::handleBatchRefreshAction( $handler, 'rakuten', null );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * Task 12・Ruling 3: WP-Cron（affilicard_refresh_all）のハンドラは掃引トリガー
+	 * （affilicard_sweep）を unique=true で 1 件積むだけにする（多重起動防止）。
+	 * boot() 内のクロージャは WP_Mock では捕捉できないため（上記と同じ理由）、
+	 * 実体である triggerSweep() を直接呼び出して確認する。
+	 */
+	public function test_triggerSweep_affilicard_sweepをunique_trueで積む(): void {
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::type( 'int' ),
+				\Affilicard\Queue\Enqueuer::HOOK_SWEEP,
+				array(),
+				'affilicard-sweep',
+				true,
+				\Affilicard\Queue\Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 400 );
+
+		Plugin::triggerSweep( new \Affilicard\Queue\Enqueuer() );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * Task 12・Ruling 3（核心）: QueueMaintenance::sweep() が false（未完走）を返したときだけ、
+	 * 同じ掃引トリガーを unique=false で即時に積み直して継続する。ここを誤ると継続更新が
+	 * 止まるため、false→積む／true→積まない の両方を固定する。
+	 */
+	public function test_handleSweepCompletion_falseなら継続トリガーをunique_falseで積む(): void {
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::type( 'int' ),
+				\Affilicard\Queue\Enqueuer::HOOK_SWEEP,
+				array(),
+				'affilicard-sweep',
+				false,
+				\Affilicard\Queue\Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 0 );
+
+		Plugin::handleSweepCompletion( false, new \Affilicard\Queue\Enqueuer() );
+
+		$this->assertConditionsMet();
+	}
+
+	public function test_handleSweepCompletion_trueなら継続トリガーを積まない(): void {
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		Plugin::handleSweepCompletion( true, new \Affilicard\Queue\Enqueuer() );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * Task 12・Ruling 8: delaySeconds > 0 を渡すと、その秒数だけ未来の時刻に
+	 * 継続トリガーを積む（即時ではない）。
+	 */
+	public function test_handleSweepCompletion_delaySecondsを渡すと遅延した時刻に積む(): void {
+		$before = time();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::on(
+					static function ( $when ) use ( $before ) {
+						return $when >= $before + 590 && $when <= $before + 610;
+					}
+				),
+				\Affilicard\Queue\Enqueuer::HOOK_SWEEP,
+				array(),
+				'affilicard-sweep',
+				false,
+				\Affilicard\Queue\Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 0 );
+
+		Plugin::handleSweepCompletion( false, new \Affilicard\Queue\Enqueuer(), 600 );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * これは私（コントローラ）の Ruling 3 の不備を修正するもの（Ruling 8）:
+	 * 「false なら即時に積み直す」だけでは、pause 中でも sweep() を呼び直し続けて
+	 * しまう。pause 中は sweep() を一切呼ばず（get_posts 等を何もスタブしないことで
+	 * 「呼ばれれば即失敗する」形で保証する）、SWEEP_STALLED_RETRY_SECONDS 秒後へ
+	 * 遅延して積み直す（unique=false でジョブは失わない）。
+	 */
+	public function test_handleSweepAction_pause中はsweepを呼ばず遅延再投入する(): void {
+		$before = time();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::on(
+					static function ( $when ) use ( $before ) {
+						return $when >= $before + Plugin::SWEEP_STALLED_RETRY_SECONDS - 5
+							&& $when <= $before + Plugin::SWEEP_STALLED_RETRY_SECONDS + 5;
+					}
+				),
+				\Affilicard\Queue\Enqueuer::HOOK_SWEEP,
+				array(),
+				'affilicard-sweep',
+				false,
+				\Affilicard\Queue\Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 0 );
+
+		$repo = Mockery::mock( \Affilicard\Repository\ProductRepositoryInterface::class );
+		$repo->shouldNotReceive( 'find' );
+		$maintenance = new \Affilicard\Queue\QueueMaintenance(
+			$repo,
+			new \Affilicard\Queue\Enqueuer(),
+			new \Affilicard\Provider\ProviderRegistry()
+		);
+
+		Plugin::handleSweepAction( true, $maintenance, new \Affilicard\Queue\Enqueuer() );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * Ruling 8（核心の失敗シナリオ）: queue_depth_cap に張り付いていて前進できない
+	 * （QueueMaintenance::queueAtCapacity()===true）ときも sweep() を呼ばず遅延して
+	 * 積み直す。これが無いと、pending 深さが cap を下回らない限り cursor が一切
+	 * 進まないまま同じ空振りクエリ（get_posts / as_get_scheduled_actions）を
+	 * 無限に繰り返し、completed アクションのチャーンを再発させる。
+	 */
+	public function test_handleSweepAction_cap到達時はsweepを呼ばず遅延再投入する(): void {
+		// queueAtCapacity(): queueDepth()（既定 depthCap=500）を cap 以上にする。
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )->andReturn( array_fill( 0, 500, 1 ) );
+
+		$before = time();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::on(
+					static function ( $when ) use ( $before ) {
+						return $when >= $before + Plugin::SWEEP_STALLED_RETRY_SECONDS - 5
+							&& $when <= $before + Plugin::SWEEP_STALLED_RETRY_SECONDS + 5;
+					}
+				),
+				\Affilicard\Queue\Enqueuer::HOOK_SWEEP,
+				array(),
+				'affilicard-sweep',
+				false,
+				\Affilicard\Queue\Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 0 );
+
+		// sweep() 本体（get_posts 等）が絶対に呼ばれないことを、それらを一切
+		// スタブしないことで保証する（呼ばれれば "undefined function" で即座に失敗する）。
+		$repo = Mockery::mock( \Affilicard\Repository\ProductRepositoryInterface::class );
+		$repo->shouldNotReceive( 'find' );
+		$maintenance = new \Affilicard\Queue\QueueMaintenance(
+			$repo,
+			new \Affilicard\Queue\Enqueuer(),
+			new \Affilicard\Provider\ProviderRegistry()
+		);
+
+		Plugin::handleSweepAction( false, $maintenance, new \Affilicard\Queue\Enqueuer() );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 通常時（pause しておらず cap にも達していない）は sweep() を実際に呼び、
+	 * その戻り値を handleSweepCompletion() へそのまま渡す。ここでは get_posts が
+	 * 空を返す＝即完走(true)のケースで、継続トリガーが積まれないことを確認する
+	 * （pause/cap 判定の分岐が sweep() の実行そのものを妨げていないことの確認）。
+	 */
+	public function test_handleSweepAction_通常時はsweepを実行し戻り値をhandleSweepCompletionへ渡す(): void {
+		// queueAtCapacity(): depth(0) < depthCap(既定500) → false。
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )->andReturn( array() );
+		WP_Mock::userFunction( 'get_option' )
+			->with( \Affilicard\Queue\SweepCursor::OPTION_KEY, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->andReturn( array() );
+		WP_Mock::userFunction( 'delete_option' )->once()->with( \Affilicard\Queue\SweepCursor::OPTION_KEY );
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->with( \Affilicard\Queue\QueueMaintenance::OPTION_LAST_COMPLETED, Mockery::type( 'string' ), false );
+
+		// completed=true のため継続トリガーは積まれない。
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$repo = Mockery::mock( \Affilicard\Repository\ProductRepositoryInterface::class );
+		$repo->shouldNotReceive( 'find' );
+		$maintenance = new \Affilicard\Queue\QueueMaintenance(
+			$repo,
+			new \Affilicard\Queue\Enqueuer(),
+			new \Affilicard\Provider\ProviderRegistry()
+		);
+
+		Plugin::handleSweepAction( false, $maintenance, new \Affilicard\Queue\Enqueuer() );
 
 		$this->assertConditionsMet();
 	}

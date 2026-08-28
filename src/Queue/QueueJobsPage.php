@@ -66,10 +66,52 @@ final class QueueJobsPage {
 	public static function onLoad(): void {
 		self::maybeLoadJapaneseTranslations();
 		self::seedDefaultSearch();
+		self::registerColumnArgsFilter();
 
 		if ( class_exists( 'ActionScheduler_AdminView' ) ) {
 			\ActionScheduler_AdminView::instance()->process_admin_ui();
 		}
+	}
+
+	/**
+	 * `affilicard_refresh_batch` ジョブは 1 件の args に最大バッチサイズ件（既定 22 件）の
+	 * ネストした連想配列（items）を持つ。AS のジョブ一覧
+	 * （ActionScheduler_ListTable::column_args()）は args の各値を
+	 * `esc_html( var_export( $value, true ) )` でそのまま出力するため、フィルタしないと
+	 * Arguments 列 1 行あたり約 110 行・1,500 文字前後の PHP 配列ダンプが並ぶ（per-listing
+	 * 時代は 2 行だった。バッチ化に起因する新しい退行）。運用者が「失敗しているジョブを
+	 * 探す」ためにこの画面を開いたとき、hook / status / 実行予定日時の突き合わせが実質
+	 * 不可能になるため、AS が提供する `action_scheduler_list_table_column_args` フィルタで
+	 * `affilicard_refresh_batch` のときだけ「account / 件数」の要約に畳む。
+	 */
+	public static function registerColumnArgsFilter(): void {
+		add_filter( 'action_scheduler_list_table_column_args', array( self::class, 'summarizeBatchArgs' ), 10, 2 );
+	}
+
+	/**
+	 * `action_scheduler_list_table_column_args` のコールバック。`affilicard_refresh_batch`
+	 * 以外の hook は AS の既定描画（$html）をそのまま通す。
+	 *
+	 * @param string                            $html 既定描画（<ul><li>...</li></ul> の配列ダンプ、または空文字）。
+	 * @param array{hook?: mixed, args?: mixed} $row ActionScheduler_ListTable の行データ。
+	 */
+	public static function summarizeBatchArgs( string $html, array $row ): string {
+		if ( Enqueuer::HOOK_REFRESH_BATCH !== ( $row['hook'] ?? '' ) ) {
+			return $html;
+		}
+
+		$args    = is_array( $row['args'] ?? null ) ? $row['args'] : array();
+		$account = isset( $args['account'] ) ? (string) $args['account'] : '';
+		$items   = is_array( $args['items'] ?? null ) ? $args['items'] : array();
+
+		return '<code>' . esc_html(
+			sprintf(
+				/* translators: 1: account コード（例: rakuten）, 2: listing 件数 */
+				__( '%1$s / %2$d 件', 'affilicard' ),
+				$account,
+				count( $items )
+			)
+		) . '</code>';
 	}
 
 	/**

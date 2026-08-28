@@ -23,6 +23,7 @@ use Affilicard\Provider\Rakuten\RakutenProvider;
 use Affilicard\Queue\ActionSchedulerLoader;
 use Affilicard\Queue\ActionSchedulerStore;
 use Affilicard\Queue\AutoCreateHandler;
+use Affilicard\Queue\BatchRefreshHandler;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\PublishTrigger;
@@ -31,6 +32,7 @@ use Affilicard\Queue\QueueMaintenance;
 use Affilicard\Queue\QueueStats;
 use Affilicard\Queue\RateLimiter;
 use Affilicard\Queue\RefreshHandler;
+use Affilicard\Queue\RunnerClock;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Rest\CardPreviewController;
 use Affilicard\Rest\CredentialsController;
@@ -42,10 +44,12 @@ use Affilicard\Rest\RestController;
 use Affilicard\Rest\SettingsController;
 use Affilicard\Settings\DashboardWidget;
 use Affilicard\Settings\GeneralSettings;
+use Affilicard\Stocktake\PublicationDate;
 use Affilicard\Types\EbookType;
 use Affilicard\Types\GenericType;
 use Affilicard\Types\ProductTypeRegistry;
 use Affilicard\Types\VodType;
+use Affilicard\Upgrade\PluginUpgrade;
 
 /**
  * プラグインのブートストラップ。
@@ -56,6 +60,15 @@ use Affilicard\Types\VodType;
 final class Plugin {
 
 	public const SEEDED_AT_OPTION = 'affilicard_seeded_at';
+
+	/**
+	 * affilicard_sweep が pause 中／queue_depth_cap 到達で前進できないときに、
+	 * 継続トリガーを遅延して積み直すまでの待機秒数（Task 12・Ruling 8）。
+	 * BatchRefreshHandler::PAUSE_RETRY_SECONDS と同じ 10 分。遅延しすぎると cap が
+	 * 空いた後の再開が遅れるが、次の WP-Cron（affilicard_refresh_all）が必ず新規の
+	 * unique=true トリガーを積むため、この値を厳密にチューニングする必要はない。
+	 */
+	public const SWEEP_STALLED_RETRY_SECONDS = 600;
 
 	public static function boot(): void {
 		$instance = new self();
@@ -68,6 +81,22 @@ final class Plugin {
 		// 現在イテレート中の plugins_loaded@0 バケットに追加され得ず（PHP/WP の do_action は
 		// イテレート中のバケットへの追加コールバックを拾わない）、AS が一切初期化されない不具合がある。
 		ActionSchedulerLoader::boot();
+
+		// AS ランナーの起動時刻を記録する（BatchRefreshHandler の JobDeadline が「このジョブ
+		// 自身の開始時刻」ではなく「AS ランナー全体の残り時間」を見て期限判定できるようにする
+		// ため。RunnerClock のクラス docblock 参照。CodeRabbit レビュー対応）。AS 自身がロード
+		// された直後、ランナーが実際に走り出すより十分前に登録すれば足りる。
+		RunnerClock::register();
+
+		// バージョン移行: register_activation_hook は自動更新・管理画面からの更新では
+		// 実行されないため、plugins_loaded で保存済みバージョンとの差分を都度チェックする
+		// （有効化したまま更新したサイトでも棚卸し基準日の初期化等が確実に走るようにする）。
+		add_action(
+			'plugins_loaded',
+			static function (): void {
+				PluginUpgrade::maybeUpgrade( AFFILICARD_VERSION );
+			}
+		);
 
 		// CPT 登録
 		add_action( 'init', array( ProductPostType::class, 'register' ) );
@@ -146,51 +175,50 @@ final class Plugin {
 			1
 		);
 
-		// 価格更新 Cron: 全体単一イベントのハンドラ登録 + 設定との差分調整
-		// v2.4.0 でハンドラを同期一括更新（ListingRefresher::run）から掃引（QueueMaintenance::sweep）へ
-		// 差し替え。実際の fetch/保存は Action Scheduler ハンドラ（RefreshHandler）側に移る。
+		// 価格更新 Cron: 全体単一イベントのハンドラ登録 + 設定との差分調整。
+		// v3.5.0（Task 12・Ruling 3）で掃引自体を AS アクション化した。WP-Cron
+		// （affilicard_refresh_all）は多重起動しないよう掃引トリガー（affilicard_sweep・
+		// unique=true）を 1 件積むだけにし、実際の掃引（QueueMaintenance::sweep）は
+		// 下記の affilicard_sweep ハンドラが担う。
 		RefreshScheduler::register(
-			static function () use ( $automaticAccountCodes, $providers ): void {
-				// I1: depth cap backstop が affilicard 以外の pending action（WooCommerce 等）に
-				// 誤反応しないよう、account group 別集計に限定する accountCodes を渡す。
-				// 再取得リード: 表示期限（priceTtlHours=24h＝規約上の表示上限）を変えず、掃引間隔
-				// ぶんだけ前倒しで needsRefetch を発火させ、価格が期限に達する前に再確認を終わらせる。
-				// A（決定的スタガリング）: account ごとの実効レート間隔（floor=minRequestIntervalMs と
-				// 管理画面 override の大きい方）を秒に丸めて Enqueuer に渡す。enqueueSweep が同一
-				// account の sweep ジョブを間隔ぶんずつ確定的にずらして積み、レート衝突→throttle
-				// 再投入（completed アクションのチャーン）を根本回避する。override を上げた account
-				// （インシデント対策で間隔を広げたケース）でもチャーンが出ない。
-				$rateLimiter            = new RateLimiter();
-				$accountIntervalSeconds = array();
-				foreach ( $automaticAccountCodes as $account ) {
-					$floorMs = 0;
-					foreach ( $providers->all() as $p ) {
-						if ( $p->accountCode() === $account ) {
-							$floorMs = $p->minRequestIntervalMs();
-							break;
-						}
-					}
-					$effMs                              = $rateLimiter->effectiveIntervalMs( $floorMs, GeneralSettings::throttleOverrideMs( $account ) );
-					$accountIntervalSeconds[ $account ] = (int) ceil( $effMs / 1000 );
-				}
-
-				$enqueuer = new Enqueuer(
-					GeneralSettings::queueDepthCap(),
-					300,
-					$automaticAccountCodes,
-					sweepLeadSeconds: PriceFreshness::sweepLeadSeconds( GeneralSettings::refreshIntervalHours() ),
-					accountIntervalSeconds: $accountIntervalSeconds
-				);
-				( new QueueMaintenance( new ProductRepository(), $enqueuer, $providers ) )->sweep();
+			static function (): void {
+				self::triggerSweep( new Enqueuer() );
 			}
 		);
 		add_action( 'init', array( RefreshScheduler::class, 'reconcile' ) );
 
+		// キュー: 掃引（sweep）アクション本体。QueueMaintenance::sweep() を呼び、戻り値が
+		// false（未完走。続きがある場合）なら同じアクションを即時に積み直して継続する
+		// （Task 12・Ruling 3）。ただし pause 中／queue_depth_cap に張り付いていて前進
+		// できない状態では sweep() を呼ばずに遅延して積み直す（Ruling 8。即時だと cursor
+		// が一切進まないまま同じ空振りクエリを無限に繰り返し、completed アクションの
+		// チャーンを再発させてしまう）。判定・分岐は handleSweepAction() に切り出す。
+		// I1: depth cap backstop が affilicard 以外の pending action（WooCommerce 等）に
+		// 誤反応しないよう、$automaticAccountCodes で account group 別集計に限定した
+		// 専用 Enqueuer を使う（REST 等が使う共有 $enqueuer とは accountCodes のスコープが
+		// 異なるため分ける）。depthCap/sweepLeadSeconds は Enqueuer と QueueMaintenance の
+		// 双方へ同じ値を渡す（cap の出所を 2 箇所に分散させない）。
+		add_action(
+			Enqueuer::HOOK_SWEEP,
+			static function () use ( $automaticAccountCodes, $providers, $repository ): void {
+				$depthCap      = GeneralSettings::queueDepthCap();
+				$sweepEnqueuer = new Enqueuer( $depthCap, 300, $automaticAccountCodes, $providers );
+				$maintenance   = new QueueMaintenance(
+					$repository,
+					$sweepEnqueuer,
+					$providers,
+					sweepLeadSeconds: PriceFreshness::sweepLeadSeconds( GeneralSettings::refreshIntervalHours() ),
+					depthCap: $depthCap
+				);
+				self::handleSweepAction( GeneralSettings::isQueuePaused(), $maintenance, $sweepEnqueuer );
+			}
+		);
+
 		// キュー: AS の completed/failed アクション保持期間を GeneralSettings に連動。
 		QueueMaintenance::registerRetentionFilters();
 
-		// キュー: AS アクション（Enqueuer::HOOK_REFRESH/HOOK_AUTOCREATE）のハンドラ配線。
-		// これが無いと Enqueuer が積んだジョブは AS 上に滞留したまま一切実行されない。
+		// キュー: AS アクション（Enqueuer::HOOK_REFRESH/HOOK_REFRESH_BATCH/HOOK_AUTOCREATE）の
+		// ハンドラ配線。これが無いと Enqueuer が積んだジョブは AS 上に滞留したまま一切実行されない。
 		$refreshHandler = new RefreshHandler(
 			$enqueuer,
 			new RateLimiter(),
@@ -198,6 +226,26 @@ final class Plugin {
 			$providers
 		);
 		add_action( Enqueuer::HOOK_REFRESH, array( $refreshHandler, 'handle' ), 10, 2 );
+
+		// BatchRefreshHandler::handle(array $args) は AS フックへ直付けできない
+		// （Action Scheduler は do_action_ref_array($hook, array_values($args)) で args を
+		// 位置引数に展開するため、直付けすると第1引数に文字列 'account' が渡り TypeError に
+		// なる）。RefreshHandler::handle と同様、クロージャで [account, items] を受けて
+		// handleBatchRefreshAction() が配列に組み直す。
+		$batchHandler = new BatchRefreshHandler(
+			$enqueuer,
+			new RateLimiter(),
+			new ListingRefresher( $providers, $repository ),
+			$providers
+		);
+		add_action(
+			Enqueuer::HOOK_REFRESH_BATCH,
+			static function ( $account, $items ) use ( $batchHandler ): void {
+				self::handleBatchRefreshAction( $batchHandler, $account, $items );
+			},
+			10,
+			2
+		);
 
 		$autoCreateHandler = new AutoCreateHandler(
 			$enqueuer,
@@ -214,7 +262,7 @@ final class Plugin {
 		// transition_post_status は publish→publish の再保存も含め毎回発火するため、
 		// onTransition 側のガード（newStatus==='publish'）だけで全 publish ケースを既にカバーする。
 		// onUpdated も配線すると二重発火するため配線しない）。
-		$publishTrigger = new PublishTrigger( $repository, $enqueuer, $providers );
+		$publishTrigger = new PublishTrigger( $repository, $enqueuer, $providers, new PublicationDate() );
 		add_action( 'transition_post_status', array( $publishTrigger, 'onTransition' ), 10, 3 );
 
 		// 予約投稿（product CPT・future）→ publish 昇格時に、対象商品の ELIGIBLE な auto listing を
@@ -258,6 +306,76 @@ final class Plugin {
 			}
 		}
 		return $codes;
+	}
+
+	/**
+	 * affilicard_sweep ハンドラの完走判定を切り出したもの（Task 12・Ruling 3/8）。
+	 * $completed が false のときだけ、同じ掃引トリガーを unique=false で積み直して
+	 * 継続する。true（完走）のときは何もしない——ここを誤ると継続更新が止まる。
+	 *
+	 * QueueMaintenance は final class で Mockery モック不可なため、bool の completed を
+	 * 引数に取る形で切り出し、この分岐だけを直接ユニットテストできるようにしている。
+	 *
+	 * @param int $delaySeconds 継続トリガーを積む遅延秒数。0（既定）は即時。
+	 *            Ruling 8: pause 中／queue_depth_cap に張り付いていて前進できない状態
+	 *            （呼び出し元は handleSweepAction() 経由）では 0 より大きい値を渡すこと。
+	 */
+	public static function handleSweepCompletion( bool $completed, Enqueuer $sweepEnqueuer, int $delaySeconds = 0 ): void {
+		if ( ! $completed ) {
+			$sweepEnqueuer->enqueueSweepTrigger( false, $delaySeconds > 0 ? time() + $delaySeconds : 0 );
+		}
+	}
+
+	/**
+	 * affilicard_sweep ハンドラの本体（Task 12・Ruling 8）。
+	 *
+	 * これは私（コントローラ）の Ruling 3 の不備を修正するもの: 「false なら即時に
+	 * 積み直す」だけでは、queue_depth_cap に張り付いて 1 件も前進できない状態
+	 * （$maintenance->queueAtCapacity()）や、キュー一時停止中（$paused）でも
+	 * sweep() を即座に呼び直し続けてしまう。前者は cursor が一切進まないまま
+	 * get_posts / as_get_scheduled_actions の空振りクエリを無限に繰り返し、
+	 * 後者は BatchRefreshHandler が pause 中バッチを自己再投入し続けるため pending
+	 * 深さが永久に cap を下回らず、いずれも completed アクションのチャーンという
+	 * spec が消そうとした症状そのものを再発させる。
+	 *
+	 * この2条件のときは sweep() を呼ばずに SWEEP_STALLED_RETRY_SECONDS 秒後へ遅延して
+	 * 積み直す（unique=false のためジョブは失われない）。それ以外は通常どおり
+	 * sweep() を呼び、その戻り値を handleSweepCompletion() へ渡す（即時の継続 or
+	 * 完走で何もしない）。
+	 */
+	public static function handleSweepAction( bool $paused, QueueMaintenance $maintenance, Enqueuer $sweepEnqueuer ): void {
+		if ( $paused || $maintenance->queueAtCapacity() ) {
+			self::handleSweepCompletion( false, $sweepEnqueuer, self::SWEEP_STALLED_RETRY_SECONDS );
+			return;
+		}
+
+		self::handleSweepCompletion( $maintenance->sweep(), $sweepEnqueuer );
+	}
+
+	/**
+	 * WP-Cron（affilicard_refresh_all）の起動ハンドラ本体（Task 12・Ruling 3）。
+	 * 掃引トリガー（affilicard_sweep）を unique=true で 1 件積むだけにし、多重起動を防ぐ。
+	 * 実際の掃引は affilicard_sweep のハンドラ（QueueMaintenance::sweep）が担う。
+	 */
+	public static function triggerSweep( Enqueuer $enqueuer ): void {
+		$enqueuer->enqueueSweepTrigger( true );
+	}
+
+	/**
+	 * Enqueuer::HOOK_REFRESH_BATCH ハンドラの本体。AS が do_action_ref_array() で
+	 * 展開する位置引数 [account, items] を BatchRefreshHandler::handle() が要求する
+	 * 配列 {account, items} へ組み直す（先行タスクからの申し送り: 直付け不可・TypeError 対策）。
+	 *
+	 * @param mixed $account
+	 * @param mixed $items
+	 */
+	public static function handleBatchRefreshAction( BatchRefreshHandler $handler, $account, $items ): void {
+		$handler->handle(
+			array(
+				'account' => (string) $account,
+				'items'   => is_array( $items ) ? $items : array(),
+			)
+		);
 	}
 
 	public static function buildAccountRegistry(): AccountRegistry {
