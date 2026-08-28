@@ -841,4 +841,235 @@ final class BatchRefreshHandlerTest extends TestCase {
 
 		$this->assertConditionsMet();
 	}
+
+	/**
+	 * CodeRabbit レビュー Major: `handle()` は AS から渡された `items` のキーが
+	 * 0 始まりの連番であることを保証せずに使っている。`foreach` で得た `$index` を
+	 * `requeueRemaining()` が `array_slice( $items, $fromIndex )` の「キー」ではなく
+	 * 「オフセット（先頭からの位置）」として渡すため、キーが連番でないとズレる。
+	 *
+	 * items を account=5,10,20 という非連番キーで直接 handle() に渡す（Enqueuer 経由の
+	 * 通常経路は enqueueBatch() が array_values() 済みの items しか JSON へ積まないため、
+	 * このズレは正規の投入経路では発生しない。handle() 自身が入力を信頼している点を
+	 * 直接検証する）。1件目（キー5・前進保証で強制的に試みる）は成功させ、2件目
+	 * （キー10）は timeLimit===safetyMargin で remaining()==0 にして期限超過で
+	 * requeueRemaining() に落とす。
+	 *
+	 * 修正前（正規化なし）: foreach の $index はそのまま 10 になり、
+	 * `array_slice( $items, 10 )`（3 要素の配列に対してオフセット10）は空配列を返す。
+	 * `requeueOrFallback()` は空配列を即 return するため、2/3件目は積み直しも
+	 * per-listing フォールバックも一切されず痕跡なく消える（as_schedule_single_action
+	 * が一度も呼ばれない）。
+	 *
+	 * 修正後（array_values() で正規化）: 内部キーは 0,1,2 になり、2件目で
+	 * `array_slice( $items, 1 )` が正しく [キー10の項目, キー20の項目] を切り出す。
+	 */
+	public function test_itemsのキーが連番でなくてもrequeueRemainingは正しい範囲を切り出す(): void {
+		$this->stubGeneralSettings();
+		$this->mockRateLimiterWpdb( 1 ); // 1件目（前進保証）は即座に CAS 獲得成功。
+
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'refreshOne' )->once()->with( 1, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
+		$refresher->shouldReceive( 'refreshOne' )->with( 2, 'rakuten-kobo' )->never();
+		$refresher->shouldReceive( 'refreshOne' )->with( 3, 'rakuten-kobo' )->never();
+
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_refresh_gaveup_1_rakuten-kobo' )
+			->andReturn( true );
+
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 ); // requeueRemaining の jitter。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH_BATCH,
+				array(
+					'account' => 'rakuten',
+					'items'   => array(
+						array(
+							'post_id'  => 2,
+							'platform' => 'rakuten-kobo',
+						),
+						array(
+							'post_id'  => 3,
+							'platform' => 'rakuten-kobo',
+						),
+					),
+				),
+				'affilicard-rakuten',
+				false,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 77 );
+
+		// timeLimitSeconds === safetyMarginSeconds → JobDeadline::remaining() は常に 0。
+		// 2件目は前進保証が及ばないため、期限超過として即 requeueRemaining() に落ちる。
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 5, 5 );
+
+		$handler->handle(
+			array(
+				'account' => 'rakuten',
+				'items'   => array(
+					5  => array(
+						'post_id'  => 1,
+						'platform' => 'rakuten-kobo',
+					),
+					10 => array(
+						'post_id'  => 2,
+						'platform' => 'rakuten-kobo',
+					),
+					20 => array(
+						'post_id'  => 3,
+						'platform' => 'rakuten-kobo',
+					),
+				),
+			)
+		);
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * CodeRabbit レビュー Minor: 前進保証（$mustAttempt）が働く1件目は、レート枠が
+	 * 取れなかったときの待機を `JobDeadline::clampWait()` でクランプしてはならない。
+	 * 1件目は期限ゲート（`canAfford`）自体を素通りして必ず試みる設計なのに、待機だけ
+	 * クランプされると待ち足りずに枠を取れないまま2回目の tryAcquire に進んでしまい、
+	 * 結局 per-listing（enqueueManual）へ落ちて「前進保証」の趣旨（1件も処理できない
+	 * まま積み直すのを防ぐ）が達成できない。
+	 *
+	 * timeLimitSeconds===safetyMarginSeconds で remaining() を常に 0 にし、
+	 * クランプされれば waitSec が 0 になり `if ($waitSec > 0)` を満たさず usleep が
+	 * 一度も呼ばれないはずの状況を作る。修正後は mustAttempt の間はクランプを経ず
+	 * 生の待機秒（正の値）で usleep が呼ばれ、2回目の tryAcquire で枠を取得して
+	 * refreshOne まで到達する。
+	 *
+	 * WP_Mock（Patchwork）は内部 PHP 関数（usleep・time 等）の上書きを許さないため、
+	 * usleep の呼び出し自体を直接アサートできない。代わりに $wpdb->query()
+	 * （RateLimiter::tryAcquire の CAS）を「実時間が最低 0.5 秒経過してから」しか
+	 * 成功しない time-based スタブにする。クランプで待機 0 秒になる（バグ）と
+	 * usleep が実質何もせず即座に2回目の CAS を試みるため間に合わず失敗し、
+	 * per-listing（enqueueManual）へ落ちる。修正後は生の raw waitSec（1秒）だけ
+	 * 実際に usleep するため間に合って成功する（このテストは実時間を約1秒消費する）。
+	 */
+	public function test_前進保証の1件目は待機をクランプせずフルに待つ(): void {
+		$this->stubGeneralSettings();
+		$nowMs = (int) round( microtime( true ) * 1000 );
+
+		$readyAt       = microtime( true ) + 0.5;
+		$callCount     = 0;
+		$wpdb          = Mockery::mock();
+		$wpdb->options = 'wp_options';
+		$wpdb->shouldReceive( 'prepare' )->andReturnUsing( static fn( string $query, ...$args ) => $query );
+		$wpdb->shouldReceive( 'query' )->andReturnUsing(
+			static function () use ( &$callCount, $readyAt ): int {
+				++$callCount;
+				if ( 1 === $callCount ) {
+					return 0; // 1回目は必ず未獲得（待機分岐に入らせる）。
+				}
+				return microtime( true ) >= $readyAt ? 1 : 0;
+			}
+		);
+		$GLOBALS['wpdb'] = $wpdb;
+		WP_Mock::userFunction( 'add_option' )->andReturn( true );
+		WP_Mock::userFunction( 'wp_cache_delete' )->andReturn( true );
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_ratelimit_rakuten', 0 )
+			->andReturn( $nowMs - 1100 + 1000 ); // next_ms ≈ 今+1秒 → raw waitSec は1秒。
+
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'refreshOne' )->once()->with( 1, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
+
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_refresh_gaveup_1_rakuten-kobo' )
+			->andReturn( true );
+
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+
+		// timeLimitSeconds === safetyMarginSeconds → remaining() は常に 0。
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 5, 5 );
+
+		$handler->handle(
+			$this->args(
+				array(
+					'post_id'  => 1,
+					'platform' => 'rakuten-kobo',
+				)
+			)
+		);
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * CodeRabbit レビュー Minor（続き）: 前進保証が及ばない2件目以降は、従来どおり
+	 * 待機がクランプされ、要求より減った場合は待たずに積み直される。Minor の修正は
+	 * `$mustAttempt` のときだけフルに待つ変更であり、2件目以降の挙動（クランプ＋
+	 * 積み直し・待たない）まで変えてはならないことを明示的に固定する
+	 * （クランプで要求より減った場合、コードは usleep へ到達する前に早期 return する
+	 * ため、real usleep が呼ばれないこと自体は「実行時間が伸びないこと」で担保される）。
+	 */
+	public function test_前進保証が及ばない2件目以降はクランプされ待たずに積み直す(): void {
+		$this->stubGeneralSettings();
+		$nowMs = (int) round( microtime( true ) * 1000 );
+		$this->mockRateLimiterWpdb( 1, 0 ); // 1件目は獲得成功、2件目は未獲得。
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_ratelimit_rakuten', 0 )
+			->andReturn( $nowMs + 48900 ); // next_ms ≈ 今+50秒 → raw waitSec は remaining(13秒) を大きく上回る。
+
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'refreshOne' )->once()->with( 1, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
+		$refresher->shouldReceive( 'refreshOne' )->with( 2, 'rakuten-kobo' )->never();
+
+		WP_Mock::userFunction( 'delete_transient' )
+			->once()
+			->with( 'affilicard_refresh_gaveup_1_rakuten-kobo' )
+			->andReturn( true );
+
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 ); // requeueRemaining の jitter。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH_BATCH,
+				array(
+					'account' => 'rakuten',
+					'items'   => array(
+						array(
+							'post_id'  => 2,
+							'platform' => 'rakuten-kobo',
+						),
+					),
+				),
+				'affilicard-rakuten',
+				false,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 8 );
+
+		// remaining=13秒（timeLimit13/margin0）。2件目は outer ゲート（perItemSeconds=12）は
+		// 通過するが、実際に計算される待機（約50秒）はクランプで13秒まで切り詰められる＝
+		// 要求より減る＝待たずに積み直す。
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 13, 0 );
+
+		$handler->handle(
+			$this->args(
+				array(
+					'post_id'  => 1,
+					'platform' => 'rakuten-kobo',
+				),
+				array(
+					'post_id'  => 2,
+					'platform' => 'rakuten-kobo',
+				)
+			)
+		);
+
+		$this->assertConditionsMet();
+	}
 }

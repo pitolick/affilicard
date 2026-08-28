@@ -51,7 +51,13 @@ final class BatchRefreshHandler {
 	 */
 	public function handle( array $args ): void {
 		$account = isset( $args['account'] ) ? (string) $args['account'] : '';
-		$items   = isset( $args['items'] ) && is_array( $args['items'] ) ? $args['items'] : array();
+		// array_values() でキーを 0 始まりの連番へ正規化する。以降の foreach で得る $index を
+		// requeueRemaining() が array_slice( $items, $fromIndex ) の「オフセット（先頭からの
+		// 位置）」として使うため、キーが連番でないとズレる（CodeRabbit レビュー指摘）。
+		// 正規の投入経路（Enqueuer::enqueueBatch）は投入前に array_values() 済みの items しか
+		// 積まないため通常は連番だが、handle() は AS フックの境界（外部入力の受け口）なので
+		// ここでも防御的に正規化する。
+		$items = isset( $args['items'] ) && is_array( $args['items'] ) ? array_values( $args['items'] ) : array();
 		if ( '' === $account || array() === $items ) {
 			return;
 		}
@@ -123,10 +129,14 @@ final class BatchRefreshHandler {
 				$rawWaitSec = max( 0, (int) ceil( $acquire['next_ms'] / 1000 ) - time() );
 				// 待機秒を残り時間でクランプする。要求した待機がクランプで減った
 				// （＝そのまま待つと期限を超える）場合は、待たずに未処理分（この listing を
-				// 含む）を積み直して終了する（spec §4-1）。前進保証が働く 1 件目は例外的に
-				// 待つ（最悪 time limit を超えるが、AS が次のバッチで回復するため
-				// 「1件も処理できない」よりまし）。
-				$waitSec = $deadline->clampWait( time(), $rawWaitSec );
+				// 含む）を積み直して終了する（spec §4-1）。前進保証が働く 1 件目は
+				// クランプを経ず生の待機秒（$rawWaitSec）だけフルに待つ（CodeRabbit レビュー
+				// 指摘）——1 件目は期限ゲート（canAfford）自体を素通りして必ず試みる設計
+				// なので、待機だけクランプされると待ち足りずに枠を取れないまま2回目の
+				// tryAcquire に進み、結局 per-listing へ落ちて「1件も処理できないまま
+				// 積み直す」を防ぐという前進保証の目的が達成できない（最悪 time limit を
+				// 超えるが、AS が次のバッチで回復するため「1件も処理できない」よりまし）。
+				$waitSec = $mustAttempt ? $rawWaitSec : $deadline->clampWait( time(), $rawWaitSec );
 				if ( $waitSec < $rawWaitSec && ! $mustAttempt ) {
 					$this->requeueRemaining( $account, $items, $index );
 					return;
