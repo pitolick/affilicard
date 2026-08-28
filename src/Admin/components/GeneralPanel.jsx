@@ -192,7 +192,7 @@ export function GeneralPanel() {
 					checked={stocktakeEnabled}
 					onChange={(v) => update({ stocktake_enabled: v })}
 					help={__(
-						'記事に掲載されなくなって指定日数が過ぎた商品の自動更新を止めます。記事を更新すれば対象に戻ります。',
+						'最後に記事へ掲載した日から指定日数が過ぎた商品の自動更新を止めます。記事を更新すれば対象に戻ります。',
 						'affilicard'
 					)}
 				/>
@@ -205,7 +205,7 @@ export function GeneralPanel() {
 					onChange={(v) => setStocktakeDaysDraft(v)}
 					onBlur={commitStocktakeDays}
 					help={__(
-						'記事に掲載されなくなってこの日数が過ぎた商品を、自動更新の対象から外します（既定 180 日・最小 1 日）。記事を更新すれば対象に戻ります。',
+						'最後に記事へ掲載した日からこの日数が過ぎた商品を、自動更新の対象から外します（既定 180 日・最小 1 日）。記事を更新すれば対象に戻ります。',
 						'affilicard'
 					)}
 				/>
