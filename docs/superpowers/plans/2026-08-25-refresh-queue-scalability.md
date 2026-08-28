@@ -1,7 +1,7 @@
 # 価格同期スケーラビリティ 実装計画
 
 > **本計画は実装前に書かれたものです。** 実装中、複数の箇所がコントローラの裁定（CodeRabbit レビュー対応を含む）で計画時点の記述から変更されています（カーソル判定の SQL 化・`Enqueuer::enqueueBatch()` への `$unique` 引数追加・`JobDeadline` の起点を AS ランナー全体の開始時刻へ変更・バッチサイズの動的算出化・`QueueMaintenance::sweep()` のカーソル巻き戻し・棚卸し設定の管理画面 UI 追加・`PluginUpgrade` の `add_option()` 戻り値の解釈 など）。以下のタスク本文には変更前の記述のまま残っている箇所があります。**最終的な仕様は [`docs/superpowers/specs/2026-08-25-refresh-queue-scalability-design.md`](../specs/2026-08-25-refresh-queue-scalability-design.md) が正**（spec が binding authority）で、実装（`src/`）はそれに従っています。本ドキュメントは意思決定の経緯を追う記録として残していますが、仕様書として読まないでください。
-
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 価格同期の空振り 90% を潰して実効スループットを一桁上げ、記事の掲載日を基礎とした棚卸しで更新需要そのものを抑える。
