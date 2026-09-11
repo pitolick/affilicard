@@ -444,9 +444,18 @@ final class ProductListColumnsTest extends TestCase {
 	 * 1件（表示中の購入リンク）である。先頭が鮮度切れ・後続が新しい場合でも、
 	 * 選択係が選ぶのは表示順の先頭（display_order 昇順）なので、その offer を見て
 	 * 警告を出す（後続の新しい offer を見て警告を消してはならない）。
+	 *
+	 * レビュー指摘（Important）: 当初の版は両 offer とも `affiliate_url` を欠いており、
+	 * `OfferSelector` がどちらを選んでも `has_fallback` が true になって
+	 * `assertStringContainsString('warning', ...)` が通ってしまう——選択を間違えても
+	 * 検知できないテストだった。両 offer に `affiliate_url` を与えてフォールバック経路を
+	 * 無効化し、代わりに2 offer 間で結果が分かれる「価格非表示警告」の文言そのものを
+	 * 見ることで、選ばれた offer を取り違えると必ず失敗する形にする。
 	 */
 	public function test_警告の判定は選択された購入リンクを見る(): void {
-		// 先頭が鮮度切れ・後続が新しい場合、先頭（表示中）を見て警告を出す。
+		// 先頭（display_order が小さい方）が鮮度切れ・後続が新しい場合、選択係は
+		// 先頭を選ぶので、先頭の鮮度切れを理由に価格非表示警告が出ること。
+		// 後続（新しい方）が選ばれてしまうと price は鮮度内になり、この警告は出ない。
 		$html = $this->renderColumnFor(
 			array(
 				array(
@@ -456,6 +465,7 @@ final class ProductListColumnsTest extends TestCase {
 						array(
 							'display_order'    => 10,
 							'external_id'      => 'shown',
+							'affiliate_url'    => 'https://hb.afl.rakuten.co.jp/hgc/a/',
 							'regular_url'      => 'https://example.test/a',
 							'price'            => '660',
 							'last_verified_at' => gmdate( 'c', time() - 30 * 3600 ),
@@ -463,6 +473,7 @@ final class ProductListColumnsTest extends TestCase {
 						array(
 							'display_order'    => 100,
 							'external_id'      => 'hidden',
+							'affiliate_url'    => 'https://hb.afl.rakuten.co.jp/hgc/b/',
 							'regular_url'      => 'https://example.test/b',
 							'price'            => '660',
 							'last_verified_at' => gmdate( 'c' ),
@@ -472,7 +483,7 @@ final class ProductListColumnsTest extends TestCase {
 			)
 		);
 
-		$this->assertStringContainsString( 'warning', $html );
+		$this->assertStringContainsString( '価格が未確認/期限切れのためカードで非表示です', $html );
 	}
 
 	/**
