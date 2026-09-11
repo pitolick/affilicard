@@ -4,8 +4,11 @@ declare(strict_types=1);
 namespace Affilicard\PostType;
 
 use Affilicard\Platform\PlatformConfig;
+use Affilicard\Pricing\FetchStatus;
+use Affilicard\Pricing\OfferSelector;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Queue\Enqueuer;
+use Affilicard\Settings\GeneralSettings;
 use Affilicard\Stocktake\PublicationDate;
 use Affilicard\Stocktake\StocktakePolicy;
 use Affilicard\Util\JsonField;
@@ -13,15 +16,24 @@ use Affilicard\Util\JsonField;
 /**
  * CPT 一覧画面に「Fallback」カラムを追加する。
  *
- * Listing の `affiliate_url` が空かつ `regular_url` が非空の場合、警告アイコンを表示する。
- * また、`price` を保持しているが `PriceFreshness::isPriceDisplayable()` が false（未確認/期限切れ）の
- * 場合も、カード上で価格が非表示になる旨の警告アイコンを表示する。
+ * 各 listing について `OfferSelector::select()` が選んだ購入リンク（offer）の
+ * `affiliate_url` が空かつ `regular_url` が非空の場合、警告アイコンを表示する。
+ * また、その offer が `price` を保持しているが `PriceFreshness::isPriceDisplayable()` が
+ * false（未確認/期限切れ）の場合も、カード上で価格が非表示になる旨の警告アイコンを表示する。
  *
  * 警告が出ている listing については、Action Scheduler の pending 状態（再取得ジョブが
- * 既にキュー投入済みか）と `fetch_error`（直近の取得失敗理由）を warning アイコンの
- * title 属性に付記する（Task 18）。`fetch_error` は provider 由来の外部文字列のため、
- * `wp_strip_all_tags()` によるタグ除去＋長さ制限（200文字）でサニタイズしたうえで、
- * 出力直前に `esc_attr()` で最終エスケープする二重防御を行う（spec §9-3）。
+ * 既にキュー投入済みか）と、選ばれた offer の `fetch_status` から `FetchStatus::label()` で
+ * 都度生成した文言を warning アイコンの title 属性に付記する（Task 18）。文言は保存された
+ * 文字列を読むのではなく、表示のたびにコードから生成する——`fetch_status` は4種類の固定コード
+ * （`FetchStatus` の定数）でしかなく、文言そのものは meta に持たない。
+ *
+ * かつてこの docblock は「v3 以前に文言そのものを保存していた旧フィールドは provider 由来の
+ * 外部文字列のため」二重サニタイズが必要と書いていたが、その前提は誤りだった。実際に
+ * 保存されていたのは本プラグイン自身が固定した3種類の日本語文言だけで、provider から
+ * 届いた文字列が入ったことはない（Task 12 で旧フィールドを撤去し `fetch_status` へ
+ * 置き換えた）。とはいえサニタイズ自体（`wp_strip_all_tags()` によるタグ除去＋長さ制限
+ * （200文字）、出力直前の `esc_attr()` による最終エスケープ）はコストがほぼ無く、将来
+ * provider 由来の詳細を持つフィールドを足す余地を残すため維持する（spec §9-3）。
  *
  * 「最終掲載日」列（Task 11）は棚卸し状況を一覧で把握する唯一の導線。値は
  * `ProductPostType::META_LAST_PUBLISHED_AT`（ISO8601, UTC）で、辞書順＝時系列順のため
@@ -172,6 +184,7 @@ final class ProductListColumns {
 		$listings_raw = get_post_meta( $post_id, ProductPostType::META_LISTINGS, true );
 		$listings     = is_array( $listings_raw ) ? $listings_raw : ( is_string( $listings_raw ) ? JsonField::decode( $listings_raw, array() ) : array() );
 
+		$fallback_enabled = GeneralSettings::fallbackOnTerminal();
 		$now_ts           = time();
 		$has_fallback     = false;
 		$has_hidden_price = false;
@@ -182,25 +195,29 @@ final class ProductListColumns {
 				continue;
 			}
 			$platform_code = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
-			$affiliate     = isset( $listing['affiliate_url'] ) ? (string) $listing['affiliate_url'] : '';
-			$regular       = isset( $listing['regular_url'] ) ? (string) $listing['regular_url'] : '';
-			$is_fallback   = ( '' === $affiliate && '' !== $regular );
+			$offers        = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
+			$selected      = OfferSelector::select( $offers, $fallback_enabled );
+			$offer         = array() !== $selected ? $selected[0] : array();
+
+			$affiliate   = isset( $offer['affiliate_url'] ) ? (string) $offer['affiliate_url'] : '';
+			$regular     = isset( $offer['regular_url'] ) ? (string) $offer['regular_url'] : '';
+			$is_fallback = ( '' === $affiliate && '' !== $regular );
 			if ( $is_fallback ) {
 				$has_fallback = true;
 			}
 
 			$definition      = null;
 			$is_price_hidden = false;
-			$price           = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
+			$price           = isset( $offer['price'] ) ? trim( (string) $offer['price'] ) : '';
 			if ( '' !== $price ) {
 				$definition = PlatformConfig::find( $platform_code );
-				if ( ! PriceFreshness::isPriceDisplayable( $listing, $definition, $now_ts ) ) {
+				if ( ! PriceFreshness::isPriceDisplayable( $offer, $definition, $now_ts ) ) {
 					$has_hidden_price = true;
 					$is_price_hidden  = true;
 				}
 			}
 
-			// キュー状態/失敗理由の問い合わせは、既に警告が出ている listing に限定する
+			// キュー状態/取得状態の問い合わせは、既に警告が出ている listing に限定する
 			// （警告の無い listing まで毎回 Action Scheduler に問い合わせるのは無駄なため）。
 			if ( ! $is_fallback && ! $is_price_hidden ) {
 				continue;
@@ -225,12 +242,15 @@ final class ProductListColumns {
 				}
 			}
 
-			$raw_error = isset( $listing['fetch_error'] ) ? trim( (string) $listing['fetch_error'] ) : '';
-			if ( '' !== $raw_error ) {
-				$clean = self::sanitizeFetchError( $raw_error );
-				if ( '' !== $clean && ! in_array( $clean, $error_notes, true ) ) {
-					$error_notes[] = $clean;
-				}
+			// 保存された文言ではなく、選ばれた offer の fetch_status からコードで生成する
+			// （FetchStatus::label()）。UNSUPPORTED/TRANSIENT/TERMINAL はどれも
+			// リトライ分類上は TRANSIENT_FAILURE 側に寄るが、人間が読む一覧では
+			// 「自動取得の対象外（恒久）」と「一時的に取得できない」を区別できないと
+			// 一覧が嘘をつくことになるため、4値それぞれ別の文言を出す。
+			$status = isset( $offer['fetch_status'] ) ? (string) $offer['fetch_status'] : FetchStatus::NONE;
+			$label  = self::sanitizeStatusLabel( FetchStatus::label( $status ) );
+			if ( '' !== $label && ! in_array( $label, $error_notes, true ) ) {
+				$error_notes[] = $label;
 			}
 		}
 
@@ -248,11 +268,12 @@ final class ProductListColumns {
 	}
 
 	/**
-	 * pending 状態と fetch_error から、警告アイコンの title に付記する追加テキストを組み立てる。
+	 * pending 状態と fetch_status の文言から、警告アイコンの title に付記する追加テキストを組み立てる。
 	 *
 	 * 戻り値はエスケープ前のプレーンテキスト（呼び出し側で esc_attr() を必ず通すこと）。
 	 *
-	 * @param list<string> $error_notes サニタイズ済みの fetch_error（listing 単位で重複除去済み）
+	 * @param list<string> $error_notes サニタイズ済みの fetch_status 文言（`FetchStatus::label()`
+	 *                                  が生成したもの。listing 単位で重複除去済み）
 	 */
 	private static function buildQueueNote( bool $has_pending, array $error_notes ): string {
 		$parts = array();
@@ -273,14 +294,19 @@ final class ProductListColumns {
 	}
 
 	/**
-	 * provider 由来の `fetch_error` を二重にサニタイズする（spec §9-3）。
+	 * `FetchStatus::label()` が生成した表示文言を二重にサニタイズする（spec §9-3）。
+	 *
+	 * 現状この文言は本プラグイン固定の4種類（`FetchStatus` の各定数に対応する日本語）
+	 * のみで、provider 由来の外部文字列が混じることはない。とはいえサニタイズ自体は
+	 * コストがほぼ無く、将来 provider 由来の詳細を持つフィールドを足す余地を残すため
+	 * 維持する。
 	 *
 	 * 1) `wp_strip_all_tags()` でタグを除去する（`<script>` 等が HTML として生存しない）。
 	 * 2) 200 文字に切り詰める（肥大化・表示崩れ防止）。
 	 *
 	 * 最終エスケープ（`esc_attr()`）は呼び出し側（title 属性への出力直前）で行う。
 	 */
-	private static function sanitizeFetchError( string $raw ): string {
+	private static function sanitizeStatusLabel( string $raw ): string {
 		$stripped = wp_strip_all_tags( $raw );
 		return mb_substr( trim( $stripped ), 0, 200 );
 	}

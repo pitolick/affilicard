@@ -6,10 +6,12 @@ namespace Affilicard\Tests\Unit\PostType;
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductListColumns;
 use Affilicard\PostType\ProductPostType;
+use Affilicard\Pricing\FetchStatus;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Settings\GeneralSettings;
 use Affilicard\Upgrade\PluginUpgrade;
 use Mockery;
+use ReflectionMethod;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
 
@@ -65,8 +67,9 @@ final class ProductListColumnsTest extends TestCase {
 					return gmdate( (string) $format, null !== $timestamp ? (int) $timestamp : time() );
 				}
 			);
-		// fetch_error サニタイズ（spec §9-3 二重防御の1段目）の実体を模した stub。
-		// 実 wp_strip_all_tags と同様、タグは除去するがタグ内テキストはそのまま残す。
+		// fetch_status 文言（FetchStatus::label()）のサニタイズ（spec §9-3 二重防御の1段目）の
+		// 実体を模した stub。実 wp_strip_all_tags と同様、タグは除去するがタグ内テキストは
+		// そのまま残す。
 		WP_Mock::userFunction( 'wp_strip_all_tags' )
 			->andReturnUsing(
 				static function ( $text ) {
@@ -79,6 +82,50 @@ final class ProductListColumnsTest extends TestCase {
 		WP_Mock::tearDown();
 		Mockery::close();
 		parent::tearDown();
+	}
+
+	/**
+	 * 対象商品の listings をスタブして Fallback 列（COLUMN_KEY）の HTML を返すテスト用ヘルパ。
+	 *
+	 * get_option は `PlatformConfig::OPTION_KEY`（プラットフォーム定義）と
+	 * `GeneralSettings::OPTION_KEY`（fallbackOnTerminal 等）の両方を同じ関数名で問い合わせる。
+	 * `WP_Mock::userFunction('get_option')` を `->with()` の異なる引数で複数回登録しても、
+	 * Mockery は最初に登録した期待値しか使わず後続を無視することがあるため、ここではキーで
+	 * 分岐する `andReturnUsing()` 1本にまとめて呼び出し引数ごとに振り分ける。
+	 *
+	 * @param list<array<string, mixed>> $listings
+	 */
+	private function renderColumnFor( array $listings ): string {
+		$post_id = 999;
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $post_id, ProductPostType::META_LISTINGS, true )
+			->andReturn( $listings );
+
+		WP_Mock::userFunction( 'get_option' )
+			->andReturnUsing(
+				static function ( $key, $default = false ) {
+					if ( PlatformConfig::OPTION_KEY === $key ) {
+						return array(
+							array(
+								'code'          => 'rakuten-kobo',
+								'provider'      => 'rakuten-kobo',
+								'priceTtlHours' => 24,
+							),
+						);
+					}
+					if ( GeneralSettings::OPTION_KEY === $key ) {
+						return array( 'fallback_on_terminal' => false );
+					}
+					return $default;
+				}
+			);
+
+		WP_Mock::userFunction( 'as_has_scheduled_action' )->andReturn( false );
+
+		ob_start();
+		ProductListColumns::renderColumn( ProductListColumns::COLUMN_KEY, $post_id );
+		return (string) ob_get_clean();
 	}
 
 	public function test_addColumn_inserts_fallback_column_right_after_title(): void {
@@ -107,9 +154,13 @@ final class ProductListColumnsTest extends TestCase {
 			->andReturn(
 				array(
 					array(
-						'platform'      => 'dmm-books',
-						'affiliate_url' => '',
-						'regular_url'   => 'https://example.com/product',
+						'platform' => 'dmm-books',
+						'offers'   => array(
+							array(
+								'affiliate_url' => '',
+								'regular_url'   => 'https://example.com/product',
+							),
+						),
 					),
 				)
 			);
@@ -123,6 +174,9 @@ final class ProductListColumnsTest extends TestCase {
 					),
 				)
 			);
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
 		WP_Mock::userFunction( 'as_has_scheduled_action' )
 			->with(
 				Enqueuer::HOOK_REFRESH,
@@ -149,12 +203,19 @@ final class ProductListColumnsTest extends TestCase {
 			->andReturn(
 				array(
 					array(
-						'platform'      => 'dmm-books',
-						'affiliate_url' => 'https://aff.example.com/abc',
-						'regular_url'   => 'https://example.com/product',
+						'platform' => 'dmm-books',
+						'offers'   => array(
+							array(
+								'affiliate_url' => 'https://aff.example.com/abc',
+								'regular_url'   => 'https://example.com/product',
+							),
+						),
 					),
 				)
 			);
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
 
 		ob_start();
 		ProductListColumns::renderColumn( ProductListColumns::COLUMN_KEY, 456 );
@@ -170,10 +231,14 @@ final class ProductListColumnsTest extends TestCase {
 			->andReturn(
 				array(
 					array(
-						'platform'      => 'rakuten-kobo',
-						'price'         => '693',
-						'affiliate_url' => 'https://hb.afl.rakuten.co.jp/hgc/x/',
-						'regular_url'   => 'https://books.rakuten.co.jp/rk/x/',
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'price'         => '693',
+								'affiliate_url' => 'https://hb.afl.rakuten.co.jp/hgc/x/',
+								'regular_url'   => 'https://books.rakuten.co.jp/rk/x/',
+							),
+						),
 					),
 				)
 			);
@@ -187,6 +252,9 @@ final class ProductListColumnsTest extends TestCase {
 					),
 				)
 			);
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
 		WP_Mock::userFunction( 'as_has_scheduled_action' )
 			->with(
 				Enqueuer::HOOK_REFRESH,
@@ -273,9 +341,13 @@ final class ProductListColumnsTest extends TestCase {
 			->andReturn(
 				array(
 					array(
-						'platform'      => 'dmm-books',
-						'affiliate_url' => '',
-						'regular_url'   => 'https://example.com/product',
+						'platform' => 'dmm-books',
+						'offers'   => array(
+							array(
+								'affiliate_url' => '',
+								'regular_url'   => 'https://example.com/product',
+							),
+						),
 					),
 				)
 			);
@@ -289,6 +361,9 @@ final class ProductListColumnsTest extends TestCase {
 					),
 				)
 			);
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
 		WP_Mock::userFunction( 'as_has_scheduled_action' )
 			->once()
 			->with(
@@ -310,106 +385,130 @@ final class ProductListColumnsTest extends TestCase {
 	}
 
 	/**
-	 * Task 18 / spec §9-3 二重防御の証拠テスト。
-	 *
-	 * fetch_error は provider 由来の外部文字列のため、HTML/script が混入していても
-	 * 1) wp_strip_all_tags によるタグ除去、2) esc_attr による最終エスケープ、の二段構えで
-	 * 生のまま出力に混入しないことを検証する。タグは除去されるがタグ内テキスト自体は
-	 * サニタイズ後も残る（strip_tags の仕様どおり）ため、タグそのもの（`<script>`）が
-	 * 出力に存在しないことをもって「実行可能なマークアップとして生存していない」ことを確認する。
+	 * Task 12: 警告アイコンの文言は保存された文字列ではなく、選ばれた offer の
+	 * `fetch_status` から `FetchStatus::label()` が都度生成する。
 	 */
-	public function test_renderColumn_fallback_title_strips_script_tag_from_fetch_error_and_escapes_output(): void {
-		WP_Mock::userFunction( 'get_post_meta' )
-			->with( 666, ProductPostType::META_LISTINGS, true )
-			->andReturn(
+	public function test_fetch_statusから文言を引く(): void {
+		// 保存された文言ではなく、コードから生成した文言が出ること。
+		$html = $this->renderColumnFor(
+			array(
 				array(
-					array(
-						'platform'      => 'dmm-books',
-						'affiliate_url' => '',
-						'regular_url'   => 'https://example.com/product',
-						'fetch_error'   => 'API接続エラー: <script>alert(1)</script>',
+					'platform' => 'rakuten-kobo',
+					'enabled'  => true,
+					'offers'   => array(
+						array(
+							'display_order' => 100,
+							'external_id'   => 'x',
+							'regular_url'   => 'https://example.test/x',
+							'fetch_status'  => FetchStatus::TERMINAL,
+						),
 					),
-				)
-			);
-		WP_Mock::userFunction( 'get_option' )
-			->with( PlatformConfig::OPTION_KEY, array() )
-			->andReturn(
-				array(
-					array(
-						'code'     => 'dmm-books',
-						'provider' => 'dmm-ebook',
-					),
-				)
-			);
-		WP_Mock::userFunction( 'as_has_scheduled_action' )
-			->with(
-				Enqueuer::HOOK_REFRESH,
-				array(
-					'post_id'  => 666,
-					'platform' => 'dmm-books',
 				),
-				'affilicard-dmm'
 			)
-			->andReturn( false );
+		);
 
-		ob_start();
-		ProductListColumns::renderColumn( ProductListColumns::COLUMN_KEY, 666 );
-		$output = (string) ob_get_clean();
-
-		$this->assertStringContainsString( 'dashicons-warning', $output );
-		$this->assertStringContainsString( '失敗理由', $output );
-		$this->assertStringContainsString( 'API接続エラー', $output );
-		$this->assertStringNotContainsString( '<script>', $output );
-		$this->assertStringNotContainsString( '</script>', $output );
+		$this->assertStringContainsString( '商品が見つかりません', $html );
 	}
 
 	/**
-	 * Task 18 / spec §9-3 二重防御の2段目（長さ制限）。
-	 *
-	 * 極端に長い fetch_error（200文字超）は切り詰められ、末尾の内容が出力に現れないこと。
+	 * v3 では UNSUPPORTED/TRANSIENT がともに TRANSIENT_FAILURE のリトライ分類に潰れ、
+	 * 一覧上でも同じ「一時的に取得できませんでした」の文言になっていた。4値それぞれが
+	 * 別の文言になることを固定する（「このプラットフォームには自動取得の provider が
+	 * 無い」と「API に一時的に到達できなかった」は一覧の読み手には別の意味を持つ）。
 	 */
-	public function test_renderColumn_fallback_title_truncates_long_fetch_error(): void {
-		$long_error = str_repeat( 'あ', 250 ) . 'TAIL_MARKER_MUST_BE_TRUNCATED';
-
-		WP_Mock::userFunction( 'get_post_meta' )
-			->with( 777, ProductPostType::META_LISTINGS, true )
-			->andReturn(
+	public function test_自動取得の対象外は一時失敗と別の文言になる(): void {
+		// v3 では両方 TRANSIENT に潰れて「一時的に取得できませんでした」と出ていた。
+		$html = $this->renderColumnFor(
+			array(
 				array(
-					array(
-						'platform'      => 'dmm-books',
-						'affiliate_url' => '',
-						'regular_url'   => 'https://example.com/product',
-						'fetch_error'   => $long_error,
+					'platform' => 'amazon',
+					'enabled'  => true,
+					'offers'   => array(
+						array(
+							'display_order' => 100,
+							'external_id'   => '',
+							'regular_url'   => 'https://example.test/x',
+							'fetch_status'  => FetchStatus::UNSUPPORTED,
+						),
 					),
-				)
-			);
-		WP_Mock::userFunction( 'get_option' )
-			->with( PlatformConfig::OPTION_KEY, array() )
-			->andReturn(
-				array(
-					array(
-						'code'     => 'dmm-books',
-						'provider' => 'dmm-ebook',
-					),
-				)
-			);
-		WP_Mock::userFunction( 'as_has_scheduled_action' )
-			->with(
-				Enqueuer::HOOK_REFRESH,
-				array(
-					'post_id'  => 777,
-					'platform' => 'dmm-books',
 				),
-				'affilicard-dmm'
 			)
-			->andReturn( false );
+		);
 
-		ob_start();
-		ProductListColumns::renderColumn( ProductListColumns::COLUMN_KEY, 777 );
-		$output = (string) ob_get_clean();
+		$this->assertStringContainsString( '自動取得の対象外です', $html );
+		$this->assertStringNotContainsString( '一時的に取得できませんでした', $html );
+	}
 
-		$this->assertStringContainsString( '失敗理由', $output );
-		$this->assertStringNotContainsString( 'TAIL_MARKER_MUST_BE_TRUNCATED', $output );
+	/**
+	 * 警告の判定対象は listing 全体ではなく `OfferSelector::select()` が選んだ
+	 * 1件（表示中の購入リンク）である。先頭が鮮度切れ・後続が新しい場合でも、
+	 * 選択係が選ぶのは表示順の先頭（display_order 昇順）なので、その offer を見て
+	 * 警告を出す（後続の新しい offer を見て警告を消してはならない）。
+	 */
+	public function test_警告の判定は選択された購入リンクを見る(): void {
+		// 先頭が鮮度切れ・後続が新しい場合、先頭（表示中）を見て警告を出す。
+		$html = $this->renderColumnFor(
+			array(
+				array(
+					'platform' => 'rakuten-kobo',
+					'enabled'  => true,
+					'offers'   => array(
+						array(
+							'display_order'    => 10,
+							'external_id'      => 'shown',
+							'regular_url'      => 'https://example.test/a',
+							'price'            => '660',
+							'last_verified_at' => gmdate( 'c', time() - 30 * 3600 ),
+						),
+						array(
+							'display_order'    => 100,
+							'external_id'      => 'hidden',
+							'regular_url'      => 'https://example.test/b',
+							'price'            => '660',
+							'last_verified_at' => gmdate( 'c' ),
+						),
+					),
+				),
+			)
+		);
+
+		$this->assertStringContainsString( 'warning', $html );
+	}
+
+	/**
+	 * Task 12: 表示文言のサニタイズ（spec §9-3 二重防御）が引き続き機能していることの
+	 * 証拠テスト。
+	 *
+	 * `FetchStatus::label()` が実際に返す値は本プラグイン固定の4種類の日本語のみで、
+	 * `<script>` のような攻撃文字列や200文字超の長文が `renderColumn()` の経路を通じて
+	 * ここに渡ることはもう無い（旧 `fetch_error` は provider 由来の外部文字列という
+	 * 前提自体が誤りだったことが分かったため）。それでも「将来 provider 由来の詳細を
+	 * 持つフィールドを足す余地」のためサニタイズ自体は残す方針（クラス docblock 参照）
+	 * であり、そのサニタイズ処理自体が壊れていないことは private メソッドを直接叩いて
+	 * 固定する。
+	 */
+	public function test_sanitizeStatusLabelはscriptタグを除去する(): void {
+		$method = new ReflectionMethod( ProductListColumns::class, 'sanitizeStatusLabel' );
+		$method->setAccessible( true );
+
+		$result = $method->invoke( null, 'API接続エラー: <script>alert(1)</script>' );
+
+		$this->assertStringContainsString( 'API接続エラー', $result );
+		$this->assertStringNotContainsString( '<script>', $result );
+		$this->assertStringNotContainsString( '</script>', $result );
+	}
+
+	/** 上記と同じ理由で、200文字を超える入力の切り詰めも private メソッド単体で固定する。 */
+	public function test_sanitizeStatusLabelは200文字に切り詰める(): void {
+		$long_text = str_repeat( 'あ', 250 ) . 'TAIL_MARKER_MUST_BE_TRUNCATED';
+
+		$method = new ReflectionMethod( ProductListColumns::class, 'sanitizeStatusLabel' );
+		$method->setAccessible( true );
+
+		$result = $method->invoke( null, $long_text );
+
+		$this->assertSame( 200, mb_strlen( $result ) );
+		$this->assertStringNotContainsString( 'TAIL_MARKER_MUST_BE_TRUNCATED', $result );
 	}
 
 	/**
