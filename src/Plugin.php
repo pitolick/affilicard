@@ -26,6 +26,7 @@ use Affilicard\Queue\AutoCreateHandler;
 use Affilicard\Queue\BatchRefreshHandler;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Queue\Enqueuer;
+use Affilicard\Queue\OfferPromotionTrigger;
 use Affilicard\Queue\PublishTrigger;
 use Affilicard\Queue\QueueJobsPage;
 use Affilicard\Queue\QueueMaintenance;
@@ -264,6 +265,28 @@ final class Plugin {
 		// onUpdated も配線すると二重発火するため配線しない）。
 		$publishTrigger = new PublishTrigger( $repository, $enqueuer, $providers, new PublicationDate() );
 		add_action( 'transition_post_status', array( $publishTrigger, 'onTransition' ), 10, 3 );
+
+		// キュー: 購入リンク（offer）の繰り上がり検知トリガー（Task 13）。繰り上がりの経路は
+		// 「本プラグイン自身が恒久エラーを検知した」「外部ツールが購入リンクを削除した」
+		// 「管理画面で並べ替えた」の3つあるが、検知するのは「切り替わった」というイベントでは
+		// なく「今使う購入リンクの価格が古い」という状態であり、3経路すべてが
+		// update_post_meta( META_LISTINGS, ... ) を通るため 1 つのフックで拾える。
+		// updated_post_meta/added_post_meta の両方に配線する（既存 listings の更新は
+		// updated_post_meta、初回作成は added_post_meta を通る）。
+		$offerPromotionTrigger = new OfferPromotionTrigger( $enqueuer, $providers );
+		foreach ( array( 'updated_post_meta', 'added_post_meta' ) as $meta_hook ) {
+			add_action(
+				$meta_hook,
+				static function ( $meta_id, $post_id, $meta_key ) use ( $offerPromotionTrigger ): void {
+					if ( ProductPostType::META_LISTINGS !== $meta_key ) {
+						return;
+					}
+					$offerPromotionTrigger->onListingsSaved( (int) $post_id );
+				},
+				10,
+				3
+			);
+		}
 
 		// 予約投稿（product CPT・future）→ publish 昇格時に、対象商品の ELIGIBLE な auto listing を
 		// force enqueue する（PublishTrigger とは別系統・商品 CPT 自身の遷移を扱う）。
