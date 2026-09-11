@@ -499,6 +499,15 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * 再書き込み時、今回の集合に含まれない既存の値は個別に削除する（キー単位で削除すると
 	 * 同じ platform の生きている値まで巻き込むため）。
 	 *
+	 * **listing の形状を offers[] と flat の両方で受け付ける。** saveMeta() 経由の呼び出しは
+	 * `$data['listings']`（呼び出し元の生データ）をそのまま渡すため、必ずしも
+	 * ProductSchema::sanitizeListings() を経由した offers[] 形状とは限らない。実際
+	 * ProductAutoCreator::buildProductData() は listing 直下に flat な external_id を書いて
+	 * save() を呼ぶ（sanitizeListings() 非経由）。ここで offers[] のみを見ると、この経路の
+	 * external_id が一切ミラーされず findByExternalId が引けなくなり、自動作成が既存商品を
+	 * 見落として重複商品を作ってしまう。ProductSchema::sanitizeOffers() が同じ入力に対して
+	 * 行っているフォールバック（offers 不在時は listing 自身を単一 offer とみなす）と揃える。
+	 *
 	 * @param array<int, mixed> $listings
 	 */
 	private function syncExternalIdMirror( int $postId, array $listings ): void {
@@ -511,7 +520,12 @@ final class ProductRepository implements ProductRepositoryInterface {
 			if ( '' === $platform ) {
 				continue;
 			}
-			$offers = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
+			$meta_key = ProductPostType::externalIdMetaKey( $platform );
+
+			$offers = isset( $listing['offers'] ) && is_array( $listing['offers'] ) && array() !== $listing['offers']
+				? $listing['offers']
+				: array( $listing );
+
 			foreach ( $offers as $offer ) {
 				if ( ! is_array( $offer ) ) {
 					continue;
@@ -520,7 +534,6 @@ final class ProductRepository implements ProductRepositoryInterface {
 				if ( '' === $external_id ) {
 					continue;
 				}
-				$meta_key                             = ProductPostType::externalIdMetaKey( $platform );
 				$desired[ $meta_key ][ $external_id ] = true;
 			}
 		}

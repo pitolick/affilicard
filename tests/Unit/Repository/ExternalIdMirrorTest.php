@@ -178,12 +178,32 @@ final class ExternalIdMirrorTest extends TestCase {
 	}
 
 	/**
-	 * findByExternalId() は渡された external_id をそのまま meta_query の value に使うだけで、
-	 * listing 内の offer の並び順を一切見ない。1 platform に複数 offer がある場合でも
-	 * 「先頭ではない offer」の external_id で検索できることを固定する（mirror 側が
-	 * 複数値を持てば足り、findByExternalId 自体の変更は不要というのがこのタスクの前提）。
+	 * ProductAutoCreator::buildProductData() は sanitizeListings()（offers[] への正規化）を
+	 * 経由せず、listing 直下に flat な external_id を持つ listing をそのまま save() に渡す。
+	 * この経路でミラーが働かないと findByExternalId が引けず、自動作成が重複商品を作る。
 	 */
-	public function test_2番目の購入リンクのexternal_idでも商品を検索できる(): void {
+	public function test_offersが無いflat形状のlistingでもexternal_idをミラーする(): void {
+		$listings = array(
+			array(
+				'platform'    => 'dmm-books',
+				'external_id' => 'flat-ext-1',
+			),
+		);
+		$this->assertSame( array( 'flat-ext-1' ), $this->mirroredValuesFor( $listings, 'dmm-books' ) );
+	}
+
+	/**
+	 * findByExternalId() が渡された external_id をそのまま meta_query の value として
+	 * 素通しするだけで、listing/offer の中身を一切参照しないことを固定する。
+	 *
+	 * 「後続 offer の external_id でも検索できる」という実質のカバレッジは
+	 * test_全ての購入リンクのexternal_idがミラーされる() が担う（mirror 側に複数値が
+	 * 正しく書き込まれていることを検証しており、その値のどれで検索しても
+	 * findByExternalId() の実装は同じ meta_query を組み立てるだけだから引ける）。
+	 * このテスト自体は get_posts() の呼び出し引数だけを見ており mirror を経由しないため、
+	 * 旧実装（1 platform 1 値しかミラーしない）でも通ってしまう。
+	 */
+	public function test_findByExternalIdは渡されたexternal_idをそのままmeta_queryに渡す(): void {
 		WP_Mock::userFunction( 'get_posts' )
 			->once()
 			->andReturnUsing(
