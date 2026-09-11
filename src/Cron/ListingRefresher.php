@@ -4,10 +4,13 @@ declare(strict_types=1);
 namespace Affilicard\Cron;
 
 use Affilicard\Platform\PlatformConfig;
+use Affilicard\Pricing\FetchStatus;
 use Affilicard\Pricing\ListingEligibility;
+use Affilicard\Pricing\OfferSelector;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Queue\WorkOutcome;
 use Affilicard\Repository\ProductRepositoryInterface;
+use Affilicard\Settings\GeneralSettings;
 
 /**
  * 商品 listing を Provider 経由で再取得し価格等を更新する。
@@ -17,6 +20,11 @@ use Affilicard\Repository\ProductRepositoryInterface;
  * refreshOne() を呼ぶ）に置き換わった。このクラスの公開 API は単一 listing を
  * 対象にする refreshOne() のみで、複数商品を走査する run()/refreshProduct() 系
  * （Phase 1 の同期スイープ実装）は死コードとして削除済み。
+ *
+ * v4.0.0（listing の複数購入リンク化）以降、実際に fetch→反映するのは listing
+ * 自身ではなく OfferSelector::select() が選んだ購入リンク（offer）1件のみ。
+ * どの購入リンクを使うかの判定は OfferSelector に一元化されており、ここでは
+ * その結果を信頼して選ばれた offer だけを更新する。
  */
 class ListingRefresher {
 
@@ -74,36 +82,51 @@ class ListingRefresher {
 	}
 
 	/**
-	 * 単一 listing を fetch→反映し、更新後 listing と WorkOutcome のタプルを返す。
+	 * listing の中から OfferSelector が選んだ購入リンク（offer）1件を fetch→反映し、
+	 * 更新後 listing と WorkOutcome のタプルを返す。
+	 *
+	 * 更新するのは選ばれた offer のみ――listing の他フィールド（platform/enabled/…）や
+	 * offers[] の他要素には一切触れない。
 	 *
 	 * @param array<string, mixed> $listing
 	 * @return array{0: array<string, mixed>, 1: WorkOutcome} 更新後 listing と outcome のタプル
 	 */
 	private function refreshListing( array $listing, string $productTitle ): array {
+		$offers  = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
+		$targets = OfferSelector::select( $offers, GeneralSettings::fallbackOnTerminal() );
+		if ( array() === $targets ) {
+			// 更新すべき購入リンクが無い（offers が空）＝何もしない。リトライで解決し得るため
+			// give-up はせず transient 扱いにする。
+			return array( $listing, WorkOutcome::TRANSIENT_FAILURE );
+		}
+		$offer = $targets[0];
+
 		$platformCode = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
-		$externalId   = isset( $listing['external_id'] ) ? (string) $listing['external_id'] : '';
+		$externalId   = isset( $offer['external_id'] ) ? (string) $offer['external_id'] : '';
 		// last_fetched_at は PriceFreshness::needsRefetch() が time()（実 UTC epoch）と比較して
 		// 掃引の再取得クールダウンを判定する。current_time('c') はサイトのローカル時刻に '+00:00'
 		// を付与するだけで実 UTC ではない（UTC 以外の TZ だとクールダウンがずれる）ため、
 		// last_verified_at と同様に gmdate('c')（実 UTC）で記録する。
 		$now = gmdate( 'c' );
 
-		$definition                 = PlatformConfig::find( $platformCode );
-		$provider                   = null !== $definition ? $this->registry->get( $definition->provider ) : null;
-		$listing['last_fetched_at'] = $now;
+		$definition               = PlatformConfig::find( $platformCode );
+		$provider                 = null !== $definition ? $this->registry->get( $definition->provider ) : null;
+		$offer['last_fetched_at'] = $now;
 
 		if ( null === $provider || ! $provider->isAutomatic() || '' === $externalId ) {
-			// config 状態（自動 Provider 未対応・external_id 無し）はリトライで解決し得る＝transient。
-			// give-up はしない（恒久失敗＝terminal は「該当なし・無効 ID」のみ）。
-			$listing['fetch_error'] = (string) __( '対応する自動 Provider がありません', 'affilicard' );
+			// 自動 Provider 未対応・external_id 無し＝この購入リンクは自動取得の対象外。
+			// 状態としては恒久的だが、リトライ分類（give-up するかどうか）はここでは変えない
+			// ――give-up するのは「該当なし・無効 ID」（TERMINAL）のときだけ。
+			$offer['fetch_status'] = FetchStatus::UNSUPPORTED;
+			$listing['offers']     = self::writeBackOffer( $offers, $offer );
 			return array( $listing, WorkOutcome::TRANSIENT_FAILURE );
 		}
 
 		$context = array(
-			'search_key'  => isset( $listing['search_key'] ) && '' !== trim( (string) $listing['search_key'] )
-				? (string) $listing['search_key']
+			'search_key'  => isset( $offer['search_key'] ) && '' !== trim( (string) $offer['search_key'] )
+				? (string) $offer['search_key']
 				: $productTitle,
-			'regular_url' => isset( $listing['regular_url'] ) ? (string) $listing['regular_url'] : '',
+			'regular_url' => isset( $offer['regular_url'] ) ? (string) $offer['regular_url'] : '',
 			'external_id' => $externalId,
 		);
 
@@ -111,35 +134,87 @@ class ListingRefresher {
 		if ( $result->isTerminalMiss() ) {
 			// 恒久失敗（該当なし・無効 ID）。last_verified_at は更新せず（表示鮮度据え置き）、
 			// TERMINAL_FAILURE を返してハンドラに give-up させる。
-			$listing['fetch_error'] = (string) __( '該当する商品が見つかりませんでした', 'affilicard' );
+			$offer['fetch_status'] = FetchStatus::TERMINAL;
+			$listing['offers']     = self::writeBackOffer( $offers, $offer );
 			return array( $listing, WorkOutcome::TERMINAL_FAILURE );
 		}
 		if ( ! $result->isHit() ) {
 			// 一時失敗（API 到達不可・エラー・認証未設定等）。リトライで解決し得るため give-up しない。
-			$listing['fetch_error'] = (string) __( '価格情報の取得に失敗しました', 'affilicard' );
+			$offer['fetch_status'] = FetchStatus::TRANSIENT;
+			$listing['offers']     = self::writeBackOffer( $offers, $offer );
 			return array( $listing, WorkOutcome::TRANSIENT_FAILURE );
 		}
 
-		$fetched                = $result->data;
-		$listing['fetch_error'] = '';
+		$fetched               = $result->data;
+		$offer['fetch_status'] = FetchStatus::NONE;
 		// PriceFreshness::isPriceDisplayable() は time()（実 UTC epoch）と比較するため、
 		// last_verified_at も実 UTC で記録する必要がある。current_time('c') はサイトのローカル
 		// 時刻に '+00:00' を付与するだけで実 UTC ではない（wp-env 等 UTC 以外のタイムゾーンだと
 		// ずれる）ため、last_fetched_at とは別に gmdate('c') で書く。
-		$listing['last_verified_at'] = gmdate( 'c' );
-		$listing['price']            = isset( $fetched['price'] ) ? (string) $fetched['price'] : ( $listing['price'] ?? '' );
-		$listing['list_price']       = isset( $fetched['list_price'] ) ? (string) $fetched['list_price'] : ( $listing['list_price'] ?? '' );
-		$listing['badge']            = isset( $fetched['badge'] ) ? (string) $fetched['badge'] : ( $listing['badge'] ?? '' );
-		$listing['image_url']        = isset( $fetched['image_url'] ) ? (string) $fetched['image_url'] : ( $listing['image_url'] ?? '' );
+		$offer['last_verified_at'] = gmdate( 'c' );
+		$offer['price']            = isset( $fetched['price'] ) ? (string) $fetched['price'] : ( $offer['price'] ?? '' );
+		$offer['list_price']       = isset( $fetched['list_price'] ) ? (string) $fetched['list_price'] : ( $offer['list_price'] ?? '' );
+		$offer['badge']            = isset( $fetched['badge'] ) ? (string) $fetched['badge'] : ( $offer['badge'] ?? '' );
+		$offer['image_url']        = isset( $fetched['image_url'] ) ? (string) $fetched['image_url'] : ( $offer['image_url'] ?? '' );
 
 		// regular_url / affiliate_url は isset() だけで判定すると、Provider が空文字を
 		// 返した場合に既存の保存値を空で上書きしてしまう（isset('') === true のため）。
 		// 空文字の fetch 結果では既存値を保持し、非空の場合のみ更新する。
-		$fetched_regular        = isset( $fetched['regular_url'] ) ? (string) $fetched['regular_url'] : '';
-		$listing['regular_url'] = '' !== $fetched_regular ? $fetched_regular : ( $listing['regular_url'] ?? '' );
+		$fetched_regular      = isset( $fetched['regular_url'] ) ? (string) $fetched['regular_url'] : '';
+		$offer['regular_url'] = '' !== $fetched_regular ? $fetched_regular : ( $offer['regular_url'] ?? '' );
 
-		$fetched_affiliate        = isset( $fetched['affiliate_url'] ) ? (string) $fetched['affiliate_url'] : '';
-		$listing['affiliate_url'] = '' !== $fetched_affiliate ? $fetched_affiliate : ( $listing['affiliate_url'] ?? '' );
+		$fetched_affiliate      = isset( $fetched['affiliate_url'] ) ? (string) $fetched['affiliate_url'] : '';
+		$offer['affiliate_url'] = '' !== $fetched_affiliate ? $fetched_affiliate : ( $offer['affiliate_url'] ?? '' );
+
+		$listing['offers'] = self::writeBackOffer( $offers, $offer );
 		return array( $listing, WorkOutcome::SUCCESS );
+	}
+
+	/**
+	 * 更新した offer を identity（external_id、空なら regular_url）で $offers 内の該当要素へ
+	 * 書き戻す。
+	 *
+	 * **配列の添字では書き戻さない。** offers は listing 編集・自動作成・価格更新など複数の
+	 * 独立した書き込み元から届くため、配列内の位置が安定しているとは限らない。添字で
+	 * 書き戻すと、位置がずれた際に別の購入リンクを誤って上書きしてしまう。
+	 *
+	 * 一致する要素が見つからない場合（fetch 中に offers 自体が入れ替わった等）は末尾に追加する。
+	 *
+	 * @param array<int, mixed>    $offers
+	 * @param array<string, mixed> $offer
+	 * @return list<array<string, mixed>>
+	 */
+	private static function writeBackOffer( array $offers, array $offer ): array {
+		$identity = self::offerIdentity( $offer );
+		$written  = false;
+		$result   = array();
+		foreach ( $offers as $existing ) {
+			if ( ! $written && is_array( $existing ) && self::offerIdentity( $existing ) === $identity ) {
+				$result[] = $offer;
+				$written  = true;
+				continue;
+			}
+			$result[] = $existing;
+		}
+		if ( ! $written ) {
+			$result[] = $offer;
+		}
+		return $result;
+	}
+
+	/**
+	 * offer の識別子。external_id、空なら regular_url。
+	 *
+	 * プレフィックスを付けるのは、一方が external_id 側の値、もう一方が regular_url 側の値と
+	 * 偶然同じ文字列になった場合の衝突を避けるため。
+	 *
+	 * @param array<string, mixed> $offer
+	 */
+	private static function offerIdentity( array $offer ): string {
+		$externalId = isset( $offer['external_id'] ) ? (string) $offer['external_id'] : '';
+		if ( '' !== $externalId ) {
+			return 'external_id:' . $externalId;
+		}
+		return 'regular_url:' . ( isset( $offer['regular_url'] ) ? (string) $offer['regular_url'] : '' );
 	}
 }

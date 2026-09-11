@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Tests\Unit\Cron;
 
 use Affilicard\Cron\ListingRefresher;
+use Affilicard\Pricing\FetchStatus;
 use Affilicard\Provider\FetchResult;
 use Affilicard\Provider\ProviderInterface;
 use Affilicard\Provider\ProviderRegistry;
@@ -70,6 +71,15 @@ final class ListingRefresherTest extends TestCase {
 			)
 		);
 	}
+	private function rakutenProvider( FetchResult $fetchReturn ): ProviderRegistry {
+		$p = Mockery::mock( ProviderInterface::class );
+		$p->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$p->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$p->shouldReceive( 'fetch' )->andReturn( $fetchReturn );
+		$r = new ProviderRegistry();
+		$r->register( $p );
+		return $r;
+	}
 	/** @param array<int,mixed> $listings */
 	private function product( int $id, array $listings ): array {
 		return array(
@@ -87,10 +97,64 @@ final class ListingRefresherTest extends TestCase {
 	}
 
 	/**
+	 * offers 形式の商品を返すリポジトリモック。
+	 *
+	 * @param list<array<string, mixed>> $offers
+	 */
+	private function repoWithOffers( array $offers, bool $saveOk = true ): ProductRepositoryInterface {
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 20 )->andReturn(
+			array(
+				'id'           => 20,
+				'title'        => '対象巻',
+				'status'       => 'publish',
+				'product_type' => 'generic',
+				'stock_status' => 'available',
+				'listings'     => array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'auto_update' => true,
+						'update_mode' => 'auto',
+						'offers'      => $offers,
+					),
+				),
+			)
+		);
+		$this->savedListing = null;
+		$repo->shouldReceive( 'updateListing' )->andReturnUsing(
+			function ( int $postId, string $platform, array $fields ) use ( $saveOk ): bool {
+				$this->savedListing = $fields;
+				return $saveOk;
+			}
+		);
+		return $repo;
+	}
+
+	/** @var array<string, mixed>|null 直近に updateListing へ渡された listing。 */
+	private ?array $savedListing = null;
+
+	/**
+	 * 保存された offers のうち external_id が一致するものを返す。
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function savedOffer( string $externalId ): array {
+		foreach ( (array) ( $this->savedListing['offers'] ?? array() ) as $offer ) {
+			if ( isset( $offer['external_id'] ) && $externalId === $offer['external_id'] ) {
+				return $offer;
+			}
+		}
+		$this->fail( "保存された offers に {$externalId} がない" );
+	}
+
+	/**
 	 * v2.4.0: 死コード化した run()/refreshProduct()/runForPlatform() 系は削除済み
 	 * （複数商品を横断する同期スイープは QueueMaintenance::sweep() + RefreshHandler へ
 	 * 移行済み）。refreshListing() の反映ロジック（全フィールドマッピング・URL保持・
 	 * last_verified_at 刻印等）は、唯一残る公開 API の refreshOne() 経由で検証する。
+	 *
+	 * v4.0.0: 反映先は listing 自身ではなく offers[0]（選択された購入リンク）になった。
 	 */
 	public function test_refreshOne_全フィールドを反映しsearch_keyとexternal_idをfetchへ渡す(): void {
 		$this->stubRakutenPlatform();
@@ -137,9 +201,13 @@ final class ListingRefresherTest extends TestCase {
 						'enabled'     => true,
 						'update_mode' => 'auto',
 						'auto_update' => true,
-						'external_id' => 'deadbeef01',
-						'search_key'  => '対象巻',
-						'price'       => '',
+						'offers'      => array(
+							array(
+								'external_id' => 'deadbeef01',
+								'search_key'  => '対象巻',
+								'price'       => '',
+							),
+						),
 					),
 				),
 			)
@@ -148,16 +216,17 @@ final class ListingRefresherTest extends TestCase {
 			function ( int $postId, string $platform, array $listing ) {
 				$this->assertSame( 20, $postId );
 				$this->assertSame( 'rakuten-kobo', $platform );
-				$this->assertSame( '693', $listing['price'] );
-				$this->assertSame( '900', $listing['list_price'] );
-				$this->assertSame( '23%OFF', $listing['badge'] );
-				$this->assertSame( 'https://example.test/i', $listing['image_url'] );
-				$this->assertSame( 'https://example.test/r', $listing['regular_url'] );
-				$this->assertSame( 'https://example.test/a', $listing['affiliate_url'] );
-				$this->assertArrayHasKey( 'last_verified_at', $listing );
-				$this->assertNotSame( '', (string) $listing['last_verified_at'] );
-				$this->assertArrayHasKey( 'last_fetched_at', $listing );
-				$this->assertNotSame( '', (string) $listing['last_fetched_at'] );
+				$offer = $listing['offers'][0];
+				$this->assertSame( '693', $offer['price'] );
+				$this->assertSame( '900', $offer['list_price'] );
+				$this->assertSame( '23%OFF', $offer['badge'] );
+				$this->assertSame( 'https://example.test/i', $offer['image_url'] );
+				$this->assertSame( 'https://example.test/r', $offer['regular_url'] );
+				$this->assertSame( 'https://example.test/a', $offer['affiliate_url'] );
+				$this->assertArrayHasKey( 'last_verified_at', $offer );
+				$this->assertNotSame( '', (string) $offer['last_verified_at'] );
+				$this->assertArrayHasKey( 'last_fetched_at', $offer );
+				$this->assertNotSame( '', (string) $offer['last_fetched_at'] );
 				return true;
 			}
 		);
@@ -174,28 +243,32 @@ final class ListingRefresherTest extends TestCase {
 				15,
 				array(
 					array(
-						'platform'        => 'dmm-books',
-						'enabled'         => true,
-						'update_mode'     => 'auto',
-						'auto_update'     => true,
-						'external_id'     => 'ext-1',
-						'price'           => '900',
-						'list_price'      => '1000',
-						'badge'           => '',
-						'image_url'       => '',
-						'regular_url'     => 'https://example.test/existing-r',
-						'affiliate_url'   => 'https://example.test/existing-a',
-						'last_fetched_at' => '',
-						'fetch_error'     => '',
+						'platform'    => 'dmm-books',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							array(
+								'external_id'     => 'ext-1',
+								'price'           => '900',
+								'list_price'      => '1000',
+								'badge'           => '',
+								'image_url'       => '',
+								'regular_url'     => 'https://example.test/existing-r',
+								'affiliate_url'   => 'https://example.test/existing-a',
+								'last_fetched_at' => '',
+							),
+						),
 					),
 				)
 			)
 		);
 		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
 			function ( int $postId, string $platform, array $listing ) {
-				$this->assertSame( '600', $listing['price'] );
-				$this->assertSame( 'https://example.test/existing-r', $listing['regular_url'] );
-				$this->assertSame( 'https://example.test/existing-a', $listing['affiliate_url'] );
+				$offer = $listing['offers'][0];
+				$this->assertSame( '600', $offer['price'] );
+				$this->assertSame( 'https://example.test/existing-r', $offer['regular_url'] );
+				$this->assertSame( 'https://example.test/existing-a', $offer['affiliate_url'] );
 				return true;
 			}
 		);
@@ -240,21 +313,26 @@ final class ListingRefresherTest extends TestCase {
 				'modified'       => '',
 				'listings'       => array(
 					array(
-						'platform'         => 'rakuten-kobo',
-						'enabled'          => true,
-						'update_mode'      => 'auto',
-						'auto_update'      => true,
-						'external_id'      => 'deadbeef01',
-						'last_verified_at' => '2020-01-01T00:00:00+09:00',
-						'price'            => '500',
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							array(
+								'external_id'      => 'deadbeef01',
+								'last_verified_at' => '2020-01-01T00:00:00+09:00',
+								'price'            => '500',
+							),
+						),
 					),
 				),
 			)
 		);
 		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
 			function ( int $postId, string $platform, array $listing ) {
-				$this->assertSame( '2020-01-01T00:00:00+09:00', $listing['last_verified_at'] );
-				$this->assertSame( '500', $listing['price'] );
+				$offer = $listing['offers'][0];
+				$this->assertSame( '2020-01-01T00:00:00+09:00', $offer['last_verified_at'] );
+				$this->assertSame( '500', $offer['price'] );
 				return true;
 			}
 		);
@@ -283,9 +361,12 @@ final class ListingRefresherTest extends TestCase {
 						'enabled'     => true,
 						'update_mode' => 'auto',
 						'auto_update' => true,
-						'external_id' => 'deadbeef01',
-						'price'       => '',
-						'fetch_error' => '',
+						'offers'      => array(
+							array(
+								'external_id' => 'deadbeef01',
+								'price'       => '',
+							),
+						),
 					),
 				)
 			)
@@ -293,8 +374,9 @@ final class ListingRefresherTest extends TestCase {
 		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
 			function ( int $postId, string $platform, array $listing ) {
 				$this->assertSame( 12, $postId );
-				$this->assertSame( '693', $listing['price'] );
-				$this->assertSame( '', $listing['fetch_error'] );
+				$offer = $listing['offers'][0];
+				$this->assertSame( '693', $offer['price'] );
+				$this->assertSame( FetchStatus::NONE, $offer['fetch_status'] );
 				return true;
 			}
 		);
@@ -329,9 +411,12 @@ final class ListingRefresherTest extends TestCase {
 						'enabled'     => true,
 						'update_mode' => 'auto',
 						'auto_update' => true,
-						'external_id' => 'deadbeef01',
-						'price'       => '',
-						'fetch_error' => '',
+						'offers'      => array(
+							array(
+								'external_id' => 'deadbeef01',
+								'price'       => '',
+							),
+						),
 					),
 				)
 			)
@@ -344,7 +429,7 @@ final class ListingRefresherTest extends TestCase {
 		$this->assertSame( WorkOutcome::TRANSIENT_FAILURE, $refresher->refreshOne( 12, 'rakuten-kobo' ) );
 	}
 
-	public function test_refreshOne_transient失敗でTRANSIENTを返しfetch_errorを記録(): void {
+	public function test_refreshOne_transient失敗でTRANSIENTを返しfetch_statusを記録(): void {
 		$this->stubRakutenPlatform();
 
 		$provider = Mockery::mock( ProviderInterface::class );
@@ -364,18 +449,22 @@ final class ListingRefresherTest extends TestCase {
 						'enabled'     => true,
 						'update_mode' => 'auto',
 						'auto_update' => true,
-						'external_id' => 'deadbeef01',
-						'price'       => '500',
-						'fetch_error' => '',
+						'offers'      => array(
+							array(
+								'external_id' => 'deadbeef01',
+								'price'       => '500',
+							),
+						),
 					),
 				)
 			)
 		);
 		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
 			function ( int $postId, string $platform, array $listing ) {
-				// transient 失敗でも保存はされる（fetch_error を記録するため）が price は維持される。
-				$this->assertSame( '500', $listing['price'] );
-				$this->assertSame( '価格情報の取得に失敗しました', $listing['fetch_error'] );
+				// transient 失敗でも保存はされる（fetch_status を記録するため）が price は維持される。
+				$offer = $listing['offers'][0];
+				$this->assertSame( '500', $offer['price'] );
+				$this->assertSame( FetchStatus::TRANSIENT, $offer['fetch_status'] );
 				return true;
 			}
 		);
@@ -385,11 +474,11 @@ final class ListingRefresherTest extends TestCase {
 	}
 
 	/**
-	 * 恒久失敗（miss/terminal＝該当なし・無効 ID）は TERMINAL_FAILURE を返し、fetch_error に
-	 * 「該当する商品が見つかりませんでした」を記録する（last_verified_at は更新しない）。
+	 * 恒久失敗（miss/terminal＝該当なし・無効 ID）は TERMINAL_FAILURE を返し、fetch_status に
+	 * FetchStatus::TERMINAL を記録する（last_verified_at は更新しない）。
 	 * ハンドラはこれを見て give-up マーカーを立て、掃引で一定期間スキップする。
 	 */
-	public function test_refreshOne_terminal失敗でTERMINALを返しmiss用fetch_errorを記録(): void {
+	public function test_refreshOne_terminal失敗でTERMINALを返しmiss用fetch_statusを記録(): void {
 		$this->stubRakutenPlatform();
 
 		$provider = Mockery::mock( ProviderInterface::class );
@@ -405,24 +494,28 @@ final class ListingRefresherTest extends TestCase {
 				12,
 				array(
 					array(
-						'platform'         => 'rakuten-kobo',
-						'enabled'          => true,
-						'update_mode'      => 'auto',
-						'auto_update'      => true,
-						'external_id'      => 'deadbeef01',
-						'price'            => '500',
-						'fetch_error'      => '',
-						'last_verified_at' => '2020-01-01T00:00:00+09:00',
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							array(
+								'external_id'      => 'deadbeef01',
+								'price'            => '500',
+								'last_verified_at' => '2020-01-01T00:00:00+09:00',
+							),
+						),
 					),
 				)
 			)
 		);
 		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
 			function ( int $postId, string $platform, array $listing ) {
-				$this->assertSame( '500', $listing['price'] );
-				$this->assertSame( '該当する商品が見つかりませんでした', $listing['fetch_error'] );
+				$offer = $listing['offers'][0];
+				$this->assertSame( '500', $offer['price'] );
+				$this->assertSame( FetchStatus::TERMINAL, $offer['fetch_status'] );
 				// terminal でも last_verified_at は更新しない（価格の表示鮮度は据え置き）。
-				$this->assertSame( '2020-01-01T00:00:00+09:00', $listing['last_verified_at'] );
+				$this->assertSame( '2020-01-01T00:00:00+09:00', $offer['last_verified_at'] );
 				return true;
 			}
 		);
@@ -554,21 +647,175 @@ final class ListingRefresherTest extends TestCase {
 						'enabled'     => true,
 						'update_mode' => 'auto',
 						'auto_update' => false, // 手動上書き中でも force enqueue 経路では対象
-						'external_id' => 'deadbeef01',
-						'price'       => '500',
-						'fetch_error' => '',
+						'offers'      => array(
+							array(
+								'external_id' => 'deadbeef01',
+								'price'       => '500',
+							),
+						),
 					),
 				)
 			)
 		);
 		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
 			function ( int $postId, string $platform, array $listing ) {
-				$this->assertSame( '693', $listing['price'] );
+				$offer = $listing['offers'][0];
+				$this->assertSame( '693', $offer['price'] );
 				return true;
 			}
 		);
 
 		$refresher = new ListingRefresher( $registry, $repo );
 		$this->assertSame( WorkOutcome::SUCCESS, $refresher->refreshOne( 12, 'rakuten-kobo' ) );
+	}
+
+	public function test_選択された購入リンクだけを更新する(): void {
+		// 表示しているものを更新する。リクエスト数は 1 listing につき 1 回のまま。
+		$this->stubRakutenPlatform();
+
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		// 先頭（表示順 10）だけが fetch される。2 件あっても 1 回きり。
+		$provider->shouldReceive( 'fetch' )->once()->withArgs(
+			static fn( string $id ): bool => 'sale' === $id
+		)->andReturn( FetchResult::hit( array( 'price' => '0' ) ) );
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+
+		$repo = $this->repoWithOffers(
+			array(
+				array(
+					'display_order' => 10,
+					'external_id'   => 'sale',
+					'regular_url'   => 'https://example.test/sale',
+				),
+				array(
+					'display_order' => 100,
+					'external_id'   => 'normal',
+					'regular_url'   => 'https://example.test/normal',
+				),
+			)
+		);
+
+		$outcome = ( new ListingRefresher( $registry, $repo ) )->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertSame( WorkOutcome::SUCCESS, $outcome );
+		$this->assertSame( '0', $this->savedOffer( 'sale' )['price'] );
+		// 後続は触られない。
+		$this->assertSame( '', $this->savedOffer( 'normal' )['price'] ?? '' );
+	}
+
+	public function test_成功でfetch_statusが空になる(): void {
+		$this->stubRakutenPlatform();
+		$registry = $this->rakutenProvider( FetchResult::hit( array( 'price' => '660' ) ) );
+		$repo     = $this->repoWithOffers(
+			array(
+				array(
+					'display_order' => 100,
+					'external_id'   => 'x',
+					'regular_url'   => 'https://example.test/x',
+					'fetch_status'  => 'transient',
+				),
+			)
+		);
+
+		$outcome = ( new ListingRefresher( $registry, $repo ) )->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertSame( WorkOutcome::SUCCESS, $outcome );
+		$this->assertSame( FetchStatus::NONE, $this->savedOffer( 'x' )['fetch_status'] );
+		$this->assertArrayNotHasKey( 'fetch_error', $this->savedOffer( 'x' ) );
+	}
+
+	public function test_terminal_missでfetch_statusがterminalになる(): void {
+		$this->stubRakutenPlatform();
+		$registry = $this->rakutenProvider( FetchResult::miss() );
+		$repo     = $this->repoWithOffers(
+			array(
+				array(
+					'display_order' => 100,
+					'external_id'   => 'gone',
+					'regular_url'   => 'https://example.test/gone',
+				),
+			)
+		);
+
+		$outcome = ( new ListingRefresher( $registry, $repo ) )->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertSame( WorkOutcome::TERMINAL_FAILURE, $outcome );
+		$this->assertSame( FetchStatus::TERMINAL, $this->savedOffer( 'gone' )['fetch_status'] );
+	}
+
+	public function test_一時失敗でfetch_statusがtransientになる(): void {
+		$this->stubRakutenPlatform();
+		$registry = $this->rakutenProvider( FetchResult::error() );
+		$repo     = $this->repoWithOffers(
+			array(
+				array(
+					'display_order' => 100,
+					'external_id'   => 'busy',
+					'regular_url'   => 'https://example.test/busy',
+				),
+			)
+		);
+
+		$outcome = ( new ListingRefresher( $registry, $repo ) )->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertSame( WorkOutcome::TRANSIENT_FAILURE, $outcome );
+		$this->assertSame( FetchStatus::TRANSIENT, $this->savedOffer( 'busy' )['fetch_status'] );
+	}
+
+	public function test_external_idが空ならunsupportedで自動取得しない(): void {
+		// 管理画面で URL だけ手入力した購入リンク。手動更新専用として扱う。
+		$this->stubRakutenPlatform();
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$provider->shouldReceive( 'fetch' )->never();
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+
+		$repo = $this->repoWithOffers(
+			array(
+				array(
+					'display_order' => 100,
+					'external_id'   => '',
+					'regular_url'   => 'https://example.test/manual',
+				),
+			)
+		);
+
+		$outcome = ( new ListingRefresher( $registry, $repo ) )->refreshOne( 20, 'rakuten-kobo' );
+
+		// WorkOutcome は TRANSIENT_FAILURE のまま（リトライ挙動は変えない）。
+		$this->assertSame( WorkOutcome::TRANSIENT_FAILURE, $outcome );
+		$this->assertSame( FetchStatus::UNSUPPORTED, $this->savedListing['offers'][0]['fetch_status'] );
+	}
+
+	public function test_書き戻しは識別子で行い配列の位置に依存しない(): void {
+		// 他の投入で位置が変わるため、添字で書き戻してはいけない。
+		$this->stubRakutenPlatform();
+		$registry = $this->rakutenProvider( FetchResult::hit( array( 'price' => '0' ) ) );
+		$repo     = $this->repoWithOffers(
+			array(
+				array(
+					'display_order' => 100,
+					'external_id'   => 'normal',
+					'regular_url'   => 'https://example.test/normal',
+					'price'         => '660',
+				),
+				array(
+					'display_order' => 10,
+					'external_id'   => 'sale',
+					'regular_url'   => 'https://example.test/sale',
+				),
+			)
+		);
+
+		( new ListingRefresher( $registry, $repo ) )->refreshOne( 20, 'rakuten-kobo' );
+
+		// 表示順 10 の 'sale'（配列では 2 番目）が更新され、'normal' は無傷。
+		$this->assertSame( '0', $this->savedOffer( 'sale' )['price'] );
+		$this->assertSame( '660', $this->savedOffer( 'normal' )['price'] );
 	}
 }
