@@ -334,4 +334,30 @@ final class GeneralSettingsTest extends TestCase {
 		$saved = GeneralSettings::update( array( 'stocktake_days' => -30 ) );
 		$this->assertSame( 1, $saved['stocktake_days'] );
 	}
+
+	public function test_フォールバック設定の既定はOFF(): void {
+		WP_Mock::userFunction( 'get_option' )->with( GeneralSettings::OPTION_KEY, array() )->andReturn( array() );
+		$this->assertFalse( GeneralSettings::fallbackOnTerminal() );
+	}
+
+	public function test_フォールバック設定をONにできる(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'update_option' )->andReturn( true );
+
+		$updated = GeneralSettings::update( array( 'fallback_on_terminal' => true ) );
+		$this->assertTrue( $updated['fallback_on_terminal'] );
+	}
+
+	public function test_フォールバック設定は真偽値へ正規化される(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'update_option' )->andReturn( true );
+
+		$updated = GeneralSettings::update( array( 'fallback_on_terminal' => '1' ) );
+		$this->assertTrue( $updated['fallback_on_terminal'] );
+		$this->assertIsBool( $updated['fallback_on_terminal'] );
+	}
 }
