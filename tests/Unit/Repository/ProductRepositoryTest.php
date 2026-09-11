@@ -424,15 +424,16 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'wp_insert_post' )->andReturn( 700 );
 
 		$mirror_calls = array();
-		WP_Mock::userFunction( 'update_post_meta' )
+		WP_Mock::userFunction( 'add_post_meta' )
 			->andReturnUsing(
-				function ( $post_id, $key, $value ) use ( &$mirror_calls ) {
-					if ( 0 === strpos( $key, ProductPostType::META_EXTID_PREFIX ) ) {
-						$mirror_calls[ $key ] = $value;
+				function ( $post_id, $key, $value, $unique ) use ( &$mirror_calls ) {
+					if ( 0 === strpos( (string) $key, ProductPostType::META_EXTID_PREFIX ) ) {
+						$mirror_calls[ $key ][] = $value;
 					}
 					return true;
 				}
 			);
+		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
 
 		$repo = new ProductRepository();
 		$repo->save(
@@ -441,17 +442,32 @@ final class ProductRepositoryTest extends TestCase {
 				'product_type' => 'ebook',
 				'listings'     => array(
 					array(
-						'platform'    => 'dmm-books',
-						'external_id' => 'dmm-ext-1',
+						'platform' => 'dmm-books',
+						'offers'   => array(
+							array(
+								'external_id' => 'dmm-ext-1',
+								'regular_url' => 'https://example.test/dmm-ext-1',
+							),
+						),
 					),
 					array(
-						'platform'    => 'amazon-kindle',
-						'external_id' => 'B0XXX',
+						'platform' => 'amazon-kindle',
+						'offers'   => array(
+							array(
+								'external_id' => 'B0XXX',
+								'regular_url' => 'https://example.test/B0XXX',
+							),
+						),
 					),
-					// external_id 欠損は無視する。
+					// external_id 欠損の購入リンクは無視する。
 					array(
-						'platform'    => 'rakuten-kobo',
-						'external_id' => '',
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => '',
+								'regular_url' => 'https://example.test/rakuten',
+							),
+						),
 					),
 				),
 			)
@@ -459,8 +475,8 @@ final class ProductRepositoryTest extends TestCase {
 
 		$this->assertSame(
 			array(
-				ProductPostType::externalIdMetaKey( 'dmm-books' )     => 'dmm-ext-1',
-				ProductPostType::externalIdMetaKey( 'amazon-kindle' ) => 'B0XXX',
+				ProductPostType::externalIdMetaKey( 'dmm-books' )     => array( 'dmm-ext-1' ),
+				ProductPostType::externalIdMetaKey( 'amazon-kindle' ) => array( 'B0XXX' ),
 			),
 			$mirror_calls
 		);
@@ -468,8 +484,8 @@ final class ProductRepositoryTest extends TestCase {
 
 	public function test_save_deletes_stale_external_id_mirror_meta(): void {
 		// 既存は dmm-books の extid mirror を持つが、新 listing は amazon-kindle のみ。
-		// 旧 affilicard_extid_dmm-books が delete_post_meta で削除され、
-		// 新 affilicard_extid_amazon-kindle が書かれることを検証する。
+		// 旧 affilicard_extid_dmm-books の値が delete_post_meta で個別に削除され、
+		// 新 affilicard_extid_amazon-kindle が add_post_meta で書かれることを検証する。
 		WP_Mock::userFunction( 'wp_insert_post' )->andReturn( 800 );
 
 		// 全 meta 列挙: extid mirror + 無関係 meta を返す。
@@ -481,26 +497,31 @@ final class ProductRepositoryTest extends TestCase {
 					ProductPostType::META_PRODUCT_TYPE => array( 'ebook' ),
 				)
 			);
+		// 「既に mirror 済みか」の判定(add_post_meta 前の重複防止チェック)。既存値なし。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 800, Mockery::any(), false )
+			->andReturn( array() );
 
 		WP_Mock::userFunction( 'delete_post_meta' )
 			->once()
-			->with( 800, ProductPostType::externalIdMetaKey( 'dmm-books' ) )
+			->with( 800, ProductPostType::externalIdMetaKey( 'dmm-books' ), 'old-ext' )
 			->andReturn( true );
 		// 無関係 meta は削除されないこと。
 		WP_Mock::userFunction( 'delete_post_meta' )
-			->with( 800, ProductPostType::META_PRODUCT_TYPE )
+			->with( 800, ProductPostType::META_PRODUCT_TYPE, Mockery::any() )
 			->never();
 
 		$mirror_calls = array();
-		WP_Mock::userFunction( 'update_post_meta' )
+		WP_Mock::userFunction( 'add_post_meta' )
 			->andReturnUsing(
-				function ( $post_id, $key, $value ) use ( &$mirror_calls ) {
+				function ( $post_id, $key, $value, $unique ) use ( &$mirror_calls ) {
 					if ( 0 === strpos( (string) $key, ProductPostType::META_EXTID_PREFIX ) ) {
-						$mirror_calls[ $key ] = $value;
+						$mirror_calls[ $key ][] = $value;
 					}
 					return true;
 				}
 			);
+		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
 
 		$repo = new ProductRepository();
 		$repo->save(
@@ -509,15 +530,20 @@ final class ProductRepositoryTest extends TestCase {
 				'product_type' => 'ebook',
 				'listings'     => array(
 					array(
-						'platform'    => 'amazon-kindle',
-						'external_id' => 'B0NEW',
+						'platform' => 'amazon-kindle',
+						'offers'   => array(
+							array(
+								'external_id' => 'B0NEW',
+								'regular_url' => 'https://example.test/B0NEW',
+							),
+						),
 					),
 				),
 			)
 		);
 
 		$this->assertSame(
-			array( ProductPostType::externalIdMetaKey( 'amazon-kindle' ) => 'B0NEW' ),
+			array( ProductPostType::externalIdMetaKey( 'amazon-kindle' ) => array( 'B0NEW' ) ),
 			$mirror_calls
 		);
 		$this->assertConditionsMet();
@@ -1063,8 +1089,13 @@ final class ProductRepositoryTest extends TestCase {
 			->andReturn(
 				array(
 					array(
-						'platform'    => 'dmm-books',
-						'external_id' => 'X1',
+						'platform' => 'dmm-books',
+						'offers'   => array(
+							array(
+								'external_id' => 'X1',
+								'regular_url' => 'https://example.test/X1',
+							),
+						),
 					),
 				)
 			);
@@ -1072,8 +1103,12 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 42 )
 			->andReturn( array() );
-		WP_Mock::userFunction( 'update_post_meta' )
-			->once()->with( 42, 'affilicard_extid_dmm-books', 'X1' )->andReturn( true );
+		// 「既に mirror 済みか」の判定(add_post_meta 前の重複防止チェック)。既存値なし。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, Mockery::any(), false )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'add_post_meta' )
+			->once()->with( 42, 'affilicard_extid_dmm-books', 'X1', false )->andReturn( true );
 		WP_Mock::userFunction( 'update_post_meta' )
 			->once()->with( 42, ProductPostType::META_SCHEMA_VERSION, \Affilicard\Schema\SchemaVersion::CURRENT )->andReturn( true );
 		$repo->syncDerivedMeta( 42 );

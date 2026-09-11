@@ -490,57 +490,78 @@ final class ProductRepository implements ProductRepositoryInterface {
 	}
 
 	/**
-	 * 各 listing の external_id を `affilicard_extid_<platform>` meta にミラーする。
+	 * 各購入リンク（offer）の external_id を `affilicard_extid_<platform>` meta にミラーする。
 	 *
-	 * 再書き込み時、今回の listing 集合に含まれない既存の extid mirror meta は削除する。
-	 * これにより platform 変更・削除後に stale な `affilicard_extid_<platform>` が残り、
-	 * findByExternalId が誤 hit して誤 upsert する問題を防ぐ。
+	 * **複数値 meta として保持する。** 1 listing が複数の購入リンクを持つため、単一値で
+	 * 上書きすると 1 つしかミラーされず、findByExternalId が後続の購入リンクを引けない。
+	 * その結果、自動作成が既存商品を見落として重複商品を作る。
+	 *
+	 * 再書き込み時、今回の集合に含まれない既存の値は個別に削除する（キー単位で削除すると
+	 * 同じ platform の生きている値まで巻き込むため）。
 	 *
 	 * @param array<int, mixed> $listings
 	 */
 	private function syncExternalIdMirror( int $postId, array $listings ): void {
-		$desired_keys = array();
+		$desired = array();
 		foreach ( $listings as $listing ) {
 			if ( ! is_array( $listing ) ) {
 				continue;
 			}
-			$platform    = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
-			$external_id = isset( $listing['external_id'] ) ? (string) $listing['external_id'] : '';
-			if ( '' === $platform || '' === $external_id ) {
+			$platform = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
+			if ( '' === $platform ) {
 				continue;
 			}
-			$meta_key                  = ProductPostType::externalIdMetaKey( $platform );
-			$desired_keys[ $meta_key ] = $external_id;
+			$offers = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
+			foreach ( $offers as $offer ) {
+				if ( ! is_array( $offer ) ) {
+					continue;
+				}
+				$external_id = isset( $offer['external_id'] ) ? (string) $offer['external_id'] : '';
+				if ( '' === $external_id ) {
+					continue;
+				}
+				$meta_key                             = ProductPostType::externalIdMetaKey( $platform );
+				$desired[ $meta_key ][ $external_id ] = true;
+			}
 		}
 
-		$this->purgeStaleExternalIdMirror( $postId, array_keys( $desired_keys ) );
+		$this->purgeStaleExternalIdMirror( $postId, $desired );
 
-		foreach ( $desired_keys as $meta_key => $external_id ) {
-			update_post_meta( $postId, $meta_key, $external_id );
+		foreach ( $desired as $meta_key => $values ) {
+			$existing = array_map( 'strval', (array) get_post_meta( $postId, $meta_key, false ) );
+			foreach ( array_keys( $values ) as $value ) {
+				if ( ! in_array( (string) $value, $existing, true ) ) {
+					add_post_meta( $postId, $meta_key, (string) $value, false );
+				}
+			}
 		}
 	}
 
 	/**
-	 * 投稿の既存 extid mirror meta のうち、$keepKeys に含まれないものを削除する。
+	 * 既存の extid mirror meta のうち、今回の集合 $desired に含まれない**値**を削除する。
 	 *
-	 * @param array<int, string> $keepKeys 維持する extid mirror meta キー。
+	 * キー単位で削除すると、同じ platform の生きている値まで巻き込むため、meta キーごとの
+	 * 個々の値を比較して不要な値だけを delete_post_meta( $postId, $metaKey, $value ) で消す。
+	 *
+	 * @param array<string, array<string, true>> $desired meta キーごとに維持したい値の集合。
 	 */
-	private function purgeStaleExternalIdMirror( int $postId, array $keepKeys ): void {
+	private function purgeStaleExternalIdMirror( int $postId, array $desired ): void {
 		$all_meta = get_post_meta( $postId );
 		if ( ! is_array( $all_meta ) ) {
 			return;
 		}
 
-		$keep = array_flip( $keepKeys );
-		foreach ( array_keys( $all_meta ) as $meta_key ) {
+		foreach ( $all_meta as $meta_key => $values ) {
 			$meta_key = (string) $meta_key;
-			if ( 0 !== strpos( $meta_key, ProductPostType::META_EXTID_PREFIX ) ) {
+			if ( ! ProductPostType::isExternalIdMetaKey( $meta_key ) ) {
 				continue;
 			}
-			if ( isset( $keep[ $meta_key ] ) ) {
-				continue;
+			foreach ( (array) $values as $value ) {
+				$value = (string) $value;
+				if ( ! isset( $desired[ $meta_key ][ $value ] ) ) {
+					delete_post_meta( $postId, $meta_key, $value );
+				}
 			}
-			delete_post_meta( $postId, $meta_key );
 		}
 	}
 
