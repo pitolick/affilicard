@@ -118,18 +118,20 @@ final class ProductSchemaTest extends TestCase {
 		$this->assertSame( 'dmm-books', $result[0]['platform'] );
 		$this->assertTrue( $result[0]['enabled'] );
 		$this->assertFalse( $result[0]['auto_update'] );
-		$this->assertSame( '600', $result[0]['price'] );
-		$this->assertSame( 'https://example.com/r', $result[0]['regular_url'] );
-		$this->assertSame( '', $result[0]['affiliate_url'] );
-		$this->assertSame( '', $result[0]['external_id'] );
-		$this->assertSame( '', $result[0]['list_price'] );
-		$this->assertSame( '', $result[0]['badge'] );
-		$this->assertSame( '', $result[0]['image_url'] );
 		$this->assertSame( '', $result[0]['button_label_override'] );
-		$this->assertSame( '', $result[0]['last_fetched_at'] );
-		$this->assertSame( '', $result[0]['fetch_error'] );
 		$this->assertSame( array(), $result[0]['platform_extras'] );
 		$this->assertSame( 'auto', $result[0]['update_mode'] );
+
+		$this->assertCount( 1, $result[0]['offers'] );
+		$offer = $result[0]['offers'][0];
+		$this->assertSame( '600', $offer['price'] );
+		$this->assertSame( 'https://example.com/r', $offer['regular_url'] );
+		$this->assertSame( '', $offer['affiliate_url'] );
+		$this->assertSame( '', $offer['external_id'] );
+		$this->assertSame( '', $offer['list_price'] );
+		$this->assertSame( '', $offer['badge'] );
+		$this->assertSame( '', $offer['image_url'] );
+		$this->assertSame( '', $offer['last_fetched_at'] );
 	}
 
 	public function test_sanitize_listings_returns_empty_when_not_array(): void {
@@ -148,6 +150,7 @@ final class ProductSchemaTest extends TestCase {
 				array(
 					'platform'         => 'rakuten-kobo',
 					'price'            => '693',
+					'regular_url'      => 'https://example.test/verified',
 					'last_verified_at' => '2026-07-20T17:00:00+00:00',
 					'search_key'       => '架空作品タイトル 3',
 				),
@@ -155,22 +158,197 @@ final class ProductSchemaTest extends TestCase {
 		);
 
 		$this->assertCount( 1, $result );
-		$this->assertSame( '2026-07-20T17:00:00+00:00', $result[0]['last_verified_at'] );
-		$this->assertSame( '架空作品タイトル 3', $result[0]['search_key'] );
+		$this->assertCount( 1, $result[0]['offers'] );
+		$this->assertSame( '2026-07-20T17:00:00+00:00', $result[0]['offers'][0]['last_verified_at'] );
+		$this->assertSame( '架空作品タイトル 3', $result[0]['offers'][0]['search_key'] );
 	}
 
 	public function test_sanitize_listings_defaults_last_verified_at_and_search_key_to_empty(): void {
 		$result = ProductSchema::sanitizeListings(
 			array(
 				array(
-					'platform' => 'dmm-books',
-					'price'    => '600',
+					'platform'    => 'dmm-books',
+					'price'       => '600',
+					'regular_url' => 'https://example.test/dmm',
 				),
 			)
 		);
 
-		$this->assertSame( '', $result[0]['last_verified_at'] );
-		$this->assertSame( '', $result[0]['search_key'] );
+		$this->assertCount( 1, $result[0]['offers'] );
+		$this->assertSame( '', $result[0]['offers'][0]['last_verified_at'] );
+		$this->assertSame( '', $result[0]['offers'][0]['search_key'] );
+	}
+
+	public function test_offersを保持する(): void {
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform' => 'rakuten-kobo',
+					'offers'   => array(
+						array(
+							'display_order' => 10,
+							'external_id'   => 'sale',
+							'regular_url'   => 'https://example.test/sale',
+							'affiliate_url' => 'https://af.example.test/sale',
+							'price'         => '0',
+							'fetch_status'  => 'terminal',
+						),
+					),
+				),
+			)
+		);
+
+		$this->assertCount( 1, $result[0]['offers'] );
+		$this->assertSame( 10, $result[0]['offers'][0]['display_order'] );
+		$this->assertSame( 'sale', $result[0]['offers'][0]['external_id'] );
+		$this->assertSame( 'terminal', $result[0]['offers'][0]['fetch_status'] );
+	}
+
+	public function test_flatな取得結果はoffers0へ畳まれる(): void {
+		// v3 以前の形で送られてきても壊れないこと（外部の投稿パイプライン向けの互換）。
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform'    => 'rakuten-kobo',
+					'external_id' => 'legacy',
+					'regular_url' => 'https://example.test/legacy',
+					'price'       => '660',
+				),
+			)
+		);
+
+		$this->assertCount( 1, $result[0]['offers'] );
+		$this->assertSame( 'legacy', $result[0]['offers'][0]['external_id'] );
+		$this->assertSame( '660', $result[0]['offers'][0]['price'] );
+		$this->assertSame( 100, $result[0]['offers'][0]['display_order'] );
+		$this->assertArrayNotHasKey( 'external_id', $result[0] );
+		$this->assertArrayNotHasKey( 'fetch_error', $result[0] );
+	}
+
+	public function test_offersがあればflatは無視する(): void {
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform'    => 'rakuten-kobo',
+					'external_id' => 'flat',
+					'regular_url' => 'https://example.test/flat',
+					'offers'      => array(
+						array(
+							'external_id' => 'nested',
+							'regular_url' => 'https://example.test/nested',
+						),
+					),
+				),
+			)
+		);
+
+		$this->assertCount( 1, $result[0]['offers'] );
+		$this->assertSame( 'nested', $result[0]['offers'][0]['external_id'] );
+	}
+
+	public function test_regular_urlが空のofferは弾く(): void {
+		// 生死を判定できない offer は棚卸しの対象外になり永久に残る。
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform' => 'rakuten-kobo',
+					'offers'   => array(
+						array(
+							'external_id' => 'nourl',
+							'regular_url' => '',
+						),
+						array(
+							'external_id' => 'ok',
+							'regular_url' => 'https://example.test/ok',
+						),
+					),
+				),
+			)
+		);
+
+		$this->assertCount( 1, $result[0]['offers'] );
+		$this->assertSame( 'ok', $result[0]['offers'][0]['external_id'] );
+	}
+
+	public function test_識別子が重複するofferは後勝ちでマージする(): void {
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform' => 'rakuten-kobo',
+					'offers'   => array(
+						array(
+							'external_id' => 'dup',
+							'regular_url' => 'https://example.test/a',
+							'price'       => '100',
+						),
+						array(
+							'external_id' => 'dup',
+							'regular_url' => 'https://example.test/b',
+							'price'       => '200',
+						),
+					),
+				),
+			)
+		);
+
+		$this->assertCount( 1, $result[0]['offers'] );
+		$this->assertSame( '200', $result[0]['offers'][0]['price'] );
+	}
+
+	public function test_external_idが空ならregular_urlが識別子になる(): void {
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform' => 'rakuten-kobo',
+					'offers'   => array(
+						array(
+							'external_id' => '',
+							'regular_url' => 'https://example.test/same',
+							'price'       => '100',
+						),
+						array(
+							'external_id' => '',
+							'regular_url' => 'https://example.test/same',
+							'price'       => '200',
+						),
+						array(
+							'external_id' => '',
+							'regular_url' => 'https://example.test/other',
+							'price'       => '300',
+						),
+					),
+				),
+			)
+		);
+
+		$this->assertCount( 2, $result[0]['offers'] );
+	}
+
+	public function test_listingの設定フィールドは不変(): void {
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform'              => 'rakuten-kobo',
+					'enabled'               => false,
+					'auto_update'           => false,
+					'update_mode'           => 'manual',
+					'button_label_override' => 'いますぐ買う',
+					'platform_extras'       => array( 'k' => 'v' ),
+					'offers'                => array(
+						array(
+							'external_id' => 'x',
+							'regular_url' => 'https://example.test/x',
+						),
+					),
+				),
+			)
+		);
+
+		$this->assertFalse( $result[0]['enabled'] );
+		$this->assertFalse( $result[0]['auto_update'] );
+		$this->assertSame( 'manual', $result[0]['update_mode'] );
+		$this->assertSame( 'いますぐ買う', $result[0]['button_label_override'] );
+		$this->assertSame( array( 'k' => 'v' ), $result[0]['platform_extras'] );
 	}
 
 	public function test_args_requires_title_for_create(): void {

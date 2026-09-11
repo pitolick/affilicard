@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Rest;
 
+use Affilicard\Pricing\OfferSelector;
 use Affilicard\Stock\StockStatus;
 
 /**
@@ -176,8 +177,9 @@ final class ProductSchema {
 	 *
 	 * - 各エントリの platform は文字列必須（空文字なら除外）
 	 * - enabled / auto_update は bool キャスト
-	 * - URL 系は esc_url_raw、文字列フィールドは sanitize_text_field
-	 * - 欠損フィールドはデフォルトで補完する
+	 * - listing が持つのは設定 6 フィールド（platform / enabled / update_mode /
+	 *   auto_update / button_label_override / platform_extras）のみで、
+	 *   購入リンクは {@see self::sanitizeOffers()} が `offers[]` へまとめる
 	 *
 	 * @param mixed $listings
 	 * @return list<array<string, mixed>>
@@ -213,24 +215,80 @@ final class ProductSchema {
 				'enabled'               => isset( $entry['enabled'] ) ? (bool) $entry['enabled'] : true,
 				'update_mode'           => isset( $entry['update_mode'] ) ? (string) sanitize_key( (string) $entry['update_mode'] ) : 'auto',
 				'auto_update'           => isset( $entry['auto_update'] ) ? (bool) $entry['auto_update'] : true,
-				'external_id'           => isset( $entry['external_id'] ) ? (string) sanitize_text_field( (string) $entry['external_id'] ) : '',
-				'regular_url'           => isset( $entry['regular_url'] ) ? (string) esc_url_raw( (string) $entry['regular_url'] ) : '',
-				'affiliate_url'         => isset( $entry['affiliate_url'] ) ? (string) esc_url_raw( (string) $entry['affiliate_url'] ) : '',
-				'price'                 => isset( $entry['price'] ) ? (string) sanitize_text_field( (string) $entry['price'] ) : '',
-				'list_price'            => isset( $entry['list_price'] ) ? (string) sanitize_text_field( (string) $entry['list_price'] ) : '',
-				'badge'                 => isset( $entry['badge'] ) ? (string) sanitize_text_field( (string) $entry['badge'] ) : '',
-				'image_url'             => isset( $entry['image_url'] ) ? (string) esc_url_raw( (string) $entry['image_url'] ) : '',
 				'button_label_override' => isset( $entry['button_label_override'] ) ? (string) sanitize_text_field( (string) $entry['button_label_override'] ) : '',
-				'last_fetched_at'       => isset( $entry['last_fetched_at'] ) ? (string) sanitize_text_field( (string) $entry['last_fetched_at'] ) : '',
-				'last_verified_at'      => isset( $entry['last_verified_at'] ) ? (string) sanitize_text_field( (string) $entry['last_verified_at'] ) : '',
-				'search_key'            => isset( $entry['search_key'] ) ? (string) sanitize_text_field( (string) $entry['search_key'] ) : '',
-				'fetch_error'           => isset( $entry['fetch_error'] ) ? (string) sanitize_text_field( (string) $entry['fetch_error'] ) : '',
 				'platform_extras'       => $platform_extras,
+				'offers'                => self::sanitizeOffers( $entry ),
 			);
 
 			$result[] = $row;
 		}
 
 		return $result;
+	}
+
+	/**
+	 * listing から購入リンク（offers）を取り出して正規化する。
+	 *
+	 * `offers` が無い場合は、v3 以前の flat な取得結果フィールドを offers[0] へ
+	 * 畳む。これにより外部の投稿パイプラインの改修を待たずにリリースできる。
+	 *
+	 * @param array<string, mixed> $entry
+	 * @return list<array<string, mixed>>
+	 */
+	private static function sanitizeOffers( array $entry ): array {
+		$raw = array();
+		if ( isset( $entry['offers'] ) && is_array( $entry['offers'] ) ) {
+			$raw = $entry['offers'];
+		} elseif ( self::hasFlatFetchFields( $entry ) ) {
+			$raw = array( $entry );
+		}
+
+		$byKey = array();
+		foreach ( $raw as $offer ) {
+			if ( ! is_array( $offer ) ) {
+				continue;
+			}
+
+			$regular = isset( $offer['regular_url'] ) ? (string) esc_url_raw( (string) $offer['regular_url'] ) : '';
+			if ( '' === $regular ) {
+				// 生死を判定できない offer は棚卸しの対象外になり永久に残るため弾く。
+				continue;
+			}
+
+			$externalId = isset( $offer['external_id'] ) ? (string) sanitize_text_field( (string) $offer['external_id'] ) : '';
+			$key        = '' !== $externalId ? 'id:' . $externalId : 'url:' . $regular;
+
+			// 識別子が重複したら後勝ち（同じ SKU を 2 つ並べない）。
+			$byKey[ $key ] = array(
+				'display_order'    => isset( $offer['display_order'] ) ? (int) $offer['display_order'] : OfferSelector::DEFAULT_ORDER,
+				'external_id'      => $externalId,
+				'regular_url'      => $regular,
+				'affiliate_url'    => isset( $offer['affiliate_url'] ) ? (string) esc_url_raw( (string) $offer['affiliate_url'] ) : '',
+				'price'            => isset( $offer['price'] ) ? (string) sanitize_text_field( (string) $offer['price'] ) : '',
+				'list_price'       => isset( $offer['list_price'] ) ? (string) sanitize_text_field( (string) $offer['list_price'] ) : '',
+				'badge'            => isset( $offer['badge'] ) ? (string) sanitize_text_field( (string) $offer['badge'] ) : '',
+				'image_url'        => isset( $offer['image_url'] ) ? (string) esc_url_raw( (string) $offer['image_url'] ) : '',
+				'search_key'       => isset( $offer['search_key'] ) ? (string) sanitize_text_field( (string) $offer['search_key'] ) : '',
+				'fetch_status'     => isset( $offer['fetch_status'] ) ? (string) sanitize_key( (string) $offer['fetch_status'] ) : '',
+				'last_fetched_at'  => isset( $offer['last_fetched_at'] ) ? (string) sanitize_text_field( (string) $offer['last_fetched_at'] ) : '',
+				'last_verified_at' => isset( $offer['last_verified_at'] ) ? (string) sanitize_text_field( (string) $offer['last_verified_at'] ) : '',
+			);
+		}
+
+		return array_values( $byKey );
+	}
+
+	/**
+	 * v3 以前の flat な取得結果フィールドを持っているか。
+	 *
+	 * @param array<string, mixed> $entry
+	 */
+	private static function hasFlatFetchFields( array $entry ): bool {
+		foreach ( array( 'external_id', 'regular_url', 'affiliate_url', 'price', 'image_url', 'search_key' ) as $key ) {
+			if ( isset( $entry[ $key ] ) && '' !== (string) $entry[ $key ] ) {
+				return true;
+			}
+		}
+		return false;
 	}
 }

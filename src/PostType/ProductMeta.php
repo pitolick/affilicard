@@ -30,6 +30,30 @@ final class ProductMeta {
 			),
 		);
 
+		// listings は各エントリが購入リンクの配列 `offers` を持つ。additionalProperties=true
+		// だけでは REST のスキーマ検証が入れ子の配列を additionalProperties 側の分岐に
+		// 委ねてしまい構造を保証しないため、`offers` を明示的な配列プロパティとして宣言する。
+		// ここを怠ると REST 経由の保存で offers が黙って消える（unit test はサニタイザを
+		// 直接叩くため REST 往復をしておらず、この欠落を検出できない）。
+		$listings_schema = array(
+			'schema' => array(
+				'type'  => 'array',
+				'items' => array(
+					'type'                 => 'object',
+					'additionalProperties' => true,
+					'properties'           => array(
+						'offers' => array(
+							'type'  => 'array',
+							'items' => array(
+								'type'                 => 'object',
+								'additionalProperties' => true,
+							),
+						),
+					),
+				),
+			),
+		);
+
 		register_post_meta(
 			ProductPostType::POST_TYPE,
 			ProductPostType::META_PRODUCT_TYPE,
@@ -67,7 +91,7 @@ final class ProductMeta {
 				'type'              => 'array',
 				'single'            => true,
 				'default'           => array(),
-				'show_in_rest'      => $object_array_schema,
+				'show_in_rest'      => $listings_schema,
 				'auth_callback'     => $auth,
 				'sanitize_callback' => static function ( $value ) {
 					return ProductSchema::sanitizeListings( $value );
