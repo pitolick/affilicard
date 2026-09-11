@@ -6,7 +6,9 @@ namespace Affilicard\Tests\Unit\Repository;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Schema\SchemaVersion;
+use Affilicard\Settings\GeneralSettings;
 use Mockery;
+use ReflectionMethod;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
 
@@ -675,14 +677,24 @@ final class ProductRepositoryTest extends TestCase {
 			->once()
 			->andReturn( array( 1, 2, 3 ) );
 
+		// hasFallbackListing() は listing 自体ではなく OfferSelector::select() が
+		// 選んだ offer を見るため、フォールバック判定用フィールドは offers[] に置く。
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 1, ProductPostType::META_LISTINGS, true )
 			->andReturn(
 				array(
 					array(
-						'platform'      => 'a',
-						'affiliate_url' => '',
-						'regular_url'   => 'https://example.com/r',
+						'platform' => 'a',
+						'offers'   => array(
+							array(
+								'affiliate_url' => '',
+								'regular_url'   => 'https://example.com/r',
+							),
+						),
 					),
 				)
 			);
@@ -691,9 +703,13 @@ final class ProductRepositoryTest extends TestCase {
 			->andReturn(
 				array(
 					array(
-						'platform'      => 'b',
-						'affiliate_url' => 'https://example.com/a',
-						'regular_url'   => 'https://example.com/r',
+						'platform' => 'b',
+						'offers'   => array(
+							array(
+								'affiliate_url' => 'https://example.com/a',
+								'regular_url'   => 'https://example.com/r',
+							),
+						),
 					),
 				)
 			);
@@ -702,15 +718,76 @@ final class ProductRepositoryTest extends TestCase {
 			->andReturn(
 				array(
 					array(
-						'platform'      => 'c',
-						'affiliate_url' => '',
-						'regular_url'   => 'https://example.com/r3',
+						'platform' => 'c',
+						'offers'   => array(
+							array(
+								'affiliate_url' => '',
+								'regular_url'   => 'https://example.com/r3',
+							),
+						),
 					),
 				)
 			);
 
 		$repo = new ProductRepository();
 		$this->assertSame( 2, $repo->countFallbackProducts() );
+	}
+
+	/**
+	 * hasFallbackListing() は private static のため、production コードに
+	 * テスト専用の公開エントリポイントを追加せずリフレクションで直接叩く。
+	 */
+	public function test_アフィリURL欠落の判定は選択された購入リンクを見る(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'display_order' => 10,
+						'external_id'   => 'a',
+						'regular_url'   => 'https://example.test/a',
+						'affiliate_url' => '',
+					),
+				),
+			),
+		);
+
+		$method = new ReflectionMethod( ProductRepository::class, 'hasFallbackListing' );
+		$method->setAccessible( true );
+
+		$this->assertTrue( $method->invoke( null, $listings ) );
+	}
+
+	/**
+	 * 先頭 offer に affiliate_url があればフォールバック表示ではない。
+	 */
+	public function test_アフィリURLがある購入リンクが選択されればフォールバックではない(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'display_order' => 10,
+						'external_id'   => 'a',
+						'regular_url'   => 'https://example.test/a',
+						'affiliate_url' => 'https://example.test/a?aff=1',
+					),
+				),
+			),
+		);
+
+		$method = new ReflectionMethod( ProductRepository::class, 'hasFallbackListing' );
+		$method->setAccessible( true );
+
+		$this->assertFalse( $method->invoke( null, $listings ) );
 	}
 
 	// -------------------------------------------------------
@@ -770,6 +847,9 @@ final class ProductRepositoryTest extends TestCase {
 		);
 
 		// 各 post の共通モック
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
 		WP_Mock::userFunction( 'get_option' )
 			->with( 'affilicard_platforms', array() )
 			->andReturn(
@@ -831,6 +911,9 @@ final class ProductRepositoryTest extends TestCase {
 			);
 
 		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_option' )
 			->with( 'affilicard_platforms', array() )
 			->andReturn( array() );
 		WP_Mock::userFunction( 'get_post_meta' )
@@ -864,6 +947,9 @@ final class ProductRepositoryTest extends TestCase {
 
 		// enabled プラットフォーム 0 件
 		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_option' )
 			->with( 'affilicard_platforms', array() )
 			->andReturn( array() );
 		WP_Mock::userFunction( 'get_post_meta' )
@@ -880,17 +966,25 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	public function test_listingSummary_returns_first_platform_and_price(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 99, ProductPostType::META_LISTINGS, true )
 			->andReturn(
 				array(
 					array(
 						'platform' => 'dmm-books',
-						'price'    => '¥660',
+						'offers'   => array(
+							array( 'price' => '¥660' ),
+						),
 					),
 					array(
 						'platform' => 'amazon-kindle',
-						'price'    => '¥550',
+						'offers'   => array(
+							array( 'price' => '¥550' ),
+						),
 					),
 				)
 			);
@@ -903,6 +997,9 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	public function test_listingSummary_returns_empty_when_no_listings(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 98, ProductPostType::META_LISTINGS, true )
 			->andReturn( array() );
@@ -912,6 +1009,51 @@ final class ProductRepositoryTest extends TestCase {
 
 		$this->assertSame( '', $result['price'] );
 		$this->assertSame( '', $result['platform'] );
+	}
+
+	/**
+	 * 先頭（表示順 10）が terminal でも、fallback_on_terminal 設定 OFF なら
+	 * 先頭の購入リンクの価格を出す（OfferSelector::select の既定挙動）。
+	 */
+	public function test_価格サマリは選択された購入リンクから作る(): void {
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'display_order' => 10,
+						'external_id'   => 'a',
+						'regular_url'   => 'https://example.test/a',
+						'price'         => '0',
+					),
+					array(
+						'display_order' => 100,
+						'external_id'   => 'b',
+						'regular_url'   => 'https://example.test/b',
+						'price'         => '660',
+					),
+				),
+			),
+		);
+		$this->assertSame( '0', $this->summaryPriceFor( $listings ) );
+	}
+
+	/**
+	 * listingSummary() の price だけを取り出すヘルパ。get_post_meta / get_option の
+	 * 間接呼び出し（GeneralSettings::fallbackOnTerminal 既定 OFF）をまとめる。
+	 *
+	 * @param array<int, mixed> $listings
+	 */
+	private function summaryPriceFor( array $listings ): string {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 501, ProductPostType::META_LISTINGS, true )
+			->andReturn( $listings );
+
+		$repo = new ProductRepository();
+		return $repo->listingSummary( 501 )['price'];
 	}
 
 	public function test_syncDerivedMeta_mirrors_external_ids_and_sets_schema_version(): void {
@@ -1073,6 +1215,67 @@ final class ProductRepositoryTest extends TestCase {
 
 		$this->assertTrue( $ok );
 		$this->assertSame( '693', $saved[0]['price'] );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * $listingFields に offers[] を含めた場合、対象 listing の置き換え先として
+	 * そのまま保存される（シグネチャは不変・offers はほかのフィールドと同様に扱う）。
+	 */
+	public function test_updateListing_offersを含むlistingFieldsをそのまま保存する(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => 'r-1',
+								'price'       => '500',
+							),
+						),
+					),
+				)
+			);
+
+		$saved = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$saved ) {
+					$saved = $value;
+					return true;
+				}
+			);
+
+		$new_offers = array(
+			array(
+				'display_order' => 10,
+				'external_id'   => 'r-1',
+				'price'         => '693',
+			),
+			array(
+				'display_order' => 100,
+				'external_id'   => 'r-2',
+				'price'         => '999',
+			),
+		);
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListing(
+			42,
+			'rakuten-kobo',
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => $new_offers,
+			)
+		);
+
+		$this->assertTrue( $ok );
+		$this->assertSame( $new_offers, $saved[0]['offers'] );
 		$this->assertConditionsMet();
 	}
 }

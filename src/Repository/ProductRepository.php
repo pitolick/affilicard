@@ -5,7 +5,9 @@ namespace Affilicard\Repository;
 
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductPostType;
+use Affilicard\Pricing\OfferSelector;
 use Affilicard\Schema\SchemaVersion;
+use Affilicard\Settings\GeneralSettings;
 use Affilicard\Stock\StockStatus;
 use Affilicard\Util\JsonField;
 
@@ -183,7 +185,8 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * ロック取得に失敗（0/null）しても RMW は best-effort で続行する（fetch は既に成功済みで、
 	 * ロック不能を理由に更新を捨てる方が有害。取得可否は挙動を変えない安全弁）。
 	 *
-	 * @param array<string, mixed> $listingFields refreshListing() が返すフィールド完全形の listing。
+	 * @param array<string, mixed> $listingFields refreshListing() が返すフィールド完全形の listing
+	 *                                             （購入リンク配列 offers を含む）。
 	 */
 	public function updateListing( int $postId, string $platform, array $listingFields ): bool {
 		global $wpdb;
@@ -350,24 +353,34 @@ final class ProductRepository implements ProductRepositoryInterface {
 	/**
 	 * 先頭の有効 listing から代表価格と platform 名を返す（無ければ空文字）。
 	 *
+	 * 価格は listing 自体ではなく、OfferSelector::select() が選んだ購入リンク（offer）から
+	 * 取る。listing はもはや取得結果を直接持たない。選択結果が空（0 件）なら価格は空文字。
+	 *
 	 * @return array{price: string, platform: string}
 	 */
 	public function listingSummary( int $postId ): array {
 		$raw      = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
 		$listings = is_string( $raw ) ? JsonField::decode( $raw, array() ) : ( is_array( $raw ) ? $raw : array() );
 
+		$fallback_enabled = GeneralSettings::fallbackOnTerminal();
+
 		foreach ( $listings as $listing ) {
 			if ( ! is_array( $listing ) ) {
 				continue;
 			}
-			$price    = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
 			$platform = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
-			if ( '' !== $platform ) {
-				return array(
-					'price'    => $price,
-					'platform' => $platform,
-				);
+			if ( '' === $platform ) {
+				continue;
 			}
+
+			$offers   = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
+			$selected = OfferSelector::select( $offers, $fallback_enabled );
+			$price    = array() !== $selected && isset( $selected[0]['price'] ) ? trim( (string) $selected[0]['price'] ) : '';
+
+			return array(
+				'price'    => $price,
+				'platform' => $platform,
+			);
 		}
 		return array(
 			'price'    => '',
@@ -539,17 +552,31 @@ final class ProductRepository implements ProductRepositoryInterface {
 	}
 
 	/**
-	 * 1 件以上の listing が affiliate_url='' かつ regular_url!='' か判定する。
+	 * 1 件以上の listing について、OfferSelector::select() が選んだ購入リンク（offer）が
+	 * affiliate_url='' かつ regular_url!='' か判定する。
+	 *
+	 * 「アフィリ URL が無いため素の商品 URL を出している」状態はもはや listing 自体の
+	 * フィールドではなく、選択された offer の性質である。選択結果が空（0 件）の listing は
+	 * 表示するリンク自体が無いため判定対象にしない。
 	 *
 	 * @param array<int, mixed> $listings
 	 */
 	private static function hasFallbackListing( array $listings ): bool {
+		$fallback_enabled = GeneralSettings::fallbackOnTerminal();
+
 		foreach ( $listings as $listing ) {
 			if ( ! is_array( $listing ) ) {
 				continue;
 			}
-			$affiliate = isset( $listing['affiliate_url'] ) ? (string) $listing['affiliate_url'] : '';
-			$regular   = isset( $listing['regular_url'] ) ? (string) $listing['regular_url'] : '';
+			$offers   = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
+			$selected = OfferSelector::select( $offers, $fallback_enabled );
+			if ( array() === $selected ) {
+				continue;
+			}
+
+			$offer     = $selected[0];
+			$affiliate = isset( $offer['affiliate_url'] ) ? (string) $offer['affiliate_url'] : '';
+			$regular   = isset( $offer['regular_url'] ) ? (string) $offer['regular_url'] : '';
 			if ( '' === $affiliate && '' !== $regular ) {
 				return true;
 			}

@@ -113,15 +113,25 @@ final class DashboardWidgetTest extends TestCase {
 			->once()
 			->andReturn( array( 1, 2 ) );
 
+		// hasFallbackListing() は listing 自体ではなく OfferSelector::select() が選んだ
+		// offer を見るため、フォールバック判定用フィールドは offers[] に置く。
+		WP_Mock::userFunction( 'get_option' )
+			->with( \Affilicard\Settings\GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
 		// 両 post_id とも fallback 状態 (affiliate_url='', regular_url 非空)
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 1, \Affilicard\PostType\ProductPostType::META_LISTINGS, true )
 			->andReturn(
 				array(
 					array(
-						'platform'      => 'a',
-						'affiliate_url' => '',
-						'regular_url'   => 'https://example.com/1',
+						'platform' => 'a',
+						'offers'   => array(
+							array(
+								'affiliate_url' => '',
+								'regular_url'   => 'https://example.com/1',
+							),
+						),
 					),
 				)
 			);
@@ -130,9 +140,13 @@ final class DashboardWidgetTest extends TestCase {
 			->andReturn(
 				array(
 					array(
-						'platform'      => 'b',
-						'affiliate_url' => '',
-						'regular_url'   => 'https://example.com/2',
+						'platform' => 'b',
+						'offers'   => array(
+							array(
+								'affiliate_url' => '',
+								'regular_url'   => 'https://example.com/2',
+							),
+						),
 					),
 				)
 			);
