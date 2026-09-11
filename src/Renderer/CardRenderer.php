@@ -6,14 +6,15 @@ namespace Affilicard\Renderer;
 use Affilicard\Platform\PlatformDefinition;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Pricing\PriceFreshness;
-use Affilicard\Settings\GeneralSettings;
 use Affilicard\Stock\StockStatus;
 
 /**
  * 商品データ + platform 定義から商品カードの HTML 文字列を生成する純粋なレンダラ。
  *
  * 副作用を持たず（DB/option を読まない）、入力はすべて引数で受け取る。
- * WordPress の escape 関数のみに依存する。
+ * WordPress の escape 関数のみに依存する。fallback_on_terminal のような設定値も
+ * 呼び出し元（CardHtmlBuilder）が GeneralSettings を読んで $options 経由で渡す
+ * ——このクラス自身は一切 option を読まない。
  */
 final class CardRenderer {
 
@@ -41,14 +42,16 @@ final class CardRenderer {
 			}
 		}
 
-		$hide             = isset( $options['hide_platforms'] ) && is_array( $options['hide_platforms'] ) ? array_map( 'strval', $options['hide_platforms'] ) : array();
-		$only             = isset( $options['only_platforms'] ) && is_array( $options['only_platforms'] ) ? array_map( 'strval', $options['only_platforms'] ) : array();
-		$fallback_image   = isset( $options['image_url'] ) ? (string) $options['image_url'] : '';
-		$visible_listings = $this->visibleListings(
+		$hide                 = isset( $options['hide_platforms'] ) && is_array( $options['hide_platforms'] ) ? array_map( 'strval', $options['hide_platforms'] ) : array();
+		$only                 = isset( $options['only_platforms'] ) && is_array( $options['only_platforms'] ) ? array_map( 'strval', $options['only_platforms'] ) : array();
+		$fallback_image       = isset( $options['image_url'] ) ? (string) $options['image_url'] : '';
+		$fallback_on_terminal = ! empty( $options['fallback_on_terminal'] );
+		$visible_listings     = $this->visibleListings(
 			isset( $product['listings'] ) && is_array( $product['listings'] ) ? $product['listings'] : array(),
 			$by_code,
 			$hide,
-			$only
+			$only,
+			$fallback_on_terminal
 		);
 		// 商品画像を出さない設定のときは、画像カラムごと描画しない。
 		// 画像だけ空にしてプレースホルダに落とすと「画像がありません」と出て
@@ -170,10 +173,7 @@ final class CardRenderer {
 
 		if ( $is_available ) {
 			$html .= $this->renderListings(
-				isset( $product['listings'] ) && is_array( $product['listings'] ) ? $product['listings'] : array(),
-				$by_code,
-				$hide,
-				$only,
+				$visible_listings,
 				$cta_overrides,
 				$is_preorder,
 				$tracking
@@ -340,10 +340,12 @@ final class CardRenderer {
 	 * @param list<array<string, mixed>>        $listings
 	 * @param array<string, PlatformDefinition> $by_code
 	 * @param list<string>                      $hide
-	 * @param list<string>                      $only     許可リスト（空 = 全表示）
+	 * @param list<string>                      $only                 許可リスト（空 = 全表示）
+	 * @param bool                              $fallback_on_terminal GeneralSettings::fallbackOnTerminal()（呼び出し元が解決して渡す。
+	 *                                                                CardRenderer 自身は option を読まない）
 	 * @return list<array{listing: array<string, mixed>, offer: array<string, mixed>, platform: PlatformDefinition}>
 	 */
-	private function visibleListings( array $listings, array $by_code, array $hide, array $only ): array {
+	private function visibleListings( array $listings, array $by_code, array $hide, array $only, bool $fallback_on_terminal ): array {
 		$filtered = array();
 		foreach ( $listings as $listing ) {
 			if ( ! is_array( $listing ) ) {
@@ -365,13 +367,12 @@ final class CardRenderer {
 			$filtered[] = $listing;
 		}
 
-		$sorted           = $this->sortByDisplayOrder( $filtered, $by_code );
-		$fallback_enabled = GeneralSettings::fallbackOnTerminal();
+		$sorted = $this->sortByDisplayOrder( $filtered, $by_code );
 
 		$out = array();
 		foreach ( $sorted as $listing ) {
 			$offers   = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
-			$selected = OfferSelector::select( $offers, $fallback_enabled );
+			$selected = OfferSelector::select( $offers, $fallback_on_terminal );
 			if ( array() === $selected ) {
 				// 選べる購入リンクが無い listing は CTA 行を出さない＝非表示扱い。
 				continue;
@@ -456,10 +457,14 @@ final class CardRenderer {
 		return $fallback;
 	}
 
-	private function renderListings( array $listings, array $by_code, array $hide, array $only, array $cta_overrides = array(), bool $is_preorder = false, array $tracking = array() ): string {
+	/**
+	 * @param list<array{listing: array<string, mixed>, offer: array<string, mixed>, platform: PlatformDefinition}> $visible_listings visibleListings() の戻り（render() から渡される。ここで選択をやり直さない）
+	 * @param array<string, string>                                                                                 $cta_overrides    ブロック属性由来の CTA ラベル上書き（code→label）
+	 */
+	private function renderListings( array $visible_listings, array $cta_overrides = array(), bool $is_preorder = false, array $tracking = array() ): string {
 		$rows   = '';
 		$now_ts = time();
-		foreach ( $this->visibleListings( $listings, $by_code, $hide, $only ) as $entry ) {
+		foreach ( $visible_listings as $entry ) {
 			$listing  = $entry['listing'];
 			$offer    = $entry['offer'];
 			$platform = $entry['platform'];

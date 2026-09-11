@@ -10,19 +10,6 @@ use WP_Mock;
 
 final class CardRendererTest extends TestCase {
 
-	/**
-	 * `affilicard_general` の生の保存値。GeneralSettings::fallbackOnTerminal() が
-	 * visibleListings() から必ず呼ばれるようになったため、全テストで get_option() の
-	 * 応答が要る。WP_Mock::userFunction() は同一関数への 2 度目以降の
-	 * shouldReceive() が「常に最初の登録が勝つ」ため（後続の上書きが届かない）、
-	 * andReturn() を個々のテストで積み増す方式は使えない。setUp() で一度だけ
-	 * andReturnUsing() を登録し、この配列をテスト側から書き換えることで
-	 * 挙動を切り替える。
-	 *
-	 * @var array<string, mixed>
-	 */
-	private array $generalSettingsOption = array();
-
 	protected function setUp(): void {
 		WP_Mock::setUp();
 		WP_Mock::passthruFunction( 'esc_html' );
@@ -32,13 +19,6 @@ final class CardRendererTest extends TestCase {
 		WP_Mock::passthruFunction( 'wp_kses_post' );
 		WP_Mock::userFunction( '__', array( 'return_arg' => 0 ) );
 		WP_Mock::userFunction( 'sanitize_hex_color', array( 'return_arg' => 0 ) );
-		$this->generalSettingsOption = array();
-		WP_Mock::userFunction( 'get_option' )
-			->andReturnUsing(
-				function () {
-					return $this->generalSettingsOption;
-				}
-			);
 		// renderTimestamp() の日付整形用。wp_date() は「サイトのタイムゾーン」で整形する契約。
 		// UTC 固定実装（gmdate を直呼びする等）を検出できるよう、stub は非 UTC（Asia/Tokyo,
 		// +09:00）を模す。期待値も同じ Asia/Tokyo 換算（jstFormat()）で作るため、実装が wp_date
@@ -1939,7 +1919,7 @@ final class CardRendererTest extends TestCase {
 	}
 
 	/** @param list<array<string, mixed>> $offers */
-	private function renderWithOffers( array $offers ): string {
+	private function renderWithOffers( array $offers, bool $fallbackOnTerminal = false ): string {
 		$product = array(
 			'id'           => 1,
 			'title'        => '対象巻',
@@ -1952,7 +1932,11 @@ final class CardRendererTest extends TestCase {
 				),
 			),
 		);
-		return ( new CardRenderer() )->render( $product, array( $this->rakutenPlatform() ) );
+		return ( new CardRenderer() )->render(
+			$product,
+			array( $this->rakutenPlatform() ),
+			array( 'fallback_on_terminal' => $fallbackOnTerminal )
+		);
 	}
 
 	public function test_購入ボタンと書影が同じ購入リンクを指す(): void {
@@ -1982,8 +1966,7 @@ final class CardRendererTest extends TestCase {
 	}
 
 	public function test_設定OFFならterminalでも先頭の購入リンクを出す(): void {
-		$this->generalSettingsOption = array(); // fallback OFF（既定）。
-		$html                        = $this->renderWithOffers(
+		$html = $this->renderWithOffers(
 			array(
 				array(
 					'display_order' => 10,
@@ -1996,7 +1979,8 @@ final class CardRendererTest extends TestCase {
 					'external_id'   => 'alive',
 					'regular_url'   => 'https://example.test/alive',
 				),
-			)
+			),
+			false // fallback OFF（既定）。
 		);
 
 		$this->assertStringContainsString( 'https://example.test/dead', $html );
@@ -2004,8 +1988,7 @@ final class CardRendererTest extends TestCase {
 	}
 
 	public function test_設定ONならterminalを飛ばして次の購入リンクを出す(): void {
-		$this->generalSettingsOption = array( 'fallback_on_terminal' => true );
-		$html                        = $this->renderWithOffers(
+		$html = $this->renderWithOffers(
 			array(
 				array(
 					'display_order' => 10,
@@ -2018,7 +2001,8 @@ final class CardRendererTest extends TestCase {
 					'external_id'   => 'alive',
 					'regular_url'   => 'https://example.test/alive',
 				),
-			)
+			),
+			true
 		);
 
 		$this->assertStringContainsString( 'https://example.test/alive', $html );
