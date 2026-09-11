@@ -26,8 +26,24 @@ use Affilicard\Settings\GeneralSettings;
  * 再利用することが要点で、失敗し続ける購入リンクを毎回積み直さないクールダウンを
  * そのまま引き継げる。
  *
- * **このクラスは post meta を書かない。** ループしない根拠がこの一点に依存するため、
- * OfferPromotionTriggerTest::test_フックはpost_metaを書かない で固定している。
+ * **このクラス自身は post meta を書かないが、それだけではループが閉じる理由には
+ * ならない。** enqueueManual() が積んだジョブは別リクエストで非同期に実行され、
+ * その経路（Enqueuer::enqueueManual → Action Scheduler ワーカー →
+ * RefreshHandler::handle → ListingRefresher::refreshOne →
+ * ProductRepository::updateListing → update_post_meta( META_LISTINGS, ... )）が
+ * 結局このフックを再び起動する。折り返してきたその新しいリクエストでは、
+ * 同一リクエスト内の再入ガード（$inFlight）は空であり、60秒の短期クールダウンも
+ * とうに期限切れなので、1・2層目はこのクロスリクエストな往復を止められない。
+ *
+ * ループが実際に閉じるのは、`ListingRefresher` が成功・恒久失敗・一時失敗・
+ * unsupported のどの結果でも `last_fetched_at` を無条件に刻むためである
+ * （`ListingRefresherTest` でその刻印をピン留め済み）。折り返してきたこのフックが
+ * `PriceFreshness::needsRefetch()` を再評価する時点では、その刻印によって
+ * 「もう古くない」と判定され false を返すため、再投入が起きない。**したがって
+ * このファイルの安全性はここだけで完結しておらず、`ListingRefresher` が
+ * すべての結果で `last_fetched_at` を刻み続けるという振る舞いに依存している。**
+ * その前提が崩れる変更（例: 一部の失敗系統だけ刻印をスキップする）は、この
+ * フックを無限ループさせる。
  */
 final class OfferPromotionTrigger {
 
@@ -70,6 +86,14 @@ final class OfferPromotionTrigger {
 			return;
 		}
 
+		// 公開商品のみ対象にする（QueueMaintenance::sweep() の post_status => 'publish'
+		// クエリと同じガード）。sweep はクエリの時点で非公開商品を取得しないが、
+		// このフックは listings meta の書き込みそのものを契機にするため、
+		// draft/pending/trash への書き込みでも素通りしないよう明示的に確認する。
+		if ( 'publish' !== get_post_status( $postId ) ) {
+			return;
+		}
+
 		$listings = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
 		if ( is_array( $listings ) ) {
 			$now = time();
@@ -102,7 +126,16 @@ final class OfferPromotionTrigger {
 		}
 
 		$platform = (string) ( $listing['platform'] ?? '' );
-		$def      = PlatformConfig::find( $platform );
+
+		// give-up 中（RefreshHandler が恒久失敗を検知して立てた cooldown）の listing は
+		// QueueMaintenance::sweep() と同じく期間中スキップする。ここを抜けると、
+		// 外部ツールが listings meta を書き換えるたびに、廃盤/無効 ID への
+		// リトライ連鎖を give-up の TTL 内で何度も焼くことになる。
+		if ( get_transient( RefreshHandler::giveUpTransientKey( $postId, $platform ) ) ) {
+			return;
+		}
+
+		$def = PlatformConfig::find( $platform );
 		if ( null === $def ) {
 			return;
 		}

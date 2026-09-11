@@ -9,6 +9,7 @@ use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Provider\Rakuten\RakutenProvider;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\OfferPromotionTrigger;
+use Affilicard\Queue\RefreshHandler;
 use Affilicard\Settings\GeneralSettings;
 use Mockery;
 use WP_Mock;
@@ -116,7 +117,15 @@ final class OfferPromotionTriggerTest extends TestCase {
 					)
 				)
 			);
-		WP_Mock::userFunction( 'get_transient' )->once()->andReturn( false );
+		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_offer_promote_123' )
+			->andReturn( false );
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( RefreshHandler::giveUpTransientKey( 123, 'rakuten-kobo' ) )
+			->andReturn( false );
 		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
 
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once()
@@ -166,7 +175,15 @@ final class OfferPromotionTriggerTest extends TestCase {
 					)
 				)
 			);
-		WP_Mock::userFunction( 'get_transient' )->once()->andReturn( false );
+		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_offer_promote_123' )
+			->andReturn( false );
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( RefreshHandler::giveUpTransientKey( 123, 'rakuten-kobo' ) )
+			->andReturn( false );
 		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
 
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
@@ -198,7 +215,15 @@ final class OfferPromotionTriggerTest extends TestCase {
 					)
 				)
 			);
-		WP_Mock::userFunction( 'get_transient' )->once()->andReturn( false );
+		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_offer_promote_123' )
+			->andReturn( false );
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( RefreshHandler::giveUpTransientKey( 123, 'rakuten-kobo' ) )
+			->andReturn( false );
 		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
 
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
@@ -224,6 +249,7 @@ final class OfferPromotionTriggerTest extends TestCase {
 					),
 				)
 			);
+		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
 		WP_Mock::userFunction( 'get_transient' )->once()->andReturn( false );
 		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
 
@@ -259,7 +285,15 @@ final class OfferPromotionTriggerTest extends TestCase {
 					)
 				)
 			);
-		WP_Mock::userFunction( 'get_transient' )->once()->andReturn( false );
+		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_offer_promote_123' )
+			->andReturn( false );
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( RefreshHandler::giveUpTransientKey( 123, 'rakuten-kobo' ) )
+			->andReturn( false );
 		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 500 );
@@ -289,7 +323,15 @@ final class OfferPromotionTriggerTest extends TestCase {
 					)
 				)
 			);
-		WP_Mock::userFunction( 'get_transient' )->once()->andReturn( false );
+		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_offer_promote_123' )
+			->andReturn( false );
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( RefreshHandler::giveUpTransientKey( 123, 'rakuten-kobo' ) )
+			->andReturn( false );
 		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 500 );
@@ -336,7 +378,15 @@ final class OfferPromotionTriggerTest extends TestCase {
 					)
 				)
 			);
-		WP_Mock::userFunction( 'get_transient' )->once()->andReturn( false );
+		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_offer_promote_123' )
+			->andReturn( false );
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( RefreshHandler::giveUpTransientKey( 123, 'rakuten-kobo' ) )
+			->andReturn( false );
 		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
 
@@ -351,6 +401,70 @@ final class OfferPromotionTriggerTest extends TestCase {
 			);
 
 		$trigger->onListingsSaved( 123 );
+
+		$this->assertConditionsMet();
+	}
+
+	public function test_非公開の商品は投入しない(): void {
+		// QueueMaintenance::sweep() は post_status => 'publish' のクエリでしか公開商品を
+		// 見ないが、本フックにはそのクエリが無い。listings meta への書き込みは
+		// draft/pending/trash でも起こり得るため、sweep 同様に明示的な post_status
+		// ガードが要る。
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_offer_promote_123' )
+			->andReturn( false );
+		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'draft' );
+
+		WP_Mock::userFunction( 'get_post_meta' )->never();
+		WP_Mock::userFunction( 'set_transient' )->never();
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$this->trigger()->onListingsSaved( 123 );
+
+		$this->assertConditionsMet();
+	}
+
+	public function test_ギブアップ中のプラットフォームは投入しない(): void {
+		// RefreshHandler が恒久失敗を検知して立てた give-up transient が残っている間は、
+		// QueueMaintenance::sweep() と同じく再取得を積まない。積んでしまうと、外部
+		// ツールが listings meta を書き換えるたびに廃盤/無効 ID へのリトライ連鎖を
+		// give-up の TTL 内で何度も焼くことになる。
+		$this->stubRakutenPlatform();
+		$this->stubGeneralSettings();
+
+		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->once()
+			->with( 123, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				$this->listings(
+					array(
+						array(
+							'display_order'   => 100,
+							'external_id'     => 'gone',
+							'regular_url'     => 'https://example.test/g',
+							'last_fetched_at' => gmdate( 'c', time() - 30 * 3600 ),
+						),
+					)
+				)
+			);
+
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_offer_promote_123' )
+			->andReturn( false );
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( RefreshHandler::giveUpTransientKey( 123, 'rakuten-kobo' ) )
+			->andReturn( 1 );
+		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
+
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$this->trigger()->onListingsSaved( 123 );
 
 		$this->assertConditionsMet();
 	}

@@ -745,6 +745,10 @@ final class ListingRefresherTest extends TestCase {
 
 		$this->assertSame( WorkOutcome::TERMINAL_FAILURE, $outcome );
 		$this->assertSame( FetchStatus::TERMINAL, $this->savedOffer( 'gone' )['fetch_status'] );
+		// last_fetched_at は成功・失敗を問わず毎試行で記録される。OfferPromotionTrigger の
+		// クロスリクエストなループ防止は「needsRefetch() がこの刻印を見て false を返す」
+		// ことに依存しており、terminal 失敗でも刻まれ続けることがその前提。
+		$this->assertNotSame( '', (string) ( $this->savedOffer( 'gone' )['last_fetched_at'] ?? '' ) );
 	}
 
 	public function test_一時失敗でfetch_statusがtransientになる(): void {
@@ -764,6 +768,9 @@ final class ListingRefresherTest extends TestCase {
 
 		$this->assertSame( WorkOutcome::TRANSIENT_FAILURE, $outcome );
 		$this->assertSame( FetchStatus::TRANSIENT, $this->savedOffer( 'busy' )['fetch_status'] );
+		// last_fetched_at は成功・失敗を問わず毎試行で記録される（OfferPromotionTrigger の
+		// クロスリクエストなループ防止の前提。上のterminalケースと同じ理由）。
+		$this->assertNotSame( '', (string) ( $this->savedOffer( 'busy' )['last_fetched_at'] ?? '' ) );
 	}
 
 	public function test_external_idが空ならunsupportedで自動取得しない(): void {
@@ -791,6 +798,9 @@ final class ListingRefresherTest extends TestCase {
 		// WorkOutcome は TRANSIENT_FAILURE のまま（リトライ挙動は変えない）。
 		$this->assertSame( WorkOutcome::TRANSIENT_FAILURE, $outcome );
 		$this->assertSame( FetchStatus::UNSUPPORTED, $this->savedListing['offers'][0]['fetch_status'] );
+		// last_fetched_at は成功・失敗を問わず毎試行で記録される（OfferPromotionTrigger の
+		// クロスリクエストなループ防止の前提。上の terminal/transient ケースと同じ理由）。
+		$this->assertNotSame( '', (string) ( $this->savedListing['offers'][0]['last_fetched_at'] ?? '' ) );
 	}
 
 	public function test_書き戻しは識別子で行い配列の位置に依存しない(): void {
