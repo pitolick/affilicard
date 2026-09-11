@@ -59,6 +59,15 @@ final class RefreshHandler extends ThrottledActionHandler {
 	}
 
 	/**
+	 * refreshOne() が実際に fetch する件数（OfferSelector::select() の選択結果件数）。
+	 * ThrottledActionHandler::run() が performWork() の**前**にこれを呼び、レート制限の
+	 * 枠をこの件数に比例させて確保する。
+	 */
+	protected function refreshTargetCount( array $args ): int {
+		return $this->refresher->targetCount( (int) $args['post_id'], (string) $args['platform'] );
+	}
+
+	/**
 	 * 恒久失敗（TERMINAL_FAILURE＝廃盤/無効 ID で恒久的に解決できない）時に give-up マーカーを
 	 * 永続化する。QueueMaintenance::sweep() が GIVEUP_COOLDOWN の間この listing をスキップし、
 	 * 再取得 TTL 毎の毎周回リトライ（API 浪費・completed チャーン）を抑える。

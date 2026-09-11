@@ -326,13 +326,17 @@ final class QueueMaintenanceTest extends TestCase {
 				12,
 				array(
 					array(
-						'platform'        => 'rakuten-kobo',
-						'enabled'         => true,
-						'update_mode'     => 'auto',
-						'auto_update'     => true,
-						'external_id'     => 'deadbeef01',
-						'price'           => '500',
-						'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ), // 直近の試行がTTL超過（TTL=24h）
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							array(
+								'external_id'     => 'deadbeef01',
+								'price'           => '500',
+								'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ), // 直近の試行がTTL超過（TTL=24h）
+							),
+						),
 					),
 				)
 			)
@@ -385,14 +389,18 @@ final class QueueMaintenanceTest extends TestCase {
 				15,
 				array(
 					array(
-						'platform'         => 'rakuten-kobo',
-						'enabled'          => true,
-						'update_mode'      => 'auto',
-						'auto_update'      => true,
-						'external_id'      => 'deadbeef02',
-						'price'            => '',
-						'last_verified_at' => '',
-						'last_fetched_at'  => gmdate( 'c', time() - 3600 ), // 直近の試行はTTL内（TTL=24h）
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							array(
+								'external_id'      => 'deadbeef02',
+								'price'            => '',
+								'last_verified_at' => '',
+								'last_fetched_at'  => gmdate( 'c', time() - 3600 ), // 直近の試行はTTL内（TTL=24h）
+							),
+						),
 					),
 				)
 			)
@@ -630,12 +638,16 @@ final class QueueMaintenanceTest extends TestCase {
 					$id,
 					array(
 						array(
-							'platform'        => 'rakuten-kobo',
-							'enabled'         => true,
-							'update_mode'     => 'auto',
-							'auto_update'     => true,
-							'external_id'     => 'e' . $id,
-							'last_fetched_at' => $stale,
+							'platform'    => 'rakuten-kobo',
+							'enabled'     => true,
+							'update_mode' => 'auto',
+							'auto_update' => true,
+							'offers'      => array(
+								array(
+									'external_id'     => 'e' . $id,
+									'last_fetched_at' => $stale,
+								),
+							),
 						),
 					)
 				)
@@ -741,12 +753,16 @@ final class QueueMaintenanceTest extends TestCase {
 				10,
 				array(
 					array(
-						'platform'        => 'rakuten-kobo',
-						'enabled'         => true,
-						'update_mode'     => 'auto',
-						'auto_update'     => true,
-						'external_id'     => 'e1',
-						'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ),
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							array(
+								'external_id'     => 'e1',
+								'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ),
+							),
+						),
 					),
 				)
 			)
@@ -789,12 +805,16 @@ final class QueueMaintenanceTest extends TestCase {
 				10,
 				array(
 					array(
-						'platform'        => 'rakuten-kobo',
-						'enabled'         => true,
-						'update_mode'     => 'auto',
-						'auto_update'     => true,
-						'external_id'     => 'e1',
-						'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ),
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							array(
+								'external_id'     => 'e1',
+								'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ),
+							),
+						),
 					),
 				)
 			)
@@ -839,12 +859,16 @@ final class QueueMaintenanceTest extends TestCase {
 				10,
 				array(
 					array(
-						'platform'        => 'rakuten-kobo',
-						'enabled'         => true,
-						'update_mode'     => 'auto',
-						'auto_update'     => true,
-						'external_id'     => 'e1',
-						'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ),
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							array(
+								'external_id'     => 'e1',
+								'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ),
+							),
+						),
 					),
 				)
 			)
@@ -891,12 +915,16 @@ final class QueueMaintenanceTest extends TestCase {
 				10,
 				array(
 					array(
-						'platform'        => 'rakuten-kobo',
-						'enabled'         => true,
-						'update_mode'     => 'auto',
-						'auto_update'     => true,
-						'external_id'     => 'e10',
-						'last_fetched_at' => $stale,
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							array(
+								'external_id'     => 'e10',
+								'last_fetched_at' => $stale,
+							),
+						),
 					),
 				)
 			)
@@ -906,12 +934,16 @@ final class QueueMaintenanceTest extends TestCase {
 				11,
 				array(
 					array(
-						'platform'        => 'dmm-books',
-						'enabled'         => true,
-						'update_mode'     => 'auto',
-						'auto_update'     => true,
-						'external_id'     => 'e11',
-						'last_fetched_at' => $stale,
+						'platform'    => 'dmm-books',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							array(
+								'external_id'     => 'e11',
+								'last_fetched_at' => $stale,
+							),
+						),
 					),
 				)
 			)
@@ -995,20 +1027,28 @@ final class QueueMaintenanceTest extends TestCase {
 				10,
 				array(
 					array(
-						'platform'        => 'rakuten-kobo',
-						'enabled'         => true,
-						'update_mode'     => 'auto',
-						'auto_update'     => true,
-						'external_id'     => 'e10r',
-						'last_fetched_at' => $stale,
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							array(
+								'external_id'     => 'e10r',
+								'last_fetched_at' => $stale,
+							),
+						),
 					),
 					array(
-						'platform'        => 'dmm-books',
-						'enabled'         => true,
-						'update_mode'     => 'auto',
-						'auto_update'     => true,
-						'external_id'     => 'e10d',
-						'last_fetched_at' => $stale,
+						'platform'    => 'dmm-books',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							array(
+								'external_id'     => 'e10d',
+								'last_fetched_at' => $stale,
+							),
+						),
 					),
 				)
 			)
@@ -1134,12 +1174,16 @@ final class QueueMaintenanceTest extends TestCase {
 				30,
 				array(
 					array(
-						'platform'        => 'rakuten-kobo',
-						'enabled'         => true,
-						'update_mode'     => 'auto',
-						'auto_update'     => true,
-						'external_id'     => 'e1',
-						'last_fetched_at' => gmdate( 'c', time() - 85000 ),
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							array(
+								'external_id'     => 'e1',
+								'last_fetched_at' => gmdate( 'c', time() - 85000 ),
+							),
+						),
 					),
 				)
 			)
@@ -1174,12 +1218,16 @@ final class QueueMaintenanceTest extends TestCase {
 				31,
 				array(
 					array(
-						'platform'        => 'rakuten-kobo',
-						'enabled'         => true,
-						'update_mode'     => 'auto',
-						'auto_update'     => true,
-						'external_id'     => 'e1',
-						'last_fetched_at' => gmdate( 'c', time() - 85000 ),
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							array(
+								'external_id'     => 'e1',
+								'last_fetched_at' => gmdate( 'c', time() - 85000 ),
+							),
+						),
 					),
 				)
 			)
@@ -1242,12 +1290,16 @@ final class QueueMaintenanceTest extends TestCase {
 					$id,
 					array(
 						array(
-							'platform'        => 'rakuten-kobo',
-							'enabled'         => true,
-							'update_mode'     => 'auto',
-							'auto_update'     => true,
-							'external_id'     => 'e' . $id,
-							'last_fetched_at' => $stale,
+							'platform'    => 'rakuten-kobo',
+							'enabled'     => true,
+							'update_mode' => 'auto',
+							'auto_update' => true,
+							'offers'      => array(
+								array(
+									'external_id'     => 'e' . $id,
+									'last_fetched_at' => $stale,
+								),
+							),
 						),
 					)
 				)
@@ -1293,12 +1345,16 @@ final class QueueMaintenanceTest extends TestCase {
 					$id,
 					array(
 						array(
-							'platform'        => 'rakuten-kobo',
-							'enabled'         => true,
-							'update_mode'     => 'auto',
-							'auto_update'     => true,
-							'external_id'     => 'e' . $id,
-							'last_fetched_at' => $stale,
+							'platform'    => 'rakuten-kobo',
+							'enabled'     => true,
+							'update_mode' => 'auto',
+							'auto_update' => true,
+							'offers'      => array(
+								array(
+									'external_id'     => 'e' . $id,
+									'last_fetched_at' => $stale,
+								),
+							),
 						),
 					)
 				)
@@ -1375,5 +1431,136 @@ final class QueueMaintenanceTest extends TestCase {
 		$this->stubRetention( 24, 10 );
 
 		$this->assertSame( 10 * DAY_IN_SECONDS, QueueMaintenance::failedRetentionSeconds() );
+	}
+
+	/**
+	 * v4.0.0: QueueMaintenance::sweep() を post_id=100・listings=$listings の1商品に対して
+	 * 走らせ、バッチ投入（enqueueBatch → as_schedule_single_action）された listing の
+	 * platform コードを配列で返す。fallback_on_terminal は $fallbackEnabled（既定 true）。
+	 *
+	 * @param list<array<string, mixed>> $listings
+	 * @return list<string>
+	 */
+	private function sweepAndCollectEnqueued( array $listings, int $now, bool $fallbackEnabled = true ): array {
+		$this->stubCursor( 0 );
+		$this->stubGeneralSettings( array( 'fallback_on_terminal' => $fallbackEnabled ) );
+		$this->stubQueueDepth( 0 );
+		$this->stubFilterCleanup();
+		$this->stubCompletion();
+		WP_Mock::userFunction( 'get_posts' )->andReturn( array( 100 ) );
+		$this->stubRakutenPlatform();
+		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->once()->with( 100 )->andReturn( $this->product( 100, $listings ) );
+
+		$enqueued = array();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->andReturnUsing(
+			function ( $timestamp, $hook, $args ) use ( &$enqueued ) {
+				foreach ( (array) ( $args['items'] ?? array() ) as $item ) {
+					if ( isset( $item['platform'] ) ) {
+						$enqueued[] = (string) $item['platform'];
+					}
+				}
+				return 1;
+			}
+		);
+
+		( new QueueMaintenance( $repo, new Enqueuer(), $this->registry(), new SweepCursor() ) )->sweep();
+
+		return $enqueued;
+	}
+
+	/**
+	 * v4.0.0: 掃引の鮮度判定（PriceFreshness::needsRefetch）は listing 自身ではなく
+	 * OfferSelector が選んだ購入リンク（表示中の offer）を見る。先頭（display_order 最小・
+	 * 表示中）が stale なら、後続（非表示）がどれだけ新しくても再取得対象になる。
+	 *
+	 * $now は実時計（time()）を基準にする。sweep() 内部の鮮度判定も同じ実時計（time()）で
+	 * 行われるため、固定タイムスタンプを使うとテスト実行時刻とずれて判定が壊れる。
+	 */
+	public function test_掃引の鮮度判定は選択された購入リンクを見る(): void {
+		$now      = time();
+		$listings = array(
+			array(
+				'platform'    => 'rakuten-kobo',
+				'enabled'     => true,
+				'auto_update' => true,
+				'offers'      => array(
+					array(
+						'display_order'   => 10,
+						'external_id'     => 'shown',
+						'regular_url'     => 'https://example.test/a',
+						'last_fetched_at' => gmdate( 'c', $now - 30 * 3600 ),
+					),
+					array(
+						'display_order'   => 100,
+						'external_id'     => 'hidden',
+						'regular_url'     => 'https://example.test/b',
+						'last_fetched_at' => gmdate( 'c', $now ),
+					),
+				),
+			),
+		);
+
+		$enqueued = $this->sweepAndCollectEnqueued( $listings, $now );
+
+		$this->assertSame( array( 'rakuten-kobo' ), $enqueued );
+	}
+
+	/** 選択された購入リンク（先頭・表示中）自体が鮮度内なら投入しない。 */
+	public function test_選択された購入リンクが新しければ投入しない(): void {
+		$now      = time();
+		$listings = array(
+			array(
+				'platform'    => 'rakuten-kobo',
+				'enabled'     => true,
+				'auto_update' => true,
+				'offers'      => array(
+					array(
+						'display_order'   => 10,
+						'external_id'     => 'shown',
+						'regular_url'     => 'https://example.test/a',
+						'last_fetched_at' => gmdate( 'c', $now ),
+					),
+				),
+			),
+		);
+
+		$this->assertSame( array(), $this->sweepAndCollectEnqueued( $listings, $now ) );
+	}
+
+	/**
+	 * fallback_on_terminal が OFF のときは、先頭が terminal（恒久失敗）でも OfferSelector は
+	 * 先頭を選び続ける（spec §7-2 (b)）。先頭自体が鮮度内なら、後続がどれだけ古くても
+	 * 表示されない購入リンクの鮮度は見ず、更新は止まる。
+	 */
+	public function test_設定OFFで先頭がterminalなら更新が止まる(): void {
+		$now      = time();
+		$listings = array(
+			array(
+				'platform'    => 'rakuten-kobo',
+				'enabled'     => true,
+				'auto_update' => true,
+				'offers'      => array(
+					array(
+						'display_order'   => 10,
+						'external_id'     => 'dead',
+						'regular_url'     => 'https://example.test/dead',
+						'fetch_status'    => 'terminal',
+						'last_fetched_at' => gmdate( 'c', $now ),
+					),
+					array(
+						'display_order'   => 100,
+						'external_id'     => 'alive',
+						'regular_url'     => 'https://example.test/alive',
+						'last_fetched_at' => gmdate( 'c', $now - 30 * 3600 ),
+					),
+				),
+			),
+		);
+
+		// 先頭（terminal・取得したて）が対象なので投入されない。後続の古さは見ない。
+		$this->assertSame( array(), $this->sweepAndCollectEnqueued( $listings, $now, false ) );
 	}
 }

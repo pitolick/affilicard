@@ -6,6 +6,7 @@ namespace Affilicard\Queue;
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Pricing\ListingEligibility;
+use Affilicard\Pricing\OfferSelector;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Repository\ProductRepositoryInterface;
@@ -256,9 +257,20 @@ final class QueueMaintenance {
 					continue;
 				}
 
-				// 直近の試行から TTL（リード分だけ前倒し）を経過していない listing は
+				// v4.0.0: 判定対象は listing 自身ではなく OfferSelector が選んだ購入リンク
+				// （表示中の offer）。選択結果が空（offers が空）なら更新すべき購入リンクが
+				// 無いためスキップする。
+				$targets = OfferSelector::select(
+					isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array(),
+					GeneralSettings::fallbackOnTerminal()
+				);
+				if ( array() === $targets ) {
+					continue;
+				}
+
+				// 直近の試行から TTL（リード分だけ前倒し）を経過していない購入リンクは
 				// まだ積まない（perpetual retry の抑止）。
-				if ( ! PriceFreshness::needsRefetch( $listing, $def, $now, $this->sweepLeadSeconds ) ) {
+				if ( ! PriceFreshness::needsRefetch( $targets[0], $def, $now, $this->sweepLeadSeconds ) ) {
 					continue;
 				}
 

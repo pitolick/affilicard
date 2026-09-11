@@ -77,6 +77,22 @@ abstract class ThrottledActionHandler {
 	}
 
 	/**
+	 * performWork() が実際に fetch する対象（listing の購入リンク）の件数。レート制限の
+	 * 枠確保（run() の tryAcquire）をこの件数に比例させる。
+	 *
+	 * 既定は 1（大半のハンドラは 1 回の performWork() で 1 件しか fetch しない）。listing の
+	 * 購入リンクを選択して更新する RefreshHandler だけが override し、OfferSelector の
+	 * 選択結果件数を返す——abstract にして全サブクラスに実装を強制すると、選択係と無関係な
+	 * ハンドラ（AutoCreateHandler 等）にまで無意味な実装を要求してしまうため、base に既定
+	 * 実装を置く。
+	 *
+	 * @param array<string, mixed> $args
+	 */
+	protected function refreshTargetCount( array $args ): int {
+		return 1;
+	}
+
+	/**
 	 * @param array<string, mixed> $args
 	 */
 	protected function run( array $args ): void {
@@ -104,8 +120,13 @@ abstract class ThrottledActionHandler {
 			$provider->minRequestIntervalMs(),
 			GeneralSettings::throttleOverrideMs( $account )
 		);
-		$nowMs    = (int) round( microtime( true ) * 1000 );
-		$acquire  = $this->limiter->tryAcquire( $account, $interval, $nowMs );
+		// v4.0.0: performWork() が実際に fetch する対象（購入リンク）の件数ぶん、レート制限の
+		// 枠を確保する。今日は refreshTargetCount() の既定 1 で従来と同じ挙動だが、選択係
+		// （OfferSelector）が複数件を返すようになったとき、ここを直さなくても枠が自動的に
+		// 広がる（表示を増やした瞬間に 429 を起こす事故を防ぐ）。
+		$slots   = max( 1, $this->refreshTargetCount( $args ) );
+		$nowMs   = (int) round( microtime( true ) * 1000 );
+		$acquire = $this->limiter->tryAcquire( $account, $interval * $slots, $nowMs );
 		if ( ! $acquire['ok'] ) {
 			$this->throttleWait( $args, (int) ceil( $acquire['next_ms'] / 1000 ) );
 			return;

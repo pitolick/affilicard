@@ -82,6 +82,29 @@ class ListingRefresher {
 	}
 
 	/**
+	 * 指定 listing に対して refreshOne() が実際に fetch する件数（OfferSelector::select() の
+	 * 選択結果件数）。fetch を伴わず件数だけを求める——ThrottledActionHandler::run() が
+	 * performWork()（＝refreshOne()）を呼ぶ**前**に、レート制限の枠をこの件数に比例させて
+	 * 確保するために使う（RefreshHandler::refreshTargetCount() から呼ばれる）。
+	 *
+	 * 該当 listing・platform が無ければ 0（refreshOne() 自身も fetch を行わない）。
+	 */
+	public function targetCount( int $postId, string $platform ): int {
+		$product = $this->repository->find( $postId );
+		if ( null === $product || ! is_array( $product['listings'] ?? null ) ) {
+			return 0;
+		}
+		foreach ( $product['listings'] as $listing ) {
+			if ( ! is_array( $listing ) || ( $listing['platform'] ?? '' ) !== $platform ) {
+				continue;
+			}
+			$offers = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
+			return count( OfferSelector::select( $offers, GeneralSettings::fallbackOnTerminal() ) );
+		}
+		return 0;
+	}
+
+	/**
 	 * listing の中から OfferSelector が選んだ購入リンク（offer）1件を fetch→反映し、
 	 * 更新後 listing と WorkOutcome のタプルを返す。
 	 *

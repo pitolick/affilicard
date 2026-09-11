@@ -10,6 +10,7 @@ use Affilicard\Provider\ProviderInterface;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Queue\WorkOutcome;
 use Affilicard\Repository\ProductRepositoryInterface;
+use Affilicard\Settings\GeneralSettings;
 use Mockery;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
@@ -817,5 +818,74 @@ final class ListingRefresherTest extends TestCase {
 		// 表示順 10 の 'sale'（配列では 2 番目）が更新され、'normal' は無傷。
 		$this->assertSame( '0', $this->savedOffer( 'sale' )['price'] );
 		$this->assertSame( '660', $this->savedOffer( 'normal' )['price'] );
+	}
+
+	/**
+	 * v4.0.0: targetCount() は refreshOne() が実際に fetch する件数（OfferSelector::select()
+	 * の選択結果件数）を fetch を伴わずに返す。ThrottledActionHandler::run() が
+	 * performWork()（＝refreshOne()）の前にレート制限の枠をこの件数へ比例させるために使う。
+	 * offers が1件（fallback 既定 OFF）なら選択結果どおり 1。
+	 */
+	public function test_targetCount_offersが1件なら1を返す(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		$repo = $this->repoWithOffers(
+			array(
+				array(
+					'external_id' => 'e1',
+					'regular_url' => 'https://example.test/a',
+				),
+			)
+		);
+
+		$count = ( new ListingRefresher( new ProviderRegistry(), $repo ) )->targetCount( 20, 'rakuten-kobo' );
+
+		$this->assertSame( 1, $count );
+	}
+
+	/** offers が空なら OfferSelector::select() の選択結果も空＝0（refreshOne 自身も fetch しない）。 */
+	public function test_targetCount_offersが空なら0を返す(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		$repo = $this->repoWithOffers( array() );
+
+		$count = ( new ListingRefresher( new ProviderRegistry(), $repo ) )->targetCount( 20, 'rakuten-kobo' );
+
+		$this->assertSame( 0, $count );
+	}
+
+	/** 該当 platform の listing が無ければ 0（refreshOne 自身も対象なし＝no-op）。 */
+	public function test_targetCount_該当platformのlistingが無ければ0を返す(): void {
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 12 )->andReturn(
+			$this->product(
+				12,
+				array(
+					array(
+						'platform'    => 'other-platform',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array( array( 'external_id' => 'e1' ) ),
+					),
+				)
+			)
+		);
+
+		$count = ( new ListingRefresher( new ProviderRegistry(), $repo ) )->targetCount( 12, 'rakuten-kobo' );
+
+		$this->assertSame( 0, $count );
+	}
+
+	/** 商品が見つからなければ 0（refreshOne 自身も対象なし＝no-op）。 */
+	public function test_targetCount_商品が見つからなければ0を返す(): void {
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 999 )->andReturn( null );
+
+		$count = ( new ListingRefresher( new ProviderRegistry(), $repo ) )->targetCount( 999, 'rakuten-kobo' );
+
+		$this->assertSame( 0, $count );
 	}
 }
