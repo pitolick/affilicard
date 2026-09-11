@@ -19,56 +19,56 @@ final class PriceFreshnessTest extends TestCase {
 	}
 
 	public function test_確認済みかつ鮮度内は表示可(): void {
-		$now     = 1_800_000_000;
-		$listing = array(
+		$now   = 1_800_000_000;
+		$offer = array(
 			'price'            => '693',
 			'last_verified_at' => gmdate( 'c', $now - 3600 ), // 1時間前
 		);
-		$this->assertTrue( PriceFreshness::isPriceDisplayable( $listing, $this->platform( 24 ), $now ) );
+		$this->assertTrue( PriceFreshness::isPriceDisplayable( $offer, $this->platform( 24 ), $now ) );
 	}
 
 	public function test_TTL超過は非表示(): void {
-		$now     = 1_800_000_000;
-		$listing = array(
+		$now   = 1_800_000_000;
+		$offer = array(
 			'price'            => '693',
 			'last_verified_at' => gmdate( 'c', $now - 25 * 3600 ), // 25時間前
 		);
-		$this->assertFalse( PriceFreshness::isPriceDisplayable( $listing, $this->platform( 24 ), $now ) );
+		$this->assertFalse( PriceFreshness::isPriceDisplayable( $offer, $this->platform( 24 ), $now ) );
 	}
 
 	public function test_last_verified_at無し_手動価格は非表示(): void {
-		$now     = 1_800_000_000;
-		$listing = array( 'price' => '693' ); // 手動入力想定・verified 無し
-		$this->assertFalse( PriceFreshness::isPriceDisplayable( $listing, $this->platform( 24 ), $now ) );
+		$now   = 1_800_000_000;
+		$offer = array( 'price' => '693' ); // 手動入力想定・verified 無し
+		$this->assertFalse( PriceFreshness::isPriceDisplayable( $offer, $this->platform( 24 ), $now ) );
 	}
 
 	public function test_price空は非表示(): void {
-		$now     = 1_800_000_000;
-		$listing = array(
+		$now   = 1_800_000_000;
+		$offer = array(
 			'price'            => '',
 			'last_verified_at' => gmdate( 'c', $now ),
 		);
-		$this->assertFalse( PriceFreshness::isPriceDisplayable( $listing, $this->platform( 24 ), $now ) );
+		$this->assertFalse( PriceFreshness::isPriceDisplayable( $offer, $this->platform( 24 ), $now ) );
 	}
 
 	public function test_platformがnullは非表示(): void {
-		$now     = 1_800_000_000;
-		$listing = array(
+		$now   = 1_800_000_000;
+		$offer = array(
 			'price'            => '693',
 			'last_verified_at' => gmdate( 'c', $now ),
 		);
-		$this->assertFalse( PriceFreshness::isPriceDisplayable( $listing, null, $now ) );
+		$this->assertFalse( PriceFreshness::isPriceDisplayable( $offer, null, $now ) );
 	}
 
 	public function test_僅かに未来のlast_verified_atも表示可_クロック差許容(): void {
 		// 書き込み側と描画側 time() のクロック差で verified が僅かに未来になることがある。
 		// これは「たった今確認済み＝最もフレッシュ」なので表示する（鮮度ゲートは古い価格を隠すためのもの）。
-		$now     = 1_800_000_000;
-		$listing = array(
+		$now   = 1_800_000_000;
+		$offer = array(
 			'price'            => '693',
 			'last_verified_at' => gmdate( 'c', $now + 3600 ), // 1時間後（未来・クロック差想定）
 		);
-		$this->assertTrue( PriceFreshness::isPriceDisplayable( $listing, $this->platform( 24 ), $now ) );
+		$this->assertTrue( PriceFreshness::isPriceDisplayable( $offer, $this->platform( 24 ), $now ) );
 	}
 
 	/**
@@ -84,26 +84,26 @@ final class PriceFreshnessTest extends TestCase {
 	public function test_needsRefetch_TTL内は再取得不要(): void {
 		$platform = $this->platform( 24 );
 		$now      = 1_000_000;
-		$listing  = array( 'last_fetched_at' => gmdate( 'c', $now - 3600 ) ); // 1h 前
-		$this->assertFalse( PriceFreshness::needsRefetch( $listing, $platform, $now ) );
+		$offer    = array( 'last_fetched_at' => gmdate( 'c', $now - 3600 ) ); // 1h 前
+		$this->assertFalse( PriceFreshness::needsRefetch( $offer, $platform, $now ) );
 	}
 
 	public function test_needsRefetch_TTL超過は再取得が必要(): void {
 		$platform = $this->platform( 24 );
 		$now      = 1_000_000;
-		$listing  = array( 'last_fetched_at' => gmdate( 'c', $now - 25 * 3600 ) ); // 25h 前
-		$this->assertTrue( PriceFreshness::needsRefetch( $listing, $platform, $now ) );
+		$offer    = array( 'last_fetched_at' => gmdate( 'c', $now - 25 * 3600 ) ); // 25h 前
+		$this->assertTrue( PriceFreshness::needsRefetch( $offer, $platform, $now ) );
 	}
 
 	public function test_needsRefetch_platformがnullは再取得が必要(): void {
-		$listing = array( 'last_fetched_at' => gmdate( 'c', 1_000_000 ) );
-		$this->assertTrue( PriceFreshness::needsRefetch( $listing, null, 1_000_000 ) );
+		$offer = array( 'last_fetched_at' => gmdate( 'c', 1_000_000 ) );
+		$this->assertTrue( PriceFreshness::needsRefetch( $offer, null, 1_000_000 ) );
 	}
 
 	public function test_needsRefetch_last_fetched_atが不正な日時文字列は再取得が必要(): void {
 		$platform = $this->platform( 24 );
-		$listing  = array( 'last_fetched_at' => 'not-a-date' );
-		$this->assertTrue( PriceFreshness::needsRefetch( $listing, $platform, 1_000_000 ) );
+		$offer    = array( 'last_fetched_at' => 'not-a-date' );
+		$this->assertTrue( PriceFreshness::needsRefetch( $offer, $platform, 1_000_000 ) );
 	}
 
 	/**
@@ -114,11 +114,11 @@ final class PriceFreshnessTest extends TestCase {
 	public function test_needsRefetch_リード分だけ前倒しで再取得を発火する(): void {
 		$platform = $this->platform( 24 );
 		$now      = 1_000_000;
-		$listing  = array( 'last_fetched_at' => gmdate( 'c', $now - 20 * 3600 ) ); // 20h 前
+		$offer    = array( 'last_fetched_at' => gmdate( 'c', $now - 20 * 3600 ) ); // 20h 前
 		$lead     = 5 * 3600; // しきい値 24-5=19h
-		$this->assertTrue( PriceFreshness::needsRefetch( $listing, $platform, $now, $lead ) );
+		$this->assertTrue( PriceFreshness::needsRefetch( $offer, $platform, $now, $lead ) );
 		// lead=0（従来）なら 20h < 24h で再取得不要。
-		$this->assertFalse( PriceFreshness::needsRefetch( $listing, $platform, $now, 0 ) );
+		$this->assertFalse( PriceFreshness::needsRefetch( $offer, $platform, $now, 0 ) );
 	}
 
 	/**
@@ -151,11 +151,11 @@ final class PriceFreshnessTest extends TestCase {
 	public function test_needsRefetch_last_verified_atやpriceが空でもlast_fetched_atがTTL内なら再取得不要(): void {
 		$platform = $this->platform( 24 );
 		$now      = 1_000_000;
-		$listing  = array(
+		$offer    = array(
 			'price'            => '',
 			'last_verified_at' => '',
 			'last_fetched_at'  => gmdate( 'c', $now - 3600 ), // 直近の失敗試行
 		);
-		$this->assertFalse( PriceFreshness::needsRefetch( $listing, $platform, $now ) );
+		$this->assertFalse( PriceFreshness::needsRefetch( $offer, $platform, $now ) );
 	}
 }

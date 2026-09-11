@@ -14,17 +14,22 @@ use Affilicard\Platform\PlatformDefinition;
 final class PriceFreshness {
 
 	/**
-	 * @param array<string, mixed> $listing
+	 * 価格をカードに表示してよいか（API 確認済み・鮮度内か）。
+	 *
+	 * 判定対象は **OfferSelector が選んだ購入リンク（offer）** である。
+	 * 取得結果フィールドは listing ではなく offer が持つ。
+	 *
+	 * @param array<string, mixed> $offer
 	 */
-	public static function isPriceDisplayable( array $listing, ?PlatformDefinition $platform, int $nowTs ): bool {
+	public static function isPriceDisplayable( array $offer, ?PlatformDefinition $platform, int $nowTs ): bool {
 		if ( null === $platform ) {
 			return false;
 		}
-		$price = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
+		$price = isset( $offer['price'] ) ? trim( (string) $offer['price'] ) : '';
 		if ( '' === $price ) {
 			return false;
 		}
-		$verified = isset( $listing['last_verified_at'] ) ? trim( (string) $listing['last_verified_at'] ) : '';
+		$verified = isset( $offer['last_verified_at'] ) ? trim( (string) $offer['last_verified_at'] ) : '';
 		if ( '' === $verified ) {
 			return false;
 		}
@@ -66,10 +71,11 @@ final class PriceFreshness {
 	/**
 	 * 掃引（sweep）の再取得判定：再取得を試みるべきか。
 	 *
+	 * 判定対象は **OfferSelector が選んだ購入リンク（offer）** である。
 	 * last_fetched_at（成功/失敗を問わず毎試行で記録される最終試行時刻）＋
 	 * platform の priceTtlHours をクールダウンとして使う。last_verified_at
 	 * （成功時刻）ベースの isPriceDisplayable とは独立の判定であり、失敗が
-	 * 続いている listing でも「直近の試行から TTL 経過するまでは再投入しない」
+	 * 続いている offer でも「直近の試行から TTL 経過するまでは再投入しない」
 	 * ことで、掃引のたびに際限なく再エンキューされる（perpetual retry）事態を防ぐ。
 	 *
 	 * $leadSeconds（掃引リード）: 再取得のしきい値を priceTtlHours より前倒しする秒数。
@@ -79,13 +85,13 @@ final class PriceFreshness {
 	 * 過剰な API 呼び出しを避けるため、しきい値は priceTtlHours の 1/2 未満には下げない
 	 * （＝再取得頻度は表示 TTL の 2 倍までにクランプ）。$leadSeconds 既定 0 は従来挙動（前倒しなし）。
 	 *
-	 * @param array<string, mixed> $listing
+	 * @param array<string, mixed> $offer
 	 */
-	public static function needsRefetch( array $listing, ?PlatformDefinition $platform, int $nowTs, int $leadSeconds = 0 ): bool {
+	public static function needsRefetch( array $offer, ?PlatformDefinition $platform, int $nowTs, int $leadSeconds = 0 ): bool {
 		if ( null === $platform ) {
 			return true;
 		}
-		$fetched = isset( $listing['last_fetched_at'] ) ? trim( (string) $listing['last_fetched_at'] ) : '';
+		$fetched = isset( $offer['last_fetched_at'] ) ? trim( (string) $offer['last_fetched_at'] ) : '';
 		if ( '' === $fetched ) {
 			return true;
 		}
