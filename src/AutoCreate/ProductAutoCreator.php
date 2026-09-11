@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace Affilicard\AutoCreate;
 
 use Affilicard\Platform\PlatformConfig;
+use Affilicard\Pricing\FetchStatus;
+use Affilicard\Pricing\OfferSelector;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Queue\WorkOutcome;
 use Affilicard\Repository\ProductRepositoryInterface;
@@ -26,7 +28,7 @@ final class ProductAutoCreator {
 	 *
 	 * give-up 機構（AutoCreateHandler）が terminal/transient を区別できるよう、単なる成否では
 	 * なく3値で返す:
-	 * - SUCCESS           = fetch hit → 商品作成成功
+	 * - SUCCESS           = fetch hit → 商品作成成功、または既存商品が見つかり生成不要（no-op）
 	 * - TERMINAL_FAILURE  = データ不備（空 ID）・未知 platform・非自動 Provider・fetch miss
 	 *                       （該当なし・無効 ID）。リトライしても成功しないため give-up してよい。
 	 * - TRANSIENT_FAILURE = fetch error（API 到達不可・エラー・認証未設定）・save 失敗。
@@ -43,6 +45,12 @@ final class ProductAutoCreator {
 		$provider = $this->registry->get( $definition->provider );
 		if ( null === $provider || ! $provider->isAutomatic() ) {
 			return WorkOutcome::TERMINAL_FAILURE;
+		}
+		// enqueue から実行までの間に別経路で既に作成済みになっている場合がある
+		// （Block::autoCreate の 5 分ロックが切れた後の再 enqueue 等）。external_id
+		// ミラー（offers[] 由来）で既存商品を引ければ、ここで作らず no-op で終える。
+		if ( null !== $this->repository->findByExternalId( $definition->code, $externalId ) ) {
+			return WorkOutcome::SUCCESS;
 		}
 		$result = $provider->fetch( $externalId, array() );
 		if ( $result->isTerminalMiss() ) {
@@ -67,25 +75,35 @@ final class ProductAutoCreator {
 			? (string) $fetched['title']
 			: trim( $platformName . ' ' . $externalId );
 
+		$now = gmdate( 'c' );
+
 		return array(
 			'title'        => $title,
 			'status'       => 'publish',
 			'product_type' => 'generic',
 			'listings'     => array(
 				array(
-					'platform'         => $platformCode,
-					'enabled'          => true,
-					'update_mode'      => 'auto',
-					'auto_update'      => true,
-					'external_id'      => $externalId,
-					'regular_url'      => isset( $fetched['regular_url'] ) ? (string) $fetched['regular_url'] : '',
-					'affiliate_url'    => isset( $fetched['affiliate_url'] ) ? (string) $fetched['affiliate_url'] : '',
-					'price'            => isset( $fetched['price'] ) ? (string) $fetched['price'] : '',
-					'list_price'       => isset( $fetched['list_price'] ) ? (string) $fetched['list_price'] : '',
-					'badge'            => isset( $fetched['badge'] ) ? (string) $fetched['badge'] : '',
-					'image_url'        => isset( $fetched['image_url'] ) ? (string) $fetched['image_url'] : '',
-					'platform_extras'  => isset( $fetched['platform_extras'] ) && is_array( $fetched['platform_extras'] ) ? $fetched['platform_extras'] : array(),
-					'last_verified_at' => gmdate( 'c' ),
+					'platform'        => $platformCode,
+					'enabled'         => true,
+					'update_mode'     => 'auto',
+					'auto_update'     => true,
+					'platform_extras' => isset( $fetched['platform_extras'] ) && is_array( $fetched['platform_extras'] ) ? $fetched['platform_extras'] : array(),
+					'offers'          => array(
+						array(
+							'display_order'    => OfferSelector::DEFAULT_ORDER,
+							'external_id'      => $externalId,
+							'regular_url'      => isset( $fetched['regular_url'] ) ? (string) $fetched['regular_url'] : '',
+							'affiliate_url'    => isset( $fetched['affiliate_url'] ) ? (string) $fetched['affiliate_url'] : '',
+							'price'            => isset( $fetched['price'] ) ? (string) $fetched['price'] : '',
+							'list_price'       => isset( $fetched['list_price'] ) ? (string) $fetched['list_price'] : '',
+							'badge'            => isset( $fetched['badge'] ) ? (string) $fetched['badge'] : '',
+							'image_url'        => isset( $fetched['image_url'] ) ? (string) $fetched['image_url'] : '',
+							'search_key'       => isset( $fetched['search_key'] ) ? (string) $fetched['search_key'] : '',
+							'fetch_status'     => FetchStatus::NONE,
+							'last_fetched_at'  => $now,
+							'last_verified_at' => $now,
+						),
+					),
 				),
 			),
 		);

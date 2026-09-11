@@ -300,6 +300,7 @@ final class AutoCreateHandlerTest extends TestCase {
 		$registry = $this->registry( $provider );
 
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'findByExternalId' )->andReturn( null );
 		$repo->shouldReceive( 'save' )->once()->andReturn( 55 );
 		$creator = new ProductAutoCreator( $registry, $repo );
 
@@ -333,6 +334,7 @@ final class AutoCreateHandlerTest extends TestCase {
 		$registry = $this->registry( $provider );
 
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'findByExternalId' )->andReturn( null );
 		$repo->shouldNotReceive( 'save' );
 		$creator = new ProductAutoCreator( $registry, $repo );
 
@@ -378,6 +380,7 @@ final class AutoCreateHandlerTest extends TestCase {
 		$registry = $this->registry( $provider );
 
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'findByExternalId' )->andReturn( null );
 		$repo->shouldNotReceive( 'save' );
 		$creator = new ProductAutoCreator( $registry, $repo );
 
