@@ -1,9 +1,11 @@
+import { useEffect, useState } from '@wordpress/element';
 import { useEntityProp } from '@wordpress/core-data';
 import { PanelBody, SelectControl, TextControl, CheckboxControl } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import { ListingsEditor } from './ListingsEditor';
 import { ExtrasEditor } from './ExtrasEditor';
 import { StockStatusSelect } from './StockStatusSelect';
+import { fetchSettings } from '../api/settings';
 
 const PRODUCT_TYPE_OPTIONS = [
 	{ value: 'generic', label: __('汎用', 'affilicard') },
@@ -19,6 +21,18 @@ export function ProductSettingsPanel() {
 		'meta'
 	);
 	const m = meta || {};
+
+	// 「使用中」の印は GeneralSettings::fallbackOnTerminal()（サイト全体設定）に
+	// 依存する。CardHtmlBuilder が描画側へ渡しているのと同じ値を、ここでは
+	// REST 経由（fetchSettings）で取得して ListingsEditor へ渡す。取得前/失敗時は
+	// PHP 側の既定（OFF）に合わせて false のまま進める。
+	const [generalSettings, setGeneralSettings] = useState(null);
+	useEffect(() => {
+		fetchSettings()
+			.then(setGeneralSettings)
+			.catch(() => setGeneralSettings({}));
+	}, []);
+	const fallbackOnTerminal = Boolean(generalSettings?.fallback_on_terminal);
 
 	const productType = m.affilicard_product_type || 'generic';
 	const stockStatus = m.affilicard_stock_status || 'available';
@@ -88,6 +102,7 @@ export function ProductSettingsPanel() {
 			>
 				<ListingsEditor
 					listings={listings}
+					fallbackOnTerminal={fallbackOnTerminal}
 					onChange={(next) => patch({ affilicard_listings: next })}
 				/>
 			</PanelBody>
