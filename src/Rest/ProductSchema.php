@@ -14,6 +14,47 @@ use Affilicard\Stock\StockStatus;
 final class ProductSchema {
 
 	/**
+	 * 移行中だけ「regular_url が空の offer を弾く」ルールを外すフラグ。
+	 *
+	 * 既定は false（＝新規保存では必ず弾く）。{@see self::withLegacyOfferPreservation()}
+	 * の実行中だけ true になる。
+	 *
+	 * @var bool
+	 */
+	private static bool $preserveOffersWithoutRegularUrl = false;
+
+	/**
+	 * 「regular_url が空の offer を弾く」ルールを外して $callback を実行する。
+	 *
+	 * このルールは新規入力向けである（生死を判定できない offer を今後は作らせない）。
+	 * v3 以前のインストールには手入力で affiliate_url だけを持つ listing が実在し得るため、
+	 * 移行に遡って適用すると復元不能な形でデータが消える。
+	 *
+	 * **移行の書き込みが `update_post_meta()` を通ると、WordPress は `update_metadata()`
+	 * の中で `sanitize_meta()` を走らせる。** ProductMeta::register() が META_LISTINGS に
+	 * `sanitize_callback => ProductSchema::sanitizeListings` を登録しているため、移行が
+	 * メモリ上でどれだけ丁寧に温存しても、保存の瞬間に sanitizeOffers() が同じ offer を
+	 * 落としてしまう。この窓はその一点だけを無効化するためにある。
+	 *
+	 * sanitize 自体は止めない（esc_url_raw / sanitize_text_field / whitelist はそのまま
+	 * 通す）。フィルタを外して生値を書く方式より窓が狭く、移行が壊れた値を保存する
+	 * 余地を残さないため。窓は移行の書き込み 1 回分に限定し、finally で必ず戻す。
+	 *
+	 * @template T
+	 * @param callable():T $callback
+	 * @return T
+	 */
+	public static function withLegacyOfferPreservation( callable $callback ) {
+		$previous                              = self::$preserveOffersWithoutRegularUrl;
+		self::$preserveOffersWithoutRegularUrl = true;
+		try {
+			return $callback();
+		} finally {
+			self::$preserveOffersWithoutRegularUrl = $previous;
+		}
+	}
+
+	/**
 	 * @return array<string, array<string, mixed>>
 	 */
 	public static function args(): array {
@@ -244,19 +285,29 @@ final class ProductSchema {
 		}
 
 		$byKey = array();
-		foreach ( $raw as $offer ) {
+		foreach ( $raw as $index => $offer ) {
 			if ( ! is_array( $offer ) ) {
 				continue;
 			}
 
 			$regular = isset( $offer['regular_url'] ) ? (string) esc_url_raw( (string) $offer['regular_url'] ) : '';
-			if ( '' === $regular ) {
+			if ( '' === $regular && ! self::$preserveOffersWithoutRegularUrl ) {
 				// 生死を判定できない offer は棚卸しの対象外になり永久に残るため弾く。
+				// 移行中（withLegacyOfferPreservation）だけはこのルールを外す——既存データを
+				// アップグレードで消さないため。
 				continue;
 			}
 
 			$externalId = isset( $offer['external_id'] ) ? (string) sanitize_text_field( (string) $offer['external_id'] ) : '';
-			$key        = '' !== $externalId ? 'id:' . $externalId : 'url:' . $regular;
+			if ( '' !== $externalId ) {
+				$key = 'id:' . $externalId;
+			} elseif ( '' !== $regular ) {
+				$key = 'url:' . $regular;
+			} else {
+				// 温存された offer は識別子を 1 つも持たないことがある。'url:' で
+				// 束ねると複数の温存 offer が 1 件に潰れて消えるため、位置で分ける。
+				$key = 'idx:' . $index;
+			}
 
 			// 識別子が重複したら後勝ち（同じ SKU を 2 つ並べない）。
 			$byKey[ $key ] = array(

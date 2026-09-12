@@ -156,6 +156,52 @@ final class OfferPromotionTriggerTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	/**
+	 * 一括書き込み（アップグレード移行など）の窓の中では、何も読まず何も投入しない。
+	 *
+	 * 移行は全商品の listings を書き直すが、移行した offer は元の（多くは古い）
+	 * last_fetched_at をそのまま引き継ぐため needsRefetch() がほぼ全件で true になる。
+	 * 抑止しないと、アップグレードした瞬間にカタログ全件ぶんの即時取得が積まれて
+	 * API のレート制限を焼き切る。移行は形状を変えるだけで購入リンクの内容は
+	 * 変えていないので、繰り上がりの契機ではない。
+	 */
+	public function test_一括書き込みの抑止中は投入しない(): void {
+		// get_post_meta も get_post_status も呼ばれない（0層目で即 return する）。
+		WP_Mock::userFunction( 'get_post_meta' )->never();
+		WP_Mock::userFunction( 'get_post_status' )->never();
+		WP_Mock::userFunction( 'get_transient' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$trigger = $this->trigger();
+		$inside  = OfferPromotionTrigger::withSuppression(
+			static function () use ( $trigger ): bool {
+				$trigger->onListingsSaved( 123 );
+				return OfferPromotionTrigger::isSuppressed();
+			}
+		);
+
+		$this->assertTrue( $inside );
+		// 窓は callback の実行中だけ。抜けたら必ず閉じている。
+		$this->assertFalse( OfferPromotionTrigger::isSuppressed() );
+		$this->assertConditionsMet();
+	}
+
+	/** 窓の中で例外が飛んでも抑止は解除される（finally）。 */
+	public function test_抑止中に例外が飛んでも窓は閉じる(): void {
+		try {
+			OfferPromotionTrigger::withSuppression(
+				static function (): void {
+					throw new \RuntimeException( 'boom' );
+				}
+			);
+			$this->fail( '例外が伝播していない' );
+		} catch ( \RuntimeException $e ) {
+			$this->assertSame( 'boom', $e->getMessage() );
+		}
+
+		$this->assertFalse( OfferPromotionTrigger::isSuppressed() );
+	}
+
 	public function test_更新直後は投入しない(): void {
 		$this->stubRakutenPlatform();
 		$this->stubGeneralSettings();

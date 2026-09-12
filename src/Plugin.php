@@ -114,6 +114,7 @@ final class Plugin {
 			$dashboard->register();
 
 			\Affilicard\Admin\CronDisabledNotice::register();
+			\Affilicard\Admin\OffersMigrationNotice::register();
 			add_action( 'admin_menu', array( self::class, 'registerSettingsPage' ) );
 			add_action( 'admin_menu', array( QueueJobsPage::class, 'registerMenu' ) );
 			// affilicard 独自の「更新キュー（ジョブ一覧）」を持つため、Tools > Scheduled Actions の

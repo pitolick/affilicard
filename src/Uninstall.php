@@ -31,6 +31,12 @@ final class Uninstall {
 		'affilicard_sweep_cursor',
 		// Affilicard\Queue\QueueMaintenance::OPTION_LAST_COMPLETED のリテラル値（spec §4-4/§6-2）。
 		'affilicard_last_sweep_completed_at',
+		// Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_CURSOR のリテラル値
+		// （offers 移行の走査カーソル兼「未完」の印）。
+		'affilicard_offers_migration_cursor',
+		// Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL の
+		// リテラル値（offers 移行で温存した listing の件数）。
+		'affilicard_offers_migration_preserved_without_regular_url',
 	);
 
 	/**
@@ -142,6 +148,11 @@ final class Uninstall {
 
 		if ( $canUnschedule ) {
 			as_unschedule_all_actions( '', array(), 'affilicard-sweep' );
+			// offers 移行バッチの group（Affilicard\Upgrade\PluginUpgrade::MIGRATION_GROUP の
+			// リテラル値）。移行が未完のままアンインストールされると、継続ジョブが
+			// pending で残る。リテラルで持つ理由は OPTION_KEYS と同じ（vendor/ 不在
+			// フォールバックでは当該クラスが未 autoload）。
+			as_unschedule_all_actions( '', array(), 'affilicard-migration' );
 		}
 	}
 

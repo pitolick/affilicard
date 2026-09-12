@@ -65,6 +65,40 @@ final class OfferPromotionTrigger {
 	 */
 	private static array $inFlight = array();
 
+	/**
+	 * 一括書き込み中の抑止フラグ（{@see self::withSuppression()}）。
+	 *
+	 * アップグレード移行は全商品の listings を書き直す。移行した offer は元の
+	 * （しばしば古い）last_fetched_at をそのまま引き継ぐため、needsRefetch() は
+	 * ほぼ全件で true を返す。抑止しないと、更新した瞬間にカタログ全件ぶんの
+	 * 即時取得ジョブが積まれて API のレート制限を焼き切る。移行は形状を変える
+	 * だけで購入リンクの中身は変えていないため、繰り上がりの契機ではない。
+	 *
+	 * @var bool
+	 */
+	private static bool $suppressed = false;
+
+	/**
+	 * $callback の実行中だけ本トリガーを止める（移行など、購入リンクの内容を
+	 * 変えない一括書き込み向け）。
+	 *
+	 * 通常の掃引（QueueMaintenance::sweep()）は止めないので、抑止した商品も
+	 * 次回の掃引で通常どおり拾われる——取得が永久に落ちることはない。
+	 *
+	 * @template T
+	 * @param callable():T $callback
+	 * @return T
+	 */
+	public static function withSuppression( callable $callback ) {
+		$previous         = self::$suppressed;
+		self::$suppressed = true;
+		try {
+			return $callback();
+		} finally {
+			self::$suppressed = $previous;
+		}
+	}
+
 	public function __construct(
 		private Enqueuer $enqueuer,
 		private ProviderRegistry $providerRegistry = new ProviderRegistry()
@@ -74,6 +108,11 @@ final class OfferPromotionTrigger {
 	 * `updated_post_meta`/`added_post_meta` フック（listings meta 限定）から呼ばれる。
 	 */
 	public function onListingsSaved( int $postId ): void {
+		// 0層目: 一括書き込みによる抑止（移行など。self::$suppressed の docblock 参照）。
+		if ( self::$suppressed ) {
+			return;
+		}
+
 		// 1層目: 再入ガード（同一リクエスト内）。
 		if ( isset( self::$inFlight[ $postId ] ) ) {
 			return;
@@ -156,8 +195,14 @@ final class OfferPromotionTrigger {
 		$this->enqueuer->enqueueManual( $postId, $platform, $account );
 	}
 
-	/** テスト用に再入ガード（1層目）を解除する。 */
+	/** 一括書き込みによる抑止（0層目）が有効か。 */
+	public static function isSuppressed(): bool {
+		return self::$suppressed;
+	}
+
+	/** テスト用に再入ガード（1層目）と抑止フラグ（0層目）を解除する。 */
 	public static function resetForTests(): void {
-		self::$inFlight = array();
+		self::$inFlight   = array();
+		self::$suppressed = false;
 	}
 }

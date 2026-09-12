@@ -6,6 +6,8 @@ namespace Affilicard\Tests\Unit\Upgrade;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Pricing\FetchStatus;
 use Affilicard\Pricing\OfferSelector;
+use Affilicard\Queue\OfferPromotionTrigger;
+use Affilicard\Rest\ProductSchema;
 use Affilicard\Schema\SchemaVersion;
 use Affilicard\Upgrade\PluginUpgrade;
 use WP_Mock;
@@ -16,15 +18,86 @@ final class PluginUpgradeTest extends TestCase {
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		OfferPromotionTrigger::resetForTests();
+
+		// 「保存される形」を再現するために本物の ProductSchema::sanitizeListings() を
+		// 走らせる。ProductSchemaTest と同じ振る舞いのスタブを置く。
+		WP_Mock::userFunction( 'sanitize_text_field' )
+			->andReturnUsing(
+				static function ( $value ) {
+					return is_scalar( $value ) ? trim( (string) $value ) : '';
+				}
+			);
+		WP_Mock::userFunction( 'sanitize_key' )
+			->andReturnUsing(
+				static function ( $value ) {
+					$value = is_scalar( $value ) ? strtolower( (string) $value ) : '';
+					return preg_replace( '/[^a-z0-9_\-]/', '', $value );
+				}
+			);
+		WP_Mock::userFunction( 'esc_url_raw' )
+			->andReturnUsing(
+				static function ( $value ) {
+					return is_scalar( $value ) ? (string) $value : '';
+				}
+			);
 	}
 
 	public function tearDown(): void {
+		OfferPromotionTrigger::resetForTests();
 		WP_Mock::tearDown();
 		\Mockery::close();
 		parent::tearDown();
 	}
 
+	/**
+	 * `update_post_meta( ..., META_LISTINGS, ... )` を WordPress と同じように振る舞わせる。
+	 *
+	 * **既存のテストが見ていたのは「update_post_meta へ渡した配列」であって「格納される
+	 * 配列」ではない。** ProductMeta::register() が META_LISTINGS に
+	 * `sanitize_callback => ProductSchema::sanitizeListings` を登録しているため、
+	 * WordPress は `update_metadata()` の中で `sanitize_meta()` を必ず通す。渡した値と
+	 * 格納される値が食い違うのがまさに本バグ（救出したはずの offer が保存時に消えていた）で、
+	 * モックで渡し値だけを見るテストでは永久に検出できない。
+	 *
+	 * このヘルパは渡された値をその場（＝移行が開いた窓の内側）で本物の
+	 * sanitizeListings() に通し、その結果を参照へ書き出す。以後 listings の保存を
+	 * 検証するテストは、渡し値ではなくこの「格納される形」を assert すること。
+	 *
+	 * @param array<string, mixed>|null $stored 格納される形の受け皿（参照）。
+	 */
+	private function expectListingsWriteCapturingStoredShape( int $postId, &$stored ): void {
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->with( $postId, ProductPostType::META_LISTINGS, \Mockery::type( 'array' ) )
+			->andReturnUsing(
+				static function ( $id, $key, $value ) use ( &$stored ): bool {
+					// WordPress の update_metadata() → sanitize_meta() 相当。
+					$stored = ProductSchema::sanitizeListings( $value );
+					return true;
+				}
+			);
+	}
+
+	/** 未完の移行が無い（カーソル option が存在しない）状態を作る。 */
+	private function stubNoMigrationPending(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, false )
+			->andReturn( false );
+	}
+
+	/** scheduleOffersMigration() が立てる「未完」の印（カーソル作成）を期待する。 */
+	private function expectMigrationMarkerCreated(): void {
+		WP_Mock::userFunction( 'add_option' )
+			->once()
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0, '', false )
+			->andReturn( true );
+	}
+
 	public function test_初回は棚卸し基準日を作成しバージョンを記録する(): void {
+		$this->stubNoMigrationPending();
+		$this->expectMigrationMarkerCreated();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->andReturn( 1 );
 		WP_Mock::userFunction( 'get_option' )->with( PluginUpgrade::OPTION_VERSION, '' )->andReturn( '' );
 		WP_Mock::userFunction( 'add_option' )
 			->once()
@@ -40,6 +113,7 @@ final class PluginUpgradeTest extends TestCase {
 	}
 
 	public function test_同一バージョンなら何もしない(): void {
+		$this->stubNoMigrationPending();
 		WP_Mock::userFunction( 'get_option' )->with( PluginUpgrade::OPTION_VERSION, '' )->andReturn( '3.5.0' );
 		WP_Mock::userFunction( 'add_option' )->never();
 		WP_Mock::userFunction( 'update_option' )->never();
@@ -54,6 +128,9 @@ final class PluginUpgradeTest extends TestCase {
 	 * get_option() で確認できれば、移行として正常なのでバージョンは進める。
 	 */
 	public function test_既存の基準日がある場合はバージョンが更新される(): void {
+		$this->stubNoMigrationPending();
+		$this->expectMigrationMarkerCreated();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->andReturn( 1 );
 		WP_Mock::userFunction( 'get_option' )
 			->with( PluginUpgrade::OPTION_VERSION, '' )
 			->andReturn( '3.4.0' );
@@ -83,6 +160,7 @@ final class PluginUpgradeTest extends TestCase {
 	 * 永久に作られない（＝棚卸しが永久に発動しない）。
 	 */
 	public function test_基準日の保存に失敗した場合はバージョンを更新せず次回再試行できる(): void {
+		$this->stubNoMigrationPending();
 		WP_Mock::userFunction( 'get_option' )
 			->with( PluginUpgrade::OPTION_VERSION, '' )
 			->andReturn( '3.4.0' );
@@ -194,6 +272,8 @@ final class PluginUpgradeTest extends TestCase {
 	}
 
 	public function test_バージョン更新時にoffers移行の開始トリガーを積む(): void {
+		$this->stubNoMigrationPending();
+		$this->expectMigrationMarkerCreated();
 		WP_Mock::userFunction( 'get_option' )->with( PluginUpgrade::OPTION_VERSION, '' )->andReturn( '3.5.0' );
 		WP_Mock::userFunction( 'add_option' )
 			->once()
@@ -229,9 +309,8 @@ final class PluginUpgradeTest extends TestCase {
 		// syncDerivedMeta() の extid mirror 走査（external_id が空のため mirror 追加は発生しない）。
 		WP_Mock::userFunction( 'get_post_meta' )->with( 501 )->andReturn( array() );
 
-		$expected = array( PluginUpgrade::migrateListingToOffers( $legacy ) );
-		WP_Mock::userFunction( 'update_post_meta' )
-			->once()->with( 501, ProductPostType::META_LISTINGS, $expected )->andReturn( true );
+		$stored = null;
+		$this->expectListingsWriteCapturingStoredShape( 501, $stored );
 		WP_Mock::userFunction( 'update_post_meta' )
 			->once()->with( 501, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT )->andReturn( true );
 
@@ -244,6 +323,13 @@ final class PluginUpgradeTest extends TestCase {
 
 		PluginUpgrade::runOffersMigrationBatch();
 
+		// 渡し値ではなく「格納される形」を検証する。
+		$this->assertCount( 1, $stored );
+		$this->assertCount( 1, $stored[0]['offers'] );
+		$this->assertSame( 'https://example.test/abc', $stored[0]['offers'][0]['regular_url'] );
+		$this->assertSame( 'https://af.test/abc', $stored[0]['offers'][0]['affiliate_url'] );
+		$this->assertSame( '660', $stored[0]['offers'][0]['price'] );
+		$this->assertSame( '対象巻', $stored[0]['offers'][0]['search_key'] );
 		$this->assertConditionsMet();
 	}
 
@@ -284,14 +370,19 @@ final class PluginUpgradeTest extends TestCase {
 	}
 
 	/**
-	 * regular_url を持たない listing はサイレントに失われてはならない。件数を option に
-	 * 積み上げ、運用が気づけるようにする（Ruling: 移行は新規保存のルールを遡って適用しない代わりに、
-	 * 何が起きたかを可視化する）。
+	 * **本タスクの本丸。** regular_url を持たない listing は移行で消えてはならない。
 	 *
-	 * get_option/update_option は同じ option を「読む→書く」ため、Mockery の固定 andReturn では
-	 * 2 回目の読み出しが更新後の値を反映できない。andReturnUsing + 参照変数で状態を再現する。
+	 * `ProductMeta::register()` が META_LISTINGS に `ProductSchema::sanitizeListings` を
+	 * sanitize_callback として登録しているため、移行の `update_post_meta()` は
+	 * `update_metadata()` の中で必ずそれを通る。素で書くと `sanitizeOffers()` の
+	 * 「regular_url 空の offer は弾く」ルールが、移行が救出したまさにその offer を
+	 * 消し（affiliate_url / price / external_id / search_key ごと失われ）、それでいて
+	 * 「N 件温存しました」と報告する——沈黙より悪い偽の全問題なしになる。
+	 *
+	 * ここでは渡し値ではなく、WordPress が実際に格納する形（本物の sanitizeListings() を
+	 * 通した結果）を検証する。
 	 */
-	public function test_regular_urlが無いlistingは残しつつ件数を数える(): void {
+	public function test_保存される形でも救出したofferが生き残る(): void {
 		$legacy = array_merge(
 			$this->legacyListing(),
 			array(
@@ -310,12 +401,8 @@ final class PluginUpgradeTest extends TestCase {
 			->andReturn( array( $legacy ) );
 		WP_Mock::userFunction( 'get_post_meta' )->with( 501 )->andReturn( array() );
 
-		$expected = array( PluginUpgrade::migrateListingToOffers( $legacy ) );
-		$this->assertSame( '', $expected[0]['offers'][0]['regular_url'] );
-		$this->assertSame( 'https://af.test/abc', $expected[0]['offers'][0]['affiliate_url'] );
-
-		WP_Mock::userFunction( 'update_post_meta' )
-			->once()->with( 501, ProductPostType::META_LISTINGS, $expected )->andReturn( true );
+		$stored = null;
+		$this->expectListingsWriteCapturingStoredShape( 501, $stored );
 		WP_Mock::userFunction( 'update_post_meta' )
 			->once()->with( 501, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT )->andReturn( true );
 
@@ -340,7 +427,176 @@ final class PluginUpgradeTest extends TestCase {
 
 		PluginUpgrade::runOffersMigrationBatch();
 
+		// 格納される形でも offer が 1 件残り、購入リンクと価格が生きている。
+		$this->assertIsArray( $stored );
+		$this->assertCount( 1, $stored );
+		$this->assertCount( 1, $stored[0]['offers'], '救出した offer が保存時に消えている' );
+		$this->assertSame( '', $stored[0]['offers'][0]['regular_url'] );
+		$this->assertSame( 'https://af.test/abc', $stored[0]['offers'][0]['affiliate_url'] );
+		$this->assertSame( '660', $stored[0]['offers'][0]['price'] );
+		$this->assertSame( '対象巻', $stored[0]['offers'][0]['search_key'] );
+
+		// 「温存した」件数は、消えたデータではなく実際に残ったデータについての報告である。
 		$this->assertSame( 1, $preserved );
 		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 移行が渡す値は、WordPress の sanitize を通しても変化しない（不動点である）。
+	 *
+	 * 個別フィールドの assert は「今 sanitize が食う 1 つ」しか守れない。whitelist 型の
+	 * sanitizer にフィールドやルールが増えれば、次に食われるのは別のフィールドになる
+	 * （このリファクタで既に 2 度起きている）。渡し値と格納値の一致そのものを固定して、
+	 * 「移行が書いたものが黙って書き換えられる」変更全般をここで落とす。
+	 */
+	public function test_移行が渡す値はsanitizeを通しても変化しない(): void {
+		$legacy = array(
+			// regular_url あり / なし・external_id あり / なしを 1 商品に混ぜる。
+			$this->legacyListing(),
+			array_merge(
+				$this->legacyListing(),
+				array(
+					'platform'    => 'dmm',
+					'external_id' => '',
+					'regular_url' => '',
+				)
+			),
+		);
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 777 ) );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 777, ProductPostType::META_LISTINGS, true )
+			->andReturn( $legacy );
+		WP_Mock::userFunction( 'get_post_meta' )->with( 777 )->andReturn( array() );
+		// extid mirror の再構築（external_id が非空なので mirror へ 1 件追加される）。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 777, \Mockery::type( 'string' ), false )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'add_post_meta' )->andReturn( 1 );
+
+		$passed = null;
+		$stored = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->with( 777, ProductPostType::META_LISTINGS, \Mockery::type( 'array' ) )
+			->andReturnUsing(
+				static function ( $id, $key, $value ) use ( &$passed, &$stored ): bool {
+					$passed = $value;
+					// WordPress の update_metadata() → sanitize_meta() 相当。
+					$stored = ProductSchema::sanitizeListings( $value );
+					return true;
+				}
+			);
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()->with( 777, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT )->andReturn( true );
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL, 1, false )
+			->andReturn( true );
+		WP_Mock::userFunction( 'delete_option' )->once()->with( PluginUpgrade::OPTION_MIGRATION_CURSOR );
+
+		PluginUpgrade::runOffersMigrationBatch();
+
+		$this->assertSame( $passed, $stored, '移行が渡した listings が sanitize で書き換えられている' );
+		$this->assertCount( 2, $stored );
+		$this->assertCount( 1, $stored[1]['offers'] );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 移行の書き込みの最中は、regular_url 空の offer を弾くルールが外れており、
+	 * 繰り上がりトリガーが抑止されている。
+	 *
+	 * 移行した offer は元の（多くは古い）last_fetched_at を引き継ぐため、抑止しないと
+	 * アップグレードした瞬間にカタログ全件ぶんの即時取得が積まれる。
+	 */
+	public function test_移行の書き込み中は繰り上がりトリガーが止まっている(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 601 ) );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 601, ProductPostType::META_LISTINGS, true )
+			->andReturn( array( $this->legacyListing() ) );
+		WP_Mock::userFunction( 'get_post_meta' )->with( 601 )->andReturn( array() );
+		// extid mirror の再構築（external_id が非空なので mirror へ 1 件追加される）。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 601, \Mockery::type( 'string' ), false )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'add_post_meta' )->andReturn( 1 );
+
+		$suppressedDuringWrite = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->with( 601, ProductPostType::META_LISTINGS, \Mockery::type( 'array' ) )
+			->andReturnUsing(
+				static function () use ( &$suppressedDuringWrite ): bool {
+					$suppressedDuringWrite = OfferPromotionTrigger::isSuppressed();
+					return true;
+				}
+			);
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()->with( 601, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT )->andReturn( true );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'delete_option' )->once()->with( PluginUpgrade::OPTION_MIGRATION_CURSOR );
+
+		PluginUpgrade::runOffersMigrationBatch();
+
+		$this->assertTrue( $suppressedDuringWrite, '移行の書き込みで繰り上がりトリガーが走ってしまう' );
+		// 窓は書き込み 1 回分。抜けたら必ず閉じている。
+		$this->assertFalse( OfferPromotionTrigger::isSuppressed() );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 移行が中断しても再武装される。
+	 *
+	 * 移行は「バージョンが変わった 1 回」だけ積まれ、その直後にバージョン option が
+	 * 書かれる。AS のジョブが fatal / timeout で消えると誰も積み直さず、半分だけ
+	 * 移行された状態で永久に止まる。カーソル（＝未完の印）が残っている限り、
+	 * バージョンが同じでも積み直すことでそれを塞ぐ。
+	 */
+	public function test_カーソルが残っていればバージョンが同じでも移行を積み直す(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, false )
+			->andReturn( 480 );
+		// 既に走っている移行のカーソルを 0 へ巻き戻さない（add_option なので既存キーは不変）。
+		WP_Mock::userFunction( 'add_option' )
+			->once()
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0, '', false )
+			->andReturn( false );
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with( \Mockery::type( 'int' ), PluginUpgrade::HOOK_MIGRATE_OFFERS, array(), PluginUpgrade::MIGRATION_GROUP, true )
+			->andReturn( 321 );
+		WP_Mock::userFunction( 'get_option' )->with( PluginUpgrade::OPTION_VERSION, '' )->andReturn( '3.6.0' );
+		WP_Mock::userFunction( 'update_option' )->never();
+
+		PluginUpgrade::maybeUpgrade( '3.6.0' );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * カーソルは「値が 0」と「存在しない」を区別する。走り始めた直後（カーソル 0）の
+	 * 移行を「未完でない」と誤判定すると、そこで落ちた移行が再武装されない。
+	 */
+	public function test_カーソルが0でも未完とみなす(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, false )
+			->andReturn( 0 );
+
+		$this->assertTrue( PluginUpgrade::isOffersMigrationPending() );
 	}
 }

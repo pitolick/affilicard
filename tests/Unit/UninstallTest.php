@@ -140,6 +140,22 @@ final class UninstallTest extends TestCase {
 		// （final-fix-report.md Important 1）。
 		$this->assertContains( \Affilicard\Queue\SweepCursor::OPTION_KEY, Uninstall::OPTION_KEYS );
 		$this->assertContains( \Affilicard\Queue\QueueMaintenance::OPTION_LAST_COMPLETED, Uninstall::OPTION_KEYS );
+		// offers 移行が書く 2 option。漏れるとアンインストール→再インストールで
+		// 「未完」の印と温存件数が残留し、通知が出続ける。
+		$this->assertContains( \Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_CURSOR, Uninstall::OPTION_KEYS );
+		$this->assertContains(
+			\Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL,
+			Uninstall::OPTION_KEYS
+		);
+	}
+
+	/**
+	 * cleanupQueue() が unschedule する 'affilicard-migration' は
+	 * PluginUpgrade::MIGRATION_GROUP と同じ値である（Uninstall.php 自身は vendor/ 不在
+	 * フォールバックのため当該クラスを参照できずリテラルで持つ——'affilicard-sweep' と同じ理由）。
+	 */
+	public function test_migrationグループのリテラルはPluginUpgradeの定数と一致する(): void {
+		$this->assertSame( \Affilicard\Upgrade\PluginUpgrade::MIGRATION_GROUP, 'affilicard-migration' );
 	}
 
 	public function test_run_deletes_provider_credentials_via_wpdb_like(): void {
@@ -204,6 +220,12 @@ final class UninstallTest extends TestCase {
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )
 			->once()
 			->with( '', array(), 'affilicard-sweep' )
+			->andReturn( null );
+		// offers 移行バッチの group も同様に unschedule する（移行が未完のまま
+		// アンインストールされると継続ジョブが pending で残る）。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )
+			->once()
+			->with( '', array(), 'affilicard-migration' )
 			->andReturn( null );
 
 		Uninstall::run();
