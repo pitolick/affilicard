@@ -390,8 +390,17 @@ final class PluginUpgrade {
 	 *
 	 * どちらも finally で必ず戻すため、例外が飛んでも窓は開いたままにならない。
 	 *
+	 * **書き込みは必ず読み直して照合する。** update_post_meta() が失敗しても
+	 * 戻り値を捨てていると、商品は旧形式のまま残るのに温存件数と派生 meta は
+	 * 新形式が保存された前提で進み、カーソルも前進して二度と再試行されない。
+	 * 戻り値そのものは判定に使えない——値が変わらなかった場合も false を返すためである。
+	 * 食い違ったら例外を投げる。runOffersMigrationBatch() はカーソル前進も
+	 * finishOffersMigration() もループの後で行うため、投げればカーソルは進まず
+	 * 移行マーカーも残り、次の実行で同じ商品からやり直せる。
+	 *
 	 * @param list<mixed> $listings
 	 * @return list<array<string, mixed>> 実際に格納された listings。
+	 * @throws \RuntimeException 書き込み後の読み直しが $stored と一致しないとき。
 	 */
 	private static function writeMigratedListings( int $postId, array $listings ): array {
 		return OfferPromotionTrigger::withSuppression(
@@ -400,6 +409,17 @@ final class PluginUpgrade {
 					static function () use ( $postId, $listings ): array {
 						$stored = ProductSchema::sanitizeListings( $listings );
 						update_post_meta( $postId, ProductPostType::META_LISTINGS, $stored );
+
+						$raw       = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
+						$persisted = is_string( $raw )
+							? JsonField::decode( $raw, array() )
+							: ( is_array( $raw ) ? $raw : array() );
+						if ( $persisted !== $stored ) {
+							throw new \RuntimeException(
+								sprintf( 'affilicard: offers 移行の保存に失敗しました（post %d）。', $postId )
+							);
+						}
+
 						return $stored;
 					}
 				);

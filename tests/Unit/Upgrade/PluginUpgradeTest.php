@@ -64,16 +64,35 @@ final class PluginUpgradeTest extends TestCase {
 	 * sanitizeListings() に通し、その結果を参照へ書き出す。以後 listings の保存を
 	 * 検証するテストは、渡し値ではなくこの「格納される形」を assert すること。
 	 *
-	 * @param array<string, mixed>|null $stored 格納される形の受け皿（参照）。
+	 * さらに **読みと書きを 1 つの実体で結ぶ**。移行は書き込み後に読み直して
+	 * $stored と照合するため、読み取りが常に移行前の値を返すモックでは移行そのものが
+	 * 失敗と判定されてしまう。実 WordPress と同じく「書いた値がそのまま読み戻る」形にする。
+	 *
+	 * @param list<array<string, mixed>> $initial 移行前に格納されている listings。
+	 * @param list<array<string, mixed>>|null $stored 格納される形の受け皿（参照）。
+	 *   listings そのもの（$stored[0] が 1 件目の listing）が入る。
+	 * @param callable|null $onWrite 書き込み時に生の渡し値で呼ばれる観測用フック。
 	 */
-	private function expectListingsWriteCapturingStoredShape( int $postId, &$stored ): void {
+	private function expectListingsRoundTrip( int $postId, array $initial, &$stored, ?callable $onWrite = null ): void {
+		$current = $initial;
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, ProductPostType::META_LISTINGS, true )
+			->andReturnUsing(
+				static function () use ( &$current ) {
+					return $current;
+				}
+			);
 		WP_Mock::userFunction( 'update_post_meta' )
 			->once()
 			->with( $postId, ProductPostType::META_LISTINGS, \Mockery::type( 'array' ) )
 			->andReturnUsing(
-				static function ( $id, $key, $value ) use ( &$stored ): bool {
+				static function ( $id, $key, $value ) use ( &$current, &$stored, $onWrite ): bool {
+					if ( null !== $onWrite ) {
+						$onWrite( $value );
+					}
 					// WordPress の update_metadata() → sanitize_meta() 相当。
-					$stored = ProductSchema::sanitizeListings( $value );
+					$stored  = ProductSchema::sanitizeListings( $value );
+					$current = $stored;
 					return true;
 				}
 			);
@@ -293,6 +312,51 @@ final class PluginUpgradeTest extends TestCase {
 	}
 
 	/**
+	 * 保存が効かなかったら移行を完了扱いにせず、次の実行で同じ商品からやり直す。
+	 *
+	 * update_post_meta() の戻り値は判定に使えない——値が変わらなかった場合も false を
+	 * 返すためである。書き込み後に読み直して食い違いを見る。これを検出できないと、
+	 * 商品は旧形式のまま残るのに温存件数と派生 meta は新形式が保存された前提で進み、
+	 * カーソルまで前進して二度と再試行されない。
+	 */
+	public function test_保存が効かなかった商品は移行を完了させず例外で差し戻す(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 909 ) );
+
+		// 書き込みを黙って捨てる WordPress（meta が壊れている・別プラグインが
+		// フィルタで握り潰す等）。読み直すと移行前の flat listing のままになる。
+		$legacy = array( $this->legacyListing() );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 909, ProductPostType::META_LISTINGS, true )
+			->andReturn( $legacy );
+		WP_Mock::userFunction( 'update_post_meta' )
+			->with( 909, ProductPostType::META_LISTINGS, \Mockery::type( 'array' ) )
+			->andReturn( false );
+
+		// メッセージまで固定する。Mockery\Exception\NoMatchingExpectationException は
+		// OutOfBoundsException 経由で RuntimeException を継承しているため、型だけを見ると
+		// 「モックが足りずに落ちただけ」でもテストが通ってしまう。
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( 'offers 移行の保存に失敗しました' );
+
+		// syncDerivedMeta() が使う get_post_meta( 909 ) はあえてモックしない。
+		// 保存の食い違いは派生 meta の同期より前に検出されなければならず、
+		// そこへ到達したらモック不足で別の例外になり、このテストは落ちる。
+		try {
+			PluginUpgrade::runOffersMigrationBatch();
+		} finally {
+			// カーソルの前進も完了処理も走っていない＝次の実行で同じ商品からやり直せる。
+			$this->assertFalse(
+				OfferPromotionTrigger::isSuppressed(),
+				'例外が飛んでも抑止の窓は閉じていなければならない'
+			);
+		}
+	}
+
+	/**
 	 * 走査件数がバッチサイズ未満なら完走とみなし、カーソルを消し、変換した listings を保存する。
 	 */
 	public function test_バッチが商品数未満で完走しカーソルを消してoffersを保存する(): void {
@@ -303,14 +367,12 @@ final class PluginUpgradeTest extends TestCase {
 			->andReturn( 0 );
 		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
 		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 501 ) );
-		WP_Mock::userFunction( 'get_post_meta' )
-			->with( 501, ProductPostType::META_LISTINGS, true )
-			->andReturn( array( $legacy ) );
+
 		// syncDerivedMeta() の extid mirror 走査（external_id が空のため mirror 追加は発生しない）。
 		WP_Mock::userFunction( 'get_post_meta' )->with( 501 )->andReturn( array() );
 
 		$stored = null;
-		$this->expectListingsWriteCapturingStoredShape( 501, $stored );
+		$this->expectListingsRoundTrip( 501, array( $legacy ), $stored );
 		WP_Mock::userFunction( 'update_post_meta' )
 			->once()->with( 501, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT )->andReturn( true );
 
@@ -396,13 +458,11 @@ final class PluginUpgradeTest extends TestCase {
 			->andReturn( 0 );
 		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
 		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 501 ) );
-		WP_Mock::userFunction( 'get_post_meta' )
-			->with( 501, ProductPostType::META_LISTINGS, true )
-			->andReturn( array( $legacy ) );
+
 		WP_Mock::userFunction( 'get_post_meta' )->with( 501 )->andReturn( array() );
 
 		$stored = null;
-		$this->expectListingsWriteCapturingStoredShape( 501, $stored );
+		$this->expectListingsRoundTrip( 501, array( $legacy ), $stored );
 		WP_Mock::userFunction( 'update_post_meta' )
 			->once()->with( 501, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT )->andReturn( true );
 
@@ -487,9 +547,6 @@ final class PluginUpgradeTest extends TestCase {
 			->andReturn( 0 );
 		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
 		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 777 ) );
-		WP_Mock::userFunction( 'get_post_meta' )
-			->with( 777, ProductPostType::META_LISTINGS, true )
-			->andReturn( $legacy );
 		WP_Mock::userFunction( 'get_post_meta' )->with( 777 )->andReturn( array() );
 		// extid mirror の再構築（external_id が非空なので mirror へ 1 件追加される）。
 		WP_Mock::userFunction( 'get_post_meta' )
@@ -499,17 +556,14 @@ final class PluginUpgradeTest extends TestCase {
 
 		$passed = null;
 		$stored = null;
-		WP_Mock::userFunction( 'update_post_meta' )
-			->once()
-			->with( 777, ProductPostType::META_LISTINGS, \Mockery::type( 'array' ) )
-			->andReturnUsing(
-				static function ( $id, $key, $value ) use ( &$passed, &$stored ): bool {
-					$passed = $value;
-					// WordPress の update_metadata() → sanitize_meta() 相当。
-					$stored = ProductSchema::sanitizeListings( $value );
-					return true;
-				}
-			);
+		$this->expectListingsRoundTrip(
+			777,
+			$legacy,
+			$stored,
+			static function ( $value ) use ( &$passed ): void {
+				$passed = $value;
+			}
+		);
 		WP_Mock::userFunction( 'update_post_meta' )
 			->once()->with( 777, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT )->andReturn( true );
 
@@ -550,9 +604,6 @@ final class PluginUpgradeTest extends TestCase {
 			->andReturn( 0 );
 		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
 		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 601 ) );
-		WP_Mock::userFunction( 'get_post_meta' )
-			->with( 601, ProductPostType::META_LISTINGS, true )
-			->andReturn( array( $this->legacyListing() ) );
 		WP_Mock::userFunction( 'get_post_meta' )->with( 601 )->andReturn( array() );
 		// extid mirror の再構築（external_id が非空なので mirror へ 1 件追加される）。
 		WP_Mock::userFunction( 'get_post_meta' )
@@ -561,15 +612,15 @@ final class PluginUpgradeTest extends TestCase {
 		WP_Mock::userFunction( 'add_post_meta' )->andReturn( 1 );
 
 		$suppressedDuringWrite = null;
-		WP_Mock::userFunction( 'update_post_meta' )
-			->once()
-			->with( 601, ProductPostType::META_LISTINGS, \Mockery::type( 'array' ) )
-			->andReturnUsing(
-				static function () use ( &$suppressedDuringWrite ): bool {
-					$suppressedDuringWrite = OfferPromotionTrigger::isSuppressed();
-					return true;
-				}
-			);
+		$storedFor601          = null;
+		$this->expectListingsRoundTrip(
+			601,
+			array( $this->legacyListing() ),
+			$storedFor601,
+			static function () use ( &$suppressedDuringWrite ): void {
+				$suppressedDuringWrite = OfferPromotionTrigger::isSuppressed();
+			}
+		);
 		WP_Mock::userFunction( 'update_post_meta' )
 			->once()->with( 601, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT )->andReturn( true );
 		WP_Mock::userFunction( 'get_option' )
