@@ -18,8 +18,11 @@ use Affilicard\Upgrade\PluginUpgrade;
  *    Action Scheduler 側でジョブが落ちている。dismiss できない——消えないこと自体が
  *    情報であり、完走すれば自動的に消える。
  * 2. **regular_url を持たないまま購入リンクを温存した listing がある**。新規保存なら
- *    弾かれる形（生死を判定できない＝棚卸しの対象外）なので、手で確認してほしい。
- *    こちらは確認したら消せるよう dismiss できる。
+ *    弾かれる形（生死を判定できない＝棚卸しの対象外）であり、**この温存は次の保存
+ *    （同じ商品の別 platform の価格更新による自動保存も含む）までの猶予でしかない**——
+ *    `ProductSchema::sanitizeOffers()` は常時この形の offer を弾くため、通常 URL を
+ *    追加しない限りいずれ黙って消える。「確認してほしい」ではなく「消える前に
+ *    通常 URL を追加してほしい」と明示する。確認したら消せるよう dismiss できる。
  *
  * 表示は affilicard 管理画面に限定する（CronDisabledNotice と同じ判定）。
  */
@@ -84,7 +87,7 @@ final class OffersMigrationNotice {
 			sprintf(
 				/* translators: %d: 温存した listing の件数。 */
 				__(
-					'affilicard: データ移行で、商品ページ URL を持たないまま購入リンクを維持した listing が %d 件あります。この形の購入リンクは生死を確認できず棚卸しの対象外になるため、手動での確認を推奨します。',
+					'affilicard: データ移行で、通常 URL（商品ページ URL）を持たないまま購入リンクを維持した listing が %d 件あります。このままではこの購入リンクは生死を確認できず棚卸しの対象外になるだけでなく、この商品を次に保存する（別プラットフォームの価格更新による自動保存も含む）と自動的に削除されます。消える前に、この購入リンクへ通常 URL を追加してください。',
 					'affilicard'
 				),
 				PluginUpgrade::preservedWithoutRegularUrlCount()

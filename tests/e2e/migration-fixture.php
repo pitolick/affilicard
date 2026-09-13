@@ -16,7 +16,7 @@
  *    `register_post_meta()` 済みのキーであり、WordPress core の
  *    `add_metadata()`/`update_metadata()`（wp-includes/meta.php）は登録済みキーに対して
  *    **呼び出し経路を問わず** `sanitize_meta()` を通す。つまり `update_post_meta()` で
- *    flat データを書いた**その場で** `ProductSchema::sanitizeListies()` が先回りして
+ *    flat データを書いた**その場で** `ProductSchema::sanitizeListings()` が先回りして
  *    `offers[]` へ正規化してしまい（かつ新語彙の `fetch_status` しか読まない
  *    sanitizeOffers() は旧語彙の `fetch_error` を素通りさせて捨てる）、
  *    `migrateOneProduct()` が読む頃には既に `offers` キーが付いていて

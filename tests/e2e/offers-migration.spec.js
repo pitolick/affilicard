@@ -56,6 +56,10 @@ test.describe( 'v3 flat listing → offers[] 移行（実 WP）', () => {
 
 		const listings = result.normal.listings;
 		expect( listings ).toHaveLength( 1 );
+		// offers が空だと [0] が undefined になり、後続の期待外れが
+		// TypeError として出て「何が壊れたか」が分かりにくくなるため、
+		// 先に配列長を期待値として明示する。
+		expect( listings[ 0 ].offers ).toHaveLength( 1 );
 		const offer = listings[ 0 ].offers[ 0 ];
 
 		expect( offer.display_order ).toBe( 100 );
@@ -79,6 +83,11 @@ test.describe( 'v3 flat listing → offers[] 移行（実 WP）', () => {
 	test( 'affiliate_url だけで regular_url を持たない listing はサイレントに消えない', async () => {
 		const listings = result.affOnly.listings;
 		expect( listings ).toHaveLength( 1 );
+		// offers が空だと [0] が undefined になり TypeError で落ちる
+		// （withLegacyOfferPreservation の窓が外れた退行はまさにこの形で壊れる）。
+		// 先に配列長を期待値として明示しておけば、そのケースでも
+		// TypeError ではなく読みやすい期待外れとして失敗する。
+		expect( listings[ 0 ].offers ).toHaveLength( 1 );
 		const offer = listings[ 0 ].offers[ 0 ];
 
 		// regular_url が空でも offer 自体は落ちない（新規保存なら弾かれる形だが、
@@ -94,15 +103,24 @@ test.describe( 'v3 flat listing → offers[] 移行（実 WP）', () => {
 		expect( result.preservedAfter - result.preservedBefore ).toBe( 1 );
 	} );
 
-	test( '運用向けの温存件数が管理画面の通知に反映される', async ( { page } ) => {
+	test( '運用向けの温存件数が管理画面の通知に反映され、次の保存で消える旨も明示される', async ( {
+		page,
+	} ) => {
 		expect( result.preservedAfter ).toBeGreaterThan( 0 );
 
 		await page.goto( '/wp-admin/edit.php?post_type=affilicard_product' );
 
+		// 件数（レビュー対応で文言を強化した後も変わらない部分）。
 		await expect(
 			page.getByText(
-				new RegExp( `商品ページ URL を持たないまま購入リンクを維持した listing が ${ result.preservedAfter } 件` )
+				new RegExp( `を持たないまま購入リンクを維持した listing が ${ result.preservedAfter } 件` )
 			)
 		).toBeVisible( { timeout: 15_000 } );
+		// 「確認してほしい」ではなく「次の保存で消える」ことを明示しているか
+		// （レビュー Important 対応: 通知が『手動での確認』としか言わないと、
+		// 通常の保存/価格更新で黙って消えるまでの猶予だと運用が気づけない）。
+		await expect(
+			page.getByText( /次に保存する.*と自動的に削除されます/ )
+		).toBeVisible();
 	} );
 } );

@@ -48,9 +48,13 @@ module.exports = async () => {
 	fs.writeFileSync( 'artifacts/seed.json', json );
 
 	// --- REST 用 Application Password（Basic 認証）を作り直す ---
-	execSync( 'npx wp-env run tests-cli wp user application-password delete admin --all', {
-		encoding: 'utf8',
-	} );
+	// 既存の Application Password が 1 つも無い（フレッシュな CI DB）と wp-cli が
+	// 非ゼロ終了する場合がある。削除自体が目的で対象が無ければ何もする必要が
+	// 無いため `|| true` で無視し、後続の create だけを失敗させたい。
+	execSync(
+		'npx wp-env run tests-cli wp user application-password delete admin --all || true',
+		{ encoding: 'utf8' }
+	);
 	const appPassOut = execSync(
 		'npx wp-env run tests-cli wp user application-password create admin affilicard-e2e --porcelain',
 		{ encoding: 'utf8' }

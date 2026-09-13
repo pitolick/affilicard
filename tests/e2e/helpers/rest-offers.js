@@ -71,6 +71,32 @@ function runWpCli( cmd ) {
 }
 
 /**
+ * タイトル検索に一致する前回実行分の商品を削除する（stale fixture の掃除）。
+ *
+ * global-setup は test:e2e 実行のたびに DB をリセットしないため、REST 経由で
+ * 商品を作るテストは掃除しないと実行のたびに重複が蓄積する。蓄積すると
+ * `findByExternalId()`（date DESC で 1 件だけ返す `get_posts`）が「たまたま
+ * 一番新しい重複」を拾ってしまい、古い重複が残っていても気づけないまま
+ * テストが green であり続ける（stale データに依存した見せかけの成功）。
+ * migration-fixture.php が PHP 側でやっている掃除と同じことを、REST 経由で
+ * 商品を作るテスト用に wp-cli 側で行う。
+ */
+function cleanupStaleFixtures( titleSearch ) {
+	const ids = runWpCli(
+		`wp post list --post_type=affilicard_product --post_status=any "--s=${ titleSearch }" --field=ID --format=csv`
+	)
+		.split( /\r?\n/ )
+		.map( ( s ) => s.trim() )
+		.filter( Boolean );
+
+	if ( 0 === ids.length ) {
+		return;
+	}
+
+	runWpCli( `wp post delete ${ ids.join( ' ' ) } --force` );
+}
+
+/**
  * `wp eval-file` を実行し、`<marker>` 以降を JSON として parse する。
  * seed.php / global-setup.js と同じ「マーカー行を探す」方式（シェルクォート問題を避ける）。
  */
@@ -195,4 +221,5 @@ module.exports = {
 	readMetaValues,
 	findByExternalId,
 	runEvalFileJson,
+	cleanupStaleFixtures,
 };

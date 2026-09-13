@@ -19,12 +19,21 @@ const {
 	updateOffers,
 	readMetaValues,
 	findByExternalId,
+	cleanupStaleFixtures,
 } = require( './helpers/rest-offers' );
 
 const PLATFORM = 'rakuten-kobo';
 const MIRROR_META_KEY = `affilicard_extid_${ PLATFORM }`;
 
 test.describe( 'affilicard_extid_<platform> の複数値ミラー', () => {
+	// global-setup は test:e2e 実行のたびに DB をリセットしないため、前回実行分の
+	// 商品（同じタイトル・同じ external_id）を先に消しておく。消さないと
+	// findByExternalId()（date DESC で 1 件だけ返す）が古い重複を拾わないまま
+	// green であり続け、ミラーの巻き添え削除のような退行を見逃しかねない。
+	test.beforeAll( () => {
+		cleanupStaleFixtures( 'E2E ミラー' );
+	} );
+
 	test( '2 件の購入リンクの external_id が両方ミラーされる', async () => {
 		const id = await createProductWithOffers(
 			[
