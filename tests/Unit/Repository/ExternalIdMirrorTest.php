@@ -62,7 +62,12 @@ final class ExternalIdMirrorTest extends TestCase {
 		$added = array();
 		WP_Mock::userFunction( 'add_post_meta' )
 			->andReturnUsing(
-				function ( $added_post_id, $key, $value, $unique ) use ( &$added, $meta_key ) {
+				function ( $added_post_id, $key, $value, $unique ) use ( &$added, $meta_key, $post_id ) {
+					// $unique を検証しないと、実装が add_post_meta(..., true) に退行しても
+					// このモックは全値を記録してしまい、テストが通ってしまう。実 WP では
+					// unique=true だと 2 件目以降が保存されず mirror が 1 値に潰れる。
+					$this->assertSame( $post_id, $added_post_id );
+					$this->assertFalse( $unique, '複数 external_id の mirror には unique=false が必要' );
 					if ( $meta_key === $key ) {
 						$added[] = (string) $value;
 					}
