@@ -347,6 +347,11 @@ final class ProductListColumns {
 	 * offers を素通しで全走査せず OfferSelector を通すのは、カードが実際に使っている
 	 * 購入リンクの同期時刻だけを出すため——使っていない次点の購入リンクの日時を混ぜると、
 	 * 一覧の「最終同期」がカードの表示内容と食い違う（Fallback 列と同じ判断基準に揃える）。
+	 *
+	 * v3 以前の flat な listing（offers 無し）は renderFallbackColumn() と同じく
+	 * legacyOffers() 経由で offers[0] 相当へ変換してから選択に回す。これを飛ばすと、
+	 * 移行バッチが当該商品へ到達するまでの窓で、実際には last_verified_at を持つ
+	 * 未移行の商品までこの列だけ em dash になる（CodeRabbit round 2）。
 	 */
 	private static function renderLastVerifiedColumn( int $post_id ): void {
 		$listings_raw = get_post_meta( $post_id, ProductPostType::META_LISTINGS, true );
@@ -360,6 +365,7 @@ final class ProductListColumns {
 				continue;
 			}
 			$offers   = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
+			$offers   = array() === $offers ? self::legacyOffers( $listing ) : $offers;
 			$selected = OfferSelector::select( $offers, $fallback_enabled );
 			if ( array() === $selected ) {
 				continue;

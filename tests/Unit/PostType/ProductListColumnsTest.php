@@ -443,6 +443,41 @@ final class ProductListColumnsTest extends TestCase {
 		$this->assertSame( '<span aria-hidden="true">—</span>', $output );
 	}
 
+	/**
+	 * CodeRabbit round 2: v3 以前の flat な listing（offers 無し・取得結果フィールドが
+	 * listing 直下）でも、renderFallbackColumn() と同じ legacyOffers() 経由で
+	 * last_verified_at を拾えなければならない。これを飛ばすと、移行バッチが当該商品へ
+	 * 到達するまでの窓で、実際には last_verified_at を持つ未移行の商品がこの列だけ
+	 * em dash になる（round 1 は Fallback 列にしか legacyOffers() を足さなかった）。
+	 *
+	 * 直前のテスト（test_最終同期はlisting直下のlast_verified_atを読まない）とは
+	 * fixture が違う点に注意: あちらは regular_url 等の flat な取得結果フィールドを
+	 * 一切持たない listing シェルなので LegacyOffer::hasFlatFetchFields() が false のまま
+	 * であり、このテストの fixture（regular_url を持つ）とは矛盾しない。
+	 */
+	public function test_最終同期はflatなlistingでもlegacyOffer経由で値を出す(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 444, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform'         => 'dmm-books',
+						'regular_url'      => 'https://example.com/product',
+						'last_verified_at' => '2026-07-20T10:00:00+00:00',
+					),
+				)
+			);
+
+		ob_start();
+		ProductListColumns::renderColumn( ProductListColumns::COLUMN_LAST_VERIFIED, 444 );
+		$output = (string) ob_get_clean();
+
+		$this->assertSame( '2026-07-20 10:00', $output );
+	}
+
 	public function test_renderColumn_returns_early_for_unrelated_column(): void {
 		ob_start();
 		ProductListColumns::renderColumn( 'some-other-column', 789 );

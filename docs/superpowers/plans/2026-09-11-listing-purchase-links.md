@@ -1,6 +1,6 @@
 # 購入リンクの複数保持と優先表示 実装計画
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** This plan is executed task by task. Steps use checkbox (`- [ ]`) syntax and are tracked as you go.
 
 **Goal:** listing を「1 platform = 1 SKU」から「複数の購入リンク（offer）を表示優先順で保持する」形へ変更し、先頭が使えなくなったら次へ自動的に倒れるようにする。
 

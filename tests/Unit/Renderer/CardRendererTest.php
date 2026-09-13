@@ -195,6 +195,35 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( 'https://example.com/1', $html );
 	}
 
+	/**
+	 * CodeRabbit round 2: ctaHref() は affiliate_url が非空なら検証せずそのまま採用していた。
+	 * legacyOffers()（{@see \Affilicard\Pricing\LegacyOffer}）は v3 以前の flat な listing の
+	 * 生データ（保存時の ProductSchema::sanitizeOffers() を経ていない）をそのまま offer へ
+	 * 変換して ctaHref() に渡すため、affiliate_url が不正スキーム（javascript: 等）でも
+	 * 「非空」というだけで採用され、出力直前の esc_url() で初めて空文字へ落ちて
+	 * href="" の壊れた CTA になっていた。ctaHref() 自身が esc_url_raw() で検証し、
+	 * 不正なら正当な regular_url へフォールバックしなければならない。
+	 */
+	public function test_不正なaffiliate_urlは正当なregular_urlへフォールバックする(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'javascript:alert(1)',
+							'regular_url'   => 'https://example.com/1',
+						)
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringContainsString( 'https://example.com/1', $html );
+		$this->assertStringNotContainsString( 'javascript:', $html );
+	}
+
 	public function test_skips_listing_when_both_urls_empty(): void {
 		$product = $this->product(
 			array(

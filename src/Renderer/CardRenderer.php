@@ -567,12 +567,23 @@ final class CardRenderer {
 	 * visibleListings()（表示可否の判定）と renderListings()（CTA の href 出力）の
 	 * 両方が同じ規則を見るための唯一の場所。
 	 *
+	 * `esc_url_raw()` で検証してから採否を決める（CodeRabbit round 2）。offers[] 経路の
+	 * データは保存時に `ProductSchema::sanitizeOffers()` が既に esc_url_raw() を通しており
+	 * 通常は無意味だが、v3 以前の flat な listing は legacyOffers()（{@see LegacyOffer}）が
+	 * 保存時のサニタイズを経ていない生の post meta をそのままここへ渡す。affiliate_url が
+	 * 不正（javascript: 等の危険スキーム）で regular_url が正当な場合、検証せずに採用すると
+	 * 出力直前の esc_url() だけがそれを空文字へ落とし、使える regular_url があるのに
+	 * href="" の壊れた CTA になる。ここで検証すれば不正な affiliate_url を素通りさせず
+	 * regular_url へフォールバックできる。
+	 *
 	 * @param array<string, mixed> $offer
 	 */
 	private function ctaHref( array $offer ): string {
-		$affiliate = isset( $offer['affiliate_url'] ) ? trim( (string) $offer['affiliate_url'] ) : '';
-		$regular   = isset( $offer['regular_url'] ) ? trim( (string) $offer['regular_url'] ) : '';
-		return '' !== $affiliate ? $affiliate : $regular;
+		$affiliate = isset( $offer['affiliate_url'] ) ? (string) esc_url_raw( trim( (string) $offer['affiliate_url'] ) ) : '';
+		if ( '' !== $affiliate ) {
+			return $affiliate;
+		}
+		return isset( $offer['regular_url'] ) ? (string) esc_url_raw( trim( (string) $offer['regular_url'] ) ) : '';
 	}
 
 	/**
