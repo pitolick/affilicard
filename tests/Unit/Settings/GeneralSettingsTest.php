@@ -360,4 +360,24 @@ final class GeneralSettingsTest extends TestCase {
 		$this->assertTrue( $updated['fallback_on_terminal'] );
 		$this->assertIsBool( $updated['fallback_on_terminal'] );
 	}
+
+	/**
+	 * REST 経由で文字列 "false" が届いても ON として保存されない回帰確認。
+	 *
+	 * `! empty( $values['fallback_on_terminal'] )` は非空文字列 "false" を truthy と判定するため、
+	 * PUT /affilicard/v1/settings に args/sanitize_callback が無い状態で文字列 "false" を送ると
+	 * 「無効化したつもりが有効化される」。rest_sanitize_boolean() 相当の正規化を
+	 * GeneralSettings::sanitize() 側に持たせることで、REST 経由・GeneralSettings::update() 直接
+	 * 呼び出しの両方を一箇所で正しくする。
+	 */
+	public function test_フォールバック設定は文字列falseをOFFとして扱う(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'update_option' )->andReturn( true );
+
+		$updated = GeneralSettings::update( array( 'fallback_on_terminal' => 'false' ) );
+
+		$this->assertFalse( $updated['fallback_on_terminal'] );
+	}
 }

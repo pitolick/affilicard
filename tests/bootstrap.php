@@ -40,6 +40,21 @@ if ( ! function_exists( 'doing_action' ) ) {
 	}
 }
 
+// WP_Mock は rest_sanitize_boolean() を提供しないが、GeneralSettings::sanitize() は設定を
+// 読むたびに通るため、モックし忘れたテストが軒並み fatal になる。WP コアと同じ意味論
+// （文字列 'false' / '0' だけ false、それ以外は (bool) キャスト）で最小スタブを置く。
+if ( ! function_exists( 'rest_sanitize_boolean' ) ) {
+	function rest_sanitize_boolean( $value ): bool { // phpcs:ignore WordPress.NamingConventions.ValidFunctionName.MethodNameInvalid
+		if ( is_string( $value ) ) {
+			$value = strtolower( $value );
+			if ( in_array( $value, array( 'false', '0' ), true ) ) {
+				$value = false;
+			}
+		}
+		return (bool) $value;
+	}
+}
+
 if ( ! class_exists( 'WP_Error' ) ) {
 	class WP_Error {} // @phpstan-ignore-line
 }
