@@ -33,6 +33,12 @@ final class OffersMigrationNoticeTest extends TestCase {
 		WP_Mock::userFunction( 'get_current_screen' )->andReturn( null === $postType ? null : $screen );
 	}
 
+	private function stubEditPosts( bool $allowed ): void {
+		WP_Mock::userFunction( 'current_user_can' )
+			->with( 'edit_posts' )
+			->andReturn( $allowed );
+	}
+
 	/** @param int|false $cursor カーソル option の値（false は未設定＝移行なし）。 */
 	private function stubCursor( $cursor ): void {
 		WP_Mock::userFunction( 'get_option' )
@@ -54,6 +60,7 @@ final class OffersMigrationNoticeTest extends TestCase {
 	}
 
 	public function test_移行が未完なら未完通知を出す(): void {
+		$this->stubEditPosts( true );
 		$this->stubScreen( 'affilicard_product' );
 		$this->stubCursor( 480 );
 
@@ -62,6 +69,7 @@ final class OffersMigrationNoticeTest extends TestCase {
 
 	/** カーソル 0（走り始めた直後）も未完。値ではなく存在で判定する。 */
 	public function test_カーソルが0でも未完通知を出す(): void {
+		$this->stubEditPosts( true );
 		$this->stubScreen( 'affilicard_product' );
 		$this->stubCursor( 0 );
 
@@ -69,6 +77,7 @@ final class OffersMigrationNoticeTest extends TestCase {
 	}
 
 	public function test_移行が完走していれば未完通知を出さない(): void {
+		$this->stubEditPosts( true );
 		$this->stubScreen( 'affilicard_product' );
 		$this->stubCursor( false );
 
@@ -112,6 +121,7 @@ final class OffersMigrationNoticeTest extends TestCase {
 	 * dismiss 不可なので、全画面に出しても居座らない。
 	 */
 	public function test_未完通知は商品画面以外にも出す(): void {
+		$this->stubEditPosts( true );
 		$this->stubScreen( 'post' );
 		$this->stubCursor( 480 );
 
@@ -132,6 +142,7 @@ final class OffersMigrationNoticeTest extends TestCase {
 	 * 「12 件消えます」とだけ伝えて、どの商品か分からない通知は運用上何もできない。
 	 */
 	public function test_温存通知は対象商品への編集リンクを出す(): void {
+		$this->stubEditPosts( true );
 		$this->stubScreen( 'affilicard_product' );
 		$this->stubCursor( false );
 		$this->stubPreserved( 2 );
@@ -165,5 +176,52 @@ final class OffersMigrationNoticeTest extends TestCase {
 		$this->assertStringContainsString( 'post=501&action=edit', $output, '対象商品への導線が無い' );
 		$this->assertStringContainsString( 'post=777&action=edit', $output, '対象商品への導線が無い' );
 		$this->assertStringContainsString( '商品501', $output );
+	}
+
+	/**
+	 * 移行中の通知は「この通知に対して何かできる人」にだけ出す。
+	 *
+	 * 画面の限定（affilicard 配下のみ）を外した結果、権限のゲートが無いと購読者が
+	 * profile.php を開いただけで消せないプラグインの警告を見ることになる。
+	 */
+	public function test_edit_postsを持たない利用者には未完通知を出さない(): void {
+		$this->stubEditPosts( false );
+		$this->stubScreen( 'profile' );
+		$this->stubCursor( 480 );
+
+		$this->assertFalse( OffersMigrationNotice::shouldShowPending() );
+	}
+
+	/**
+	 * 「ほか N 件」を件数の引き算で出さない。
+	 *
+	 * 上の件数は offer 単位、商品一覧は商品単位である。1 商品が温存 offer を 2 つ持つと
+	 * 引き算は 1 になり、存在しない商品が隠れているかのように報告してしまう。
+	 */
+	public function test_温存通知は存在しない商品を隠れ件数として報告しない(): void {
+		$this->stubEditPosts( true );
+		$this->stubScreen( 'affilicard_product' );
+		$this->stubCursor( false );
+		// 1 商品が温存 offer を 2 件持つ状況（件数 2・商品 1）。
+		$this->stubPreserved( 2 );
+		$this->stubUser( 0 );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS, array() )
+			->andReturn( array( 501 ) );
+		WP_Mock::userFunction( 'get_edit_post_link' )->andReturn( 'https://example.test/edit' );
+		WP_Mock::userFunction( 'get_the_title' )->andReturn( '商品501' );
+		WP_Mock::userFunction( 'wp_nonce_url' )->andReturn( 'https://example.test/dismiss' );
+		WP_Mock::userFunction( 'add_query_arg' )->andReturn( 'https://example.test/current' );
+		WP_Mock::userFunction( '__', array( 'return_arg' => 0 ) );
+		WP_Mock::passthruFunction( 'esc_html' );
+		WP_Mock::passthruFunction( 'esc_html__' );
+		WP_Mock::passthruFunction( 'esc_url' );
+
+		ob_start();
+		OffersMigrationNotice::maybeRender();
+		$output = (string) ob_get_clean();
+
+		$this->assertStringContainsString( '商品501', $output );
+		$this->assertStringNotContainsString( 'ほか', $output, '存在しない商品を隠れ件数として報告している' );
 	}
 }

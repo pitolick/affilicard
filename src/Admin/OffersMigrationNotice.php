@@ -45,13 +45,22 @@ final class OffersMigrationNotice {
 	 * dismiss を効かせない（完走すればカーソルが消えて通知も消える。運用が消せる
 	 * ようにすると、止まったままの移行を握り潰せてしまう）。
 	 *
-	 * **画面を限定しない。** 移行が終わるまでカードは読み側のフォールバック
-	 * （CardRenderer::legacyOffers()）で描かれており、この通知はカタログが移行途上に
-	 * あることを伝える唯一の signal である。affilicard の画面を開いた運用者にしか
-	 * 見えないと、止まった移行が誰にも気づかれない。短命かつ dismiss 不可なので
-	 * 全画面に出しても居座らない（温存通知の方は恒久的に出得るので従来どおり限定する）。
+	 * **画面は限定しないが、読み手は限定する。** 移行が終わるまでカードは読み側の
+	 * フォールバック（CardRenderer::legacyOffers()）で描かれており、この通知は
+	 * カタログが移行途上にあることを伝える唯一の signal である。affilicard の画面を
+	 * 開いた運用者にしか見えないと、止まった移行が誰にも気づかれない。短命かつ
+	 * dismiss 不可なので全画面に出しても居座らない（温存通知の方は恒久的に出得るので
+	 * 従来どおり画面を限定する）。
+	 *
+	 * ただし画面の限定を外すと、購読者が profile.php を開いただけで消せない警告が
+	 * 出る。**この通知に対して何かできる人にだけ出す**——商品を編集できる権限
+	 * （edit_posts。ProductRestController / SettingsController の読み取りと同じ
+	 * capability）を条件にする。
 	 */
 	public static function shouldShowPending(): bool {
+		if ( ! current_user_can( 'edit_posts' ) ) {
+			return false;
+		}
 		return PluginUpgrade::isOffersMigrationPending();
 	}
 
@@ -109,7 +118,7 @@ final class OffersMigrationNotice {
 	 * 件数だけを告げる通知は運用上何もできない——「12 件消えます」と言われても、
 	 * どの商品を直せばよいか分からない。移行が数えるついでに控えた post ID
 	 * （{@see PluginUpgrade::preservedWithoutRegularUrlPostIds()}）を編集画面への
-	 * 導線にする。ID の保持には上限があるため、件数の方が多い場合は「ほか」と添える。
+	 * 導線にする。ID の保持には上限があるため、上限に達している場合はその旨を添える。
 	 */
 	private static function renderPreservedPostLinks(): void {
 		$ids = PluginUpgrade::preservedWithoutRegularUrlPostIds();
@@ -132,13 +141,16 @@ final class OffersMigrationNotice {
 		}
 		echo '</ul>';
 
-		$remaining = PluginUpgrade::preservedWithoutRegularUrlCount() - count( $ids );
-		if ( $remaining > 0 ) {
+		// **件数の引き算はしない。** 上の件数は offer 単位、この一覧は商品単位であり、
+		// 1 商品が温存 offer を 2 つ持てば差分は「存在しない商品」を指す。控えている
+		// post ID は上限（PRESERVED_POST_IDS_CAP）で打ち切るため、上限に達したかどうか
+		// だけを伝える（打ち切った先に何件あるかは記録していない＝数えられない）。
+		if ( count( $ids ) >= PluginUpgrade::PRESERVED_POST_IDS_CAP ) {
 			echo '<p>' . esc_html(
 				sprintf(
-					/* translators: %d: 一覧に出していない残りの件数。 */
-					__( 'ほか %d 件は一覧に出していません（表示上限）。', 'affilicard' ),
-					$remaining
+					/* translators: %d: 一覧に出す商品数の上限。 */
+					__( '商品の一覧は先頭 %d 件までです。これ以外にも対象商品がある場合は表示されません。', 'affilicard' ),
+					PluginUpgrade::PRESERVED_POST_IDS_CAP
 				)
 			) . '</p>';
 		}
