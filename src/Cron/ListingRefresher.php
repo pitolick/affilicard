@@ -5,6 +5,7 @@ namespace Affilicard\Cron;
 
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\Pricing\FetchStatus;
+use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\ListingEligibility;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Provider\ProviderRegistry;
@@ -106,7 +107,10 @@ class ListingRefresher {
 			if ( ! ListingEligibility::isEnabledAuto( $listing ) ) {
 				return 0;
 			}
-			$offers = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
+			// refreshListing() と同じフォールバックを通す。ここだけ offers を直接読むと、
+			// 移行前の flat な listing で「refreshOne は fetch するのに枠は 0 件ぶんしか
+			// 確保しない」というズレが生まれる。
+			$offers = LegacyOffer::offersWithFallback( $listing );
 			return count( OfferSelector::select( $offers, GeneralSettings::fallbackOnTerminal() ) );
 		}
 		return 0;
@@ -123,7 +127,15 @@ class ListingRefresher {
 	 * @return array{0: array<string, mixed>, 1: WorkOutcome} 更新後 listing と outcome のタプル
 	 */
 	private function refreshListing( array $listing, string $productTitle ): array {
-		$offers  = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
+		// 移行前の flat な listing（offers を持たず取得結果フィールドが listing 直下に並ぶ
+		// v3 以前の形）も取得対象にする。offers を直接読むと、移行バッチが当該商品へ到達
+		// する前に管理画面の「強制更新」が走ったとき、一度も fetch せず TRANSIENT_FAILURE
+		// を返してリトライ枠だけを焼く。読み取り側（CardRenderer 等）と同じ写像を通す。
+		//
+		// ここで書き戻す offers[] は、移行バッチにとって「変換済み」と同じ形である。
+		// PluginUpgrade::migrateListingToOffers() は offers を持つ listing をそのまま返す
+		// （冪等）ため、先にこちらが変換しても移行が二重に offer を作ることはない。
+		$offers  = LegacyOffer::offersWithFallback( $listing );
 		$targets = OfferSelector::select( $offers, GeneralSettings::fallbackOnTerminal() );
 		if ( array() === $targets ) {
 			// 更新すべき購入リンクが無い（offers が空）＝何もしない。リトライで解決し得るため

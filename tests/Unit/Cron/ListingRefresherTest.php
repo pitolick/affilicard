@@ -927,4 +927,94 @@ final class ListingRefresherTest extends TestCase {
 
 		$this->assertSame( 0, $count );
 	}
+
+	/**
+	 * A: 移行前の flat な listing（offers キーを持たず、取得結果フィールドが listing 直下に
+	 * 並ぶ v3 以前の形）でも fetch する。
+	 *
+	 * refreshListing() が $listing['offers'] を直接読むと、移行バッチが当該商品に到達する
+	 * 前に管理画面の「強制更新」が走ったとき、OfferSelector::select() が空を返して
+	 * 一度も fetch せずに TRANSIENT_FAILURE を返す（リトライ枠だけを焼く）。読み取り側と
+	 * 同じ LegacyOffer::offersWithFallback() を通し、flat な listing も取得対象にする。
+	 */
+	public function test_refreshOne_移行前のflat_listingでもフォールバックでfetchして保存する(): void {
+		$this->stubRakutenPlatform();
+
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$provider->shouldReceive( 'fetch' )->once()->withArgs(
+			static function ( string $externalId, array $context ): bool {
+				return 'flat-1' === $externalId
+					&& 'flat-key' === ( $context['search_key'] ?? '' );
+			}
+		)->andReturn( FetchResult::hit( array( 'price' => '550' ) ) );
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 31 )->andReturn(
+			$this->product(
+				31,
+				array(
+					// offers キーが無い＝移行前の flat な listing。
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'external_id' => 'flat-1',
+						'regular_url' => 'https://example.test/flat',
+						'search_key'  => 'flat-key',
+						'price'       => '700',
+					),
+				)
+			)
+		);
+		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
+			function ( int $postId, string $platform, array $listing ): bool {
+				$this->savedListing = $listing;
+				return true;
+			}
+		);
+
+		$outcome = ( new ListingRefresher( $registry, $repo ) )->refreshOne( 31, 'rakuten-kobo' );
+
+		$this->assertSame( WorkOutcome::SUCCESS, $outcome );
+		$offer = $this->savedOffer( 'flat-1' );
+		$this->assertSame( '550', $offer['price'] );
+		$this->assertSame( FetchStatus::NONE, $offer['fetch_status'] );
+		$this->assertSame( 'https://example.test/flat', $offer['regular_url'] );
+		$this->assertCount( 1, (array) $this->savedListing['offers'] );
+	}
+
+	/**
+	 * A: targetCount() も同じフォールバックを通す。refreshOne() が fetch するのに
+	 * ここが 0 を返すと、レート制限の枠を確保しないまま外部 API を叩くことになる。
+	 */
+	public function test_targetCount_移行前のflat_listingでも1を返す(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 32 )->andReturn(
+			$this->product(
+				32,
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'external_id' => 'flat-2',
+						'regular_url' => 'https://example.test/flat2',
+					),
+				)
+			)
+		);
+
+		$count = ( new ListingRefresher( new ProviderRegistry(), $repo ) )->targetCount( 32, 'rakuten-kobo' );
+
+		$this->assertSame( 1, $count );
+	}
 }
