@@ -140,11 +140,16 @@ final class UninstallTest extends TestCase {
 		// （final-fix-report.md Important 1）。
 		$this->assertContains( \Affilicard\Queue\SweepCursor::OPTION_KEY, Uninstall::OPTION_KEYS );
 		$this->assertContains( \Affilicard\Queue\QueueMaintenance::OPTION_LAST_COMPLETED, Uninstall::OPTION_KEYS );
-		// offers 移行が書く 2 option。漏れるとアンインストール→再インストールで
-		// 「未完」の印と温存件数が残留し、通知が出続ける。
+		// offers 移行が書く 3 option。漏れるとアンインストール→再インストールで
+		// 「未完」の印・温存件数・温存 post ID 一覧が残留し、通知が出続ける
+		// （CodeRabbit Minor #4: OPTION_MIGRATION_PRESERVED_POST_IDS が抜けていた）。
 		$this->assertContains( \Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_CURSOR, Uninstall::OPTION_KEYS );
 		$this->assertContains(
 			\Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL,
+			Uninstall::OPTION_KEYS
+		);
+		$this->assertContains(
+			\Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS,
 			Uninstall::OPTION_KEYS
 		);
 	}

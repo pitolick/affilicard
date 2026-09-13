@@ -37,6 +37,10 @@ final class Uninstall {
 		// Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL の
 		// リテラル値（offers 移行で温存した listing の件数）。
 		'affilicard_offers_migration_preserved_without_regular_url',
+		// Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS のリテラル値
+		// （温存が起きた商品の post ID 一覧。CodeRabbit Minor #4: 上の件数 option とペアで
+		// 追加されたが本リストへの追記が漏れていた）。
+		'affilicard_offers_migration_preserved_post_ids',
 	);
 
 	/**
