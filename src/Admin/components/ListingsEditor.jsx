@@ -58,10 +58,13 @@ function rowTitle(platforms, row) {
  * `Affilicard\Pricing\OfferSelector::sorted()`（PHP）と同じ並べ替え。
  * display_order 昇順・同値は元の配列での出現順（安定ソート）。
  *
+ * 元の配列での位置（index）を添えて返す。編集画面はこの並びで描画しつつ、
+ * 行の身元（uid）・編集・削除は元の位置で引く必要があるため。
+ *
  * @param {Array<Object>} offers
- * @return {Array<Object>}
+ * @return {Array<{offer: Object, index: number, order: number}>}
  */
-function sortOffersForSelection(offers) {
+function sortOffersWithIndex(offers) {
 	return offers
 		.map((offer, index) => ({ offer, index }))
 		.filter(({ offer }) => offer && typeof offer === 'object')
@@ -73,8 +76,17 @@ function sortOffersForSelection(offers) {
 					: Number(raw);
 			return { offer, index, order };
 		})
-		.sort((a, b) => (a.order === b.order ? a.index - b.index : a.order - b.order))
-		.map((entry) => entry.offer);
+		.sort((a, b) => (a.order === b.order ? a.index - b.index : a.order - b.order));
+}
+
+/**
+ * 上と同じ並べ替えの結果から offer だけを取り出す。
+ *
+ * @param {Array<Object>} offers
+ * @return {Array<Object>}
+ */
+function sortOffersForSelection(offers) {
+	return sortOffersWithIndex(offers).map((entry) => entry.offer);
 }
 
 /**
@@ -152,6 +164,12 @@ function OffersEditor({ offers, fallbackOnTerminal, onChange }) {
 	const [openKeys, setOpenKeys] = useState(() => new Set());
 	const inUseOffer = selectInUseOffer(rows, fallbackOnTerminal);
 
+	// 描画は配列の並びではなく PHP の OfferSelector と同じ並び（display_order 昇順・
+	// 同値は出現順）で行う。配列順で描くと、外部パイプラインが書いた listing や
+	// 過去 UI で並べ替えた listing で「PHP は 2 行目を使っているのに、画面では
+	// 1 行目に使用中の印が付いている」という食い違いが起きる。
+	const sortedEntries = sortOffersWithIndex(rows);
+
 	const setOpen = (key, isOpen) => {
 		setOpenKeys((prev) => {
 			const next = new Set(prev);
@@ -185,23 +203,29 @@ function OffersEditor({ offers, fallbackOnTerminal, onChange }) {
 	// 振り直す（同値が並んでいても確実に順序が変わるように）。削除時に詰めない
 	// ルールとは別。身元（uids）もデータと同じ入れ替えでなぞり、開いていた行が
 	// 新しい位置でも開いたままになるようにする。
-	const move = (idx, direction) => {
-		const target = idx + direction;
-		if (target < 0 || target >= rows.length) {
+	//
+	// 受け取るのは配列の位置ではなく**描画されている並び**での位置。配列の位置で
+	// 動かすと、配列の並びと display_order がずれている listing で ↑↓ が見えている
+	// 並びと違う行を動かす。並べ替えたあとは配列の並びも描画順に揃える。
+	const move = (position, direction) => {
+		const target = position + direction;
+		if (target < 0 || target >= sortedEntries.length) {
 			return;
 		}
-		setUids((prev) => {
-			const next = [...prev];
-			[next[idx], next[target]] = [next[target], next[idx]];
-			return next;
-		});
-		const next = [...rows];
-		[next[idx], next[target]] = [next[target], next[idx]];
-		const renumbered = next.map((o, i) => ({
-			...o,
-			display_order: (i + 1) * 10,
-		}));
-		onChange(renumbered);
+		const entries = [...sortedEntries];
+		[entries[position], entries[target]] = [
+			entries[target],
+			entries[position],
+		];
+		setUids((prev) =>
+			entries.map((entry) => prev[entry.index] ?? `pos:${entry.index}`)
+		);
+		onChange(
+			entries.map((entry, i) => ({
+				...entry.offer,
+				display_order: (i + 1) * 10,
+			}))
+		);
 	};
 
 	return (
@@ -212,9 +236,10 @@ function OffersEditor({ offers, fallbackOnTerminal, onChange }) {
 					{__('購入リンクがありません', 'affilicard')}
 				</p>
 			)}
-			{rows.map((offer, i) => {
+			{sortedEntries.map(({ offer, index: i }, position) => {
 				// uids は rows と同じ操作（追加・削除・並べ替え）でしか変わらないため、
 				// 常に rows と同じ長さ・同じ並びのはず。念のため index にフォールバックする。
+				// 引くのは描画位置ではなく元の配列での位置（i）。
 				const key = uids[i] ?? `pos:${i}`;
 				const isInUse = inUseOffer === offer;
 				const statusLabel = offerStatusLabel(offer.fetch_status);
@@ -233,15 +258,15 @@ function OffersEditor({ offers, fallbackOnTerminal, onChange }) {
 								icon="arrow-up-alt2"
 								size="small"
 								label={__('上へ移動', 'affilicard')}
-								disabled={i === 0}
-								onClick={() => move(i, -1)}
+								disabled={position === 0}
+								onClick={() => move(position, -1)}
 							/>
 							<Button
 								icon="arrow-down-alt2"
 								size="small"
 								label={__('下へ移動', 'affilicard')}
-								disabled={i === rows.length - 1}
-								onClick={() => move(i, 1)}
+								disabled={position === sortedEntries.length - 1}
+								onClick={() => move(position, 1)}
 							/>
 							{isInUse && (
 								<span className="affilicard-offer-row__badge">

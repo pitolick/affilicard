@@ -535,6 +535,62 @@ describe( 'ListingsEditor 購入リンク（offers）', () => {
 		expect( screen.getByTestId( 'offer-alive' ) ).toHaveTextContent( '使用中' );
 	} );
 
+	// D: PHP（OfferSelector）は display_order 昇順で選ぶのに、編集画面は配列の並び順で
+	// 描画していた。配列の並びと display_order がずれている listing（外部パイプラインが
+	// 書いた・過去 UI で並べ替えた等）では、「使用中」の印が付いている行が先頭に無く、
+	// ↑↓ も配列の位置で動くため、見えている並びと実際の優先順位が食い違う。
+	const unsortedOffers = [
+		{ display_order: 100, external_id: 'later', regular_url: 'https://example.test/later' },
+		{ display_order: 10, external_id: 'first', regular_url: 'https://example.test/first' },
+	];
+
+	/** 描画されている購入リンク行の data-testid を上から順に返す。 */
+	const renderedOfferIds = ( container ) =>
+		Array.from( container.querySelectorAll( '.affilicard-offer-row' ) ).map(
+			( el ) => el.getAttribute( 'data-testid' )
+		);
+
+	test( '配列の並びではなく表示順で描画する', () => {
+		const { container } = render(
+			<ListingsEditor
+				listings={ listingWithOffers( unsortedOffers ) }
+				platforms={ platforms }
+				onChange={ jest.fn() }
+			/>
+		);
+
+		expect( renderedOfferIds( container ) ).toEqual( [
+			'offer-first',
+			'offer-later',
+		] );
+		// 「使用中」の印は必ず先頭の行に付く（PHP が選ぶのと同じ行）。
+		expect(
+			container.querySelectorAll( '.affilicard-offer-row' )[ 0 ]
+		).toHaveTextContent( '使用中' );
+	} );
+
+	test( '↑↓ は配列の位置ではなく描画されている並びで動く', async () => {
+		const onChange = jest.fn();
+		const { container } = render(
+			<ListingsEditor
+				listings={ listingWithOffers( unsortedOffers ) }
+				platforms={ platforms }
+				onChange={ onChange }
+			/>
+		);
+
+		// 描画上の先頭（= 使用中の 'first'）を下へ動かす。
+		await userEvent.click(
+			screen.getAllByRole( 'button', { name: '下へ移動' } )[ 0 ]
+		);
+
+		const offers = onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers;
+		const byOrder = [ ...offers ]
+			.sort( ( a, b ) => a.display_order - b.display_order )
+			.map( ( o ) => o.external_id );
+		expect( byOrder ).toEqual( [ 'later', 'first' ] );
+	} );
+
 	test.each( [
 		[ 'unsupported', '自動取得の対象外です' ],
 		[ 'transient', '一時的に取得できませんでした' ],
