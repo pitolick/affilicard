@@ -6,7 +6,7 @@
 
 **Architecture:** listing には設定フィールドだけを残し、取得結果は `offers[]` へ移す。「どの offer を使うか」を答える選択係を 1 つ作り、描画も価格更新も**その答えだけ**を見る。恒久エラー時に次へ倒すかは設定（既定 OFF）で切り替える。
 
-**Tech Stack:** PHP 8.2 / WordPress / PHPUnit 10 + WP_Mock / React（`@wordpress/components`）/ Jest（wp-scripts）/ Playwright（wp-env）
+**Tech Stack:** PHP 8.2 / WordPress / PHPUnit 9.6 + WP_Mock 1.x / React（`@wordpress/components`）/ Jest（wp-scripts）/ Playwright（wp-env）
 
 **Spec:** [`docs/superpowers/specs/2026-09-11-listing-purchase-links-design.md`](../specs/2026-09-11-listing-purchase-links-design.md)
 
