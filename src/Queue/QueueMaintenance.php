@@ -5,6 +5,7 @@ namespace Affilicard\Queue;
 
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductPostType;
+use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\ListingEligibility;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Pricing\PriceFreshness;
@@ -260,8 +261,12 @@ final class QueueMaintenance {
 				// v4.0.0: 判定対象は listing 自身ではなく OfferSelector が選んだ購入リンク
 				// （表示中の offer）。選択結果が空（offers が空）なら更新すべき購入リンクが
 				// 無いためスキップする。
+				// 移行前の flat な listing（offers を持たない v3 以前の形）も
+				// LegacyOffer::offersWithFallback() で拾う。offers を直接読むと、
+				// 移行バッチが止まっているインストールでその商品が掃引から恒久的に
+				// 外れ、自動更新が二度と走らない。
 				$targets = OfferSelector::select(
-					isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array(),
+					LegacyOffer::offersWithFallback( $listing ),
 					GeneralSettings::fallbackOnTerminal()
 				);
 				if ( array() === $targets ) {

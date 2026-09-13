@@ -1563,4 +1563,49 @@ final class QueueMaintenanceTest extends TestCase {
 		// 先頭（terminal・取得したて）が対象なので投入されない。後続の古さは見ない。
 		$this->assertSame( array(), $this->sweepAndCollectEnqueued( $listings, $now, false ) );
 	}
+
+	/**
+	 * B: 移行前の flat な listing（offers キーを持たず、取得結果フィールドが listing 直下に
+	 * 並ぶ v3 以前の形）も掃引の対象にする。
+	 *
+	 * offers を直接読むと、移行バッチが止まっているインストールでは該当商品が掃引から
+	 * 恒久的に外れ、自動更新が二度と走らない。読み取り側と同じ
+	 * LegacyOffer::offersWithFallback() を通して判定する。
+	 */
+	public function test_sweep_移行前のflat_listingもフォールバックして投入する(): void {
+		$now      = time();
+		$listings = array(
+			array(
+				'platform'        => 'rakuten-kobo',
+				'enabled'         => true,
+				'auto_update'     => true,
+				'external_id'     => 'flat-1',
+				'regular_url'     => 'https://example.test/flat',
+				'last_fetched_at' => gmdate( 'c', $now - 30 * 3600 ), // TTL=24h 超過
+			),
+		);
+
+		$this->assertSame( array( 'rakuten-kobo' ), $this->sweepAndCollectEnqueued( $listings, $now ) );
+	}
+
+	/**
+	 * B: フォールバックしても鮮度のゲートはそのまま効く。flat な listing でも
+	 * last_fetched_at が TTL 内なら投入しない（フォールバックが「全部投入する」に
+	 * ならないことの対照）。
+	 */
+	public function test_sweep_移行前のflat_listingでも鮮度内なら投入しない(): void {
+		$now      = time();
+		$listings = array(
+			array(
+				'platform'        => 'rakuten-kobo',
+				'enabled'         => true,
+				'auto_update'     => true,
+				'external_id'     => 'flat-1',
+				'regular_url'     => 'https://example.test/flat',
+				'last_fetched_at' => gmdate( 'c', $now ),
+			),
+		);
+
+		$this->assertSame( array(), $this->sweepAndCollectEnqueued( $listings, $now ) );
+	}
 }
