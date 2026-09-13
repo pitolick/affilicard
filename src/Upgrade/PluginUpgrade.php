@@ -173,6 +173,15 @@ final class PluginUpgrade {
 	 * 復元不能な形で消える。件数の集計は呼び出し側（バッチ）が offers[0]['regular_url']
 	 * を見て行う。
 	 *
+	 * **ただし、取得結果フィールドを 1 つも持たない listing には offer を作らない。**
+	 * 設定（platform / enabled 等）だけを持つ listing は購入リンクを 1 件も持っていない。
+	 * ここで空の offer を作ると、移行の書き込みは身元チェックを外している
+	 * （{@see ProductSchema::withLegacyOfferPreservation()}）ため実際に保存され、
+	 * 移行前は 0 件だった購入リンクが移行後は 1 件に増える——存在しない購入リンクを
+	 * OfferSelector が選び、レート制限の枠取り（targetCount）も価格更新もそれを
+	 * 対象にしてしまう。判定は読み取り側と同じ {@see LegacyOffer::hasFlatFetchFields()}
+	 * ——移行前後で {@see LegacyOffer::offersWithFallback()} の件数が変わらないようにする。
+	 *
 	 * @param array<string, mixed> $listing
 	 * @return array<string, mixed>
 	 */
@@ -183,13 +192,17 @@ final class PluginUpgrade {
 
 		// flat → offer の写像は LegacyOffer が唯一持つ（保存時の畳み込み・描画時の
 		// フォールバックと同じ関数を通し、片方だけ拾うフィールドが生まれないようにする）。
-		$offer = LegacyOffer::toOffer( $listing );
+		// 持ち越す購入リンクが 1 件も無い listing は空の offers[] にする（存在しない
+		// 購入リンクを作らない）。
+		$offers = LegacyOffer::hasFlatFetchFields( $listing )
+			? array( LegacyOffer::toOffer( $listing ) )
+			: array();
 
 		foreach ( self::LEGACY_FETCH_FIELDS as $field ) {
 			unset( $listing[ $field ] );
 		}
 
-		$listing['offers'] = array( $offer );
+		$listing['offers'] = $offers;
 
 		return $listing;
 	}

@@ -5,6 +5,7 @@ namespace Affilicard\Tests\Unit\Upgrade;
 
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Pricing\FetchStatus;
+use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Queue\OfferPromotionTrigger;
 use Affilicard\Rest\ProductSchema;
@@ -288,6 +289,59 @@ final class PluginUpgradeTest extends TestCase {
 		$this->assertCount( 1, $migrated['offers'] );
 		$this->assertSame( '', $migrated['offers'][0]['regular_url'] );
 		$this->assertSame( 'https://af.test/abc', $migrated['offers'][0]['affiliate_url'] );
+	}
+
+	/**
+	 * B（PR レビュー Round2）: 設定系フィールドしか持たない listing に、存在しない
+	 * 購入リンクを作らない。
+	 *
+	 * 移行の書き込みは身元チェックを外している（withLegacyOfferPreservation）ため、
+	 * ここで作った空の offer はそのまま保存される。移行前は
+	 * LegacyOffer::offersWithFallback() が 0 件と見ていた listing が、移行後は
+	 * OfferSelector::select() で 1 件になり、枠取り（targetCount）も価格更新も
+	 * 実在しない購入リンクを対象にしてしまう。
+	 */
+	public function test_取得結果を持たないlistingにはoffersを作らない(): void {
+		$settingsOnly = array(
+			'platform'              => 'rakuten-kobo',
+			'enabled'               => true,
+			'update_mode'           => 'auto',
+			'auto_update'           => true,
+			'button_label_override' => '',
+			'platform_extras'       => array(),
+		);
+
+		$migrated = PluginUpgrade::migrateListingToOffers( $settingsOnly );
+
+		$this->assertSame( array(), $migrated['offers'] );
+		// 移行の前後で「購入リンクは何件か」の答えが変わらない。
+		$this->assertCount(
+			count( LegacyOffer::offersWithFallback( $settingsOnly ) ),
+			LegacyOffer::offersWithFallback( $migrated )
+		);
+		$this->assertSame( array(), OfferSelector::select( $migrated['offers'], false ) );
+		// 設定フィールドはそのまま残る。
+		$this->assertSame( 'rakuten-kobo', $migrated['platform'] );
+		$this->assertTrue( $migrated['enabled'] );
+	}
+
+	/**
+	 * 上の判定は「取得結果フィールドが空文字」でも同じ（LegacyOffer::hasFlatFetchFields()
+	 * が空文字を「持たない」と見るのに合わせる）。空文字のキーだけを頼りに offer を
+	 * 作ると、書き出しの都合でキーが並んでいる listing が全部 1 件に化ける。
+	 */
+	public function test_取得結果フィールドが空文字だけならoffersを作らない(): void {
+		$migrated = PluginUpgrade::migrateListingToOffers(
+			array(
+				'platform'    => 'rakuten-kobo',
+				'enabled'     => true,
+				'external_id' => '',
+				'regular_url' => '',
+				'price'       => '',
+			)
+		);
+
+		$this->assertSame( array(), $migrated['offers'] );
 	}
 
 	public function test_バージョン更新時にoffers移行の開始トリガーを積む(): void {
