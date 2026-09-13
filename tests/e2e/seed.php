@@ -13,13 +13,17 @@
 
 $repo = new \Affilicard\Repository\ProductRepository();
 
+// regular_url は空にできない。ProductSchema::sanitizeOffers() は生死を判定できない
+// （regular_url が空の）offer を新規保存時に弾くため（移行時のみ例外）、空のまま渡すと
+// offers[] が空になりカードの CTA が消える（2026-09 の Task 16 E2E で実際に検出した回帰。
+// この offers[] 化以前は listing 直下の flat フィールドがそのまま保存されていたため空でも通っていた）。
 $listing = static function ( string $aff ): array {
 	return array(
 		array(
 			'platform'         => 'dmm-books',
 			'enabled'          => true,
 			'affiliate_url'    => $aff,
-			'regular_url'      => '',
+			'regular_url'      => str_replace( '/aff-', '/product-', $aff ),
 			'price'            => '600',
 			'last_verified_at' => gmdate( 'c' ),
 		),
@@ -43,7 +47,7 @@ $available_id = $repo->save(
 				'platform'         => 'dmm-books',
 				'enabled'          => true,
 				'affiliate_url'    => 'https://example.com/aff-a',
-				'regular_url'      => '',
+				'regular_url'      => 'https://example.com/product-a',
 				'price'            => '600',
 				'badge'            => '40%OFF',
 				'last_fetched_at'  => '2026-04-20T10:30:00+09:00',
@@ -109,7 +113,7 @@ $repo->saveMeta(
 				'update_mode'   => 'manual',
 				'auto_update'   => false,
 				'affiliate_url' => 'https://example.com/aff-future',
-				'regular_url'   => '',
+				'regular_url'   => 'https://example.com/product-future',
 				'price'         => '700',
 			),
 		),
@@ -131,7 +135,7 @@ $display_order_id = $repo->save(
 				'update_mode'   => 'manual',
 				'auto_update'   => false,
 				'affiliate_url' => 'https://example.com/aff-order-kobo',
-				'regular_url'   => '',
+				'regular_url'   => 'https://example.com/product-order-kobo',
 				'image_url'     => 'https://example.com/cover-kobo.png',
 			),
 			array(
@@ -140,7 +144,7 @@ $display_order_id = $repo->save(
 				'update_mode'   => 'manual',
 				'auto_update'   => false,
 				'affiliate_url' => 'https://example.com/aff-order-dmm',
-				'regular_url'   => '',
+				'regular_url'   => 'https://example.com/product-order-dmm',
 				'image_url'     => 'https://example.com/cover-dmm.png',
 			),
 		),

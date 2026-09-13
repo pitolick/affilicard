@@ -4,6 +4,32 @@
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-09-14
+
+### Added
+
+- **listing が複数の購入リンク（offers）を優先順で保持できるように**なった。使用中の 1 件がストア側で消滅しても、次点の購入リンクへ自動的に切り替わる（カードの購入ボタン・価格・書影が消えない）
+- 商品カードの管理画面に、購入リンクを並べ替え・追加・削除できる UI を追加（`listings[].offers[]`。表示順は各 offer の `display_order` で決まる）
+- 既存インストール向けに、旧形式（listing 直下に取得結果フィールドが並ぶ flat な形）を新形式へ変換する一度きりの移行バッチを追加。大規模カタログでも 1 リクエストの実行時間が伸びないよう分割実行する
+- 購入リンクの繰り上がり（使用中の 1 件が外れて次点に切り替わる）を検知し、即時の再取得ジョブを積む
+
+### Changed (BREAKING)
+
+- **取得結果フィールドの置き場所が変わった**: `listings[].external_id` / `regular_url` / `affiliate_url` / `price` / `list_price` / `badge` / `image_url` / `search_key` / `last_fetched_at` / `last_verified_at` は、すべて `listings[].offers[].*` の下へ移動した。`listings[]` 直下に残るのは `platform` / `enabled` / `update_mode` / `auto_update` / `button_label_override` / `platform_extras` の設定系フィールドのみ
+- **`listings[].fetch_error`（日本語の文言を保存する文字列）を廃止**。代わりに `listings[].offers[].fetch_status` を参照する。値は `''`（成功）/ `'unsupported'`（自動取得の対象外）/ `'transient'`（一時失敗）/ `'terminal'`（恒久失敗）のいずれか。表示用の文言はコードから都度生成する（保存しない）
+- **`affilicard_extid_<platform>` post meta が複数値**になった（1 platform に対して購入リンクの数だけ値を持つ）。単一値としての読み出し（`get_post_meta( $id, $key, true )`）は最初の 1 件しか返さないため、外部から複数値を前提に読み替えが必要な場合は `get_post_meta( $id, $key, false )` を使うこと
+- 書き込み側の互換: REST（`POST /wp/v2/affilicard_product` の `meta.affilicard_listings`）は引き続き**旧来の flat な形も受理**し、`offers[0]` へ自動的に正規化する。外部の投稿パイプライン側の改修を待たずに本バージョンへ上げられる
+
+### Fixed
+
+- 移行時に `regular_url` を持たず `affiliate_url` のみを持つ listing（手入力で温存されていたデータ）が保存の瞬間に消えていた不具合を修正。移行はこの形の購入リンクも温存し、件数を運用向けに可視化する（管理画面の通知）
+- 購入リンク編集 UI の身元判定・権限・必須項目まわりの不具合を修正
+
+### Notes
+
+- **ダウングレードはできない**。v3 系のコードは `listings[].offers[]` を読めないため、v4 で保存した商品を v3 へ戻すと**すべての商品カードで購入ボタン・価格・書影が欠落する**
+- **読み取り側の追随が必要**。`listings[].fetch_error` を見て分岐していた外部コードは、v4 移行後は `fetch_error` キー自体が存在しなくなるため、**エラーにならないまま何もしない（判定が常に外れる）状態で沈黙する**。`listings[].offers[].fetch_status` へ書き換えること
+
 ## [3.5.0] - 2026-08-28
 
 ### Changed
