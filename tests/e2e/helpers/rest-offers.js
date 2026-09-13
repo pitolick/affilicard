@@ -103,7 +103,7 @@ function cleanupStaleFixtures( titleSearch ) {
 function runEvalFileJson( relativePathUnderPlugin, args, marker ) {
 	const argStr = args.map( ( a ) => String( a ) ).join( ' ' );
 	const raw = execSync(
-		`npx wp-env run tests-cli wp eval-file wp-content/plugins/affilicard/${ relativePathUnderPlugin } ${ argStr }`,
+		`npx wp-env run tests-cli wp eval-file --use-include wp-content/plugins/affilicard/${ relativePathUnderPlugin } ${ argStr }`,
 		{ encoding: 'utf8' }
 	);
 	const idx = raw.indexOf( marker );

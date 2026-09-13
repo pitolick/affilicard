@@ -37,7 +37,7 @@ module.exports = async () => {
 
 	// --- seed data via a PHP file (no shell quoting of JSON) ---
 	const out = execSync(
-		'npx wp-env run tests-cli wp eval-file wp-content/plugins/affilicard/tests/e2e/seed.php',
+		'npx wp-env run tests-cli wp eval-file --use-include wp-content/plugins/affilicard/tests/e2e/seed.php',
 		{ encoding: 'utf8' }
 	);
 	const line = out.split( '\n' ).find( ( l ) => l.includes( 'SEED_JSON:' ) );

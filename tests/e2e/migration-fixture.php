@@ -1,4 +1,7 @@
 <?php
+
+declare(strict_types=1);
+
 /**
  * E2E 補助スクリプト（Task 16 — offers 移行の実 WP 検証）。`wp eval-file` でコンテナ内実行する。
  *

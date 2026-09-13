@@ -23,7 +23,7 @@ const { execSync } = require( 'child_process' );
 
 function runMigrationFixture() {
 	const raw = execSync(
-		'npx wp-env run tests-cli wp eval-file wp-content/plugins/affilicard/tests/e2e/migration-fixture.php',
+		'npx wp-env run tests-cli wp eval-file --use-include wp-content/plugins/affilicard/tests/e2e/migration-fixture.php',
 		{ encoding: 'utf8' }
 	);
 	const marker = 'MIGRATION_JSON:';
@@ -149,8 +149,14 @@ test.describe( 'v3 flat listing → offers[] 移行（実 WP）', () => {
 		await page.goto( '/wp-admin/edit.php?post_type=affilicard_product' );
 
 		// 件数（レビュー対応で文言を強化した後も変わらない部分）。
+		// 以降の assertion は必ずこの通知の中へ限定する。商品一覧のページ全体を
+		// 対象にすると、行アクション（編集／ゴミ箱へ移動／プレビュー）の
+		// アクセシブル名にも商品タイトルが含まれるため link が複数一致する。
+		const notice = page.locator( '.notice', {
+			hasText: '購入リンクを維持した listing',
+		} );
 		await expect(
-			page.getByText(
+			notice.getByText(
 				new RegExp(
 					`持たないまま購入リンクを維持した listing が ${ result.preservedAfter } 件`
 				)
@@ -160,11 +166,14 @@ test.describe( 'v3 flat listing → offers[] 移行（実 WP）', () => {
 		// （レビュー Important 対応: 通知が『手動での確認』としか言わないと、
 		// 通常の保存/価格更新で黙って消えるまでの猶予だと運用が気づけない）。
 		await expect(
-			page.getByText( /次に保存する.*と自動的に削除されます/ )
+			notice.getByText( /次に保存する.*と自動的に削除されます/ )
 		).toBeVisible();
 		// 件数だけでは運用が動けない。どの商品かへ辿れること。
-		await expect(
-			page.getByRole( 'link', { name: result.noIdentityTitle } )
-		).toBeVisible();
+		// タイトルではなく post ID で特定する。同名の商品が増えても一意に決まる。
+		const productLink = notice.locator(
+			`a[href*="post=${ result.noIdentityPostId }"]`
+		);
+		await expect( productLink ).toBeVisible();
+		await expect( productLink ).toHaveText( result.noIdentityTitle );
 	} );
 } );
