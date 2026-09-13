@@ -101,6 +101,7 @@ final class ListingRefresherTest extends TestCase {
 	 * offers 形式の商品を返すリポジトリモック。
 	 *
 	 * @param list<array<string, mixed>> $offers
+	 * @return ProductRepositoryInterface&\Mockery\MockInterface
 	 */
 	private function repoWithOffers( array $offers, bool $saveOk = true ): ProductRepositoryInterface {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
