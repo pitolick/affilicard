@@ -1,6 +1,6 @@
 # 購入リンクの複数保持と優先表示（listing の offers 化）
 
-> **ステータス**: 設計完了（2026-09-11 brainstorm）。実装未着手。
+> **ステータス**: 設計完了（2026-09-11 brainstorm）。実装済み。
 > **バージョン**: v3.5.0 → **v4.0.0**（MAJOR・listing の形が変わるため公開 IF 破壊）
 > **先行 spec**: [2026-07-22-refresh-queue-design.md](2026-07-22-refresh-queue-design.md)（キュー機構）／[2026-08-25-refresh-queue-scalability-design.md](2026-08-25-refresh-queue-scalability-design.md)（`needsRefetch` と掃引）／[2026-07-26-platform-display-order-design.md](2026-07-26-platform-display-order-design.md)（表示順の規約）
 
@@ -74,7 +74,7 @@ listing には**人が決める設定だけ**が残る。取得結果はすべ�
 Offer
 ├ display_order           int       既定 100。小さいほど優先
 ├ external_id             string    ストア側の SKU 識別子
-├ regular_url             string    商品ページ URL（必須）
+├ regular_url             string    商品ページ URL（§3-4 の身元のいずれかが必要）
 ├ affiliate_url           string    アフィリエイト URL（任意）
 ├ price                   string
 ├ list_price              string
@@ -96,7 +96,7 @@ Offer
 - **生死判定はアフィリエイト URL では行えない**。リダイレクタは転送先が 404 でも 302 を返す。`offer の生死 = regular_url の生死` と一意に定義できることが必要である
 - 分離すると `price` / `image_url` / `last_verified_at` を 2 重に持つことになる
 
-したがって `regular_url` は**必須**とし、空の offer は保存時に弾く。生死を判定できない offer は棚卸しの対象外となり、永久に残るためである。`affiliate_url` は任意で、空なら CTA は `affiliate_url ?: regular_url` により通常 URL へ倒れる（既存挙動）。
+したがって `regular_url` は**生死判定の拠り所**であり、実質的に必要である。ただし保存時に弾く条件は「`regular_url` が空」ではなく **§3-4 の身元（`external_id` と `regular_url`）が両方とも空**である——`external_id` さえあれば後から `regular_url` を引き直して再同定できるため、消してしまうと復旧不能になる。`affiliate_url` は任意で、空なら CTA は `affiliate_url ?: regular_url` により通常 URL へ倒れる（既存挙動）。
 
 **既知の弱点**: アフィリエイト ID を変更すると、保存済みの `affiliate_url` が一斉に陳腐化する。正規化（通常 URL だけ保存して描画時に組み立てる）は、ストアによっては決定的なビルダーを作れず都度 API 取得が必要なため採用できない。これは既存の弱点であり本 spec が新たに作る問題ではないが、offer の複数化により保存件数が増えるため影響範囲は広がる。アフィリエイト ID 変更時は全 offer の強制再取得が必要である。
 

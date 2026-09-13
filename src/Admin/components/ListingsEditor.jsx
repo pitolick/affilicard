@@ -301,10 +301,9 @@ function OffersEditor({ offers, fallbackOnTerminal, onChange }) {
 								}
 							/>
 							<TextControl
-								label={__('通常 URL（必須）', 'affilicard')}
-								required
+								label={__('通常 URL', 'affilicard')}
 								help={__(
-									'空のまま保存すると、この購入リンクは保存時に破棄されます（生死を判定できないリンクを残さないため）。',
+									'価格の自動更新と生死判定はこの URL で行います。外部 ID も通常 URL も空のまま保存すると、指し直せないためこの購入リンクは破棄されます。',
 									'affilicard'
 								)}
 								value={offer.regular_url ?? ''}
