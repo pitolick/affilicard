@@ -5,6 +5,7 @@ namespace Affilicard\Queue;
 
 use Affilicard\Cron\ListingRefresher;
 use Affilicard\Platform\PlatformConfig;
+use Affilicard\Pricing\FetchStatus;
 use Affilicard\Provider\ProviderRegistry;
 
 /**
@@ -27,6 +28,33 @@ final class RefreshHandler extends ThrottledActionHandler {
 	 */
 	public static function giveUpTransientKey( int $postId, string $platform ): string {
 		return 'affilicard_refresh_gaveup_' . $postId . '_' . $platform;
+	}
+
+	/**
+	 * give-up マーカーが「今使う購入リンク」に効いているか。投入経路
+	 * （QueueMaintenance::sweep / OfferPromotionTrigger）はこの判定だけを見る。
+	 *
+	 * **マーカーのキーは (post_id, platform) 単位でしか立たない。** onTerminalFailure() が
+	 * 受け取る args にどの購入リンクだったかの情報が無く、キーへ offer の身元を混ぜるには
+	 * 実行時にもう一度 listing を読んで選択をやり直すしかない（すでに書かれた既存キーの
+	 * 面倒も見る必要がある）。代わりに、恒久失敗した購入リンク自身が持つ
+	 * `fetch_status=terminal` を併せて見る——ListingRefresher は TERMINAL_FAILURE を返す
+	 * 前に必ずその offer へ terminal を書き込み、保存に失敗した場合は
+	 * TRANSIENT_FAILURE へ落ちてマーカー自体が立たないため、マーカーと terminal な
+	 * offer は常に対で残る。
+	 *
+	 * これにより、恒久失敗した購入リンク A のマーカーが、繰り上げた別の購入リンク B
+	 * （一度も失敗していない）まで TTL のあいだ止める事故が起きない。B が選ばれている
+	 * 間は取得が走り、成功すれば onSuccess() がマーカーを消す。
+	 *
+	 * @param array<string, mixed> $selectedOffer OfferSelector::select() が選んだ購入リンク。
+	 */
+	public static function isGivenUp( int $postId, string $platform, array $selectedOffer ): bool {
+		if ( ! get_transient( self::giveUpTransientKey( $postId, $platform ) ) ) {
+			return false;
+		}
+		$status = isset( $selectedOffer['fetch_status'] ) ? (string) $selectedOffer['fetch_status'] : '';
+		return FetchStatus::isTerminal( $status );
 	}
 
 	public function __construct(

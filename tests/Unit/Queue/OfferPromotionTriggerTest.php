@@ -455,10 +455,14 @@ final class OfferPromotionTriggerTest extends TestCase {
 			->andReturn(
 				$this->listings(
 					array(
+						// 恒久失敗を検知した ListingRefresher が fetch_status=terminal を
+						// 書き込んだのと同じタイミングで give-up マーカーが立つ（両者は
+						// 常に対で残る）。マーカーだけを持つ fixture は実データに無い。
 						array(
 							'display_order'   => 100,
 							'external_id'     => 'gone',
 							'regular_url'     => 'https://example.test/g',
+							'fetch_status'    => 'terminal',
 							'last_fetched_at' => gmdate( 'c', time() - 30 * 3600 ),
 						),
 					)
@@ -472,6 +476,70 @@ final class OfferPromotionTriggerTest extends TestCase {
 
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$this->trigger()->onListingsSaved( 123 );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * C: give-up マーカーは (post_id, platform) 単位でしか立たないため、恒久失敗した
+	 * 購入リンク A のマーカーが、繰り上げた別の購入リンク B にまで効いてしまっていた。
+	 * B は一度も失敗していないのに TTL（3日）のあいだ投入されない。
+	 *
+	 * マーカーの効く範囲は「今使う購入リンク自身が terminal のとき」に限る
+	 * （{@see RefreshHandler::isGivenUp()}）。terminal かどうかは offer に保存済みで、
+	 * マーカーは常にその書き込みと対で立つため、キーの形を変えずに済む。
+	 */
+	public function test_ギブアップ中でも繰り上げた別の購入リンクは投入する(): void {
+		$this->stubRakutenPlatform();
+		$this->stubGeneralSettings();
+
+		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->once()
+			->with( 123, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				$this->listings(
+					array(
+						// 恒久失敗した購入リンク（give-up マーカーの原因）。後ろへ回した。
+						array(
+							'display_order'   => 100,
+							'external_id'     => 'gone',
+							'regular_url'     => 'https://example.test/g',
+							'fetch_status'    => 'terminal',
+							'last_fetched_at' => gmdate( 'c', time() - 30 * 3600 ),
+						),
+						// 先頭へ繰り上げた購入リンク。一度も失敗していない。
+						array(
+							'display_order'   => 10,
+							'external_id'     => 'promoted',
+							'regular_url'     => 'https://example.test/p',
+							'last_fetched_at' => gmdate( 'c', time() - 30 * 3600 ),
+						),
+					)
+				)
+			);
+
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( RefreshHandler::giveUpTransientKey( 123, 'rakuten-kobo' ) )
+			->andReturn( 1 );
+
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 123,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten',
+				true,
+				Enqueuer::PRIORITY_MANUAL
+			)
+			->andReturn( 501 );
 
 		$this->trigger()->onListingsSaved( 123 );
 

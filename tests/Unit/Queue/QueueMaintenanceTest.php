@@ -434,13 +434,20 @@ final class QueueMaintenanceTest extends TestCase {
 				16,
 				array(
 					array(
-						'platform'        => 'rakuten-kobo',
-						'enabled'         => true,
-						'update_mode'     => 'auto',
-						'auto_update'     => true,
-						'external_id'     => 'deadbeef03',
-						'price'           => '',
-						'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ), // stale だが give-up 中
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							// give-up マーカーは、ListingRefresher が fetch_status=terminal を
+							// 書き込んだのと対で立つ。マーカーだけを持つ形は実データに無い。
+							array(
+								'external_id'     => 'deadbeef03',
+								'price'           => '',
+								'fetch_status'    => 'terminal',
+								'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ), // stale だが give-up 中
+							),
+						),
 					),
 				)
 			)
@@ -1607,5 +1614,64 @@ final class QueueMaintenanceTest extends TestCase {
 		);
 
 		$this->assertSame( array(), $this->sweepAndCollectEnqueued( $listings, $now ) );
+	}
+
+	/**
+	 * C: give-up マーカーは (post_id, platform) 単位でしか立たないため、恒久失敗した
+	 * 購入リンク A のマーカーが、繰り上げた別の購入リンク B にまで効いてしまっていた。
+	 * B は一度も失敗していないのに TTL（3日）のあいだ掃引から外れる。マーカーは
+	 * 「今使う購入リンク自身が terminal のとき」だけ効かせる
+	 * （{@see \Affilicard\Queue\RefreshHandler::isGivenUp()}）。
+	 */
+	public function test_sweep_giveup中でも繰り上げた別の購入リンクは投入する(): void {
+		$this->stubCursor( 0 );
+		$this->stubGeneralSettings();
+		$this->stubQueueDepth( 0 );
+		$this->stubFilterCleanup();
+		$this->stubCompletion();
+		WP_Mock::userFunction( 'get_posts' )->andReturn( array( 17 ) );
+		$this->stubRakutenPlatform();
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->once()->with( 17 )->andReturn(
+			$this->product(
+				17,
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							// 恒久失敗した購入リンク（give-up マーカーの原因）。後ろへ回した。
+							array(
+								'display_order'   => 100,
+								'external_id'     => 'gone',
+								'regular_url'     => 'https://example.test/g',
+								'fetch_status'    => 'terminal',
+								'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ),
+							),
+							// 先頭へ繰り上げた購入リンク。一度も失敗していない。
+							array(
+								'display_order'   => 10,
+								'external_id'     => 'promoted',
+								'regular_url'     => 'https://example.test/p',
+								'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ),
+							),
+						),
+					),
+				)
+			)
+		);
+
+		WP_Mock::userFunction( 'get_transient' )
+			->with( 'affilicard_refresh_gaveup_17_rakuten-kobo' )
+			->andReturn( 1 );
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 200 );
+
+		$result = ( new QueueMaintenance( $repo, new Enqueuer(), $this->registry(), new SweepCursor() ) )->sweep();
+
+		$this->assertTrue( $result );
+		$this->assertConditionsMet();
 	}
 }

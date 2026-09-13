@@ -180,7 +180,12 @@ final class OfferPromotionTrigger {
 		// QueueMaintenance::sweep() と同じく期間中スキップする。ここを抜けると、
 		// 外部ツールが listings meta を書き換えるたびに、廃盤/無効 ID への
 		// リトライ連鎖を give-up の TTL 内で何度も焼くことになる。
-		if ( get_transient( RefreshHandler::giveUpTransientKey( $postId, $platform ) ) ) {
+		//
+		// ただしマーカーは (post_id, platform) 単位でしか立たないため、判定は
+		// 「今使う購入リンク自身が terminal か」まで含めて RefreshHandler::isGivenUp()
+		// に委ねる。そうしないと、恒久失敗した購入リンクのマーカーが、繰り上げた
+		// 別の購入リンク（一度も失敗していない）まで TTL のあいだ止めてしまう。
+		if ( RefreshHandler::isGivenUp( $postId, $platform, $targets[0] ) ) {
 			return;
 		}
 

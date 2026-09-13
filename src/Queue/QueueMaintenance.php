@@ -252,12 +252,6 @@ final class QueueMaintenance {
 					continue;
 				}
 
-				// B: give-up マーカーが立つ listing（terminal failure 済み＝廃盤/無効 ID）は
-				// GIVEUP_COOLDOWN の間スキップする。
-				if ( get_transient( RefreshHandler::giveUpTransientKey( $id, $platform ) ) ) {
-					continue;
-				}
-
 				// v4.0.0: 判定対象は listing 自身ではなく OfferSelector が選んだ購入リンク
 				// （表示中の offer）。選択結果が空（offers が空）なら更新すべき購入リンクが
 				// 無いためスキップする。
@@ -270,6 +264,16 @@ final class QueueMaintenance {
 					GeneralSettings::fallbackOnTerminal()
 				);
 				if ( array() === $targets ) {
+					continue;
+				}
+
+				// B: give-up マーカーが立つ listing（terminal failure 済み＝廃盤/無効 ID）は
+				// GIVEUP_COOLDOWN の間スキップする。マーカーは (post_id, platform) 単位で
+				// しか立たないため、判定は「今使う購入リンク自身が terminal か」まで含めて
+				// RefreshHandler::isGivenUp() に委ねる（選択の後に置くのはそのため）。
+				// そうしないと、恒久失敗した購入リンクのマーカーが、繰り上げた別の
+				// 購入リンク（一度も失敗していない）まで TTL のあいだ止めてしまう。
+				if ( RefreshHandler::isGivenUp( $id, $platform, $targets[0] ) ) {
 					continue;
 				}
 
