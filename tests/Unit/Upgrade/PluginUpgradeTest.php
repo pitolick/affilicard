@@ -68,10 +68,10 @@ final class PluginUpgradeTest extends TestCase {
 	 * $stored と照合するため、読み取りが常に移行前の値を返すモックでは移行そのものが
 	 * 失敗と判定されてしまう。実 WordPress と同じく「書いた値がそのまま読み戻る」形にする。
 	 *
-	 * @param list<array<string, mixed>> $initial 移行前に格納されている listings。
+	 * @param list<array<string, mixed>>      $initial 移行前に格納されている listings。
 	 * @param list<array<string, mixed>>|null $stored 格納される形の受け皿（参照）。
 	 *   listings そのもの（$stored[0] が 1 件目の listing）が入る。
-	 * @param callable|null $onWrite 書き込み時に生の渡し値で呼ばれる観測用フック。
+	 * @param callable|null                   $onWrite 書き込み時に生の渡し値で呼ばれる観測用フック。
 	 */
 	private function expectListingsRoundTrip( int $postId, array $initial, &$stored, ?callable $onWrite = null ): void {
 		$current = $initial;

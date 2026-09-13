@@ -400,7 +400,7 @@ final class PluginUpgrade {
 	 *
 	 * @param list<mixed> $listings
 	 * @return list<array<string, mixed>> 実際に格納された listings。
-	 * @throws \RuntimeException 書き込み後の読み直しが $stored と一致しないとき。
+	 * @throws \RuntimeException 書き込み後の読み直しが $stored と一致しないとき.
 	 */
 	private static function writeMigratedListings( int $postId, array $listings ): array {
 		return OfferPromotionTrigger::withSuppression(
@@ -416,6 +416,7 @@ final class PluginUpgrade {
 							: ( is_array( $raw ) ? $raw : array() );
 						if ( $persisted !== $stored ) {
 							throw new \RuntimeException(
+								// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- HTML 出力ではなく Action Scheduler のログ／PHP エラーログに残る例外メッセージ。埋め込むのは post ID（int）のみで外部入力を含まない。
 								sprintf( 'affilicard: offers 移行の保存に失敗しました（post %d）。', $postId )
 							);
 						}
