@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Rest;
 
+use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Stock\StockStatus;
 
@@ -14,7 +15,8 @@ use Affilicard\Stock\StockStatus;
 final class ProductSchema {
 
 	/**
-	 * 移行中だけ「regular_url が空の offer を弾く」ルールを外すフラグ。
+	 * 移行中だけ「身元（regular_url / external_id）を 1 つも持たない offer を弾く」
+	 * ルールを外すフラグ。
 	 *
 	 * 既定は false（＝新規保存では必ず弾く）。{@see self::withLegacyOfferPreservation()}
 	 * の実行中だけ true になる。
@@ -24,10 +26,12 @@ final class ProductSchema {
 	private static bool $preserveOffersWithoutRegularUrl = false;
 
 	/**
-	 * 「regular_url が空の offer を弾く」ルールを外して $callback を実行する。
+	 * 「身元（regular_url / external_id）を 1 つも持たない offer を弾く」ルールを外して
+	 * $callback を実行する。
 	 *
 	 * このルールは新規入力向けである（生死を判定できない offer を今後は作らせない）。
-	 * v3 以前のインストールには手入力で affiliate_url だけを持つ listing が実在し得るため、
+	 * v3 以前のインストールには手入力で affiliate_url だけを持つ listing（身元を 1 つも
+	 * 持たない形）が実在し得るため、
 	 * 移行に遡って適用すると復元不能な形でデータが消える。
 	 *
 	 * **移行の書き込みが `update_post_meta()` を通ると、WordPress は `update_metadata()`
@@ -280,8 +284,12 @@ final class ProductSchema {
 		$raw = array();
 		if ( isset( $entry['offers'] ) && is_array( $entry['offers'] ) ) {
 			$raw = $entry['offers'];
-		} elseif ( self::hasFlatFetchFields( $entry ) ) {
-			$raw = array( $entry );
+		} elseif ( LegacyOffer::hasFlatFetchFields( $entry ) ) {
+			// 畳み込みは LegacyOffer に委ねる。ここで $entry をそのまま offer として扱うと
+			// 旧 `fetch_error`（文言）が `fetch_status`（コード）へ写らず、失敗していた
+			// 購入リンクが以後ずっと「取得成功」として振る舞う（移行バッチが到達する前に
+			// 別プラットフォームの価格更新などで保存された商品で実際に起きる）。
+			$raw = array( LegacyOffer::toOffer( $entry ) );
 		}
 
 		$byKey = array();
@@ -290,15 +298,22 @@ final class ProductSchema {
 				continue;
 			}
 
-			$regular = isset( $offer['regular_url'] ) ? (string) esc_url_raw( (string) $offer['regular_url'] ) : '';
-			if ( '' === $regular && ! self::$preserveOffersWithoutRegularUrl ) {
-				// 生死を判定できない offer は棚卸しの対象外になり永久に残るため弾く。
-				// 移行中（withLegacyOfferPreservation）だけはこのルールを外す——既存データを
-				// アップグレードで消さないため。
+			$regular    = isset( $offer['regular_url'] ) ? (string) esc_url_raw( (string) $offer['regular_url'] ) : '';
+			$externalId = isset( $offer['external_id'] ) ? (string) sanitize_text_field( (string) $offer['external_id'] ) : '';
+			if ( '' === $regular && '' === $externalId && ! self::$preserveOffersWithoutRegularUrl ) {
+				// 身元（spec §3-4: external_id、無ければ regular_url）を 1 つも持たない offer は
+				// 生死の判定も再同定もできず永久に残るため弾く。
+				//
+				// **regular_url だけを必須にしない。** それは新規入力向けのルール（§3-3）で
+				// あって、保存のたびに既存データへ遡って適用してよいものではない——
+				// ProductRepository::updateListing() は 1 platform の更新でも商品の全 listing を
+				// 再 sanitize するため、移行が温存した購入リンクが「別プラットフォームの
+				// 定期価格更新」で数時間後に消えていた。external_id があれば再同定できる。
+				//
+				// 移行中（withLegacyOfferPreservation）はこのルール自体を外す——身元を
+				// 1 つも持たない既存データもアップグレードでは消さないため。
 				continue;
 			}
-
-			$externalId = isset( $offer['external_id'] ) ? (string) sanitize_text_field( (string) $offer['external_id'] ) : '';
 			if ( '' !== $externalId ) {
 				$key = 'id:' . $externalId;
 			} elseif ( '' !== $regular ) {
@@ -327,19 +342,5 @@ final class ProductSchema {
 		}
 
 		return array_values( $byKey );
-	}
-
-	/**
-	 * v3 以前の flat な取得結果フィールドを持っているか。
-	 *
-	 * @param array<string, mixed> $entry
-	 */
-	private static function hasFlatFetchFields( array $entry ): bool {
-		foreach ( array( 'external_id', 'regular_url', 'affiliate_url', 'price', 'image_url', 'search_key' ) as $key ) {
-			if ( isset( $entry[ $key ] ) && '' !== (string) $entry[ $key ] ) {
-				return true;
-			}
-		}
-		return false;
 	}
 }

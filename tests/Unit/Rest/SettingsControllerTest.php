@@ -21,7 +21,14 @@ final class SettingsControllerTest extends TestCase {
 		parent::tearDown();
 	}
 
+	private function stubManageOptions( bool $allowed ): void {
+		WP_Mock::userFunction( 'current_user_can' )
+			->with( 'manage_options' )
+			->andReturn( $allowed );
+	}
+
 	public function test_get_returns_200_with_merged_settings(): void {
+		$this->stubManageOptions( true );
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn(
@@ -71,6 +78,7 @@ final class SettingsControllerTest extends TestCase {
 	}
 
 	public function test_get_returns_stocktake_settings(): void {
+		$this->stubManageOptions( true );
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn(
@@ -154,5 +162,35 @@ final class SettingsControllerTest extends TestCase {
 
 		$controller = new SettingsController();
 		$this->assertFalse( $controller->canReadSettings() );
+	}
+
+	/**
+	 * GET の許可は edit_posts まで緩めてあるが、返す中身まで緩めない。
+	 *
+	 * 商品編集画面（ProductSettingsPanel）が必要とするのは fallback_on_terminal 1 つ
+	 * だけである。manage_options を持たない読み手へ一般設定オブジェクト全体（キューの
+	 * 状態・保持期間・スロットル上書き等）を返すと、権限を 1 つのフラグのために
+	 * 緩めたつもりが読み取り面ごと広がる。公開プラグインでは、広げた endpoint は
+	 * そのまま固定化する。
+	 */
+	public function test_manage_optionsが無い読み手にはfallback_on_terminalだけ返す(): void {
+		$this->stubManageOptions( false );
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					'fallback_on_terminal' => true,
+					'cache_ttl_seconds'    => 7200,
+				)
+			);
+
+		$controller = new SettingsController();
+		$request    = new WP_REST_Request( 'GET', '/affilicard/v1/settings' );
+
+		$response = $controller->get( $request );
+		$data     = $response->get_data();
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertSame( array( 'fallback_on_terminal' => true ), $data );
 	}
 }

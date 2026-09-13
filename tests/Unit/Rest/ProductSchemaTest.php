@@ -246,16 +246,17 @@ final class ProductSchemaTest extends TestCase {
 		$this->assertSame( 'nested', $result[0]['offers'][0]['external_id'] );
 	}
 
-	public function test_regular_urlが空のofferは弾く(): void {
-		// 生死を判定できない offer は棚卸しの対象外になり永久に残る。
+	public function test_regular_urlもexternal_idも無いofferは弾く(): void {
+		// 識別子を 1 つも持たない offer は、生死の判定も再同定もできず永久に残る。
 		$result = ProductSchema::sanitizeListings(
 			array(
 				array(
 					'platform' => 'rakuten-kobo',
 					'offers'   => array(
 						array(
-							'external_id' => 'nourl',
-							'regular_url' => '',
+							'external_id'   => '',
+							'regular_url'   => '',
+							'affiliate_url' => 'https://aff.test/orphan',
 						),
 						array(
 							'external_id' => 'ok',
@@ -268,6 +269,74 @@ final class ProductSchemaTest extends TestCase {
 
 		$this->assertCount( 1, $result[0]['offers'] );
 		$this->assertSame( 'ok', $result[0]['offers'][0]['external_id'] );
+	}
+
+	/**
+	 * external_id を持つ offer は regular_url が空でも保存で消さない。
+	 *
+	 * spec §3-4 の身元は「external_id、無ければ regular_url」であり、external_id が
+	 * あれば再同定できる。regular_url 必須は新規入力向けのルール（§3-3）であって、
+	 * 保存のたびに既存データへ遡って適用してよいものではない——移行が温存した
+	 * 購入リンクが、同じ商品の別プラットフォームの価格更新（ProductRepository::
+	 * updateListing() が全 listing を再 sanitize する）で数時間後に消えていた。
+	 */
+	public function test_external_idを持つofferはregular_urlが空でも残す(): void {
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform' => 'rakuten-kobo',
+					'offers'   => array(
+						array(
+							'external_id'   => 'rescued',
+							'regular_url'   => '',
+							'affiliate_url' => 'https://aff.test/rescued',
+						),
+					),
+				),
+			)
+		);
+
+		$this->assertCount( 1, $result[0]['offers'], 'external_id を持つ購入リンクが保存で消えている' );
+		$this->assertSame( 'rescued', $result[0]['offers'][0]['external_id'] );
+		$this->assertSame( 'https://aff.test/rescued', $result[0]['offers'][0]['affiliate_url'] );
+	}
+
+	/**
+	 * flat な listing を offers[0] へ畳むとき、v3 以前の fetch_error（日本語の文言）を
+	 * fetch_status へ写す。
+	 *
+	 * 写さないと fetch_status は空＝成功になる。移行バッチが到達する前に通常の保存
+	 * （別プラットフォームの価格更新など）が走った商品は、恒久失敗している購入リンクを
+	 * 「取得成功」として持ち続け、以後どの経路でも失敗が見えなくなる。
+	 */
+	public function test_flatなfetch_errorはfetch_statusへ写像される(): void {
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform'    => 'rakuten-kobo',
+					'external_id' => 'legacy',
+					'regular_url' => 'https://example.test/legacy',
+					'fetch_error' => '該当する商品が見つかりませんでした',
+				),
+			)
+		);
+
+		$this->assertSame( 'terminal', $result[0]['offers'][0]['fetch_status'] );
+	}
+
+	public function test_flatな未知のfetch_errorはtransientへ倒れる(): void {
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform'    => 'rakuten-kobo',
+					'external_id' => 'legacy',
+					'regular_url' => 'https://example.test/legacy',
+					'fetch_error' => 'HTTP 503',
+				),
+			)
+		);
+
+		$this->assertSame( 'transient', $result[0]['offers'][0]['fetch_status'] );
 	}
 
 	public function test_識別子が重複するofferは後勝ちでマージする(): void {

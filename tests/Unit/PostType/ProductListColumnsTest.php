@@ -275,18 +275,36 @@ final class ProductListColumnsTest extends TestCase {
 		$this->assertStringNotContainsString( '更新待ち', $output );
 	}
 
-	public function test_renderColumn_last_verified_shows_max_timestamp_across_listings(): void {
+	/**
+	 * 「最終同期」は listing 直下ではなく、OfferSelector が選んだ購入リンク（offer）の
+	 * last_verified_at を読む。v4 で last_verified_at は offers[] の下へ移ったため、
+	 * listing 直下を読む実装は移行後の全商品で em dash を出し続ける（黙って死ぬ）。
+	 */
+	public function test_最終同期は選ばれたofferのlast_verified_atの最大値を出す(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 111, ProductPostType::META_LISTINGS, true )
 			->andReturn(
 				array(
 					array(
-						'platform'         => 'dmm-books',
-						'last_verified_at' => '2026-07-20T10:00:00+00:00',
+						'platform' => 'dmm-books',
+						'offers'   => array(
+							array(
+								'regular_url'      => 'https://example.test/a',
+								'last_verified_at' => '2026-07-20T10:00:00+00:00',
+							),
+						),
 					),
 					array(
-						'platform'         => 'rakuten-kobo',
-						'last_verified_at' => '2026-07-21T03:15:00+00:00',
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'regular_url'      => 'https://example.test/b',
+								'last_verified_at' => '2026-07-21T03:15:00+00:00',
+							),
+						),
 					),
 				)
 			);
@@ -298,17 +316,71 @@ final class ProductListColumnsTest extends TestCase {
 		$this->assertSame( '2026-07-21 03:15', $output );
 	}
 
-	public function test_renderColumn_last_verified_echoes_em_dash_when_no_timestamps(): void {
+	/**
+	 * 使用中でない購入リンク（display_order が後ろ）の日時は出さない。
+	 *
+	 * 選択を OfferSelector に委ねていること自体をここで固定する——offers を単に
+	 * 全走査して最大値を取る実装だと、カードが使っていない購入リンクの日時が
+	 * 「最終同期」として出てしまう（fixture が新旧どちらの形でも通ってしまう
+	 * 状態に戻らないための番人）。
+	 */
+	public function test_最終同期は使用中でない購入リンクの日時を出さない(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 333, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'display_order'    => 200,
+								'regular_url'      => 'https://example.test/secondary',
+								'last_verified_at' => '2026-07-25T00:00:00+00:00',
+							),
+							array(
+								'display_order'    => 100,
+								'regular_url'      => 'https://example.test/primary',
+								'last_verified_at' => '2026-07-21T03:15:00+00:00',
+							),
+						),
+					),
+				)
+			);
+
+		ob_start();
+		ProductListColumns::renderColumn( ProductListColumns::COLUMN_LAST_VERIFIED, 333 );
+		$output = (string) ob_get_clean();
+
+		$this->assertSame( '2026-07-21 03:15', $output );
+	}
+
+	/**
+	 * v3 以前の flat な listing（offers 無し・listing 直下に last_verified_at）は
+	 * この列の対象外＝em dash。旧形状を読み続ける実装へ戻ればここが落ちる。
+	 */
+	public function test_最終同期はlisting直下のlast_verified_atを読まない(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 222, ProductPostType::META_LISTINGS, true )
 			->andReturn(
 				array(
 					array(
-						'platform' => 'dmm-books',
+						'platform'         => 'dmm-books',
+						'last_verified_at' => '2026-07-20T10:00:00+00:00',
 					),
 					array(
-						'platform'         => 'rakuten-kobo',
-						'last_verified_at' => '',
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'regular_url'      => 'https://example.test/b',
+								'last_verified_at' => '',
+							),
+						),
 					),
 				)
 			);

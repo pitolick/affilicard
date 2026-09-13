@@ -103,12 +103,67 @@ final class OffersMigrationNoticeTest extends TestCase {
 		$this->assertFalse( OffersMigrationNotice::shouldShowPreserved() );
 	}
 
-	public function test_affilicard以外の画面では通知しない(): void {
+	/**
+	 * 未完通知は affilicard の画面に限定しない。
+	 *
+	 * 移行が終わるまでカードは flat な listing を読み側のフォールバックで描いており、
+	 * この通知がカタログの状態を伝える唯一の signal である。商品 CPT の画面を開いた
+	 * 運用者にしか見えないと、止まった移行は誰にも気づかれない。短命かつ
+	 * dismiss 不可なので、全画面に出しても居座らない。
+	 */
+	public function test_未完通知は商品画面以外にも出す(): void {
 		$this->stubScreen( 'post' );
 		$this->stubCursor( 480 );
+
+		$this->assertTrue( OffersMigrationNotice::shouldShowPending() );
+	}
+
+	/** 温存通知は従来どおり affilicard の画面に限定する（恒久的に出るため）。 */
+	public function test_温存通知はaffilicard以外の画面では出さない(): void {
+		$this->stubScreen( 'post' );
 		$this->stubPreserved( 3 );
 
-		$this->assertFalse( OffersMigrationNotice::shouldShowPending() );
 		$this->assertFalse( OffersMigrationNotice::shouldShowPreserved() );
+	}
+
+	/**
+	 * 温存通知は件数だけでなく、対象商品への編集リンクを出す。
+	 *
+	 * 「12 件消えます」とだけ伝えて、どの商品か分からない通知は運用上何もできない。
+	 */
+	public function test_温存通知は対象商品への編集リンクを出す(): void {
+		$this->stubScreen( 'affilicard_product' );
+		$this->stubCursor( false );
+		$this->stubPreserved( 2 );
+		$this->stubUser( 0 );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS, array() )
+			->andReturn( array( 501, 777 ) );
+		WP_Mock::userFunction( 'get_edit_post_link' )
+			->andReturnUsing(
+				static function ( $id ): string {
+					return 'https://example.test/wp-admin/post.php?post=' . (int) $id . '&action=edit';
+				}
+			);
+		WP_Mock::userFunction( 'get_the_title' )
+			->andReturnUsing(
+				static function ( $id ): string {
+					return '商品' . (int) $id;
+				}
+			);
+		WP_Mock::userFunction( 'wp_nonce_url' )->andReturn( 'https://example.test/dismiss' );
+		WP_Mock::userFunction( 'add_query_arg' )->andReturn( 'https://example.test/current' );
+		WP_Mock::userFunction( '__', array( 'return_arg' => 0 ) );
+		WP_Mock::passthruFunction( 'esc_html' );
+		WP_Mock::passthruFunction( 'esc_html__' );
+		WP_Mock::passthruFunction( 'esc_url' );
+
+		ob_start();
+		OffersMigrationNotice::maybeRender();
+		$output = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'post=501&action=edit', $output, '対象商品への導線が無い' );
+		$this->assertStringContainsString( 'post=777&action=edit', $output, '対象商品への導線が無い' );
+		$this->assertStringContainsString( '商品501', $output );
 	}
 }

@@ -312,19 +312,36 @@ final class ProductListColumns {
 	}
 
 	/**
-	 * 各 listing の `last_verified_at`（UTC ISO8601）のうち最新（MAX）を `wp_date()` でサイトの
+	 * 各 listing について `OfferSelector::select()` が選んだ購入リンク（offer）の
+	 * `last_verified_at`（UTC ISO8601）のうち最新（MAX）を `wp_date()` でサイトの
 	 * タイムゾーン/ロケールに整形して表示する。1件も無ければ Fallback カラムと同じ em dash。
+	 *
+	 * **listing 直下は読まない。** v4 で取得結果フィールドは `offers[]` の下へ移っており、
+	 * 直下の `last_verified_at` は移行後のどの商品にも存在しない（読み続けると、この列は
+	 * カタログ全件で em dash を出し続けて黙って死ぬ）。
+	 *
+	 * offers を素通しで全走査せず OfferSelector を通すのは、カードが実際に使っている
+	 * 購入リンクの同期時刻だけを出すため——使っていない次点の購入リンクの日時を混ぜると、
+	 * 一覧の「最終同期」がカードの表示内容と食い違う（Fallback 列と同じ判断基準に揃える）。
 	 */
 	private static function renderLastVerifiedColumn( int $post_id ): void {
 		$listings_raw = get_post_meta( $post_id, ProductPostType::META_LISTINGS, true );
 		$listings     = is_array( $listings_raw ) ? $listings_raw : ( is_string( $listings_raw ) ? JsonField::decode( $listings_raw, array() ) : array() );
+
+		$fallback_enabled = GeneralSettings::fallbackOnTerminal();
 
 		$max_ts = 0;
 		foreach ( $listings as $listing ) {
 			if ( ! is_array( $listing ) ) {
 				continue;
 			}
-			$at = isset( $listing['last_verified_at'] ) ? trim( (string) $listing['last_verified_at'] ) : '';
+			$offers   = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
+			$selected = OfferSelector::select( $offers, $fallback_enabled );
+			if ( array() === $selected ) {
+				continue;
+			}
+			$offer = $selected[0];
+			$at    = isset( $offer['last_verified_at'] ) ? trim( (string) $offer['last_verified_at'] ) : '';
 			if ( '' === $at ) {
 				continue;
 			}

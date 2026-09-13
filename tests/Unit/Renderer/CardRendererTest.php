@@ -2060,4 +2060,38 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( 'https://af.test/x', $html );
 		$this->assertStringContainsString( '660', $html );
 	}
+
+	/**
+	 * 移行バッチが到達するまでの窓（v4 のコードは動いているが当該商品の meta はまだ flat）で
+	 * カードが空にならないこと。
+	 *
+	 * PluginUpgrade::maybeUpgrade() は移行を「積む」だけなので、Action Scheduler が
+	 * 止まっている（CronDisabledNotice が出るインストール）・商品がゴミ箱から復元された
+	 * 等の理由で、v4 のコードが flat な listing を読む状況は現実に起こる。読み側で
+	 * offers[0] を合成しないと、購入ボタン・価格・書影のすべてが落ちたカードが
+	 * カタログ全体で出続ける。
+	 */
+	public function test_offersが無いflatなlistingでも購入ボタンと価格と書影を描画する(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'         => 'example-store',
+						'enabled'          => true,
+						'affiliate_url'    => 'https://aff.example/legacy',
+						'regular_url'      => 'https://example.com/legacy',
+						'price'            => '660',
+						'image_url'        => 'https://img.example/legacy.jpg',
+						'last_verified_at' => gmdate( 'c', time() - 3600 ),
+					),
+				),
+			)
+		);
+
+		$html = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+
+		$this->assertStringContainsString( 'https://aff.example/legacy', $html, '移行前の listing で購入ボタンが消えている' );
+		$this->assertStringContainsString( '660', $html, '移行前の listing で価格が消えている' );
+		$this->assertStringContainsString( 'https://img.example/legacy.jpg', $html, '移行前の listing で書影が消えている' );
+	}
 }

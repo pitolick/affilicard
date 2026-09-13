@@ -4,8 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Upgrade;
 
 use Affilicard\PostType\ProductPostType;
-use Affilicard\Pricing\FetchStatus;
-use Affilicard\Pricing\OfferSelector;
+use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Queue\OfferPromotionTrigger;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Rest\ProductSchema;
@@ -48,15 +47,29 @@ final class PluginUpgrade {
 	public const OPTION_MIGRATION_CURSOR = 'affilicard_offers_migration_cursor';
 
 	/**
-	 * regular_url を持たないまま offers[0] へ持ち越した listing の延べ件数。
+	 * 身元（regular_url / external_id）を 1 つも持たないまま offers[0] へ持ち越した
+	 * listing の延べ件数。
 	 *
-	 * 新規保存（ProductSchema::sanitizeOffers）は regular_url が空の offer を弾く
-	 * （生死を判定できないため）が、それは新規入力向けのルールであり、移行に遡って
+	 * 新規保存（ProductSchema::sanitizeOffers）は身元を 1 つも持たない offer を弾く
+	 * （生死の判定も再同定もできないため）が、それは新規入力向けのルールであり、移行に遡って
 	 * 適用すると手入力で affiliate_url のみ設定されていた既存 listing のデータが
 	 * 復元不能な形で消える。移行はこのルールを適用せずデータを持ち越す代わりに、
 	 * 件数をここへ積み上げて運用が気づけるようにする（サイレントな消失の禁止）。
 	 */
 	public const OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL = 'affilicard_offers_migration_preserved_without_regular_url';
+
+	/**
+	 * 上記の温存が起きた商品の post ID（重複なし・先頭 {@see self::PRESERVED_POST_IDS_CAP} 件）。
+	 *
+	 * 件数だけの通知は運用上何もできない——「12 件消えます」と言われても、どの商品を
+	 * 直せばよいか分からない。数えるついでに ID を控えて、通知から編集画面へ直接
+	 * 辿れるようにする。全件は持たない（option の肥大を避ける。上限を超えた分は
+	 * 件数にだけ現れる）。
+	 */
+	public const OPTION_MIGRATION_PRESERVED_POST_IDS = 'affilicard_offers_migration_preserved_post_ids';
+
+	/** 通知に出す post ID の保持上限。 */
+	public const PRESERVED_POST_IDS_CAP = 50;
 
 	/**
 	 * offers 移行バッチが使う Action Scheduler の group。
@@ -153,9 +166,9 @@ final class PluginUpgrade {
 	 * offers が既に存在する listing はそのまま返す（冪等性）。中断後の再実行や、
 	 * 二重にスケジュールされたバッチが同じ listing を重複変換することがない。
 	 *
-	 * regular_url を持たない listing でも offer は落とさず持ち越す。新規保存
-	 * （ProductSchema::sanitizeOffers）は regular_url が空の offer を弾くが、それは
-	 * 「今後は生死判定できない offer を作らせない」という新規入力向けのルールであり、
+	 * 身元（regular_url / external_id）を持たない listing でも offer は落とさず持ち越す。
+	 * 新規保存（ProductSchema::sanitizeOffers）はこの形の offer を弾くが、それは
+	 * 「今後は生死判定も再同定もできない offer を作らせない」という新規入力向けのルールであり、
 	 * 移行に遡って適用すると手入力で affiliate_url のみ設定されていた listing のデータが
 	 * 復元不能な形で消える。件数の集計は呼び出し側（バッチ）が offers[0]['regular_url']
 	 * を見て行う。
@@ -168,20 +181,9 @@ final class PluginUpgrade {
 			return $listing;
 		}
 
-		$offer = array(
-			'display_order'    => OfferSelector::DEFAULT_ORDER,
-			'external_id'      => isset( $listing['external_id'] ) ? (string) $listing['external_id'] : '',
-			'regular_url'      => isset( $listing['regular_url'] ) ? (string) $listing['regular_url'] : '',
-			'affiliate_url'    => isset( $listing['affiliate_url'] ) ? (string) $listing['affiliate_url'] : '',
-			'price'            => isset( $listing['price'] ) ? (string) $listing['price'] : '',
-			'list_price'       => isset( $listing['list_price'] ) ? (string) $listing['list_price'] : '',
-			'badge'            => isset( $listing['badge'] ) ? (string) $listing['badge'] : '',
-			'image_url'        => isset( $listing['image_url'] ) ? (string) $listing['image_url'] : '',
-			'search_key'       => isset( $listing['search_key'] ) ? (string) $listing['search_key'] : '',
-			'fetch_status'     => FetchStatus::fromLegacyMessage( isset( $listing['fetch_error'] ) ? (string) $listing['fetch_error'] : '' ),
-			'last_fetched_at'  => isset( $listing['last_fetched_at'] ) ? (string) $listing['last_fetched_at'] : '',
-			'last_verified_at' => isset( $listing['last_verified_at'] ) ? (string) $listing['last_verified_at'] : '',
-		);
+		// flat → offer の写像は LegacyOffer が唯一持つ（保存時の畳み込み・描画時の
+		// フォールバックと同じ関数を通し、片方だけ拾うフィールドが生まれないようにする）。
+		$offer = LegacyOffer::toOffer( $listing );
 
 		foreach ( self::LEGACY_FETCH_FIELDS as $field ) {
 			unset( $listing[ $field ] );
@@ -225,9 +227,29 @@ final class PluginUpgrade {
 		return false !== get_option( self::OPTION_MIGRATION_CURSOR, false );
 	}
 
-	/** regular_url を持たないまま移行で温存した listing の延べ件数。 */
+	/** 身元を持たないまま移行で温存した listing の延べ件数。 */
 	public static function preservedWithoutRegularUrlCount(): int {
 		return (int) get_option( self::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL, 0 );
+	}
+
+	/**
+	 * 上記の温存が起きた商品の post ID（最大 {@see self::PRESERVED_POST_IDS_CAP} 件）。
+	 *
+	 * @return list<int>
+	 */
+	public static function preservedWithoutRegularUrlPostIds(): array {
+		$raw = get_option( self::OPTION_MIGRATION_PRESERVED_POST_IDS, array() );
+		if ( ! is_array( $raw ) ) {
+			return array();
+		}
+		$ids = array();
+		foreach ( $raw as $id ) {
+			$id = (int) $id;
+			if ( $id > 0 && ! in_array( $id, $ids, true ) ) {
+				$ids[] = $id;
+			}
+		}
+		return $ids;
 	}
 
 	/**
@@ -340,7 +362,7 @@ final class PluginUpgrade {
 
 		if ( $changed ) {
 			$stored = self::writeMigratedListings( $postId, $migrated );
-			self::countPreservedWithoutRegularUrl( $stored );
+			self::countPreservedWithoutRegularUrl( $postId, $stored );
 		}
 
 		( new ProductRepository() )->syncDerivedMeta( $postId );
@@ -357,8 +379,8 @@ final class PluginUpgrade {
 	 *
 	 * 2 つの窓をこの 1 回の書き込みだけに掛ける:
 	 *
-	 * - `ProductSchema::withLegacyOfferPreservation()`: regular_url 空の offer を
-	 *   落とすルールを外す。外さないと、移行が丁寧に温存した手入力 listing
+	 * - `ProductSchema::withLegacyOfferPreservation()`: 身元（regular_url / external_id）を
+	 *   1 つも持たない offer を落とすルールを外す。外さないと、移行が丁寧に温存した手入力 listing
 	 *   （affiliate_url だけを持つもの）が保存の瞬間に消える。
 	 * - `OfferPromotionTrigger::withSuppression()`: 移行の書き込みで繰り上がり
 	 *   トリガーを走らせない。移行した offer は元の（多くは古い）last_fetched_at を
@@ -386,15 +408,18 @@ final class PluginUpgrade {
 	}
 
 	/**
-	 * 保存済み listings のうち、regular_url を持たないまま購入リンクを残した offer を数え、
-	 * option へ積み上げる。
+	 * 保存済み listings のうち、身元（regular_url / external_id）を 1 つも持たないまま
+	 * 購入リンクを残した offer を数え、件数と対象 post ID を option へ積み上げる。
 	 *
-	 * 新規保存なら弾かれる形（生死を判定できない＝棚卸しの対象外）なので、運用が
-	 * 手で確認できるよう可視化する。数えるのは「保存後の形」——沈黙も嘘も避けるため。
+	 * **数える対象は「次の保存で消える offer」だけである。** external_id を持つ offer は
+	 * 通常の保存でも消えない（ProductSchema::sanitizeOffers は身元を 1 つも持たない
+	 * offer だけを弾く）ため、これを数えると通知が「消えます」と嘘をつく。
+	 *
+	 * 数えるのは「保存後の形」——沈黙も嘘も避けるため。
 	 *
 	 * @param list<array<string, mixed>> $stored
 	 */
-	private static function countPreservedWithoutRegularUrl( array $stored ): void {
+	private static function countPreservedWithoutRegularUrl( int $postId, array $stored ): void {
 		$preserved = 0;
 
 		foreach ( $stored as $listing ) {
@@ -406,22 +431,42 @@ final class PluginUpgrade {
 				if ( '' !== (string) ( $offer['regular_url'] ?? '' ) ) {
 					continue;
 				}
-				$hasFetchData = '' !== (string) ( $offer['affiliate_url'] ?? '' )
-					|| '' !== (string) ( $offer['external_id'] ?? '' );
-				if ( $hasFetchData ) {
+				if ( '' !== (string) ( $offer['external_id'] ?? '' ) ) {
+					// 身元があるので再同定できる＝通常の保存でも消えない。
+					continue;
+				}
+				if ( '' !== (string) ( $offer['affiliate_url'] ?? '' ) ) {
 					++$preserved;
 				}
 			}
 		}
 
-		if ( $preserved > 0 ) {
-			$total = self::preservedWithoutRegularUrlCount();
-			update_option( self::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL, $total + $preserved, false );
+		if ( $preserved < 1 ) {
+			return;
 		}
+
+		$total = self::preservedWithoutRegularUrlCount();
+		update_option( self::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL, $total + $preserved, false );
+		self::recordPreservedPostId( $postId );
 	}
 
 	/**
-	 * 移行完走時の後始末。カーソル（＝未完の印）を消し、regular_url を持たないまま
+	 * 温存が起きた商品の post ID を控える（重複なし・上限あり）。
+	 *
+	 * 上限を超えたら追加しない。件数は別 option で正確に積み上がるので、通知は
+	 * 「N 件のうち、この商品を確認してください」を示せる。
+	 */
+	private static function recordPreservedPostId( int $postId ): void {
+		$ids = self::preservedWithoutRegularUrlPostIds();
+		if ( in_array( $postId, $ids, true ) || count( $ids ) >= self::PRESERVED_POST_IDS_CAP ) {
+			return;
+		}
+		$ids[] = $postId;
+		update_option( self::OPTION_MIGRATION_PRESERVED_POST_IDS, $ids, false );
+	}
+
+	/**
+	 * 移行完走時の後始末。カーソル（＝未完の印）を消し、身元を持たないまま
 	 * 延命した listing があればログに残す。
 	 *
 	 * **error_log() は運用への通知としては当てにならない**（本番は WP_DEBUG_LOG が off で
@@ -437,7 +482,7 @@ final class PluginUpgrade {
 			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- 新規保存なら弾かれる regular_url 欠落の listing を移行では温存しており、AS 側では完全に不可視になるため運用が気づけるようログに残す。
 			error_log(
 				sprintf(
-					'affilicard: offers 移行が完了しました。regular_url を持たないまま購入リンクを維持した listing が %d 件あります。棚卸しの対象にならないため手動確認を推奨します。',
+					'affilicard: offers 移行が完了しました。通常 URL も外部 ID も持たないまま購入リンクを維持した listing が %d 件あります。次回の保存で削除されるため、通常 URL の追加を推奨します。',
 					$preserved
 				)
 			);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Renderer;
 
 use Affilicard\Platform\PlatformDefinition;
+use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Stock\StockStatus;
@@ -372,6 +373,7 @@ final class CardRenderer {
 		$out = array();
 		foreach ( $sorted as $listing ) {
 			$offers   = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
+			$offers   = array() === $offers ? self::legacyOffers( $listing ) : $offers;
 			$selected = OfferSelector::select( $offers, $fallback_on_terminal );
 			if ( array() === $selected ) {
 				// 選べる購入リンクが無い listing は CTA 行を出さない＝非表示扱い。
@@ -390,6 +392,31 @@ final class CardRenderer {
 			);
 		}
 		return $out;
+	}
+
+	/**
+	 * `offers` を持たない listing（v3 以前の flat な形）から offers[0] を**メモリ上で**合成する。
+	 *
+	 * 移行バッチ（PluginUpgrade）は「積む」だけなので、v4 のコードが動き始めてから
+	 * 当該商品にバッチが到達するまでのあいだ、meta は flat のままである。この窓は
+	 * 短いとは限らない——Action Scheduler が止まっているインストール（CronDisabledNotice
+	 * が出る状態）、移行の走査（post_status=any）が拾わないゴミ箱から復元された商品、
+	 * offer を持たない listing を飛ばす QueueMaintenance::sweep() のいずれでも
+	 * 恒久化し得る。読み側が offers しか見ないと、その間カタログ全体のカードが
+	 * 購入ボタン・価格・書影を失う。
+	 *
+	 * **選択規則はここに持ち込まない。** 合成するのは配列だけで、どの購入リンクを
+	 * 使うかは従来どおり OfferSelector::select() が決める（決定者は 1 つ）。
+	 * 保存はしない（読み取り時の補完のみ。正規化は移行バッチと ProductSchema が行う）。
+	 *
+	 * @param array<string, mixed> $listing
+	 * @return list<array<string, mixed>>
+	 */
+	private static function legacyOffers( array $listing ): array {
+		if ( ! LegacyOffer::hasFlatFetchFields( $listing ) ) {
+			return array();
+		}
+		return array( LegacyOffer::toOffer( $listing ) );
 	}
 
 	/**

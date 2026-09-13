@@ -423,6 +423,24 @@ final class PluginUpgradeTest extends TestCase {
 					return true;
 				}
 			);
+		// 件数だけでは運用が動けない。どの商品かを控える（通知が編集画面へ導線を張る）。
+		$preserved_ids = array();
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS, array() )
+			->andReturnUsing(
+				static function () use ( &$preserved_ids ): array {
+					return $preserved_ids;
+				}
+			);
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS, array( 501 ), false )
+			->andReturnUsing(
+				static function ( $key, $value ) use ( &$preserved_ids ): bool {
+					$preserved_ids = $value;
+					return true;
+				}
+			);
 		WP_Mock::userFunction( 'delete_option' )->once()->with( PluginUpgrade::OPTION_MIGRATION_CURSOR );
 
 		PluginUpgrade::runOffersMigrationBatch();
@@ -438,6 +456,7 @@ final class PluginUpgradeTest extends TestCase {
 
 		// 「温存した」件数は、消えたデータではなく実際に残ったデータについての報告である。
 		$this->assertSame( 1, $preserved );
+		$this->assertSame( array( 501 ), $preserved_ids, '温存した商品の post ID が記録されていない' );
 		$this->assertConditionsMet();
 	}
 
@@ -500,6 +519,13 @@ final class PluginUpgradeTest extends TestCase {
 		WP_Mock::userFunction( 'update_option' )
 			->once()
 			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL, 1, false )
+			->andReturn( true );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS, array( 777 ), false )
 			->andReturn( true );
 		WP_Mock::userFunction( 'delete_option' )->once()->with( PluginUpgrade::OPTION_MIGRATION_CURSOR );
 

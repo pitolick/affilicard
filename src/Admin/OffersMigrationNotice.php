@@ -44,11 +44,14 @@ final class OffersMigrationNotice {
 	 *
 	 * dismiss を効かせない（完走すればカーソルが消えて通知も消える。運用が消せる
 	 * ようにすると、止まったままの移行を握り潰せてしまう）。
+	 *
+	 * **画面を限定しない。** 移行が終わるまでカードは読み側のフォールバック
+	 * （CardRenderer::legacyOffers()）で描かれており、この通知はカタログが移行途上に
+	 * あることを伝える唯一の signal である。affilicard の画面を開いた運用者にしか
+	 * 見えないと、止まった移行が誰にも気づかれない。短命かつ dismiss 不可なので
+	 * 全画面に出しても居座らない（温存通知の方は恒久的に出得るので従来どおり限定する）。
 	 */
 	public static function shouldShowPending(): bool {
-		if ( ! self::isAffilicardScreen() ) {
-			return false;
-		}
 		return PluginUpgrade::isOffersMigrationPending();
 	}
 
@@ -87,7 +90,7 @@ final class OffersMigrationNotice {
 			sprintf(
 				/* translators: %d: 温存した listing の件数。 */
 				__(
-					'affilicard: データ移行で、通常 URL（商品ページ URL）を持たないまま購入リンクを維持した listing が %d 件あります。このままではこの購入リンクは生死を確認できず棚卸しの対象外になるだけでなく、この商品を次に保存する（別プラットフォームの価格更新による自動保存も含む）と自動的に削除されます。消える前に、この購入リンクへ通常 URL を追加してください。',
+					'affilicard: データ移行で、通常 URL（商品ページ URL）も外部 ID も持たないまま購入リンクを維持した listing が %d 件あります。このままではこの購入リンクは生死を確認できず棚卸しの対象外になるだけでなく、この商品を次に保存する（別プラットフォームの価格更新による自動保存も含む）と自動的に削除されます。消える前に、この購入リンクへ通常 URL を追加してください。',
 					'affilicard'
 				),
 				PluginUpgrade::preservedWithoutRegularUrlCount()
@@ -95,7 +98,50 @@ final class OffersMigrationNotice {
 		);
 		echo ' <a href="' . esc_url( $dismiss_url ) . '">'
 			. esc_html__( 'この通知を今後表示しない', 'affilicard' ) . '</a>';
-		echo '</p></div>';
+		echo '</p>';
+		self::renderPreservedPostLinks();
+		echo '</div>';
+	}
+
+	/**
+	 * 温存が起きた商品への編集リンクを列挙する。
+	 *
+	 * 件数だけを告げる通知は運用上何もできない——「12 件消えます」と言われても、
+	 * どの商品を直せばよいか分からない。移行が数えるついでに控えた post ID
+	 * （{@see PluginUpgrade::preservedWithoutRegularUrlPostIds()}）を編集画面への
+	 * 導線にする。ID の保持には上限があるため、件数の方が多い場合は「ほか」と添える。
+	 */
+	private static function renderPreservedPostLinks(): void {
+		$ids = PluginUpgrade::preservedWithoutRegularUrlPostIds();
+		if ( array() === $ids ) {
+			return;
+		}
+
+		echo '<ul style="margin:0 0 0 1.5em;list-style:disc">';
+		foreach ( $ids as $id ) {
+			$link = get_edit_post_link( $id );
+			if ( ! is_string( $link ) || '' === $link ) {
+				continue;
+			}
+			$title = (string) get_the_title( $id );
+			if ( '' === trim( $title ) ) {
+				/* translators: %d: 商品の投稿 ID。 */
+				$title = sprintf( (string) __( '（無題 #%d）', 'affilicard' ), $id );
+			}
+			echo '<li><a href="' . esc_url( $link ) . '">' . esc_html( $title ) . '</a></li>';
+		}
+		echo '</ul>';
+
+		$remaining = PluginUpgrade::preservedWithoutRegularUrlCount() - count( $ids );
+		if ( $remaining > 0 ) {
+			echo '<p>' . esc_html(
+				sprintf(
+					/* translators: %d: 一覧に出していない残りの件数。 */
+					__( 'ほか %d 件は一覧に出していません（表示上限）。', 'affilicard' ),
+					$remaining
+				)
+			) . '</p>';
+		}
 	}
 
 	/**
