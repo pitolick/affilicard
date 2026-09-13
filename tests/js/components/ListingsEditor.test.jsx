@@ -10,6 +10,7 @@ import { useState } from '@wordpress/element';
 import {
 	ListingsEditor,
 	selectInUseOffer,
+	withNormalisedOffers,
 } from '../../../src/Admin/components/ListingsEditor';
 import { fetchPlatforms } from '../../../src/Admin/api/platforms';
 
@@ -671,5 +672,165 @@ describe( 'selectInUseOffer（Affilicard\\Pricing\\OfferSelector::select() と�
 	test( '配列でない要素は無視する', () => {
 		const offers = [ 'こわれた値', offer( 10, 'ok' ) ];
 		expect( selectInUseOffer( offers, false ).external_id ).toBe( 'ok' );
+	} );
+} );
+
+describe( 'withNormalisedOffers（Affilicard\\Pricing\\LegacyOffer::offersWithFallback() と同じ規則であることの固定）', () => {
+	// src/Pricing/LegacyOffer.php（offersWithFallback / hasFlatFetchFields / toOffer）
+	// と同じケースを JS 側にも置く。PHP の分岐を変えたら、このテストも一緒に直すこと
+	// （移行前の listing を編集したときに、保存側と編集側で「購入リンクが何件あるか」
+	// の答えが食い違わないための固定）。
+	const flatListing = ( patch ) => ( {
+		platform: 'rakuten-kobo',
+		enabled: true,
+		update_mode: 'auto',
+		auto_update: true,
+		external_id: 'flat-1',
+		regular_url: 'https://example.test/flat',
+		affiliate_url: 'https://example.test/aff',
+		price: '700',
+		search_key: 'flat-key',
+		...patch,
+	} );
+
+	test( 'offers を持つ listing はそのまま返す', () => {
+		const listing = {
+			platform: 'rakuten-kobo',
+			offers: [ { external_id: 'a', regular_url: 'https://example.test/a' } ],
+		};
+		expect( withNormalisedOffers( listing ) ).toBe( listing );
+	} );
+
+	test( '移行前の flat な listing を offers[0] へ写す', () => {
+		const normalised = withNormalisedOffers( flatListing() );
+
+		expect( normalised.offers ).toHaveLength( 1 );
+		expect( normalised.offers[ 0 ].external_id ).toBe( 'flat-1' );
+		expect( normalised.offers[ 0 ].regular_url ).toBe( 'https://example.test/flat' );
+		expect( normalised.offers[ 0 ].affiliate_url ).toBe( 'https://example.test/aff' );
+		expect( normalised.offers[ 0 ].price ).toBe( '700' );
+		expect( normalised.offers[ 0 ].search_key ).toBe( 'flat-key' );
+		// display_order 未指定は 100（PHP の OfferSelector::DEFAULT_ORDER）。
+		expect( normalised.offers[ 0 ].display_order ).toBe( 100 );
+		// 設定フィールドは残す。
+		expect( normalised.platform ).toBe( 'rakuten-kobo' );
+	} );
+
+	test( '取得結果フィールドを持たない listing は 0 件のまま', () => {
+		const normalised = withNormalisedOffers( {
+			platform: 'rakuten-kobo',
+			enabled: true,
+		} );
+
+		expect( normalised.offers ).toEqual( [] );
+	} );
+
+	test( '取得結果フィールドが空文字だけでも 0 件のまま', () => {
+		const normalised = withNormalisedOffers( {
+			platform: 'rakuten-kobo',
+			external_id: '',
+			regular_url: '',
+			price: '',
+		} );
+
+		expect( normalised.offers ).toEqual( [] );
+	} );
+
+	test( 'offers が空配列でも flat なフィールドがあれば写す', () => {
+		const normalised = withNormalisedOffers( flatListing( { offers: [] } ) );
+
+		expect( normalised.offers ).toHaveLength( 1 );
+		expect( normalised.offers[ 0 ].external_id ).toBe( 'flat-1' );
+	} );
+
+	test( '旧 fetch_error の文言を fetch_status へ写す', () => {
+		// 写さないと、恒久失敗していた購入リンクが「取得成功」として振る舞う。
+		expect(
+			withNormalisedOffers( flatListing( { fetch_error: '該当する商品が見つかりませんでした' } ) )
+				.offers[ 0 ].fetch_status
+		).toBe( 'terminal' );
+		expect(
+			withNormalisedOffers( flatListing( { fetch_error: '対応する自動 Provider がありません' } ) )
+				.offers[ 0 ].fetch_status
+		).toBe( 'unsupported' );
+		// 未知の文言は transient へ倒す（恒久と誤認して購入リンクを飛ばすより安全）。
+		expect(
+			withNormalisedOffers( flatListing( { fetch_error: '手で書き換えられた文言' } ) )
+				.offers[ 0 ].fetch_status
+		).toBe( 'transient' );
+		expect(
+			withNormalisedOffers( flatListing() ).offers[ 0 ].fetch_status
+		).toBe( '' );
+	} );
+} );
+
+describe( 'ListingsEditor 移行前の flat な listing', () => {
+	const flatListings = () => [
+		{
+			platform: 'dmm-books',
+			enabled: true,
+			auto_update: true,
+			external_id: 'flat-1',
+			regular_url: 'https://example.test/flat',
+			affiliate_url: 'https://example.test/aff',
+			price: '700',
+		},
+	];
+
+	test( '既存の購入リンクを 1 件として描画する', async () => {
+		render(
+			<ListingsEditor
+				listings={ flatListings() }
+				platforms={ platforms }
+				onChange={ jest.fn() }
+			/>
+		);
+
+		expect( screen.queryByText( '購入リンクがありません' ) ).toBeNull();
+		// 行の見出しは flat な external_id から作られる（＝1 件として認識している）。
+		await userEvent.click( screen.getByRole( 'button', { name: 'flat-1' } ) );
+		expect( screen.getByLabelText( /通常 URL/ ) ).toHaveValue(
+			'https://example.test/flat'
+		);
+	} );
+
+	test( '購入リンクを追加しても既存の購入リンクが消えない', async () => {
+		const onChange = jest.fn();
+		render(
+			<ListingsEditor
+				listings={ flatListings() }
+				platforms={ platforms }
+				onChange={ onChange }
+			/>
+		);
+
+		await userEvent.click(
+			screen.getByRole( 'button', { name: '購入リンクを追加' } )
+		);
+
+		const next = onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers;
+		expect( next ).toHaveLength( 2 );
+		expect( next[ 0 ].external_id ).toBe( 'flat-1' );
+		expect( next[ 0 ].regular_url ).toBe( 'https://example.test/flat' );
+	} );
+
+	test( '既存の購入リンクを編集しても他のフィールドが落ちない', async () => {
+		const onChange = jest.fn();
+		render(
+			<ListingsEditor
+				listings={ flatListings() }
+				platforms={ platforms }
+				onChange={ onChange }
+			/>
+		);
+
+		await userEvent.click( screen.getByRole( 'button', { name: 'flat-1' } ) );
+		await userEvent.type( screen.getByLabelText( '外部 ID' ), '9' );
+
+		const next = onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers;
+		expect( next ).toHaveLength( 1 );
+		expect( next[ 0 ].external_id ).toBe( 'flat-19' );
+		expect( next[ 0 ].affiliate_url ).toBe( 'https://example.test/aff' );
+		expect( next[ 0 ].price ).toBe( '700' );
 	} );
 } );

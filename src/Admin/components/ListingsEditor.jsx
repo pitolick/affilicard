@@ -44,6 +44,117 @@ function emptyOffer() {
 	};
 }
 
+/**
+ * `Affilicard\Pricing\LegacyOffer::hasFlatFetchFields()`（PHP）と同じ判定。
+ * v3 以前の flat な取得結果フィールドを 1 つでも持っているか（空文字は「持たない」）。
+ *
+ * @param {Object} listing
+ * @return {boolean}
+ */
+function hasFlatFetchFields(listing) {
+	return [
+		'external_id',
+		'regular_url',
+		'affiliate_url',
+		'price',
+		'image_url',
+		'search_key',
+	].some((key) => {
+		const value = listing?.[key];
+		return value !== undefined && value !== null && String(value) !== '';
+	});
+}
+
+/**
+ * `Affilicard\Pricing\FetchStatus::fromLegacyMessage()`（PHP）と同じ写像。
+ * v3 以前が保存していた `fetch_error`（日本語の文言）をコードへ写す。
+ * いずれにも一致しない値は transient へ倒す（恒久と誤認して購入リンクを
+ * 飛ばすより安全）。
+ *
+ * @param {string} message
+ * @return {string}
+ */
+function fetchStatusFromLegacyMessage(message) {
+	const trimmed = String(message ?? '').trim();
+	if (trimmed === '') {
+		return '';
+	}
+	if (trimmed === '対応する自動 Provider がありません') {
+		return 'unsupported';
+	}
+	if (trimmed === '該当する商品が見つかりませんでした') {
+		return 'terminal';
+	}
+	return 'transient';
+}
+
+/**
+ * `Affilicard\Pricing\LegacyOffer::toOffer()`（PHP）と同じ変換。
+ * flat な listing を offers[0] 相当の 1 件へ写す。
+ *
+ * @param {Object} listing
+ * @return {Object}
+ */
+function legacyOffer(listing) {
+	const str = (value) =>
+		value === undefined || value === null ? '' : String(value);
+	const order = listing.display_order;
+	return {
+		display_order:
+			order === undefined || order === null || order === ''
+				? DEFAULT_DISPLAY_ORDER
+				: Number(order),
+		external_id: str(listing.external_id),
+		regular_url: str(listing.regular_url),
+		affiliate_url: str(listing.affiliate_url),
+		price: str(listing.price),
+		list_price: str(listing.list_price),
+		badge: str(listing.badge),
+		image_url: str(listing.image_url),
+		search_key: str(listing.search_key),
+		fetch_status:
+			str(listing.fetch_status) !== ''
+				? str(listing.fetch_status)
+				: fetchStatusFromLegacyMessage(listing.fetch_error),
+		last_fetched_at: str(listing.last_fetched_at),
+		last_verified_at: str(listing.last_verified_at),
+	};
+}
+
+/**
+ * 編集画面へ入ってきた listing の購入リンクを offers[] へ揃える。
+ *
+ * `Affilicard\Pricing\LegacyOffer::offersWithFallback()`（PHP、
+ * src/Pricing/LegacyOffer.php）と同じ規則——`offers` が非空ならそのまま、
+ * 空・不在なら flat な取得結果フィールドから 1 件を合成し、そのフィールドも
+ * 無ければ 0 件。移行バッチが当該商品へ到達する前でも編集画面が同じ購入リンクを
+ * 見るようにするためで、揃えずに渡すと「編集・追加・並べ替え・保存のどれをしても
+ * 既存の購入リンクが保存の瞬間に消える」（保存側は offers キーがあればそちらを
+ * 正とするため）。
+ *
+ * PHP と JS で同じ規則を二重に持つのは意図的（管理画面が REST 往復せずに
+ * 判定するため）。分岐を変えるときは両方直し、
+ * tests/js/components/ListingsEditor.test.jsx の一致確認テストも一緒に直すこと。
+ *
+ * 変換が要らない listing は同じ参照をそのまま返す（無駄な再生成をしない）。
+ *
+ * @param {Object} listing
+ * @return {Object}
+ */
+export function withNormalisedOffers(listing) {
+	if (!listing || typeof listing !== 'object') {
+		return listing;
+	}
+	if (Array.isArray(listing.offers)) {
+		if (listing.offers.length > 0 || !hasFlatFetchFields(listing)) {
+			return listing;
+		}
+	} else if (!hasFlatFetchFields(listing)) {
+		return { ...listing, offers: [] };
+	}
+	return { ...listing, offers: [legacyOffer(listing)] };
+}
+
 function platformName(platforms, code) {
 	const p = (platforms || []).find((x) => x.code === code);
 	return p ? p.name : '';
@@ -393,7 +504,11 @@ export function ListingsEditor({
 			.catch(() => setFetchedPlatforms([]));
 	}, [platformsProp]);
 
-	const rows = Array.isArray(listings) ? listings : [];
+	// 移行前の flat な listing も offers[] へ揃えてから編集する（揃えないと、
+	// 編集・追加・並べ替え・保存のどれをしても既存の購入リンクが消える）。
+	const rows = (Array.isArray(listings) ? listings : []).map(
+		withNormalisedOffers
+	);
 
 	const updateRow = (idx, patch) => {
 		const next = rows.map((r, i) => (i === idx ? { ...r, ...patch } : r));
