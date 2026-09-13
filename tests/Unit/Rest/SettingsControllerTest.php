@@ -129,4 +129,30 @@ final class SettingsControllerTest extends TestCase {
 		$controller = new SettingsController();
 		$this->assertTrue( $controller->canManageOptions() );
 	}
+
+	/**
+	 * 読み取り（GET）は manage_options より緩い edit_posts を要求する。
+	 * affilicard_product は capability_type='post' で Editor は
+	 * manage_options を持たないため、ProductSettingsPanel が
+	 * fallback_on_terminal を読めるように GET だけ緩めてある
+	 * （ProductRestController が商品自体の read 許可を edit_posts に
+	 * 合わせているのと同じ capability）。
+	 */
+	public function test_can_read_settings_checks_edit_posts_not_manage_options(): void {
+		WP_Mock::userFunction( 'current_user_can' )
+			->with( 'edit_posts' )
+			->andReturn( true );
+
+		$controller = new SettingsController();
+		$this->assertTrue( $controller->canReadSettings() );
+	}
+
+	public function test_can_read_settings_denies_when_edit_posts_missing(): void {
+		WP_Mock::userFunction( 'current_user_can' )
+			->with( 'edit_posts' )
+			->andReturn( false );
+
+		$controller = new SettingsController();
+		$this->assertFalse( $controller->canReadSettings() );
+	}
 }

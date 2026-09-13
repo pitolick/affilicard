@@ -9,9 +9,24 @@
 
 const React = require( 'react' );
 
-function TextControl( { label, value, onChange, onBlur, type, className, help } ) {
+function TextControl( {
+	label,
+	value,
+	onChange,
+	onBlur,
+	type,
+	className,
+	help,
+	// 実物の TextControl も input へ渡す前にこれらを取り除く（DOM に漏れると
+	// 「不明な属性」の React 警告になり、@wordpress/jest-console の
+	// assertExpectedCalls に他テストが巻き込まれて落ちる）。
+	__nextHasNoMarginBottom,
+	__next40pxDefaultSize,
+	...rest
+} ) {
 	// help はラベルの子にすると accessible name（getByLabelText の一致文字列）に混ざってしまうため、
 	// label の外側の兄弟要素として描画する。
+	// ...rest（required 等）は実物の TextControl と同様に input へそのまま転送する。
 	return React.createElement(
 		React.Fragment,
 		null,
@@ -24,6 +39,7 @@ function TextControl( { label, value, onChange, onBlur, type, className, help } 
 				value,
 				onChange: ( e ) => onChange( e.target.value ),
 				onBlur,
+				...rest,
 			} )
 		),
 		help

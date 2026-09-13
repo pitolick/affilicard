@@ -1,4 +1,4 @@
-import { useEffect, useState } from '@wordpress/element';
+import { useEffect, useRef, useState } from '@wordpress/element';
 import {
 	TextControl,
 	ToggleControl,
@@ -128,16 +128,6 @@ function offerTitle(offer) {
 	return id !== '' ? id : __('（外部 ID 未設定）', 'affilicard');
 }
 
-// PanelBody の開閉に使う識別子。行の位置（配列 index）に紐づけると、並べ替えで
-// 別の購入リンクが同じ位置に来たときに開閉状態が入れ替わって見える
-// （PanelBody の initialOpen は手動トグルまで毎レンダー読み直されるため）。
-// external_id は外部（ストア）の商品 ID で購入リンクごとに決まるため、これを識別子にする。
-// 未設定のうちは位置でしか区別できないため index にフォールバックする。
-function offerKey(offer, index) {
-	const id = (offer.external_id ?? '').trim();
-	return id !== '' ? `id:${id}` : `pos:${index}`;
-}
-
 function offerTestId(offer, index) {
 	const id = (offer.external_id ?? '').trim();
 	return id !== '' ? id : `pos-${index}`;
@@ -145,6 +135,20 @@ function offerTestId(offer, index) {
 
 function OffersEditor({ offers, fallbackOnTerminal, onChange }) {
 	const rows = Array.isArray(offers) ? offers : [];
+
+	// 行の身元（React key ＝ PanelBody の開閉キー）は、中身（external_id 等）から
+	// 導出してはいけない。導出すると、外部 ID を1文字打つたびに識別子が変わって
+	// React が行を作り直し、openKeys が古いキーのままになって入力中のパネルが
+	// 閉じ、フォーカスも失われる（1文字ごとに入力が止まる）。ここでは行が
+	// 生成された瞬間に発行する uid を使い、以後は並べ替え・追加・削除のときだけ
+	// この配列も同じ操作でなぞる。フィールドの編集では一切触らない。
+	const nextUidRef = useRef(0);
+	const makeUid = () => {
+		nextUidRef.current += 1;
+		return `offer-uid-${nextUidRef.current}`;
+	};
+	const [uids, setUids] = useState(() => rows.map(() => makeUid()));
+
 	const [openKeys, setOpenKeys] = useState(() => new Set());
 	const inUseOffer = selectInUseOffer(rows, fallbackOnTerminal);
 
@@ -160,24 +164,37 @@ function OffersEditor({ offers, fallbackOnTerminal, onChange }) {
 		});
 	};
 
+	// フィールドの編集は行の身元にもならない配列の並びにも触れない。
 	const updateOffer = (idx, patch) => {
 		onChange(rows.map((o, i) => (i === idx ? { ...o, ...patch } : o)));
 	};
 
 	// 削除では残りの display_order を詰めない。外部パイプライン等が明示的に
 	// 振った番号かもしれず、詰めると別の書き手の意図を壊すため。
-	const removeOffer = (idx) => onChange(rows.filter((_, i) => i !== idx));
+	const removeOffer = (idx) => {
+		setUids((prev) => prev.filter((_, i) => i !== idx));
+		onChange(rows.filter((_, i) => i !== idx));
+	};
 
-	const addOffer = () => onChange([...rows, emptyOffer()]);
+	const addOffer = () => {
+		setUids((prev) => [...prev, makeUid()]);
+		onChange([...rows, emptyOffer()]);
+	};
 
 	// 並べ替えは人の操作が明示的な意図なので、新しい並びに display_order を
 	// 振り直す（同値が並んでいても確実に順序が変わるように）。削除時に詰めない
-	// ルールとは別。
+	// ルールとは別。身元（uids）もデータと同じ入れ替えでなぞり、開いていた行が
+	// 新しい位置でも開いたままになるようにする。
 	const move = (idx, direction) => {
 		const target = idx + direction;
 		if (target < 0 || target >= rows.length) {
 			return;
 		}
+		setUids((prev) => {
+			const next = [...prev];
+			[next[idx], next[target]] = [next[target], next[idx]];
+			return next;
+		});
 		const next = [...rows];
 		[next[idx], next[target]] = [next[target], next[idx]];
 		const renumbered = next.map((o, i) => ({
@@ -196,7 +213,9 @@ function OffersEditor({ offers, fallbackOnTerminal, onChange }) {
 				</p>
 			)}
 			{rows.map((offer, i) => {
-				const key = offerKey(offer, i);
+				// uids は rows と同じ操作（追加・削除・並べ替え）でしか変わらないため、
+				// 常に rows と同じ長さ・同じ並びのはず。念のため index にフォールバックする。
+				const key = uids[i] ?? `pos:${i}`;
 				const isInUse = inUseOffer === offer;
 				const statusLabel = offerStatusLabel(offer.fetch_status);
 				return (
@@ -257,7 +276,12 @@ function OffersEditor({ offers, fallbackOnTerminal, onChange }) {
 								}
 							/>
 							<TextControl
-								label={__('通常 URL', 'affilicard')}
+								label={__('通常 URL（必須）', 'affilicard')}
+								required
+								help={__(
+									'空のまま保存すると、この購入リンクは保存時に破棄されます（生死を判定できないリンクを残さないため）。',
+									'affilicard'
+								)}
 								value={offer.regular_url ?? ''}
 								placeholder={__(
 									'https://example.com/item/123',

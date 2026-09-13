@@ -98,6 +98,45 @@ describe( 'ProductSettingsPanel', () => {
 		expect( getLastSetterCall() ).toMatchObject( { affilicard_mask_blur: true } );
 	} );
 
+	// GeneralSettings::fallbackOnTerminal() は REST（fetchSettings）経由で取得し
+	// ListingsEditor まで配線している。これまで ListingsEditor 単体には ON の
+	// テストがあったが、ProductSettingsPanel からの配線そのものは未検証だった
+	// （配線先の endpoint が権限で 403 になっていても、ListingsEditor 単体テストは
+	// 気づけない）。ここでは実際に fetchSettings → 「使用中」表示までを通す。
+	test( 'fallback_on_terminal=ON がサイト設定から「使用中」の印まで届く', async () => {
+		fetchSettings.mockResolvedValue( { fallback_on_terminal: true } );
+		setEntityMeta( {
+			affilicard_listings: [
+				{
+					platform: 'dmm-books',
+					enabled: true,
+					offers: [
+						{
+							display_order: 10,
+							external_id: 'dead',
+							regular_url: 'https://a',
+							fetch_status: 'terminal',
+						},
+						{
+							display_order: 100,
+							external_id: 'alive',
+							regular_url: 'https://b',
+						},
+					],
+				},
+			],
+			affilicard_extras: [],
+		} );
+		render( <ProductSettingsPanel /> );
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+
+		// fallback_on_terminal は非同期取得（REST）なので反映を待つ。
+		await waitFor( () =>
+			expect( screen.getByTestId( 'offer-alive' ) ).toHaveTextContent( '使用中' )
+		);
+		expect( screen.getByTestId( 'offer-dead' ) ).not.toHaveTextContent( '使用中' );
+	} );
+
 	// 回帰防止: setMeta(object) で meta が更新され再レンダーされること。
 	// 以前 setMeta を更新関数形式にしたところ useEntityProp が関数を解釈せず
 	// listing 追加が反映されない不具合があった（E2E で発覚）。

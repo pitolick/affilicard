@@ -6,6 +6,7 @@ jest.mock( '../../../src/Admin/api/platforms' );
 
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from '@wordpress/element';
 import {
 	ListingsEditor,
 	selectInUseOffer,
@@ -392,26 +393,115 @@ describe( 'ListingsEditor 購入リンク（offers）', () => {
 		expect( onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].external_id ).toBe( 'b' );
 	} );
 
-	test( '並べ替えても開閉状態が保たれる', async () => {
-		// PanelBody の initialOpen は手動トグルまで毎レンダー読み直される。
-		// 位置依存の値を渡すと、並べ替えで開閉が入れ替わる。
+	test( '削除しても残りの購入リンクの表示順は詰めない', async () => {
+		// ルールは 2 つ：並べ替えは採番し直す／削除は詰めない。ここでは後者を固定する。
+		// display_order は他の書き手（外部パイプライン等）が明示的に振った番号かもしれず、
+		// 削除のたびに詰め直すとその意図を壊す。
+		const onChange = jest.fn();
+		const three = [
+			{ display_order: 10, external_id: 'a', regular_url: 'https://example.test/a' },
+			{ display_order: 50, external_id: 'b', regular_url: 'https://example.test/b' },
+			{ display_order: 90, external_id: 'c', regular_url: 'https://example.test/c' },
+		];
 		render(
 			<ListingsEditor
-				listings={ listingWithOffers( twoOffers ) }
+				listings={ listingWithOffers( three ) }
 				platforms={ platforms }
-				onChange={ jest.fn() }
+				onChange={ onChange }
 			/>
 		);
 
+		// 'b' の行を開いて、その行の「購入リンクを削除」を押す
+		// （パネルは既定で閉じているため、開いている行にしかボタンは無い）。
+		await userEvent.click( screen.getByRole( 'button', { name: /^b$/ } ) );
+		await userEvent.click(
+			screen.getByRole( 'button', { name: '購入リンクを削除' } )
+		);
+
+		const offers = onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers;
+		expect( offers.map( ( o ) => o.external_id ) ).toEqual( [ 'a', 'c' ] );
+		// 削除で残りの番号を詰め直していないこと（10, 90 のまま）。
+		expect( offers.map( ( o ) => o.display_order ) ).toEqual( [ 10, 90 ] );
+	} );
+
+	test( '並べ替えても開閉状態が保たれる', async () => {
+		// PanelBody の initialOpen は手動トグルまで毎レンダー読み直される。
+		// 位置依存の値を渡すと、並べ替えで開閉が入れ替わる。
+		//
+		// onChange をスタブ（jest.fn()）のままにすると listings prop が実際には
+		// 更新されず、並べ替えクリックは DOM に何の変化も起こさないまま
+		// このテストは通ってしまう（並べ替え自体を検証しない、なにも固定しない
+		// テストになる）。ここでは onChange を実際に state へ反映する
+		// controlled wrapper で描画し、本当に並べ替えさせてから確認する。
+		function Wrapper() {
+			const [ listings, setListings ] = useState(
+				listingWithOffers( twoOffers )
+			);
+			return (
+				<ListingsEditor
+					listings={ listings }
+					platforms={ platforms }
+					onChange={ setListings }
+				/>
+			);
+		}
+		render( <Wrapper /> );
+
 		await userEvent.click( screen.getByRole( 'button', { name: /sale/ } ) ); // 1件目を開く
-		expect( screen.getByLabelText( '通常 URL' ) ).toHaveValue( 'https://example.test/sale' );
+		expect( screen.getByLabelText( /通常 URL/ ) ).toHaveValue( 'https://example.test/sale' );
+
+		// 並べ替え前は sale → normal の順。
+		expect(
+			screen.getAllByText( /^(sale|normal)$/ ).map( ( el ) => el.textContent )
+		).toEqual( [ 'sale', 'normal' ] );
 
 		await userEvent.click(
 			screen.getAllByRole( 'button', { name: '上へ移動' } )[ 1 ]
 		); // 並べ替える
 
-		// 開いているのは依然として 'sale' の行（位置ではなく識別子に紐づく）。
-		expect( screen.getByLabelText( '通常 URL' ) ).toHaveValue( 'https://example.test/sale' );
+		// 並べ替えが実際に起きたこと自体を確認する（vacuous にしないため）。
+		expect(
+			screen.getAllByText( /^(sale|normal)$/ ).map( ( el ) => el.textContent )
+		).toEqual( [ 'normal', 'sale' ] );
+
+		// 位置は入れ替わったが、開いているのは依然として 'sale' の行
+		// （位置ではなく識別子に紐づく）。
+		expect( screen.getByLabelText( /通常 URL/ ) ).toHaveValue( 'https://example.test/sale' );
+	} );
+
+	test( '外部 ID を入力してもパネルが閉じない（識別子が入力内容から導出されていないこと）', async () => {
+		// 識別子を external_id 等の中身から導出すると、1 文字打つたびに識別子が
+		// 変わって行が作り直され、開いていたパネルが閉じてフォーカスが失われる
+		// （1 文字ごとに入力が止まる致命的な不具合になる）。
+		function Wrapper() {
+			const [ listings, setListings ] = useState(
+				listingWithOffers( [
+					{ display_order: 100, external_id: '', regular_url: 'https://example.test/new' },
+				] )
+			);
+			return (
+				<ListingsEditor
+					listings={ listings }
+					platforms={ platforms }
+					onChange={ setListings }
+				/>
+			);
+		}
+		render( <Wrapper /> );
+
+		// external_id 未設定なのでプレースホルダ見出しが行タイトルになる。
+		await userEvent.click(
+			screen.getByRole( 'button', { name: /（外部 ID 未設定）/ } )
+		);
+
+		const externalIdInput = screen.getByLabelText( '外部 ID' );
+		await userEvent.type( externalIdInput, 'a' );
+		// 1 文字目を打った直後も、通常 URL の入力欄が見えている
+		// （パネルが閉じていない）ことを確認する。
+		expect( screen.getByLabelText( /通常 URL/ ) ).toHaveValue( 'https://example.test/new' );
+
+		await userEvent.type( externalIdInput, 'b' );
+		expect( screen.getByLabelText( /通常 URL/ ) ).toHaveValue( 'https://example.test/new' );
 	} );
 
 	test( '使用中の購入リンクに印が付く', () => {
