@@ -816,6 +816,31 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertFalse( $method->invoke( null, $listings ) );
 	}
 
+	/**
+	 * v3 以前の flat な listing（offers キー無し）でも LegacyOffer::offersWithFallback()
+	 * 経由でフォールバック判定の対象になる。これが抜けると、移行バッチが当該商品へ
+	 * 到達するまでの窓でフォールバック中の商品がダッシュボードの件数から漏れる。
+	 */
+	public function test_アフィリURL欠落の判定はoffersが無いflatなlistingでも機能する(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		$listings = array(
+			array(
+				'platform'      => 'rakuten-kobo',
+				'external_id'   => 'a',
+				'regular_url'   => 'https://example.test/a',
+				'affiliate_url' => '',
+			),
+		);
+
+		$method = new ReflectionMethod( ProductRepository::class, 'hasFallbackListing' );
+		$method->setAccessible( true );
+
+		$this->assertTrue( $method->invoke( null, $listings ) );
+	}
+
 	// -------------------------------------------------------
 	// search() テスト
 	// -------------------------------------------------------
@@ -1035,6 +1060,38 @@ final class ProductRepositoryTest extends TestCase {
 
 		$this->assertSame( '', $result['price'] );
 		$this->assertSame( '', $result['platform'] );
+	}
+
+	/**
+	 * v3 以前の flat な listing（offers キー無し・取得結果フィールドが listing 直下）でも
+	 * LegacyOffer::offersWithFallback() 経由で offers[0] 相当へ変換してから価格を選ぶ。
+	 * これが抜けると、移行バッチが当該商品へ到達するまでの窓で管理画面の商品検索結果の
+	 * 価格が空欄になる。
+	 */
+	public function test_listingSummary_offersが無いflatなlistingでも旧フィールドから価格を返す(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 97, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform'      => 'dmm-books',
+						'external_id'   => 'X1',
+						'regular_url'   => 'https://example.test/X1',
+						'affiliate_url' => 'https://example.test/X1?aff=1',
+						'price'         => '¥660',
+					),
+				)
+			);
+
+		$repo   = new ProductRepository();
+		$result = $repo->listingSummary( 97 );
+
+		$this->assertSame( '¥660', $result['price'] );
+		$this->assertSame( 'dmm-books', $result['platform'] );
 	}
 
 	/**

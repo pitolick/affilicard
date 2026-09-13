@@ -5,6 +5,7 @@ namespace Affilicard\Repository;
 
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductPostType;
+use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Schema\SchemaVersion;
 use Affilicard\Settings\GeneralSettings;
@@ -356,6 +357,11 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * 価格は listing 自体ではなく、OfferSelector::select() が選んだ購入リンク（offer）から
 	 * 取る。listing はもはや取得結果を直接持たない。選択結果が空（0 件）なら価格は空文字。
 	 *
+	 * v3 以前の flat な listing（offers 無し）は LegacyOffer::offersWithFallback() 経由で
+	 * offers[0] 相当へ変換してから選択に回す。この結果は mapSearchItem() 経由で管理画面の
+	 * 商品検索結果へ入るため、これを飛ばすと移行バッチが当該商品へ到達するまでの窓で
+	 * 未移行の商品だけ検索結果の価格が空欄になる。
+	 *
 	 * @return array{price: string, platform: string}
 	 */
 	public function listingSummary( int $postId ): array {
@@ -373,7 +379,7 @@ final class ProductRepository implements ProductRepositoryInterface {
 				continue;
 			}
 
-			$offers   = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
+			$offers   = LegacyOffer::offersWithFallback( $listing );
 			$selected = OfferSelector::select( $offers, $fallback_enabled );
 			$price    = array() !== $selected && isset( $selected[0]['price'] ) ? trim( (string) $selected[0]['price'] ) : '';
 
@@ -593,6 +599,10 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * フィールドではなく、選択された offer の性質である。選択結果が空（0 件）の listing は
 	 * 表示するリンク自体が無いため判定対象にしない。
 	 *
+	 * v3 以前の flat な listing（offers 無し）は LegacyOffer::offersWithFallback() 経由で
+	 * offers[0] 相当へ変換してから選択に回す。これを飛ばすと、countFallbackProducts() が
+	 * 参照するダッシュボード件数から、移行バッチが到達するまでの窓で未移行の商品が漏れる。
+	 *
 	 * @param array<int, mixed> $listings
 	 */
 	private static function hasFallbackListing( array $listings ): bool {
@@ -602,7 +612,7 @@ final class ProductRepository implements ProductRepositoryInterface {
 			if ( ! is_array( $listing ) ) {
 				continue;
 			}
-			$offers   = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
+			$offers   = LegacyOffer::offersWithFallback( $listing );
 			$selected = OfferSelector::select( $offers, $fallback_enabled );
 			if ( array() === $selected ) {
 				continue;
