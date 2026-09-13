@@ -123,32 +123,26 @@ final class ListingRefresherTest extends TestCase {
 				),
 			)
 		);
-		$this->savedListing = null;
-		$repo->shouldReceive( 'updateListing' )->andReturnUsing(
-			function ( int $postId, string $platform, array $fields ) use ( $saveOk ): bool {
-				$this->savedListing = $fields;
+		$this->savedOffer = null;
+		$repo->shouldReceive( 'updateListingOffer' )->andReturnUsing(
+			function ( int $postId, string $platform, array $offer ) use ( $saveOk ): bool {
+				$this->savedOffer = $offer;
 				return $saveOk;
 			}
 		);
 		return $repo;
 	}
 
-	/** @var array<string, mixed>|null 直近に updateListing へ渡された listing。 */
-	private ?array $savedListing = null;
-
 	/**
-	 * 保存された offers のうち external_id が一致するものを返す。
+	 * 直近に updateListingOffer() へ渡された購入リンク 1 件。
 	 *
-	 * @return array<string, mixed>
+	 * refreshOne() が保存経路へ渡すのは listing 全体ではなく offer 1 件だけである
+	 * （fetch 前の写しを持ち込まないため）。他の購入リンクを保持したまま差し替える
+	 * 突き合わせは Repository 側の責務で、ProductRepositoryTest が検証する。
+	 *
+	 * @var array<string, mixed>|null
 	 */
-	private function savedOffer( string $externalId ): array {
-		foreach ( (array) ( $this->savedListing['offers'] ?? array() ) as $offer ) {
-			if ( isset( $offer['external_id'] ) && $externalId === $offer['external_id'] ) {
-				return $offer;
-			}
-		}
-		$this->fail( "保存された offers に {$externalId} がない" );
-	}
+	private ?array $savedOffer = null;
 
 	/**
 	 * v2.4.0: 死コード化した run()/refreshProduct()/runForPlatform() 系は削除済み
@@ -214,11 +208,10 @@ final class ListingRefresherTest extends TestCase {
 				),
 			)
 		);
-		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
-			function ( int $postId, string $platform, array $listing ) {
+		$repo->shouldReceive( 'updateListingOffer' )->once()->andReturnUsing(
+			function ( int $postId, string $platform, array $offer ) {
 				$this->assertSame( 20, $postId );
 				$this->assertSame( 'rakuten-kobo', $platform );
-				$offer = $listing['offers'][0];
 				$this->assertSame( '693', $offer['price'] );
 				$this->assertSame( '900', $offer['list_price'] );
 				$this->assertSame( '23%OFF', $offer['badge'] );
@@ -265,9 +258,8 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
-			function ( int $postId, string $platform, array $listing ) {
-				$offer = $listing['offers'][0];
+		$repo->shouldReceive( 'updateListingOffer' )->once()->andReturnUsing(
+			function ( int $postId, string $platform, array $offer ) {
 				$this->assertSame( '600', $offer['price'] );
 				$this->assertSame( 'https://example.test/existing-r', $offer['regular_url'] );
 				$this->assertSame( 'https://example.test/existing-a', $offer['affiliate_url'] );
@@ -330,9 +322,8 @@ final class ListingRefresherTest extends TestCase {
 				),
 			)
 		);
-		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
-			function ( int $postId, string $platform, array $listing ) {
-				$offer = $listing['offers'][0];
+		$repo->shouldReceive( 'updateListingOffer' )->once()->andReturnUsing(
+			function ( int $postId, string $platform, array $offer ) {
 				$this->assertSame( '2020-01-01T00:00:00+09:00', $offer['last_verified_at'] );
 				$this->assertSame( '500', $offer['price'] );
 				return true;
@@ -373,10 +364,9 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
-			function ( int $postId, string $platform, array $listing ) {
+		$repo->shouldReceive( 'updateListingOffer' )->once()->andReturnUsing(
+			function ( int $postId, string $platform, array $offer ) {
 				$this->assertSame( 12, $postId );
-				$offer = $listing['offers'][0];
 				$this->assertSame( '693', $offer['price'] );
 				$this->assertSame( FetchStatus::NONE, $offer['fetch_status'] );
 				return true;
@@ -388,12 +378,15 @@ final class ListingRefresherTest extends TestCase {
 	}
 
 	/**
-	 * fetch は成功したが updateListing() が false（find→再読込の間に対象 listing が
-	 * 削除・変更され保存できなかった）場合、refreshOne() は false を返す。ここで true を
-	 * 返すとハンドラが成功と判断し、取得済みの新価格が保存されないまま再試行もされない
-	 * サイレントなデータロスになる（CodeRabbit 指摘の回帰防止）。
+	 * fetch は成功したが updateListingOffer() が false（find→再読込の間に対象 listing、
+	 * または対象の購入リンクそのものが削除され保存できなかった）場合、refreshOne() は
+	 * TRANSIENT_FAILURE を返す。ここで SUCCESS を返すとハンドラが成功と判断し、取得済みの
+	 * 新価格が保存されないまま再試行もされないサイレントなデータロスになる。
+	 *
+	 * 消えた購入リンクを保存側が復活させない（＝false を返す）ことは
+	 * ProductRepositoryTest 側で検証する。ここは「false を握り潰さない」ことだけを見る。
 	 */
-	public function test_refreshOne_updateListingがfalseなら成功fetchでもTRANSIENTを返す(): void {
+	public function test_refreshOne_updateListingOfferがfalseなら成功fetchでもTRANSIENTを返す(): void {
 		$this->stubRakutenPlatform();
 
 		$provider = Mockery::mock( ProviderInterface::class );
@@ -423,8 +416,8 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		// 保存に失敗（対象 listing が消えた等）を模して false を返す。
-		$repo->shouldReceive( 'updateListing' )->once()->andReturn( false );
+		// 保存に失敗（fetch 中に対象の購入リンクが削除された等）を模して false を返す。
+		$repo->shouldReceive( 'updateListingOffer' )->once()->andReturn( false );
 
 		$refresher = new ListingRefresher( $registry, $repo );
 		// 保存競合はリトライで解決し得るため TRANSIENT_FAILURE（give-up しない）。
@@ -461,10 +454,9 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
-			function ( int $postId, string $platform, array $listing ) {
+		$repo->shouldReceive( 'updateListingOffer' )->once()->andReturnUsing(
+			function ( int $postId, string $platform, array $offer ) {
 				// transient 失敗でも保存はされる（fetch_status を記録するため）が price は維持される。
-				$offer = $listing['offers'][0];
 				$this->assertSame( '500', $offer['price'] );
 				$this->assertSame( FetchStatus::TRANSIENT, $offer['fetch_status'] );
 				return true;
@@ -511,9 +503,8 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
-			function ( int $postId, string $platform, array $listing ) {
-				$offer = $listing['offers'][0];
+		$repo->shouldReceive( 'updateListingOffer' )->once()->andReturnUsing(
+			function ( int $postId, string $platform, array $offer ) {
 				$this->assertSame( '500', $offer['price'] );
 				$this->assertSame( FetchStatus::TERMINAL, $offer['fetch_status'] );
 				// terminal でも last_verified_at は更新しない（価格の表示鮮度は据え置き）。
@@ -542,7 +533,7 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		$repo->shouldNotReceive( 'updateListing' );
+		$repo->shouldNotReceive( 'updateListingOffer' );
 
 		$refresher = new ListingRefresher( new ProviderRegistry(), $repo );
 		// platform 該当なしは対象なし（no-op）＝SUCCESS。failed 化させない。
@@ -552,7 +543,7 @@ final class ListingRefresherTest extends TestCase {
 	public function test_refreshOne_商品が見つからなければSUCCESS_noop(): void {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->with( 999 )->andReturn( null );
-		$repo->shouldNotReceive( 'updateListing' );
+		$repo->shouldNotReceive( 'updateListingOffer' );
 
 		$refresher = new ListingRefresher( new ProviderRegistry(), $repo );
 		// 削除済み商品は対象なし（no-op）＝SUCCESS。failed 化させない。
@@ -587,7 +578,7 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		$repo->shouldNotReceive( 'updateListing' );
+		$repo->shouldNotReceive( 'updateListingOffer' );
 
 		$refresher = new ListingRefresher( $registry, $repo );
 		// 実行時に無効化された listing は対象外（no-op）＝SUCCESS。failed 化させない。
@@ -617,7 +608,7 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		$repo->shouldNotReceive( 'updateListing' );
+		$repo->shouldNotReceive( 'updateListingOffer' );
 
 		$refresher = new ListingRefresher( $registry, $repo );
 		// 実行時に手動化された listing は対象外（no-op）＝SUCCESS。failed 化させない。
@@ -659,9 +650,8 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
-			function ( int $postId, string $platform, array $listing ) {
-				$offer = $listing['offers'][0];
+		$repo->shouldReceive( 'updateListingOffer' )->once()->andReturnUsing(
+			function ( int $postId, string $platform, array $offer ) {
 				$this->assertSame( '693', $offer['price'] );
 				return true;
 			}
@@ -703,9 +693,10 @@ final class ListingRefresherTest extends TestCase {
 		$outcome = ( new ListingRefresher( $registry, $repo ) )->refreshOne( 20, 'rakuten-kobo' );
 
 		$this->assertSame( WorkOutcome::SUCCESS, $outcome );
-		$this->assertSame( '0', $this->savedOffer( 'sale' )['price'] );
-		// 後続は触られない。
-		$this->assertSame( '', $this->savedOffer( 'normal' )['price'] ?? '' );
+		// 保存へ渡すのは選ばれた 1 件だけ。後続（normal）は渡さない＝触りようがない。
+		$this->assertNotNull( $this->savedOffer );
+		$this->assertSame( 'sale', $this->savedOffer['external_id'] );
+		$this->assertSame( '0', $this->savedOffer['price'] );
 	}
 
 	public function test_成功でfetch_statusが空になる(): void {
@@ -725,8 +716,8 @@ final class ListingRefresherTest extends TestCase {
 		$outcome = ( new ListingRefresher( $registry, $repo ) )->refreshOne( 20, 'rakuten-kobo' );
 
 		$this->assertSame( WorkOutcome::SUCCESS, $outcome );
-		$this->assertSame( FetchStatus::NONE, $this->savedOffer( 'x' )['fetch_status'] );
-		$this->assertArrayNotHasKey( 'fetch_error', $this->savedOffer( 'x' ) );
+		$this->assertSame( FetchStatus::NONE, $this->savedOffer['fetch_status'] );
+		$this->assertArrayNotHasKey( 'fetch_error', $this->savedOffer );
 	}
 
 	public function test_terminal_missでfetch_statusがterminalになる(): void {
@@ -745,11 +736,11 @@ final class ListingRefresherTest extends TestCase {
 		$outcome = ( new ListingRefresher( $registry, $repo ) )->refreshOne( 20, 'rakuten-kobo' );
 
 		$this->assertSame( WorkOutcome::TERMINAL_FAILURE, $outcome );
-		$this->assertSame( FetchStatus::TERMINAL, $this->savedOffer( 'gone' )['fetch_status'] );
+		$this->assertSame( FetchStatus::TERMINAL, $this->savedOffer['fetch_status'] );
 		// last_fetched_at は成功・失敗を問わず毎試行で記録される。OfferPromotionTrigger の
 		// クロスリクエストなループ防止は「needsRefetch() がこの刻印を見て false を返す」
 		// ことに依存しており、terminal 失敗でも刻まれ続けることがその前提。
-		$this->assertNotSame( '', (string) ( $this->savedOffer( 'gone' )['last_fetched_at'] ?? '' ) );
+		$this->assertNotSame( '', (string) ( $this->savedOffer['last_fetched_at'] ?? '' ) );
 	}
 
 	public function test_一時失敗でfetch_statusがtransientになる(): void {
@@ -768,10 +759,10 @@ final class ListingRefresherTest extends TestCase {
 		$outcome = ( new ListingRefresher( $registry, $repo ) )->refreshOne( 20, 'rakuten-kobo' );
 
 		$this->assertSame( WorkOutcome::TRANSIENT_FAILURE, $outcome );
-		$this->assertSame( FetchStatus::TRANSIENT, $this->savedOffer( 'busy' )['fetch_status'] );
+		$this->assertSame( FetchStatus::TRANSIENT, $this->savedOffer['fetch_status'] );
 		// last_fetched_at は成功・失敗を問わず毎試行で記録される（OfferPromotionTrigger の
 		// クロスリクエストなループ防止の前提。上のterminalケースと同じ理由）。
-		$this->assertNotSame( '', (string) ( $this->savedOffer( 'busy' )['last_fetched_at'] ?? '' ) );
+		$this->assertNotSame( '', (string) ( $this->savedOffer['last_fetched_at'] ?? '' ) );
 	}
 
 	public function test_external_idが空ならunsupportedで自動取得しない(): void {
@@ -798,14 +789,22 @@ final class ListingRefresherTest extends TestCase {
 
 		// WorkOutcome は TRANSIENT_FAILURE のまま（リトライ挙動は変えない）。
 		$this->assertSame( WorkOutcome::TRANSIENT_FAILURE, $outcome );
-		$this->assertSame( FetchStatus::UNSUPPORTED, $this->savedListing['offers'][0]['fetch_status'] );
+		$this->assertSame( FetchStatus::UNSUPPORTED, $this->savedOffer['fetch_status'] );
 		// last_fetched_at は成功・失敗を問わず毎試行で記録される（OfferPromotionTrigger の
 		// クロスリクエストなループ防止の前提。上の terminal/transient ケースと同じ理由）。
-		$this->assertNotSame( '', (string) ( $this->savedListing['offers'][0]['last_fetched_at'] ?? '' ) );
+		$this->assertNotSame( '', (string) ( $this->savedOffer['last_fetched_at'] ?? '' ) );
 	}
 
-	public function test_書き戻しは識別子で行い配列の位置に依存しない(): void {
-		// 他の投入で位置が変わるため、添字で書き戻してはいけない。
+	/**
+	 * fetch のあいだに管理画面が購入リンクを追加・削除・並べ替えても、その編集は
+	 * 巻き戻ってはならない。そのための最初の条件が「refreshOne() が fetch 前の
+	 * listing の写しを保存経路へ渡さない」ことである（渡した瞬間、ロックの中で
+	 * 読み直しても書き込む値が古い）。
+	 *
+	 * 身元で突き合わせて 1 件だけ差し替える処理そのものは Repository 側にあり、
+	 * ProductRepositoryTest::test_updateListingOffer_* が検証する。
+	 */
+	public function test_保存へはlisting全体ではなく選ばれた購入リンク1件だけを渡す(): void {
 		$this->stubRakutenPlatform();
 		$registry = $this->rakutenProvider( FetchResult::hit( array( 'price' => '0' ) ) );
 		$repo     = $this->repoWithOffers(
@@ -824,11 +823,16 @@ final class ListingRefresherTest extends TestCase {
 			)
 		);
 
+		// listing 全体を渡す旧経路は使わない。
+		$repo->shouldNotReceive( 'updateListing' );
+
 		( new ListingRefresher( $registry, $repo ) )->refreshOne( 20, 'rakuten-kobo' );
 
-		// 表示順 10 の 'sale'（配列では 2 番目）が更新され、'normal' は無傷。
-		$this->assertSame( '0', $this->savedOffer( 'sale' )['price'] );
-		$this->assertSame( '660', $this->savedOffer( 'normal' )['price'] );
+		// 渡ったのは表示順 10 の 'sale'（配列では 2 番目）1 件だけ。
+		$this->assertNotNull( $this->savedOffer );
+		$this->assertSame( 'sale', $this->savedOffer['external_id'] );
+		$this->assertSame( '0', $this->savedOffer['price'] );
+		$this->assertArrayNotHasKey( 'offers', $this->savedOffer );
 	}
 
 	/**
@@ -972,9 +976,9 @@ final class ListingRefresherTest extends TestCase {
 				)
 			)
 		);
-		$repo->shouldReceive( 'updateListing' )->once()->andReturnUsing(
-			function ( int $postId, string $platform, array $listing ): bool {
-				$this->savedListing = $listing;
+		$repo->shouldReceive( 'updateListingOffer' )->once()->andReturnUsing(
+			function ( int $postId, string $platform, array $offer ): bool {
+				$this->savedOffer = $offer;
 				return true;
 			}
 		);
@@ -982,11 +986,11 @@ final class ListingRefresherTest extends TestCase {
 		$outcome = ( new ListingRefresher( $registry, $repo ) )->refreshOne( 31, 'rakuten-kobo' );
 
 		$this->assertSame( WorkOutcome::SUCCESS, $outcome );
-		$offer = $this->savedOffer( 'flat-1' );
-		$this->assertSame( '550', $offer['price'] );
-		$this->assertSame( FetchStatus::NONE, $offer['fetch_status'] );
-		$this->assertSame( 'https://example.test/flat', $offer['regular_url'] );
-		$this->assertCount( 1, (array) $this->savedListing['offers'] );
+		$this->assertNotNull( $this->savedOffer );
+		$this->assertSame( 'flat-1', $this->savedOffer['external_id'] );
+		$this->assertSame( '550', $this->savedOffer['price'] );
+		$this->assertSame( FetchStatus::NONE, $this->savedOffer['fetch_status'] );
+		$this->assertSame( 'https://example.test/flat', $this->savedOffer['regular_url'] );
 	}
 
 	/**

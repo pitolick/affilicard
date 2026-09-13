@@ -6,6 +6,7 @@ namespace Affilicard\Repository;
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Pricing\LegacyOffer;
+use Affilicard\Pricing\OfferIdentity;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Schema\SchemaVersion;
 use Affilicard\Settings\GeneralSettings;
@@ -218,6 +219,83 @@ final class ProductRepository implements ProductRepositoryInterface {
 
 			update_post_meta( $postId, ProductPostType::META_LISTINGS, array_values( $listings ) );
 			return true;
+		} finally {
+			if ( $got > 0 ) {
+				$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock ) );
+			}
+		}
+	}
+
+	/**
+	 * 指定 platform の listing のうち、身元が一致する購入リンク（offer）1 件だけを
+	 * 差し替えて原子的に保存する。
+	 *
+	 * **価格更新（{@see \Affilicard\Cron\ListingRefresher::refreshOne()}）はこちらを使う。**
+	 * updateListing() は呼び出し側が持っている listing 全体で置き換えるため、外部 API の
+	 * fetch（数百 ms〜数秒）のあいだに管理画面が購入リンクを追加・削除・並べ替えていると、
+	 * その編集が fetch 前の写しで丸ごと巻き戻る（lost update）。ロックの中で listing を
+	 * 読み直しても、書き込む値が古ければ意味がない——**古い値を持ち込まない**ことが要点で、
+	 * だから渡すのは「今回 fetch した 1 件の offer」だけにする。
+	 *
+	 * 突き合わせは配列の添字ではなく身元（{@see OfferIdentity}: external_id、空なら
+	 * regular_url）で行う。offers は複数の書き込み元から届き、位置は安定しない。
+	 *
+	 * **身元が見つからなければ何も保存せず false を返す（追加はしない）。** fetch 中に
+	 * 管理者が削除した購入リンクをここで復活させると、削除操作が無言で取り消される。
+	 * false は呼び出し側で一時失敗として扱われ、リトライ時には「そのとき現存する」
+	 * 購入リンクが選び直されるため、この状態は次の試行で自然に解消する。
+	 *
+	 * 移行前の flat な listing（offers を持たない v3 以前の形）は
+	 * {@see LegacyOffer::offersWithFallback()} で offers[] へ写してから突き合わせる
+	 * （読み取り側・移行バッチと同じ写像を通す）。
+	 *
+	 * ロックの流儀・best-effort 続行の理由は updateListing() と同じ。
+	 *
+	 * @param array<string, mixed> $offer 更新後の購入リンク 1 件。
+	 */
+	public function updateListingOffer( int $postId, string $platform, array $offer ): bool {
+		global $wpdb;
+
+		$lock = "affilicard_listing_{$postId}";
+		$got  = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $lock, 10 ) );
+
+		try {
+			$raw      = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
+			$listings = is_string( $raw )
+				? JsonField::decode( $raw, array() )
+				: ( is_array( $raw ) ? $raw : array() );
+
+			$identity = OfferIdentity::of( $offer );
+
+			foreach ( $listings as $index => $listing ) {
+				if ( ! is_array( $listing ) || ( $listing['platform'] ?? '' ) !== $platform ) {
+					continue;
+				}
+
+				$merged  = array();
+				$written = false;
+				foreach ( LegacyOffer::offersWithFallback( $listing ) as $existing ) {
+					if ( ! $written && is_array( $existing ) && OfferIdentity::of( $existing ) === $identity ) {
+						$merged[] = $offer;
+						$written  = true;
+						continue;
+					}
+					$merged[] = $existing;
+				}
+
+				if ( ! $written ) {
+					// fetch 中に削除された購入リンク。追加し直さず未保存を報告する。
+					return false;
+				}
+
+				$listing['offers']  = $merged;
+				$listings[ $index ] = $listing;
+
+				update_post_meta( $postId, ProductPostType::META_LISTINGS, array_values( $listings ) );
+				return true;
+			}
+
+			return false;
 		} finally {
 			if ( $got > 0 ) {
 				$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock ) );

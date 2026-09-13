@@ -1370,4 +1370,293 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertSame( $new_offers, $saved[0]['offers'] );
 		$this->assertConditionsMet();
 	}
+
+	/**
+	 * A（PR レビュー Round2）: fetch 中に管理画面が別の購入リンクを追加していても、
+	 * 価格更新はその編集を巻き戻さない。
+	 *
+	 * updateListing() は呼び出し側が持っている listing 全体で置き換えるため、
+	 * ロックの中で読み直しても「書き込む値が fetch 前の写し」であり、追加・削除・
+	 * 並べ替えが消える。updateListingOffer() は今回 fetch した 1 件だけを受け取り、
+	 * 読み直した listing へ差し込むので、並行編集が残る。
+	 */
+	public function test_updateListingOffer_fetch中に追加された購入リンクを保持して1件だけ差し替える(): void {
+		$captured = array();
+		$this->mockLockWpdb( 1, $captured );
+
+		// ロックの中で読み直した「今」の listing。r-2 は fetch のあいだに管理者が追加した。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'display_order' => 10,
+								'external_id'   => 'r-1',
+								'price'         => '500',
+							),
+							array(
+								'display_order' => 20,
+								'external_id'   => 'r-2',
+								'price'         => '800',
+							),
+						),
+					),
+					array(
+						'platform' => 'dmm-books',
+						'offers'   => array( array( 'external_id' => 'd-1' ) ),
+					),
+				)
+			);
+
+		$saved = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$saved ) {
+					$this->assertSame( 42, $post_id );
+					$this->assertSame( ProductPostType::META_LISTINGS, $key );
+					$saved = $value;
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'display_order' => 10,
+				'external_id'   => 'r-1',
+				'price'         => '693',
+			)
+		);
+
+		$this->assertTrue( $ok );
+		$this->assertCount( 2, $saved[0]['offers'] );
+		$this->assertSame( '693', $saved[0]['offers'][0]['price'] );
+		// 追加された購入リンクは残る（旧経路ではここが消えていた）。
+		$this->assertSame( 'r-2', $saved[0]['offers'][1]['external_id'] );
+		$this->assertSame( '800', $saved[0]['offers'][1]['price'] );
+		// 別 platform も不変。
+		$this->assertSame( 'dmm-books', $saved[1]['platform'] );
+		$this->assertStringContainsString( 'GET_LOCK', $captured[0] );
+		$this->assertStringContainsString( 'RELEASE_LOCK', $captured[1] );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 突き合わせは配列の添字ではなく身元（external_id）で行う。offers は複数の
+	 * 書き込み元から届き、位置は安定しないため、添字で書き戻すと別の購入リンクを
+	 * 上書きする。
+	 */
+	public function test_updateListingOffer_識別子で突き合わせ配列の位置に依存しない(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'display_order' => 100,
+								'external_id'   => 'normal',
+								'price'         => '660',
+							),
+							array(
+								'display_order' => 10,
+								'external_id'   => 'sale',
+								'price'         => '',
+							),
+						),
+					),
+				)
+			);
+
+		$saved = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$saved ) {
+					$saved = $value;
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'display_order' => 10,
+				'external_id'   => 'sale',
+				'price'         => '0',
+			)
+		);
+
+		$this->assertTrue( $ok );
+		// 配列の 2 番目にいる 'sale' が更新され、1 番目の 'normal' は無傷。
+		$this->assertSame( 'normal', $saved[0]['offers'][0]['external_id'] );
+		$this->assertSame( '660', $saved[0]['offers'][0]['price'] );
+		$this->assertSame( 'sale', $saved[0]['offers'][1]['external_id'] );
+		$this->assertSame( '0', $saved[0]['offers'][1]['price'] );
+		$this->assertConditionsMet();
+	}
+
+	/** external_id を持たない購入リンクは通常 URL（regular_url）で突き合わせる。 */
+	public function test_updateListingOffer_external_idが空なら通常URLで突き合わせる(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => '',
+								'regular_url' => 'https://example.test/manual',
+								'price'       => '',
+							),
+						),
+					),
+				)
+			);
+
+		$saved = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$saved ) {
+					$saved = $value;
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'external_id'  => '',
+				'regular_url'  => 'https://example.test/manual',
+				'fetch_status' => 'unsupported',
+			)
+		);
+
+		$this->assertTrue( $ok );
+		$this->assertCount( 1, $saved[0]['offers'] );
+		$this->assertSame( 'unsupported', $saved[0]['offers'][0]['fetch_status'] );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * fetch のあいだに管理者が削除した購入リンクは、**復活させない**。
+	 *
+	 * 末尾に追加し直すと削除操作が無言で取り消される。何も保存せず false を返し、
+	 * 呼び出し側（ListingRefresher）に一時失敗として扱わせる——リトライでは
+	 * OfferSelector が「そのとき現存する」購入リンクを選び直すため自然に解消する。
+	 */
+	public function test_updateListingOffer_fetch中に削除された購入リンクは追加せずfalseを返す(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => 'r-2',
+								'price'       => '800',
+							),
+						),
+					),
+				)
+			);
+		WP_Mock::userFunction( 'update_post_meta' )->never();
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'external_id' => 'r-1',
+				'price'       => '693',
+			)
+		);
+
+		$this->assertFalse( $ok );
+		$this->assertConditionsMet();
+	}
+
+	/** 該当 platform の listing 自体が無ければ false（保存しない）。 */
+	public function test_updateListingOffer_一致platformが無ければfalseで保存しない(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 7, ProductPostType::META_LISTINGS, true )
+			->andReturn( array( array( 'platform' => 'dmm-books' ) ) );
+		WP_Mock::userFunction( 'update_post_meta' )->never();
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer( 7, 'rakuten-kobo', array( 'external_id' => 'r-1' ) );
+
+		$this->assertFalse( $ok );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 移行前の flat な listing（offers を持たない v3 以前の形）でも、読み取り側と同じ
+	 * 写像（LegacyOffer::offersWithFallback）を通してから突き合わせる。ここで offers を
+	 * 直接読むと、移行バッチが到達していない商品の価格更新が永久に保存できない。
+	 */
+	public function test_updateListingOffer_移行前のflat_listingでもoffers化して差し替える(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 31, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'external_id' => 'flat-1',
+						'regular_url' => 'https://example.test/flat',
+						'price'       => '700',
+					),
+				)
+			);
+
+		$saved = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$saved ) {
+					$saved = $value;
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			31,
+			'rakuten-kobo',
+			array(
+				'external_id' => 'flat-1',
+				'regular_url' => 'https://example.test/flat',
+				'price'       => '550',
+			)
+		);
+
+		$this->assertTrue( $ok );
+		$this->assertCount( 1, $saved[0]['offers'] );
+		$this->assertSame( '550', $saved[0]['offers'][0]['price'] );
+		$this->assertConditionsMet();
+	}
 }

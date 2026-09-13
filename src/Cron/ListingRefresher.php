@@ -25,7 +25,9 @@ use Affilicard\Settings\GeneralSettings;
  * v4.0.0（listing の複数購入リンク化）以降、実際に fetch→反映するのは listing
  * 自身ではなく OfferSelector::select() が選んだ購入リンク（offer）1件のみ。
  * どの購入リンクを使うかの判定は OfferSelector に一元化されており、ここでは
- * その結果を信頼して選ばれた offer だけを更新する。
+ * その結果を信頼して選ばれた offer だけを更新する。**保存に渡すのもその 1 件だけ**
+ * ——listing 全体を渡すと、fetch のあいだに入った管理画面の編集を fetch 前の写しで
+ * 巻き戻す（{@see ProductRepositoryInterface::updateListingOffer()}）。
  */
 class ListingRefresher {
 
@@ -46,11 +48,14 @@ class ListingRefresher {
 	 * ――force enqueue（管理画面「強制更新」）は auto_update=false の listing も対象に
 	 * 含める契約のため、実行時に auto_update だけを理由に取りこぼすと force 機能が壊れる。
 	 *
-	 * 保存は find→save（全 listings 上書き）ではなく Repository::updateListing()（対象
-	 * platform のみ原子的に差し替え）で行う。RateLimiter は account 単位で直列化するため、
-	 * 同一商品の別 platform listing は別 group で並行実行され得る。全 listings 上書きだと
-	 * 後着の save が先着の別 platform 更新を消す（lost update）ため、単一 listing の原子的
-	 * 更新に委譲する。
+	 * 保存は find→save（全 listings 上書き）ではなく Repository::updateListingOffer()
+	 * （対象 platform の、身元が一致する購入リンク 1 件のみ原子的に差し替え）で行う。
+	 * RateLimiter は account 単位で直列化するため、同一商品の別 platform listing は別
+	 * group で並行実行され得る。全 listings 上書きだと後着の save が先着の別 platform
+	 * 更新を消す（lost update）。さらに listing 単位で渡しても、fetch（数百 ms〜数秒）の
+	 * あいだに管理画面が同じ listing の購入リンクを追加・削除・並べ替えていれば、その編集を
+	 * fetch 前の写しで巻き戻してしまう。渡す単位を「今回 fetch した offer 1 件」まで
+	 * 絞り込むことで、古い値そのものを保存経路へ持ち込まない。
 	 */
 	public function refreshOne( int $postId, string $platform ): WorkOutcome {
 		$product = $this->repository->find( $postId );
@@ -67,12 +72,20 @@ class ListingRefresher {
 				return WorkOutcome::SUCCESS;
 			}
 			list( $refreshed, $outcome ) = $this->refreshListing( $listing, (string) $product['title'] );
-			// updateListing() の戻り値を必ず反映する。find() から updateListing() の再読込
-			// までの間（外部 API fetch 中）に対象 platform の listing が削除・変更されると
-			// updateListing() は false（未保存）を返す。ここで false を握り潰すと、取得済みの
+			if ( null === $refreshed ) {
+				// 更新すべき購入リンクが無い＝保存するものも無い。ここで listing を書き戻すと、
+				// fetch もしていないのに fetch 前の写しで管理画面の編集を巻き戻す。
+				return $outcome;
+			}
+			// updateListingOffer() の戻り値を必ず反映する。find() から再読込までの間（外部
+			// API fetch 中）に対象 platform の listing、または対象の購入リンクそのものが
+			// 削除されると false（未保存）が返る。ここで false を握り潰すと、取得済みの
 			// 新しい価格が保存されないまま成功扱いになり、ハンドラが再試行もしない＝サイレントな
 			// データロスになる。保存失敗はリトライで解決し得るため TRANSIENT_FAILURE を返す。
-			$saved = $this->repository->updateListing( $postId, $platform, $refreshed );
+			// 削除された購入リンクを取りこぼしても、リトライでは OfferSelector が「そのとき
+			// 現存する」購入リンクを選び直すため自然に解消する（無限には回らない——
+			// ThrottledActionHandler::backoff() が MAX_ATTEMPTS で打ち切る）。
+			$saved = $this->repository->updateListingOffer( $postId, $platform, $refreshed );
 			if ( ! $saved ) {
 				return WorkOutcome::TRANSIENT_FAILURE;
 			}
@@ -118,13 +131,16 @@ class ListingRefresher {
 
 	/**
 	 * listing の中から OfferSelector が選んだ購入リンク（offer）1件を fetch→反映し、
-	 * 更新後 listing と WorkOutcome のタプルを返す。
+	 * 更新後の offer と WorkOutcome のタプルを返す。
 	 *
-	 * 更新するのは選ばれた offer のみ――listing の他フィールド（platform/enabled/…）や
-	 * offers[] の他要素には一切触れない。
+	 * 返すのは選ばれた offer 1 件だけで、listing は返さない――保存経路（Repository::
+	 * updateListingOffer()）が listing を読み直して差し込むため、ここで listing を組み立てて
+	 * 持ち回ると、その写しが古くなった状態で保存へ渡ってしまう。
+	 *
+	 * 更新すべき購入リンクが無いときは offer に null を返す（保存を行わせない）。
 	 *
 	 * @param array<string, mixed> $listing
-	 * @return array{0: array<string, mixed>, 1: WorkOutcome} 更新後 listing と outcome のタプル
+	 * @return array{0: array<string, mixed>|null, 1: WorkOutcome} 更新後 offer と outcome のタプル
 	 */
 	private function refreshListing( array $listing, string $productTitle ): array {
 		// 移行前の flat な listing（offers を持たず取得結果フィールドが listing 直下に並ぶ
@@ -132,15 +148,16 @@ class ListingRefresher {
 		// する前に管理画面の「強制更新」が走ったとき、一度も fetch せず TRANSIENT_FAILURE
 		// を返してリトライ枠だけを焼く。読み取り側（CardRenderer 等）と同じ写像を通す。
 		//
-		// ここで書き戻す offers[] は、移行バッチにとって「変換済み」と同じ形である。
-		// PluginUpgrade::migrateListingToOffers() は offers を持つ listing をそのまま返す
-		// （冪等）ため、先にこちらが変換しても移行が二重に offer を作ることはない。
+		// このフォールバックで得た offer を保存経路（Repository::updateListingOffer()）へ
+		// 渡すと、保存側も同じ写像で listing を offers[] へ揃えて書き戻す。その形は移行
+		// バッチにとって「変換済み」と同じで、PluginUpgrade::migrateListingToOffers() は
+		// offers を持つ listing をそのまま返す（冪等）ため二重に offer を作ることはない。
 		$offers  = LegacyOffer::offersWithFallback( $listing );
 		$targets = OfferSelector::select( $offers, GeneralSettings::fallbackOnTerminal() );
 		if ( array() === $targets ) {
 			// 更新すべき購入リンクが無い（offers が空）＝何もしない。リトライで解決し得るため
 			// give-up はせず transient 扱いにする。
-			return array( $listing, WorkOutcome::TRANSIENT_FAILURE );
+			return array( null, WorkOutcome::TRANSIENT_FAILURE );
 		}
 		$offer = $targets[0];
 
@@ -161,8 +178,7 @@ class ListingRefresher {
 			// 状態としては恒久的だが、リトライ分類（give-up するかどうか）はここでは変えない
 			// ――give-up するのは「該当なし・無効 ID」（TERMINAL）のときだけ。
 			$offer['fetch_status'] = FetchStatus::UNSUPPORTED;
-			$listing['offers']     = self::writeBackOffer( $offers, $offer );
-			return array( $listing, WorkOutcome::TRANSIENT_FAILURE );
+			return array( $offer, WorkOutcome::TRANSIENT_FAILURE );
 		}
 
 		$context = array(
@@ -178,14 +194,12 @@ class ListingRefresher {
 			// 恒久失敗（該当なし・無効 ID）。last_verified_at は更新せず（表示鮮度据え置き）、
 			// TERMINAL_FAILURE を返してハンドラに give-up させる。
 			$offer['fetch_status'] = FetchStatus::TERMINAL;
-			$listing['offers']     = self::writeBackOffer( $offers, $offer );
-			return array( $listing, WorkOutcome::TERMINAL_FAILURE );
+			return array( $offer, WorkOutcome::TERMINAL_FAILURE );
 		}
 		if ( ! $result->isHit() ) {
 			// 一時失敗（API 到達不可・エラー・認証未設定等）。リトライで解決し得るため give-up しない。
 			$offer['fetch_status'] = FetchStatus::TRANSIENT;
-			$listing['offers']     = self::writeBackOffer( $offers, $offer );
-			return array( $listing, WorkOutcome::TRANSIENT_FAILURE );
+			return array( $offer, WorkOutcome::TRANSIENT_FAILURE );
 		}
 
 		$fetched               = $result->data;
@@ -209,55 +223,6 @@ class ListingRefresher {
 		$fetched_affiliate      = isset( $fetched['affiliate_url'] ) ? (string) $fetched['affiliate_url'] : '';
 		$offer['affiliate_url'] = '' !== $fetched_affiliate ? $fetched_affiliate : ( $offer['affiliate_url'] ?? '' );
 
-		$listing['offers'] = self::writeBackOffer( $offers, $offer );
-		return array( $listing, WorkOutcome::SUCCESS );
-	}
-
-	/**
-	 * 更新した offer を identity（external_id、空なら regular_url）で $offers 内の該当要素へ
-	 * 書き戻す。
-	 *
-	 * **配列の添字では書き戻さない。** offers は listing 編集・自動作成・価格更新など複数の
-	 * 独立した書き込み元から届くため、配列内の位置が安定しているとは限らない。添字で
-	 * 書き戻すと、位置がずれた際に別の購入リンクを誤って上書きしてしまう。
-	 *
-	 * 一致する要素が見つからない場合（fetch 中に offers 自体が入れ替わった等）は末尾に追加する。
-	 *
-	 * @param array<int, mixed>    $offers
-	 * @param array<string, mixed> $offer
-	 * @return list<array<string, mixed>>
-	 */
-	private static function writeBackOffer( array $offers, array $offer ): array {
-		$identity = self::offerIdentity( $offer );
-		$written  = false;
-		$result   = array();
-		foreach ( $offers as $existing ) {
-			if ( ! $written && is_array( $existing ) && self::offerIdentity( $existing ) === $identity ) {
-				$result[] = $offer;
-				$written  = true;
-				continue;
-			}
-			$result[] = $existing;
-		}
-		if ( ! $written ) {
-			$result[] = $offer;
-		}
-		return $result;
-	}
-
-	/**
-	 * offer の識別子。external_id、空なら regular_url。
-	 *
-	 * プレフィックスを付けるのは、一方が external_id 側の値、もう一方が regular_url 側の値と
-	 * 偶然同じ文字列になった場合の衝突を避けるため。
-	 *
-	 * @param array<string, mixed> $offer
-	 */
-	private static function offerIdentity( array $offer ): string {
-		$externalId = isset( $offer['external_id'] ) ? (string) $offer['external_id'] : '';
-		if ( '' !== $externalId ) {
-			return 'external_id:' . $externalId;
-		}
-		return 'regular_url:' . ( isset( $offer['regular_url'] ) ? (string) $offer['regular_url'] : '' );
+		return array( $offer, WorkOutcome::SUCCESS );
 	}
 }
