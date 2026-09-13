@@ -196,12 +196,11 @@ final class ProductListColumns {
 				continue;
 			}
 			$platform_code = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
-			$offers        = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
-			// v3 以前の flat な listing（offers 無し）は CardRenderer の読み取りフォールバック
-			// と同じく LegacyOffer 経由で offers[0] 相当へ変換してから選択に回す。これを
-			// 飛ばすと、移行バッチが当該商品へ到達するまでの窓で、未移行の商品がこの列だけ
-			// 常に em dash（警告なし）になり、実際にフォールバック中の商品を見逃す。
-			$offers   = array() === $offers ? self::legacyOffers( $listing ) : $offers;
+			// v3 以前の flat な listing（offers 無し）は LegacyOffer::offersWithFallback() 経由で
+			// offers[0] 相当へ変換してから選択に回す。これを飛ばすと、移行バッチが当該商品へ
+			// 到達するまでの窓で、未移行の商品がこの列だけ常に em dash（警告なし）になり、
+			// 実際にフォールバック中の商品を見逃す。
+			$offers   = LegacyOffer::offersWithFallback( $listing );
 			$selected = OfferSelector::select( $offers, $fallback_enabled );
 			$offer    = array() !== $selected ? $selected[0] : array();
 
@@ -318,24 +317,6 @@ final class ProductListColumns {
 	}
 
 	/**
-	 * `offers` を持たない listing（v3 以前の flat な形）から offers[0] を**メモリ上で**合成する。
-	 *
-	 * `CardRenderer::legacyOffers()` と同じ変換を `LegacyOffer` に委譲するだけ（変換ロジック
-	 * 自体は 1 箇所に固定——{@see LegacyOffer}）。移行バッチが当該商品へ到達するまでの窓で
-	 * Fallback 列だけが常に em dash（警告なし）を出し続けないためのフォールバック。
-	 * 保存はしない（読み取り時の補完のみ）。
-	 *
-	 * @param array<string, mixed> $listing
-	 * @return list<array<string, mixed>>
-	 */
-	private static function legacyOffers( array $listing ): array {
-		if ( ! LegacyOffer::hasFlatFetchFields( $listing ) ) {
-			return array();
-		}
-		return array( LegacyOffer::toOffer( $listing ) );
-	}
-
-	/**
 	 * 各 listing について `OfferSelector::select()` が選んだ購入リンク（offer）の
 	 * `last_verified_at`（UTC ISO8601）のうち最新（MAX）を `wp_date()` でサイトの
 	 * タイムゾーン/ロケールに整形して表示する。1件も無ければ Fallback カラムと同じ em dash。
@@ -349,9 +330,9 @@ final class ProductListColumns {
 	 * 一覧の「最終同期」がカードの表示内容と食い違う（Fallback 列と同じ判断基準に揃える）。
 	 *
 	 * v3 以前の flat な listing（offers 無し）は renderFallbackColumn() と同じく
-	 * legacyOffers() 経由で offers[0] 相当へ変換してから選択に回す。これを飛ばすと、
-	 * 移行バッチが当該商品へ到達するまでの窓で、実際には last_verified_at を持つ
-	 * 未移行の商品までこの列だけ em dash になる（CodeRabbit round 2）。
+	 * LegacyOffer::offersWithFallback() 経由で offers[0] 相当へ変換してから選択に回す。
+	 * これを飛ばすと、移行バッチが当該商品へ到達するまでの窓で、実際には last_verified_at を
+	 * 持つ未移行の商品までこの列だけ em dash になる（CodeRabbit round 2）。
 	 */
 	private static function renderLastVerifiedColumn( int $post_id ): void {
 		$listings_raw = get_post_meta( $post_id, ProductPostType::META_LISTINGS, true );
@@ -364,8 +345,7 @@ final class ProductListColumns {
 			if ( ! is_array( $listing ) ) {
 				continue;
 			}
-			$offers   = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
-			$offers   = array() === $offers ? self::legacyOffers( $listing ) : $offers;
+			$offers   = LegacyOffer::offersWithFallback( $listing );
 			$selected = OfferSelector::select( $offers, $fallback_enabled );
 			if ( array() === $selected ) {
 				continue;
