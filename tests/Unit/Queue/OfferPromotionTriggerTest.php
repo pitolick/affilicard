@@ -120,13 +120,8 @@ final class OfferPromotionTriggerTest extends TestCase {
 		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
 		WP_Mock::userFunction( 'get_transient' )
 			->once()
-			->with( 'affilicard_offer_promote_123' )
-			->andReturn( false );
-		WP_Mock::userFunction( 'get_transient' )
-			->once()
 			->with( RefreshHandler::giveUpTransientKey( 123, 'rakuten-kobo' ) )
 			->andReturn( false );
-		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
 
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once()
 			->with(
@@ -224,13 +219,8 @@ final class OfferPromotionTriggerTest extends TestCase {
 		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
 		WP_Mock::userFunction( 'get_transient' )
 			->once()
-			->with( 'affilicard_offer_promote_123' )
-			->andReturn( false );
-		WP_Mock::userFunction( 'get_transient' )
-			->once()
 			->with( RefreshHandler::giveUpTransientKey( 123, 'rakuten-kobo' ) )
 			->andReturn( false );
-		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
 
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
@@ -264,13 +254,8 @@ final class OfferPromotionTriggerTest extends TestCase {
 		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
 		WP_Mock::userFunction( 'get_transient' )
 			->once()
-			->with( 'affilicard_offer_promote_123' )
-			->andReturn( false );
-		WP_Mock::userFunction( 'get_transient' )
-			->once()
 			->with( RefreshHandler::giveUpTransientKey( 123, 'rakuten-kobo' ) )
 			->andReturn( false );
-		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
 
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
@@ -296,8 +281,7 @@ final class OfferPromotionTriggerTest extends TestCase {
 				)
 			);
 		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
-		WP_Mock::userFunction( 'get_transient' )->once()->andReturn( false );
-		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
+		WP_Mock::userFunction( 'get_transient' )->never();
 
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
@@ -334,13 +318,8 @@ final class OfferPromotionTriggerTest extends TestCase {
 		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
 		WP_Mock::userFunction( 'get_transient' )
 			->once()
-			->with( 'affilicard_offer_promote_123' )
-			->andReturn( false );
-		WP_Mock::userFunction( 'get_transient' )
-			->once()
 			->with( RefreshHandler::giveUpTransientKey( 123, 'rakuten-kobo' ) )
 			->andReturn( false );
-		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 500 );
 
@@ -349,13 +328,28 @@ final class OfferPromotionTriggerTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
-	public function test_同一リクエストで2回呼んでも投入は1件(): void {
-		// 1層目: 再入ガード。
+	/**
+	 * CodeRabbit Major #2 の回帰テスト。
+	 *
+	 * **このテストの意図は旧版から変わっている。** 旧実装は $inFlight をリクエスト終了まで
+	 * 解放しなかったため、同一リクエスト内で 2 回呼んでも 2 回目は丸ごと無視され
+	 * 「投入は1件」になっていた——だがこれは、platform A の保存で本フックが発火した
+	 * 直後に platform B を保存しても B が一度も評価されないのと同じ欠陥である
+	 * （$inFlight が実行中だけの再入ガードではなく、事実上のセッションスコープの
+	 * 抑止になっていた）。
+	 *
+	 * 修正後は $inFlight を `finally` で必ず解放するため、同一リクエスト内でも
+	 * 実行が完全に終わった後の独立した 2 回目の呼び出しはきちんと評価される。
+	 * この例では 2 回とも同じ stale な状態を渡しているため、2 回とも投入が起きる
+	 * （enqueueManual は要求のたびに unschedule→再schedule するため、最終的に
+	 * pending なジョブは常に1件に収束する。「呼ばれた回数」自体は増えてよい）。
+	 */
+	public function test_同一リクエスト内の2回目の呼び出しも独立して評価される(): void {
 		$this->stubRakutenPlatform();
 		$this->stubGeneralSettings();
 
 		WP_Mock::userFunction( 'get_post_meta' )
-			->once()
+			->twice()
 			->with( 123, ProductPostType::META_LISTINGS, true )
 			->andReturn(
 				$this->listings(
@@ -369,18 +363,13 @@ final class OfferPromotionTriggerTest extends TestCase {
 					)
 				)
 			);
-		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
+		WP_Mock::userFunction( 'get_post_status' )->twice()->with( 123 )->andReturn( 'publish' );
 		WP_Mock::userFunction( 'get_transient' )
-			->once()
-			->with( 'affilicard_offer_promote_123' )
-			->andReturn( false );
-		WP_Mock::userFunction( 'get_transient' )
-			->once()
+			->twice()
 			->with( RefreshHandler::giveUpTransientKey( 123, 'rakuten-kobo' ) )
 			->andReturn( false );
-		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
-		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
-		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 500 );
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->twice();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->twice()->andReturn( 500 );
 
 		$trigger = $this->trigger();
 		$trigger->onListingsSaved( 123 );
@@ -389,23 +378,11 @@ final class OfferPromotionTriggerTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
-	public function test_短期クールダウン中は投入しない(): void {
-		// 2層目: リクエスト跨ぎの連打を吸収する。get_transient が「クールダウン中」を
-		// 返した時点で listings meta の読み出しにすら進まない。
-		WP_Mock::userFunction( 'get_transient' )->once()->andReturn( 1 );
-		WP_Mock::userFunction( 'get_post_meta' )->never();
-		WP_Mock::userFunction( 'set_transient' )->never();
-		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
-		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
-
-		$this->trigger()->onListingsSaved( 123 );
-
-		$this->assertConditionsMet();
-	}
-
 	public function test_再帰させても深さ1で止まる(): void {
 		// 投入処理（as_schedule_single_action）の中から再度 onListingsSaved を呼んでも、
-		// 再入ガードで即座に止まり、投入は1件のまま増えない。
+		// 再入ガードで即座に止まり、投入は1件のまま増えない。再帰呼び出しは外側の
+		// onListingsSaved() の try ブロック内（$inFlight がまだ解放される前）で起きるため、
+		// finally での解放化後もこのテストの前提（1層目が同期的な再帰を止める）は変わらない。
 		$this->stubRakutenPlatform();
 		$this->stubGeneralSettings();
 
@@ -427,13 +404,8 @@ final class OfferPromotionTriggerTest extends TestCase {
 		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
 		WP_Mock::userFunction( 'get_transient' )
 			->once()
-			->with( 'affilicard_offer_promote_123' )
-			->andReturn( false );
-		WP_Mock::userFunction( 'get_transient' )
-			->once()
 			->with( RefreshHandler::giveUpTransientKey( 123, 'rakuten-kobo' ) )
 			->andReturn( false );
-		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
 
 		$trigger = $this->trigger();
@@ -456,14 +428,10 @@ final class OfferPromotionTriggerTest extends TestCase {
 		// 見ないが、本フックにはそのクエリが無い。listings meta への書き込みは
 		// draft/pending/trash でも起こり得るため、sweep 同様に明示的な post_status
 		// ガードが要る。
-		WP_Mock::userFunction( 'get_transient' )
-			->once()
-			->with( 'affilicard_offer_promote_123' )
-			->andReturn( false );
 		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'draft' );
 
+		WP_Mock::userFunction( 'get_transient' )->never();
 		WP_Mock::userFunction( 'get_post_meta' )->never();
-		WP_Mock::userFunction( 'set_transient' )->never();
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
 
@@ -499,13 +467,8 @@ final class OfferPromotionTriggerTest extends TestCase {
 
 		WP_Mock::userFunction( 'get_transient' )
 			->once()
-			->with( 'affilicard_offer_promote_123' )
-			->andReturn( false );
-		WP_Mock::userFunction( 'get_transient' )
-			->once()
 			->with( RefreshHandler::giveUpTransientKey( 123, 'rakuten-kobo' ) )
 			->andReturn( 1 );
-		WP_Mock::userFunction( 'set_transient' )->once()->andReturn( true );
 
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();

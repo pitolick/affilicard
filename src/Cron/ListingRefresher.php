@@ -88,6 +88,11 @@ class ListingRefresher {
 	 * 確保するために使う（RefreshHandler::refreshTargetCount() から呼ばれる）。
 	 *
 	 * 該当 listing・platform が無ければ 0（refreshOne() 自身も fetch を行わない）。
+	 *
+	 * refreshOne() と同じ ListingEligibility::isEnabledAuto() ゲートを先に掛ける。
+	 * これを飛ばすと、実行時に無効化・手動化された listing（refreshOne() が SUCCESS_noop で
+	 * 即 return し fetch しない）にも OfferSelector::select() の件数ぶんレート制限の枠を
+	 * 予約してしまい、実際には使われない枠を無駄に確保することになる（CodeRabbit Minor #3）。
 	 */
 	public function targetCount( int $postId, string $platform ): int {
 		$product = $this->repository->find( $postId );
@@ -97,6 +102,9 @@ class ListingRefresher {
 		foreach ( $product['listings'] as $listing ) {
 			if ( ! is_array( $listing ) || ( $listing['platform'] ?? '' ) !== $platform ) {
 				continue;
+			}
+			if ( ! ListingEligibility::isEnabledAuto( $listing ) ) {
+				return 0;
 			}
 			$offers = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
 			return count( OfferSelector::select( $offers, GeneralSettings::fallbackOnTerminal() ) );

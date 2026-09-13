@@ -32,8 +32,8 @@ use Affilicard\Settings\GeneralSettings;
  * RefreshHandler::handle → ListingRefresher::refreshOne →
  * ProductRepository::updateListing → update_post_meta( META_LISTINGS, ... )）が
  * 結局このフックを再び起動する。折り返してきたその新しいリクエストでは、
- * 同一リクエスト内の再入ガード（$inFlight）は空であり、60秒の短期クールダウンも
- * とうに期限切れなので、1・2層目はこのクロスリクエストな往復を止められない。
+ * 同一リクエスト内の再入ガード（$inFlight）は当然空であり、このクロスリクエストな
+ * 往復をそもそも止める役割は持たない。
  *
  * ループが実際に閉じるのは、`ListingRefresher` が成功・恒久失敗・一時失敗・
  * unsupported のどの結果でも `last_fetched_at` を無条件に刻むためである
@@ -44,22 +44,34 @@ use Affilicard\Settings\GeneralSettings;
  * すべての結果で `last_fetched_at` を刻み続けるという振る舞いに依存している。**
  * その前提が崩れる変更（例: 一部の失敗系統だけ刻印をスキップする）は、この
  * フックを無限ループさせる。
+ *
+ * **$inFlight が守るのは「同一実行内の同期的な再帰」だけであり、「同一リクエスト内の
+ * 独立した複数回の保存」まで塞いではならない。** 以前は $inFlight を解放せず
+ * リクエスト終了まで立てたままにしていたため、例えば platform A の listing 保存で
+ * 本フックが発火し全 listing（A・B）を評価した直後、同じリクエストの中で platform B の
+ * listing を保存しても、$inFlight が残っていて 2 回目の呼び出しが丸ごと無視され、
+ * B の新しい状態が一度も評価されない事故があった（CodeRabbit Major #2）。
+ * onListingsSaved() は $inFlight を `finally` で必ず解放し、実行が完全に終わった後の
+ * 独立した呼び出しは毎回きちんと評価する。
+ *
+ * かつて存在した「60秒の短期クールダウン」（商品単位の transient）は撤去した。
+ * 外部ツールが複数の購入リンクを立て続けに削除するケースを吸収する目的だったが、
+ * 実際にはリクエスト跨ぎでも上と同じ「genuinely later write が無視される」事故を
+ * 再現するだけで、しかも `PriceFreshness::needsRefetch()` 自身が platform 単位で持つ
+ * クールダウンと `Enqueuer::enqueueManual()` の unique=true（pending を必ず 1 件に
+ * 収束させる）がすでに十分な歯止めになっており、二重には要らなかった。
  */
 final class OfferPromotionTrigger {
 
 	/**
-	 * 短期クールダウン（秒）。外部ツールが複数の購入リンクを立て続けに削除する等、
-	 * 同じ商品に対してこのフックがリクエストを跨いで連打されるのを吸収する保険。
-	 * needsRefetch() が持つ長いクールダウン（TTL 起点）とは別物。
-	 */
-	private const COOLDOWN_SECONDS = 60;
-
-	/**
-	 * 同一リクエスト内で処理済みの商品 ID（1層目: 再入ガード）。
+	 * 実行中の商品 ID（1層目: 再入ガード）。
 	 *
-	 * 1 回の保存が listings meta を複数回書く場合や、投入処理から本フックへ再帰
-	 * （enqueueManual の先で他のトリガーが同じ post を触る等）した場合に、同じ
-	 * リクエスト内で二重に処理しないための静的な既処理集合。
+	 * onListingsSaved() の実行中だけ立て、`finally` で必ず解放する（session-scoped では
+	 * ない）。1 回の保存が listings meta を複数回書く場合や、投入処理から本フックへ
+	 * 同期的に再帰（enqueueManual の先で他のトリガーが同じ post を触る等）した場合に、
+	 * その**実行中の**多重処理だけを防ぐための静的集合。同一リクエスト内で実行が
+	 * 完全に終わった後の独立した 2 回目の呼び出しはこれに引っかからず、通常どおり
+	 * 評価される（クラス docblock 参照）。
 	 *
 	 * @var array<int, true>
 	 */
@@ -113,35 +125,33 @@ final class OfferPromotionTrigger {
 			return;
 		}
 
-		// 1層目: 再入ガード（同一リクエスト内）。
+		// 1層目: 再入ガード（同一実行内の同期的な再帰のみを防ぐ）。
 		if ( isset( self::$inFlight[ $postId ] ) ) {
 			return;
 		}
 		self::$inFlight[ $postId ] = true;
 
-		// 2層目: 短期クールダウン（リクエスト跨ぎの連打を吸収する）。
-		$key = 'affilicard_offer_promote_' . $postId;
-		if ( false !== get_transient( $key ) ) {
-			return;
-		}
-
-		// 公開商品のみ対象にする（QueueMaintenance::sweep() の post_status => 'publish'
-		// クエリと同じガード）。sweep はクエリの時点で非公開商品を取得しないが、
-		// このフックは listings meta の書き込みそのものを契機にするため、
-		// draft/pending/trash への書き込みでも素通りしないよう明示的に確認する。
-		if ( 'publish' !== get_post_status( $postId ) ) {
-			return;
-		}
-
-		$listings = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
-		if ( is_array( $listings ) ) {
-			$now = time();
-			foreach ( $listings as $listing ) {
-				$this->maybeEnqueue( $postId, $listing, $now );
+		try {
+			// 公開商品のみ対象にする（QueueMaintenance::sweep() の post_status => 'publish'
+			// クエリと同じガード）。sweep はクエリの時点で非公開商品を取得しないが、
+			// このフックは listings meta の書き込みそのものを契機にするため、
+			// draft/pending/trash への書き込みでも素通りしないよう明示的に確認する。
+			if ( 'publish' !== get_post_status( $postId ) ) {
+				return;
 			}
-		}
 
-		set_transient( $key, 1, self::COOLDOWN_SECONDS );
+			$listings = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
+			if ( is_array( $listings ) ) {
+				$now = time();
+				foreach ( $listings as $listing ) {
+					$this->maybeEnqueue( $postId, $listing, $now );
+				}
+			}
+		} finally {
+			// 実行が正常終了・例外いずれでも、次の（同一リクエスト内かどうかを問わない）
+			// 独立した呼び出しを塞がないよう必ず解放する。
+			unset( self::$inFlight[ $postId ] );
+		}
 	}
 
 	/**
@@ -190,8 +200,8 @@ final class OfferPromotionTrigger {
 			return;
 		}
 
-		// 3層目: Enqueuer::enqueueManual() 自体が unique=true のため、1・2層目を
-		// すり抜けても投入は 1 件に収束する。
+		// 2層目: Enqueuer::enqueueManual() 自体が unique=true のため、1層目をすり抜けても
+		// pending は 1 件に収束する。
 		$this->enqueuer->enqueueManual( $postId, $platform, $account );
 	}
 
@@ -200,7 +210,13 @@ final class OfferPromotionTrigger {
 		return self::$suppressed;
 	}
 
-	/** テスト用に再入ガード（1層目）と抑止フラグ（0層目）を解除する。 */
+	/**
+	 * テスト用に再入ガード（1層目）と抑止フラグ（0層目）を解除する。
+	 *
+	 * 通常運用では $inFlight は onListingsSaved() の `finally` で必ず解放されるため
+	 * 常に空のはずだが、テストが例外的な状態（モックの例外送出テスト等）を挟んだ後の
+	 * 後始末として維持する。
+	 */
 	public static function resetForTests(): void {
 		self::$inFlight   = array();
 		self::$suppressed = false;

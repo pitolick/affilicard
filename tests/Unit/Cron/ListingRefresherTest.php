@@ -889,6 +889,35 @@ final class ListingRefresherTest extends TestCase {
 		$this->assertSame( 0, $count );
 	}
 
+	/**
+	 * CodeRabbit Minor #3: refreshOne() は ListingEligibility::isEnabledAuto() が false の
+	 * listing を fetch せず SUCCESS_noop で終える。targetCount() が同じゲートを掛けずに
+	 * OfferSelector::select() の件数をそのまま返すと、disabled/manual な listing にも
+	 * レート制限の枠を予約してしまう（実際には fetch されない分の枠が無駄になる）。
+	 * offers が1件あっても enabled=false なら 0 を返すことを固定する。
+	 */
+	public function test_targetCount_disabledなlistingはoffersがあっても0を返す(): void {
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 20 )->andReturn(
+			$this->product(
+				20,
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => false,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array( array( 'external_id' => 'e1' ) ),
+					),
+				)
+			)
+		);
+
+		$count = ( new ListingRefresher( new ProviderRegistry(), $repo ) )->targetCount( 20, 'rakuten-kobo' );
+
+		$this->assertSame( 0, $count );
+	}
+
 	/** 商品が見つからなければ 0（refreshOne 自身も対象なし＝no-op）。 */
 	public function test_targetCount_商品が見つからなければ0を返す(): void {
 		$repo = Mockery::mock( ProductRepositoryInterface::class );

@@ -197,6 +197,57 @@ final class ProductListColumnsTest extends TestCase {
 		$this->assertStringNotContainsString( '更新待ち', $output );
 	}
 
+	/**
+	 * CodeRabbit Major #1: v3 以前の flat な listing（offers 無し・取得結果フィールドが
+	 * listing 直下）は、CardRenderer の読み取りフォールバックと同じく LegacyOffer 経由で
+	 * offers[0] 相当へメモリ上変換してから選択に回さなければならない。これを飛ばすと、
+	 * 移行バッチが当該商品へ到達するまでの窓で、未移行の商品が一覧で軒並み em dash
+	 * （警告なし）になり、実際にはフォールバック中の商品を見逃す。
+	 */
+	public function test_renderColumn_flatなlistingでもfallback警告を出す(): void {
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 124, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform'      => 'dmm-books',
+						'affiliate_url' => '',
+						'regular_url'   => 'https://example.com/product',
+					),
+				)
+			);
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					array(
+						'code'     => 'dmm-books',
+						'provider' => 'dmm-ebook',
+					),
+				)
+			);
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'as_has_scheduled_action' )
+			->with(
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 124,
+					'platform' => 'dmm-books',
+				),
+				'affilicard-dmm'
+			)
+			->andReturn( false );
+
+		ob_start();
+		ProductListColumns::renderColumn( ProductListColumns::COLUMN_KEY, 124 );
+		$output = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'dashicons-warning', $output );
+		$this->assertStringContainsString( 'フォールバック', $output );
+	}
+
 	public function test_renderColumn_echoes_em_dash_when_no_fallback(): void {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 456, ProductPostType::META_LISTINGS, true )

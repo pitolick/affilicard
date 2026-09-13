@@ -5,6 +5,7 @@ namespace Affilicard\PostType;
 
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\Pricing\FetchStatus;
+use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Queue\Enqueuer;
@@ -196,8 +197,13 @@ final class ProductListColumns {
 			}
 			$platform_code = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
 			$offers        = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
-			$selected      = OfferSelector::select( $offers, $fallback_enabled );
-			$offer         = array() !== $selected ? $selected[0] : array();
+			// v3 以前の flat な listing（offers 無し）は CardRenderer の読み取りフォールバック
+			// と同じく LegacyOffer 経由で offers[0] 相当へ変換してから選択に回す。これを
+			// 飛ばすと、移行バッチが当該商品へ到達するまでの窓で、未移行の商品がこの列だけ
+			// 常に em dash（警告なし）になり、実際にフォールバック中の商品を見逃す。
+			$offers   = array() === $offers ? self::legacyOffers( $listing ) : $offers;
+			$selected = OfferSelector::select( $offers, $fallback_enabled );
+			$offer    = array() !== $selected ? $selected[0] : array();
 
 			$affiliate   = isset( $offer['affiliate_url'] ) ? (string) $offer['affiliate_url'] : '';
 			$regular     = isset( $offer['regular_url'] ) ? (string) $offer['regular_url'] : '';
@@ -309,6 +315,24 @@ final class ProductListColumns {
 	private static function sanitizeStatusLabel( string $raw ): string {
 		$stripped = wp_strip_all_tags( $raw );
 		return mb_substr( trim( $stripped ), 0, 200 );
+	}
+
+	/**
+	 * `offers` を持たない listing（v3 以前の flat な形）から offers[0] を**メモリ上で**合成する。
+	 *
+	 * `CardRenderer::legacyOffers()` と同じ変換を `LegacyOffer` に委譲するだけ（変換ロジック
+	 * 自体は 1 箇所に固定——{@see LegacyOffer}）。移行バッチが当該商品へ到達するまでの窓で
+	 * Fallback 列だけが常に em dash（警告なし）を出し続けないためのフォールバック。
+	 * 保存はしない（読み取り時の補完のみ）。
+	 *
+	 * @param array<string, mixed> $listing
+	 * @return list<array<string, mixed>>
+	 */
+	private static function legacyOffers( array $listing ): array {
+		if ( ! LegacyOffer::hasFlatFetchFields( $listing ) ) {
+			return array();
+		}
+		return array( LegacyOffer::toOffer( $listing ) );
 	}
 
 	/**
