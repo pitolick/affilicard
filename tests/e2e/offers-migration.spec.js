@@ -96,14 +96,52 @@ test.describe( 'v3 flat listing → offers[] 移行（実 WP）', () => {
 		expect( offer.affiliate_url ).toBe( 'https://example.test/legacy-aff-only' );
 		expect( offer.external_id ).toBe( 'legacy-aff-only' );
 		expect( result.affOnly.schema_version ).toBe( '2' );
-
-		// 運用向け「温存件数」カウンタ（管理画面 OffersMigrationNotice が表示する値）に
-		// このケースの分だけ加算されている。厳密に 1 件分の増分であることを確認する
-		// （温存対象でない通常 listing まで数えていないか、を同時に検証する）。
-		expect( result.preservedAfter - result.preservedBefore ).toBe( 1 );
 	} );
 
-	test( '運用向けの温存件数が管理画面の通知に反映され、次の保存で消える旨も明示される', async ( {
+	test( '外部 ID を持つ購入リンクは、別プラットフォームの保存を挟んでも消えない', async () => {
+		// ProductRepository::updateListing() は 1 platform の更新でも商品の全 listing を
+		// 保存し直す（= sanitize を通す）。「regular_url が空なら落とす」ルールのままだと、
+		// 移行が温存した購入リンクが別プラットフォームの定期価格更新で数時間後に消えていた。
+		const rakuten = result.affOnlyAfterResave.find(
+			( row ) => 'rakuten-kobo' === row.platform
+		);
+		expect( rakuten ).toBeTruthy();
+		expect( rakuten.offers ).toHaveLength( 1 );
+		expect( rakuten.offers[ 0 ].external_id ).toBe( 'legacy-aff-only' );
+		expect( rakuten.offers[ 0 ].affiliate_url ).toBe(
+			'https://example.test/legacy-aff-only'
+		);
+		// 追加した別プラットフォームの listing も保存されている（＝実際に保存が起きた）。
+		expect(
+			result.affOnlyAfterResave.find( ( row ) => 'dmm-books' === row.platform )
+		).toBeTruthy();
+	} );
+
+	test( '身元を 1 つも持たない購入リンクは温存されるが、次の保存では消える（既知の制限）', async () => {
+		// 移行直後は残っている。
+		const listings = result.noIdentity.listings;
+		expect( listings ).toHaveLength( 1 );
+		expect( listings[ 0 ].offers ).toHaveLength( 1 );
+		expect( listings[ 0 ].offers[ 0 ].affiliate_url ).toBe(
+			'https://example.test/legacy-no-identity'
+		);
+
+		// 温存カウンタが増えるのはこのケースだけ（身元を持つ affOnly は数えない
+		// ——数えると通知が「消えます」と嘘をつく）。
+		expect( result.preservedAfter - result.preservedBefore ).toBe( 1 );
+		// 通知から辿れるよう post ID が控えられている。
+		expect( result.preservedPostIds ).toContain( result.noIdentityPostId );
+
+		// そして次の保存（別プラットフォームの価格更新）で消える。CHANGELOG と
+		// 管理画面通知が「消える」と言っている挙動そのもの。
+		const rakuten = result.noIdentityAfterResave.find(
+			( row ) => 'rakuten-kobo' === row.platform
+		);
+		expect( rakuten ).toBeTruthy();
+		expect( rakuten.offers ).toHaveLength( 0 );
+	} );
+
+	test( '運用向けの温存件数が管理画面の通知に反映され、対象商品への導線と削除予告が出る', async ( {
 		page,
 	} ) => {
 		expect( result.preservedAfter ).toBeGreaterThan( 0 );
@@ -113,7 +151,9 @@ test.describe( 'v3 flat listing → offers[] 移行（実 WP）', () => {
 		// 件数（レビュー対応で文言を強化した後も変わらない部分）。
 		await expect(
 			page.getByText(
-				new RegExp( `を持たないまま購入リンクを維持した listing が ${ result.preservedAfter } 件` )
+				new RegExp(
+					`持たないまま購入リンクを維持した listing が ${ result.preservedAfter } 件`
+				)
 			)
 		).toBeVisible( { timeout: 15_000 } );
 		// 「確認してほしい」ではなく「次の保存で消える」ことを明示しているか
@@ -121,6 +161,10 @@ test.describe( 'v3 flat listing → offers[] 移行（実 WP）', () => {
 		// 通常の保存/価格更新で黙って消えるまでの猶予だと運用が気づけない）。
 		await expect(
 			page.getByText( /次に保存する.*と自動的に削除されます/ )
+		).toBeVisible();
+		// 件数だけでは運用が動けない。どの商品かへ辿れること。
+		await expect(
+			page.getByRole( 'link', { name: result.noIdentityTitle } )
 		).toBeVisible();
 	} );
 } );

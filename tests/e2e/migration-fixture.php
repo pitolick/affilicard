@@ -119,6 +119,8 @@ $normal_id = $make_legacy(
 );
 
 // regular_url を持たず affiliate_url のみの flat listing（Critical 回帰の固定テスト）。
+// external_id は持つ＝身元があるので、移行後の通常の保存でも消えてはならない
+// （ProductSchema::sanitizeOffers が落とすのは身元を 1 つも持たない offer だけ）。
 $aff_only_id = $make_legacy(
 	'E2E-MigrationFixture affiliateのみ',
 	array(
@@ -132,9 +134,23 @@ $aff_only_id = $make_legacy(
 	)
 );
 
+// 身元（regular_url / external_id）を 1 つも持たない flat listing。
+// 移行は温存するが、通常の保存では落ちる（＝運用向けカウンタと管理画面通知の対象）。
+$no_id_id = $make_legacy(
+	'E2E-MigrationFixture 身元なし',
+	array(
+		array(
+			'platform'      => 'rakuten-kobo',
+			'enabled'       => true,
+			'affiliate_url' => 'https://example.test/legacy-no-identity',
+			'price'         => '400',
+		),
+	)
+);
+
 $schema_version_before_normal  = (string) get_post_meta( $normal_id, ProductPostType::META_SCHEMA_VERSION, true );
 $schema_version_before_affonly = (string) get_post_meta( $aff_only_id, ProductPostType::META_SCHEMA_VERSION, true );
-$preserved_before               = PluginUpgrade::preservedWithoutRegularUrlCount();
+$preserved_before              = PluginUpgrade::preservedWithoutRegularUrlCount();
 
 // バッチサイズ（200）を超える既存商品がある環境でも完走するまでループする。
 $guard = 0;
@@ -152,14 +168,62 @@ $read = static function ( int $id ): array {
 	);
 };
 
+/**
+ * 「別プラットフォームの価格更新による通常の保存」を実データで再現する。
+ *
+ * ProductRepository::updateListing() は 1 platform の更新でも商品の全 listing を
+ * まとめて保存し直すため、保存は必ず sanitize_meta()（= ProductSchema::sanitizeListings）を
+ * 通る。移行が温存した購入リンクがここで生き残るか消えるかが、運用上いちばん効く分岐
+ * （身元があれば残り、無ければ消える）。ここでは別 platform の listing を 1 件足して
+ * 保存する——値が同一だと update_post_meta() が書き込み自体を省くため、実際に
+ * sanitize を通る形にする。
+ */
+$resave_with_other_platform = static function ( int $id ): array {
+	$listings   = get_post_meta( $id, ProductPostType::META_LISTINGS, true );
+	$listings   = is_array( $listings ) ? $listings : array();
+	$listings[] = array(
+		'platform' => 'dmm-books',
+		'enabled'  => true,
+		'offers'   => array(
+			array(
+				'display_order'    => 100,
+				'external_id'      => 'other-platform-refresh',
+				'regular_url'      => 'https://example.test/other-platform',
+				'price'            => '700',
+				'last_verified_at' => '2026-09-01T00:00:00+00:00',
+			),
+		),
+	);
+	update_post_meta( $id, ProductPostType::META_LISTINGS, $listings );
+	wp_cache_delete( $id, 'post_meta' );
+
+	$stored = get_post_meta( $id, ProductPostType::META_LISTINGS, true );
+	return is_array( $stored ) ? $stored : array();
+};
+
+// 保存前（移行直後）の状態を先に確定させてから再保存する。
+$normal_after_migration     = $read( $normal_id );
+$aff_only_after_migration   = $read( $aff_only_id );
+$no_id_after_migration      = $read( $no_id_id );
+$preserved_post_ids         = PluginUpgrade::preservedWithoutRegularUrlPostIds();
+
+$aff_only_after_resave = $resave_with_other_platform( $aff_only_id );
+$no_id_after_resave    = $resave_with_other_platform( $no_id_id );
+
 echo 'MIGRATION_JSON:' . wp_json_encode(
 	array(
-		'normal'                       => $read( $normal_id ),
-		'affOnly'                      => $read( $aff_only_id ),
-		'schemaVersionBeforeNormal'    => $schema_version_before_normal,
-		'schemaVersionBeforeAffOnly'   => $schema_version_before_affonly,
-		'preservedBefore'              => $preserved_before,
-		'preservedAfter'               => $preserved_after,
-		'migrationGuardIterations'     => $guard,
+		'normal'                     => $normal_after_migration,
+		'affOnly'                    => $aff_only_after_migration,
+		'noIdentity'                 => $no_id_after_migration,
+		'affOnlyAfterResave'         => $aff_only_after_resave,
+		'noIdentityAfterResave'      => $no_id_after_resave,
+		'noIdentityPostId'           => $no_id_id,
+		'noIdentityTitle'            => 'E2E-MigrationFixture 身元なし',
+		'preservedPostIds'           => $preserved_post_ids,
+		'schemaVersionBeforeNormal'  => $schema_version_before_normal,
+		'schemaVersionBeforeAffOnly' => $schema_version_before_affonly,
+		'preservedBefore'            => $preserved_before,
+		'preservedAfter'             => $preserved_after,
+		'migrationGuardIterations'   => $guard,
 	)
 ) . "\n";
