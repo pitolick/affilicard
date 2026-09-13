@@ -52,11 +52,11 @@ module.exports = async () => {
 	// 非ゼロ終了する場合がある。削除自体が目的で対象が無ければ何もする必要が
 	// 無いため `|| true` で無視し、後続の create だけを失敗させたい。
 	execSync(
-		'npx wp-env run tests-cli wp user application-password delete admin --all || true',
+		`npx wp-env run tests-cli wp user application-password delete ${ user } --all || true`,
 		{ encoding: 'utf8' }
 	);
 	const appPassOut = execSync(
-		'npx wp-env run tests-cli wp user application-password create admin affilicard-e2e --porcelain',
+		`npx wp-env run tests-cli wp user application-password create ${ user } affilicard-e2e --porcelain`,
 		{ encoding: 'utf8' }
 	);
 	// wp-env run は `ℹ Starting ...` / `✔ Ran ...` で実コマンドの出力を挟むため、
