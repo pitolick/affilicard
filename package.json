@@ -22,20 +22,20 @@
 		"test:e2e": "playwright test --config=playwright.config.js"
 	},
 	"devDependencies": {
-		"@playwright/test": "^1.62.0",
+		"@playwright/test": "^1.62.1",
 		"@testing-library/dom": "^10.4.1",
-		"@testing-library/jest-dom": "^7.0.0",
+		"@testing-library/jest-dom": "^7.0.1",
 		"@testing-library/react": "^16.3.2",
-		"@testing-library/user-event": "^14.6.1",
-		"@wordpress/env": "^11.11.0",
+		"@testing-library/user-event": "^14.6.6",
+		"@wordpress/env": "^11.13.0",
 		"@wordpress/scripts": "^33.0.0",
-		"eslint": "^10.8.0",
+		"eslint": "^10.9.1",
 		"prettier": "^3.9.6"
 	},
 	"dependencies": {
-		"@wordpress/api-fetch": "^7.51.0",
+		"@wordpress/api-fetch": "^7.53.0",
 		"@wordpress/components": "^37.0.0",
-		"@wordpress/data": "^10.51.0",
+		"@wordpress/data": "^10.53.0",
 		"@wordpress/element": "^8.2.0",
 		"@wordpress/i18n": "^6.24.0",
 		"react": "^18.3.1",

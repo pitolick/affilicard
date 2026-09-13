@@ -39,6 +39,17 @@
 - **ダウングレードはできない**。v3 系のコードは `listings[].offers[]` を読めないため、v4 で保存した商品を v3 へ戻すと**すべての商品カードで購入ボタン・価格・書影が欠落する**
 - **読み取り側の追随が必要**。`listings[].fetch_error` を見て分岐していた外部コードは、v4 移行後は `fetch_error` キー自体が存在しなくなるため、**エラーにならないまま何もしない（判定が常に外れる）状態で沈黙する**。`listings[].offers[].fetch_status` へ書き換えること
 
+## [3.5.1] - 2026-09-08
+
+### Changed
+
+- 依存更新のみ（機能変更なし）
+  - `@wordpress/api-fetch` 7.51.0→7.53.0 / `@wordpress/data` 10.51.0→10.53.0 / `@wordpress/element` 8.4.0→8.5.0 / `@wordpress/i18n` 6.25.0→6.26.0（production）
+  - `woocommerce/action-scheduler` 4.0.0→4.1.0（production）
+  - `@playwright/test` 1.62.0→1.62.1 / `@testing-library/jest-dom` 7.0.0→7.0.1 / `@testing-library/user-event` 14.6.1→14.6.6 / `@wordpress/env` 11.12.0→11.13.0 / `eslint` 10.8.0→10.9.1（development）
+  - `friendsofphp/php-cs-fixer` 3.95.17→3.95.22（development）
+  - `fast-uri` 3.1.5→3.1.7 / `postcss-selector-parser` 7.1.1→7.1.5・6.1.2→6.1.4（indirect）
+
 ## [3.5.0] - 2026-08-28
 
 ### Changed
