@@ -14,6 +14,61 @@ import { fetchPlatforms } from '../api/platforms';
 // Affilicard\Pricing\OfferSelector::DEFAULT_ORDER と揃える。
 const DEFAULT_DISPLAY_ORDER = 100;
 
+/**
+ * PHP の `(int)` キャストと同じ整数化。
+ *
+ * PHP 側（`LegacyOffer::toOffer()` / `ProductSchema::sanitizeOffers()` /
+ * `OfferSelector::sorted()`）は display_order を `(int)` で畳む。JS が
+ * `Number()` で畳むと、空文字は PHP の 0 に対して NaN、数字でない文字列も
+ * NaN になり、並べ替えの結果が未定義になる（＝「使用中」の印が PHP の選ぶ
+ * 購入リンクとずれる）。ここで PHP の規則をそのまま写す:
+ * 先頭の空白を飛ばし、先頭から続く数値表現だけを読み、残りは捨てて 0 方向へ丸める。
+ *
+ * @param {*} value
+ * @return {number}
+ */
+function phpIntCast(value) {
+	if (typeof value === 'boolean') {
+		return value ? 1 : 0;
+	}
+	if (typeof value === 'number') {
+		return Number.isFinite(value) ? Math.trunc(value) : 0;
+	}
+	if (typeof value !== 'string') {
+		// 配列・オブジェクトの display_order は保存され得ない（PHP 側は必ず
+		// 整数へ畳んでから格納する）。壊れた値なので 0 に倒す。
+		return 0;
+	}
+	// PHP が数値文字列の先頭で許す空白は " \t\n\r\v\f" だけ（\s より狭い）。
+	const leading = /^[ \t\n\r\v\f]*[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?/.exec(
+		value
+	);
+	if (!leading) {
+		return 0;
+	}
+	const parsed = Number(leading[0]);
+	return Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
+}
+
+/**
+ * offer の display_order を PHP と同じ規則で整数へ揃える唯一の場所。
+ *
+ * **既定値（100）を当てるのは「値が無い」ときだけ。** PHP は
+ * `isset($offer['display_order']) ? (int) ... : DEFAULT_ORDER` なので、
+ * キーが無い・null のときだけ既定値で、空文字が入っていれば `(int) ''` ＝ 0
+ * （＝最優先）である。JS が空文字も既定値に倒すと、保存前の編集画面が
+ * 「使用中」と印を付ける行と、保存後に PHP が選ぶ行が食い違う。
+ *
+ * @param {*} raw
+ * @return {number}
+ */
+function offerDisplayOrder(raw) {
+	if (raw === undefined || raw === null) {
+		return DEFAULT_DISPLAY_ORDER;
+	}
+	return phpIntCast(raw);
+}
+
 const EMPTY_LISTING = {
 	platform: '',
 	enabled: true,
@@ -98,12 +153,8 @@ function fetchStatusFromLegacyMessage(message) {
 function legacyOffer(listing) {
 	const str = (value) =>
 		value === undefined || value === null ? '' : String(value);
-	const order = listing.display_order;
 	return {
-		display_order:
-			order === undefined || order === null || order === ''
-				? DEFAULT_DISPLAY_ORDER
-				: Number(order),
+		display_order: offerDisplayOrder(listing.display_order),
 		external_id: str(listing.external_id),
 		regular_url: str(listing.regular_url),
 		affiliate_url: str(listing.affiliate_url),
@@ -210,14 +261,11 @@ function sortOffersWithIndex(offers) {
 	return offers
 		.map((offer, index) => ({ offer, index }))
 		.filter(({ offer }) => offer && typeof offer === 'object')
-		.map(({ offer, index }) => {
-			const raw = offer.display_order;
-			const order =
-				raw === undefined || raw === null || raw === ''
-					? DEFAULT_DISPLAY_ORDER
-					: Number(raw);
-			return { offer, index, order };
-		})
+		.map(({ offer, index }) => ({
+			offer,
+			index,
+			order: offerDisplayOrder(offer.display_order),
+		}))
 		.sort((a, b) => (a.order === b.order ? a.index - b.index : a.order - b.order));
 }
 
@@ -394,7 +442,7 @@ function OffersEditor({ offers, fallbackOnTerminal, onChange }) {
 						<div className="affilicard-offer-row__header">
 							<span className="affilicard-offer-row__order">
 								{__('表示順', 'affilicard')}:{' '}
-								{offer.display_order ?? DEFAULT_DISPLAY_ORDER}
+								{offerDisplayOrder(offer.display_order)}
 							</span>
 							<Button
 								icon="arrow-up-alt2"

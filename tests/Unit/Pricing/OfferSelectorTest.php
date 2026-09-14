@@ -48,6 +48,52 @@ final class OfferSelectorTest extends TestCase {
 		$this->assertSame( 'explicit', $got[0]['external_id'] );
 	}
 
+	/**
+	 * 管理画面（src/Admin/components/ListingsEditor.jsx の offerDisplayOrder）は
+	 * この規則を JS へ写している。ここは「PHP 側が何を返すか」の固定であり、
+	 * tests/js/components/ListingsEditor.test.jsx の同名ケースと対になっている。
+	 * どちらかを変えるときは必ず両方直すこと。
+	 */
+	public function test_display_orderが空文字なら0として扱う(): void {
+		// isset() は true なので既定値ではなく (int) '' ＝ 0 ＝ 最優先。
+		$offers = array(
+			$this->offer( 10, 'ten' ),
+			array(
+				'display_order' => '',
+				'external_id'   => 'empty',
+				'regular_url'   => 'https://example.test/e',
+			),
+		);
+		$got    = OfferSelector::select( $offers, false );
+		$this->assertSame( 'empty', $got[0]['external_id'] );
+	}
+
+	public function test_display_orderが数字でない文字列でも0として扱う(): void {
+		$offers = array(
+			$this->offer( 10, 'ten' ),
+			array(
+				'display_order' => 'あ',
+				'external_id'   => 'bogus',
+				'regular_url'   => 'https://example.test/b',
+			),
+		);
+		$got    = OfferSelector::select( $offers, false );
+		$this->assertSame( 'bogus', $got[0]['external_id'] );
+	}
+
+	public function test_display_orderが数字で始まる文字列は先頭の数値だけを読む(): void {
+		$offers = array(
+			$this->offer( 50, 'fifty' ),
+			array(
+				'display_order' => '12abc',
+				'external_id'   => 'twelve',
+				'regular_url'   => 'https://example.test/t',
+			),
+		);
+		$got    = OfferSelector::select( $offers, false );
+		$this->assertSame( 'twelve', $got[0]['external_id'] );
+	}
+
 	public function test_設定OFFならterminalでも先頭を返す(): void {
 		$offers = array( $this->offer( 10, 'dead', FetchStatus::TERMINAL ), $this->offer( 100, 'alive' ) );
 		$got    = OfferSelector::select( $offers, false );

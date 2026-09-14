@@ -643,6 +643,43 @@ describe( 'selectInUseOffer（Affilicard\\Pricing\\OfferSelector::select() と�
 		expect( selectInUseOffer( offers, false ).external_id ).toBe( 'explicit' );
 	} );
 
+	test( 'display_order が null でも 100 として扱う', () => {
+		// PHP の isset() は null を「値が無い」と見なすため既定値になる。
+		const offers = [
+			{ display_order: null, external_id: 'nulled', regular_url: 'https://example.test/n' },
+			offer( 10, 'explicit' ),
+		];
+		expect( selectInUseOffer( offers, false ).external_id ).toBe( 'explicit' );
+	} );
+
+	test( 'display_order が空文字なら 0（PHP の (int) キャストと同じ）', () => {
+		// PHP: isset() は true なので既定値ではなく (int) '' ＝ 0 ＝ 最優先。
+		// 既定値（100）へ倒すと、保存前の「使用中」の印が保存後に PHP が選ぶ行とずれる。
+		const offers = [
+			offer( 10, 'ten' ),
+			{ display_order: '', external_id: 'empty', regular_url: 'https://example.test/e' },
+		];
+		expect( selectInUseOffer( offers, false ).external_id ).toBe( 'empty' );
+	} );
+
+	test( 'display_order が数字でない文字列でも 0', () => {
+		// PHP: (int) 'あ' === 0。JS の Number() は NaN になり並べ替えが未定義になる。
+		const offers = [
+			offer( 10, 'ten' ),
+			{ display_order: 'あ', external_id: 'bogus', regular_url: 'https://example.test/b' },
+		];
+		expect( selectInUseOffer( offers, false ).external_id ).toBe( 'bogus' );
+	} );
+
+	test( 'display_order が数字で始まる文字列は先頭の数値だけを読む', () => {
+		// PHP: (int) '12abc' === 12。
+		const offers = [
+			offer( 50, 'fifty' ),
+			{ display_order: '12abc', external_id: 'twelve', regular_url: 'https://example.test/t' },
+		];
+		expect( selectInUseOffer( offers, false ).external_id ).toBe( 'twelve' );
+	} );
+
 	test( '設定 OFF なら terminal でも先頭を返す', () => {
 		const offers = [ offer( 10, 'dead', 'terminal' ), offer( 100, 'alive' ) ];
 		expect( selectInUseOffer( offers, false ).external_id ).toBe( 'dead' );
@@ -737,6 +774,32 @@ describe( 'withNormalisedOffers（Affilicard\\Pricing\\LegacyOffer::offersWithFa
 
 		// 2 回目: 旧フィールドが残っていると、ここで削除した購入リンクが復活する。
 		expect( withNormalisedOffers( emptied ).offers ).toEqual( [] );
+	} );
+
+	test( 'display_order は PHP の (int) キャストと同じ整数へ揃える', () => {
+		// PHP の LegacyOffer::toOffer() は
+		// isset() ? (int) $listing['display_order'] : DEFAULT_ORDER。
+		expect(
+			withNormalisedOffers( flatListing( { display_order: '' } ) ).offers[ 0 ]
+				.display_order
+		).toBe( 0 );
+		expect(
+			withNormalisedOffers( flatListing( { display_order: 'あ' } ) ).offers[ 0 ]
+				.display_order
+		).toBe( 0 );
+		expect(
+			withNormalisedOffers( flatListing( { display_order: '12abc' } ) )
+				.offers[ 0 ].display_order
+		).toBe( 12 );
+		expect(
+			withNormalisedOffers( flatListing( { display_order: '3' } ) ).offers[ 0 ]
+				.display_order
+		).toBe( 3 );
+		// 値が無いときだけ既定値（PHP の isset() は null を「無い」と見なす）。
+		expect(
+			withNormalisedOffers( flatListing( { display_order: null } ) ).offers[ 0 ]
+				.display_order
+		).toBe( 100 );
 	} );
 
 	test( '取得結果フィールドを持たない listing は 0 件のまま', () => {
