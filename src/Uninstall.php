@@ -38,8 +38,7 @@ final class Uninstall {
 		// リテラル値（offers 移行で温存した listing の件数）。
 		'affilicard_offers_migration_preserved_without_regular_url',
 		// Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS のリテラル値
-		// （温存が起きた商品の post ID 一覧。CodeRabbit Minor #4: 上の件数 option とペアで
-		// 追加されたが本リストへの追記が漏れていた）。
+		// （温存が起きた商品の post ID 一覧）。
 		'affilicard_offers_migration_preserved_post_ids',
 	);
 
@@ -52,11 +51,25 @@ final class Uninstall {
 	 */
 	private const AUTOMATIC_ACCOUNT_CODES_FALLBACK = array( 'dmm', 'rakuten' );
 
+	/**
+	 * 全ユーザーに残る本プラグインのユーザーメタを消す。
+	 *
+	 * OPTION_KEYS の掃除は options テーブルしか触らないため、移行通知の「閉じた」印
+	 * （{@see \Affilicard\Admin\OffersMigrationNotice} が update_user_meta() で書く）は
+	 * アンインストール後も全ユーザーに残り続けていた。ユーザー数ぶん個別に消すのは
+	 * 現実的でないので、delete_metadata() の delete-all で一括削除する。
+	 */
+	private static function deleteUserMeta(): void {
+		// Affilicard\Admin\OffersMigrationNotice::DISMISS_META のリテラル値。
+		delete_metadata( 'user', 0, 'affilicard_offers_migration_notice_dismissed', '', true );
+	}
+
 	public static function run(): void {
 		foreach ( self::OPTION_KEYS as $option_key ) {
 			delete_option( $option_key );
 		}
 
+		self::deleteUserMeta();
 		self::deleteProviderCredentials();
 		self::deleteAccountCredentials();
 		self::cleanupQueue();

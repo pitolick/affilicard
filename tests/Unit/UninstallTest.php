@@ -10,9 +10,23 @@ use WP_Mock\Tools\TestCase;
 
 final class UninstallTest extends TestCase {
 
+	/** @var list<array{0:string,1:int,2:string,3:mixed,4:bool}> */
+	private array $deletedMeta = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		// run() は必ずユーザーメタの一括削除を通る。**捕捉はここでしか行えない**
+		// ——WP_Mock::userFunction() を同じ関数名で再登録しても最初の期待が残り、
+		// 個別テストでの上書きは黙って無視されるため。
+		$this->deletedMeta = array();
+		WP_Mock::userFunction( 'delete_metadata' )
+			->andReturnUsing(
+				function ( $type, $objectId, $key, $value, $deleteAll ): bool {
+					$this->deletedMeta[] = array( $type, $objectId, $key, $value, $deleteAll );
+					return true;
+				}
+			);
 	}
 
 	public function tearDown(): void {
@@ -65,6 +79,29 @@ final class UninstallTest extends TestCase {
 				}
 			)
 			->andReturn( true );
+	}
+
+	/**
+	 * アンインストールでユーザーメタも消す。
+	 *
+	 * OPTION_KEYS の掃除は options テーブルしか触らないため、移行通知の「閉じた」印は
+	 * ユーザーメタとして全ユーザーに残り続けていた。ユーザー数ぶん個別に消すのは
+	 * 現実的でないので delete-all で一括削除する。
+	 */
+	public function test_run_はユーザーメタも全ユーザーぶん消す(): void {
+		$captured = array();
+		$this->mockWpdb( $captured );
+		$this->stubQueueCleanup();
+		WP_Mock::userFunction( 'delete_option' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->andReturn( array() );
+
+		Uninstall::run();
+
+		$this->assertContains(
+			array( 'user', 0, 'affilicard_offers_migration_notice_dismissed', '', true ),
+			$this->deletedMeta,
+			'移行通知の dismissed フラグを全ユーザーぶん消していない'
+		);
 	}
 
 	public function test_run_deletes_known_options_and_all_products(): void {
