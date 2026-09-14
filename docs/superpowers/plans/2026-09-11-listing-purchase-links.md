@@ -719,6 +719,10 @@ Expected: FAIL — `Undefined array key "offers"`
 				continue;
 			}
 
+			// NOTE: この破棄条件は実装時に狭めた。最終実装（ProductSchema::sanitizeOffers）は
+			// 「regular_url が空」ではなく **spec §3-4 の身元（external_id と regular_url）が
+			// 両方とも空** のときだけ弾く。external_id さえあれば後から regular_url を
+			// 引き直して再同定できるため、ここで消すと復旧不能になる。
 			$regular = isset( $offer['regular_url'] ) ? (string) esc_url_raw( (string) $offer['regular_url'] ) : '';
 			if ( '' === $regular ) {
 				// 生死を判定できない offer は棚卸しの対象外になり永久に残るため弾く。

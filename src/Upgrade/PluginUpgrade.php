@@ -304,6 +304,10 @@ final class PluginUpgrade {
 		if ( ! function_exists( 'as_schedule_single_action' ) ) {
 			return;
 		}
+		// **戻り値は意図的に見ない。** 投入に失敗しても（Action Scheduler が未初期化・
+		// DB エラー等）カーソルは既に立っているので、maybeUpgrade() が次のリクエストで
+		// isOffersMigrationPending() を見て積み直す。カーソルを先に立てるのはこのため
+		// であり、投入成功後に立てる順序だと失敗が痕跡を残さず永久に止まる。
 		as_schedule_single_action( time(), self::HOOK_MIGRATE_OFFERS, array(), self::MIGRATION_GROUP, true );
 	}
 
