@@ -59,12 +59,32 @@ final class FetchStatus {
 		if ( '' === $message ) {
 			return self::NONE;
 		}
-		if ( '対応する自動 Provider がありません' === $message ) {
+		// **翻訳済みの値も拾う。** v3 の ListingRefresher は __() の戻り値を
+		// fetch_error に保存していたため、affilicard の翻訳を入れているサイトでは
+		// 日本語リテラルと一致しない。リテラルだけを見ると恒久失敗が TRANSIENT に
+		// 化け、fallback_on_terminal が ON のとき消滅した購入リンクを選び続ける。
+		// 保存時と移行時でサイトのロケールは通常同じなので、現在の __() 出力と
+		// 突き合わせれば拾える。
+		if ( self::matchesLegacy( $message, '対応する自動 Provider がありません' ) ) {
 			return self::UNSUPPORTED;
 		}
-		if ( '該当する商品が見つかりませんでした' === $message ) {
+		if ( self::matchesLegacy( $message, '該当する商品が見つかりませんでした' ) ) {
 			return self::TERMINAL;
 		}
 		return self::TRANSIENT;
+	}
+
+	/**
+	 * 旧 fetch_error の文言が、指定した原文（またはその現在ロケールでの翻訳）かどうか。
+	 *
+	 * ロケールが保存時から変わっている場合までは拾えないが、その取りこぼしは
+	 * 次の再取得で解消する——Provider が同じ恒久失敗を返せば fetch_status が
+	 * TERMINAL に確定するためである。
+	 */
+	private static function matchesLegacy( string $message, string $source ): bool {
+		if ( $source === $message ) {
+			return true;
+		}
+		return function_exists( '__' ) && (string) __( $source, 'affilicard' ) === $message; // phpcs:ignore WordPress.WP.I18n.NonSingularStringLiteralText -- $source は本メソッドの呼び出し元が渡すリテラルのみ。
 	}
 }

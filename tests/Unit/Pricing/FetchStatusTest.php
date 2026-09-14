@@ -9,10 +9,24 @@ use WP_Mock\Tools\TestCase;
 
 final class FetchStatusTest extends TestCase {
 
+	/**
+	 * 現在ロケールの訳語。原文 => 訳文。
+	 *
+	 * **ここに置くのは意図的である。** WP_Mock::userFunction() は同じ関数名を
+	 * 再登録しても最初の期待が残るため、個別テストで __ を差し替えても黙って
+	 * 無視される。切り替えたい値はプロパティ経由で渡す。
+	 *
+	 * @var array<string, string>
+	 */
+	private array $translations = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
-		WP_Mock::userFunction( '__' )->andReturnUsing( static fn( $t ) => $t );
+		$this->translations = array();
+		WP_Mock::userFunction( '__' )->andReturnUsing(
+			fn( $t ) => $this->translations[ $t ] ?? $t
+		);
 	}
 
 	public function tearDown(): void {
@@ -52,5 +66,21 @@ final class FetchStatusTest extends TestCase {
 	public function test_未知の旧文言はtransientへ倒す(): void {
 		// 恒久と誤認して購入リンクを飛ばすより、飛ばさない側が安全。
 		$this->assertSame( FetchStatus::TRANSIENT, FetchStatus::fromLegacyMessage( '手で書き換えられた文言' ) );
+	}
+
+	/**
+	 * 翻訳済みの旧 fetch_error でも恒久失敗として拾う。
+	 *
+	 * v3 は __() の戻り値を保存していたため、affilicard の翻訳を入れているサイトでは
+	 * 日本語リテラルと一致しない。リテラルだけを見ると TERMINAL が TRANSIENT に化け、
+	 * fallback_on_terminal が ON のとき消滅した購入リンクを選び続ける。
+	 */
+	public function test_翻訳済みの恒久失敗メッセージもTERMINALとして扱う(): void {
+		$this->translations['該当する商品が見つかりませんでした'] = 'No matching product was found';
+
+		$this->assertSame(
+			FetchStatus::TERMINAL,
+			FetchStatus::fromLegacyMessage( 'No matching product was found' )
+		);
 	}
 }
