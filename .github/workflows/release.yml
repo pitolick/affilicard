@@ -45,8 +45,13 @@ jobs:
           echo "コミット済み AFFILICARD_VERSION (${COMMITTED_CONST}) = タグ (${VERSION}) を確認しました。"
           # package.json / package-lock.json（lock はリリース zip に含めないが、次回の npm ci の
           # 入力であり、ずれたまま残ると誰も直さない）。
+          # JSON は jq で読む（ubuntu-latest にプリインストール済み。このステップは
+          # checkout しか済んでいないので、後段の setup-node に依存しない手段を使う）。
+          # 行位置や並び順に依存する読み方（head -5 して grep 等）にすると、説明文の追加や
+          # キーの並べ替えだけで値が空になり、バージョンが正しいのにリリースが落ちる。
+          # `// empty` は version キー不在時に "null" ではなく空文字を返させるため。
           for f in package.json package-lock.json; do
-            PKG="$(head -5 "${f}" | grep -E '"version"' | head -1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')"
+            PKG="$(jq -r '.version // empty' "${f}")"
             if [ "${PKG}" != "${VERSION}" ]; then
               echo "::error::${f} の version (${PKG}) がタグ (${VERSION}) と一致しません。"
               exit 1
