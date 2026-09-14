@@ -6,6 +6,7 @@ namespace Affilicard\Rest;
 use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Stock\StockStatus;
+use Affilicard\Util\ScalarField;
 
 /**
  * `/products` 系エンドポイントの input schema を返す。
@@ -286,7 +287,7 @@ final class ProductSchema {
 	 * @param array<string, mixed> $source
 	 */
 	private static function stringField( array $source, string $key ): string {
-		return isset( $source[ $key ] ) && is_scalar( $source[ $key ] ) ? (string) $source[ $key ] : '';
+		return ScalarField::string( $source, $key );
 	}
 
 	/**

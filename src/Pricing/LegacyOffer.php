@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Affilicard\Pricing;
 
+use Affilicard\Util\ScalarField;
+
 /**
  * v3 以前の flat な listing（取得結果フィールドが listing 直下に並ぶ形）を
  * offers[0] 相当の 1 件へ写すだけの純粋な変換。
@@ -35,7 +37,7 @@ final class LegacyOffer {
 	 */
 	public static function hasFlatFetchFields( array $listing ): bool {
 		foreach ( array( 'external_id', 'regular_url', 'affiliate_url', 'price', 'image_url', 'search_key' ) as $key ) {
-			if ( isset( $listing[ $key ] ) && '' !== (string) $listing[ $key ] ) {
+			if ( '' !== ScalarField::string( $listing, $key ) ) {
 				return true;
 			}
 		}
@@ -56,17 +58,17 @@ final class LegacyOffer {
 	public static function toOffer( array $listing ): array {
 		return array(
 			'display_order'    => isset( $listing['display_order'] ) ? (int) $listing['display_order'] : OfferSelector::DEFAULT_ORDER,
-			'external_id'      => isset( $listing['external_id'] ) ? (string) $listing['external_id'] : '',
-			'regular_url'      => isset( $listing['regular_url'] ) ? (string) $listing['regular_url'] : '',
-			'affiliate_url'    => isset( $listing['affiliate_url'] ) ? (string) $listing['affiliate_url'] : '',
-			'price'            => isset( $listing['price'] ) ? (string) $listing['price'] : '',
-			'list_price'       => isset( $listing['list_price'] ) ? (string) $listing['list_price'] : '',
-			'badge'            => isset( $listing['badge'] ) ? (string) $listing['badge'] : '',
-			'image_url'        => isset( $listing['image_url'] ) ? (string) $listing['image_url'] : '',
-			'search_key'       => isset( $listing['search_key'] ) ? (string) $listing['search_key'] : '',
+			'external_id'      => ScalarField::string( $listing, 'external_id' ),
+			'regular_url'      => ScalarField::string( $listing, 'regular_url' ),
+			'affiliate_url'    => ScalarField::string( $listing, 'affiliate_url' ),
+			'price'            => ScalarField::string( $listing, 'price' ),
+			'list_price'       => ScalarField::string( $listing, 'list_price' ),
+			'badge'            => ScalarField::string( $listing, 'badge' ),
+			'image_url'        => ScalarField::string( $listing, 'image_url' ),
+			'search_key'       => ScalarField::string( $listing, 'search_key' ),
 			'fetch_status'     => self::resolveFetchStatus( $listing ),
-			'last_fetched_at'  => isset( $listing['last_fetched_at'] ) ? (string) $listing['last_fetched_at'] : '',
-			'last_verified_at' => isset( $listing['last_verified_at'] ) ? (string) $listing['last_verified_at'] : '',
+			'last_fetched_at'  => ScalarField::string( $listing, 'last_fetched_at' ),
+			'last_verified_at' => ScalarField::string( $listing, 'last_verified_at' ),
 		);
 	}
 
