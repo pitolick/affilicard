@@ -16,10 +16,75 @@ use WP_Mock\Tools\TestCase;
 
 final class PluginUpgradeTest extends TestCase {
 
+	/**
+	 * 記録済みの試行回数（post ID => 回数）。
+	 *
+	 * **プロパティで持つのは意図的である。** WP_Mock::userFunction() は同じ引数で
+	 * 再登録しても最初の期待が優先されるため、setUp で登録したあとテスト本体で
+	 * 差し替えても黙って無視される。切り替えたい値はここを書き換えて渡す。
+	 *
+	 * @var array<int, int>
+	 */
+	private array $migrationAttempts = array();
+
+	/**
+	 * 記録済みの「移行を諦めた商品」の延べ件数。上と同じ理由でプロパティに置く。
+	 *
+	 * @var int
+	 */
+	private int $migrationFailedCount = 0;
+
+	/**
+	 * 記録済みの「移行を諦めた商品」の post ID。上と同じ理由でプロパティに置く。
+	 *
+	 * @var list<int>
+	 */
+	private array $migrationFailedPostIds = array();
+
+	/**
+	 * setUp で登録した delete_option が拾った option キー。
+	 *
+	 * **プロパティ経由で拾うのは WP_Mock の先勝ちを避けるためである。** 同じ引数の
+	 * 期待をテスト本体で登録し直しても setUp の登録が優先され、黙って無視される。
+	 * 「完走で試行回数の記録を消す」ことを主張するテストは、ここを読んで検証する。
+	 *
+	 * @var list<string>
+	 */
+	private array $deletedOptions = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
 		OfferPromotionTrigger::resetForTests();
+
+		$this->migrationAttempts      = array();
+		$this->migrationFailedCount   = 0;
+		$this->migrationFailedPostIds = array();
+		$this->deletedOptions         = array();
+
+		// 移行の失敗記録（試行回数・諦めた件数／post ID）。移行が成功する経路でも
+		// 「持ち越した失敗が無いか」を見るため読まれる。
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_ATTEMPTS, array() )
+			->andReturnUsing( fn() => $this->migrationAttempts );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_FAILED_COUNT, 0 )
+			->andReturnUsing( fn() => $this->migrationFailedCount );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_FAILED_POST_IDS, array() )
+			->andReturnUsing( fn() => $this->migrationFailedPostIds );
+		// 完走時の後始末（作業用データの削除）。カーソルの delete_option は
+		// 各テストが個別に期待を書くため、ここでは触らない。
+		// 呼ばれたことはプロパティへ控える——テスト本体で同じ引数の期待を
+		// 登録し直しても先勝ちで無視されるため、ここが唯一の観測点になる。
+		WP_Mock::userFunction( 'delete_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_ATTEMPTS )
+			->andReturnUsing(
+				function (): bool {
+					$this->deletedOptions[] = PluginUpgrade::OPTION_MIGRATION_ATTEMPTS;
+					return true;
+				}
+			);
 
 		// 「保存される形」を再現するために本物の ProductSchema::sanitizeListings() を
 		// 走らせる。ProductSchemaTest と同じ振る舞いのスタブを置く。
@@ -97,6 +162,48 @@ final class PluginUpgradeTest extends TestCase {
 					return true;
 				}
 			);
+	}
+
+	/**
+	 * update_option() の書き込みをキー => 値で拾う（最後の書き込みが残る）。
+	 *
+	 * @param array<string, mixed> $writes 受け皿（参照）。
+	 */
+	private function captureOptionWrites( array &$writes ): void {
+		WP_Mock::userFunction( 'update_option' )
+			->andReturnUsing(
+				static function ( $key, $value ) use ( &$writes ): bool {
+					$writes[ $key ] = $value;
+					return true;
+				}
+			);
+	}
+
+	/**
+	 * 書き込みが黙って捨てられる商品（別プラグインのフィルタ・壊れた meta 行）を作る。
+	 *
+	 * 読み直すと移行前の flat listing のままなので、writeMigratedListings() が
+	 * 食い違いを検出して例外を投げる。
+	 *
+	 * **listing は「保存できていれば温存として数えられる形」にする**（身元＝
+	 * regular_url / external_id を持たず affiliate_url だけを持つ）。ここを身元のある
+	 * listing にすると、諦めた商品を誤って温存件数へ数える実装でも件数が 0 のままになり、
+	 * 「保存されていないデータを温存として数えていないか」を検証できない。
+	 */
+	private function stubUnwritableProduct( int $postId ): void {
+		$legacy = array_merge(
+			$this->legacyListing(),
+			array(
+				'external_id' => '',
+				'regular_url' => '',
+			)
+		);
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $postId, ProductPostType::META_LISTINGS, true )
+			->andReturn( array( $legacy ) );
+		WP_Mock::userFunction( 'update_post_meta' )
+			->with( $postId, ProductPostType::META_LISTINGS, \Mockery::type( 'array' ) )
+			->andReturn( false );
 	}
 
 	/** 未完の移行が無い（カーソル option が存在しない）状態を作る。 */
@@ -410,13 +517,10 @@ final class PluginUpgradeTest extends TestCase {
 
 		// 書き込みを黙って捨てる WordPress（meta が壊れている・別プラグインが
 		// フィルタで握り潰す等）。読み直すと移行前の flat listing のままになる。
-		$legacy = array( $this->legacyListing() );
-		WP_Mock::userFunction( 'get_post_meta' )
-			->with( 909, ProductPostType::META_LISTINGS, true )
-			->andReturn( $legacy );
-		WP_Mock::userFunction( 'update_post_meta' )
-			->with( 909, ProductPostType::META_LISTINGS, \Mockery::type( 'array' ) )
-			->andReturn( false );
+		$this->stubUnwritableProduct( 909 );
+
+		$writes = array();
+		$this->captureOptionWrites( $writes );
 
 		// メッセージまで固定する。Mockery\Exception\NoMatchingExpectationException は
 		// OutOfBoundsException 経由で RuntimeException を継承しているため、型だけを見ると
@@ -435,7 +539,208 @@ final class PluginUpgradeTest extends TestCase {
 				OfferPromotionTrigger::isSuppressed(),
 				'例外が飛んでも抑止の窓は閉じていなければならない'
 			);
+			$this->assertArrayNotHasKey(
+				PluginUpgrade::OPTION_MIGRATION_CURSOR,
+				$writes,
+				'カーソルが前進している'
+			);
+			// 1 回目の失敗は記録するだけ（諦めない）。
+			$this->assertSame(
+				array( 909 => 1 ),
+				$writes[ PluginUpgrade::OPTION_MIGRATION_ATTEMPTS ] ?? null,
+				'試行回数を記録していない'
+			);
+			$this->assertArrayNotHasKey(
+				PluginUpgrade::OPTION_MIGRATION_FAILED_COUNT,
+				$writes,
+				'1 回目の失敗で諦めている'
+			);
 		}
+	}
+
+	/**
+	 * **本 finding の本丸。** 永久に保存できない商品 1 件が移行全体を止めてはならない。
+	 *
+	 * writeMigratedListings() の例外は「次の実行で同じ商品からやり直す」ための正しい
+	 * 差し戻しだが、恒久的な失敗（別プラグインの update_post_meta フィルタが握り潰す・
+	 * meta 行が壊れている）では毎回同じ場所で投げ続ける。maybeUpgrade() はカーソルが
+	 * ある限り毎リクエスト積み直すため、**その商品より後ろの post ID は永久に移行
+	 * されない**。上限回数で諦めて先へ進み、諦めたことを記録する。
+	 */
+	public function test_保存に失敗し続けた商品は上限で諦めて後続の商品を移行する(): void {
+		// 909 は既に 2 回失敗している（次で上限 MIGRATION_MAX_ATTEMPTS=3 に達する）。
+		$this->migrationAttempts = array( 909 => PluginUpgrade::MIGRATION_MAX_ATTEMPTS - 1 );
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 909, 910 ) );
+
+		$this->stubUnwritableProduct( 909 );
+
+		// 909 の後ろにいる健全な商品。ここが移行されることが本テストの主張である。
+		// external_id を空にしているのは syncDerivedMeta() の extid mirror 走査を
+		// 発生させないため（既存の完走テストと同じ形）。
+		$stored = null;
+		$this->expectListingsRoundTrip(
+			910,
+			array( array_merge( $this->legacyListing(), array( 'external_id' => '' ) ) ),
+			$stored
+		);
+		WP_Mock::userFunction( 'get_post_meta' )->with( 910 )->andReturn( array() );
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()->with( 910, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT )->andReturn( true );
+
+		// 909 の syncDerivedMeta（get_post_meta( 909 ) の 1 引数呼び出し）は
+		// あえてモックしない。諦めた商品は何も保存されていないため派生 meta を
+		// 触ってはならず（META_SCHEMA_VERSION を進めると未移行の商品を移行済みと
+		// 記録してしまう）、到達したらモック不足で落ちる。
+		// 完走時の後始末が温存件数を読む（本テストでは温存は発生しない）。
+		// setUp ではなく各テストで登録する——同じ引数の期待は先勝ちなので、
+		// 温存件数を差し替える既存テストを黙って上書きしてしまうため。
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL, 0 )
+			->andReturn( 0 );
+		// 温存の記録経路も読めるようにしておく。ここをモックしないと、諦めた商品を
+		// 温存として数える実装は「モック不足の別エラー」で落ちてしまい、下の
+		// assertArrayNotHasKey が本当に効いているのか確かめられない。
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS, array() )
+			->andReturn( array() );
+
+		$writes = array();
+		$this->captureOptionWrites( $writes );
+		WP_Mock::userFunction( 'delete_option' )->once()->with( PluginUpgrade::OPTION_MIGRATION_CURSOR );
+
+		PluginUpgrade::runOffersMigrationBatch();
+
+		// 後続の商品が移行されている（＝移行が止まっていない）。
+		$this->assertCount( 1, $stored, '諦めた商品の後ろが移行されていない' );
+		$this->assertCount( 1, $stored[0]['offers'] );
+		$this->assertSame( 'https://example.test/abc', $stored[0]['offers'][0]['regular_url'] );
+
+		// 諦めたことが記録されている（沈黙の禁止）。
+		$this->assertSame( 1, $writes[ PluginUpgrade::OPTION_MIGRATION_FAILED_COUNT ] ?? null );
+		$this->assertSame( array( 909 ), $writes[ PluginUpgrade::OPTION_MIGRATION_FAILED_POST_IDS ] ?? null );
+		// 試行回数の記録は諦めた時点で落とす（諦めた記録は上の 2 option が引き取る）。
+		$this->assertSame( array(), $writes[ PluginUpgrade::OPTION_MIGRATION_ATTEMPTS ] ?? null );
+
+		// **保存されなかったデータを温存件数へ数えない。** 909 は何も格納されていないので、
+		// 「温存しました」と報告する対象は存在しない。
+		$this->assertArrayNotHasKey(
+			PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL,
+			$writes,
+			'保存されていない offer を温存件数に数えている'
+		);
+
+		$this->assertConditionsMet();
+	}
+
+	/** 上限に達するまでは従来どおり差し戻す（一時的な失敗を 1 回で見限らない）。 */
+	public function test_上限に達するまでは例外で差し戻し試行回数だけ増やす(): void {
+		$this->migrationAttempts = array( 909 => 1 );
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 909 ) );
+		$this->stubUnwritableProduct( 909 );
+
+		$writes = array();
+		$this->captureOptionWrites( $writes );
+
+		// Mockery\Exception\NoMatchingExpectationException は RuntimeException を
+		// 継承しているため、型だけではモック不足と区別できない。メッセージを固定する。
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( 'offers 移行の保存に失敗しました' );
+
+		try {
+			PluginUpgrade::runOffersMigrationBatch();
+		} finally {
+			$this->assertSame(
+				array( 909 => 2 ),
+				$writes[ PluginUpgrade::OPTION_MIGRATION_ATTEMPTS ] ?? null
+			);
+			$this->assertArrayNotHasKey( PluginUpgrade::OPTION_MIGRATION_FAILED_COUNT, $writes );
+		}
+	}
+
+	/**
+	 * 試行回数の記録は上限件数で頭打ちにする（option を無制限に育てない）。
+	 *
+	 * ここまで失敗が溜まっているインストールは「再試行すれば直る」状態ではない。
+	 * 未知の商品は記録を増やさず即座に諦め、移行が終わる方を優先する。
+	 */
+	public function test_試行回数の記録が上限なら未知の商品は再試行せず諦める(): void {
+		$this->migrationAttempts = array_fill_keys(
+			range( 1, PluginUpgrade::MIGRATION_ATTEMPTS_CAP ),
+			1
+		);
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 909 ) );
+		$this->stubUnwritableProduct( 909 );
+
+		// 完走時の後始末が温存件数を読む（本テストでは温存は発生しない）。
+		// setUp ではなく各テストで登録する——同じ引数の期待は先勝ちなので、
+		// 温存件数を差し替える既存テストを黙って上書きしてしまうため。
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL, 0 )
+			->andReturn( 0 );
+
+		$writes = array();
+		$this->captureOptionWrites( $writes );
+		WP_Mock::userFunction( 'delete_option' )->once()->with( PluginUpgrade::OPTION_MIGRATION_CURSOR );
+
+		PluginUpgrade::runOffersMigrationBatch();
+
+		$this->assertSame( 1, $writes[ PluginUpgrade::OPTION_MIGRATION_FAILED_COUNT ] ?? null );
+		$this->assertArrayNotHasKey(
+			PluginUpgrade::OPTION_MIGRATION_ATTEMPTS,
+			$writes,
+			'上限に達しているのに試行回数の記録を増やしている'
+		);
+	}
+
+	/**
+	 * 諦めた商品が既に記録済みなら post ID は重ねない（件数は延べで積む）。
+	 */
+	public function test_諦めた商品のpost_idは重複して記録しない(): void {
+		$this->migrationAttempts      = array( 909 => PluginUpgrade::MIGRATION_MAX_ATTEMPTS - 1 );
+		$this->migrationFailedCount   = 4;
+		$this->migrationFailedPostIds = array( 909, 777 );
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 909 ) );
+		$this->stubUnwritableProduct( 909 );
+
+		// 完走時の後始末が温存件数を読む（本テストでは温存は発生しない）。
+		// setUp ではなく各テストで登録する——同じ引数の期待は先勝ちなので、
+		// 温存件数を差し替える既存テストを黙って上書きしてしまうため。
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL, 0 )
+			->andReturn( 0 );
+
+		$writes = array();
+		$this->captureOptionWrites( $writes );
+		WP_Mock::userFunction( 'delete_option' )->once()->with( PluginUpgrade::OPTION_MIGRATION_CURSOR );
+
+		PluginUpgrade::runOffersMigrationBatch();
+
+		$this->assertSame( 5, $writes[ PluginUpgrade::OPTION_MIGRATION_FAILED_COUNT ] ?? null );
+		$this->assertArrayNotHasKey(
+			PluginUpgrade::OPTION_MIGRATION_FAILED_POST_IDS,
+			$writes,
+			'既に記録済みの post ID を重ねて書いている'
+		);
 	}
 
 	/**
@@ -474,6 +779,13 @@ final class PluginUpgradeTest extends TestCase {
 		$this->assertSame( 'https://af.test/abc', $stored[0]['offers'][0]['affiliate_url'] );
 		$this->assertSame( '660', $stored[0]['offers'][0]['price'] );
 		$this->assertSame( '対象巻', $stored[0]['offers'][0]['search_key'] );
+		// 試行回数は「再試行するか」を決めるためだけの作業用データなので、完走したら
+		// option ごと消す（残すとカタログ規模の残骸が次のアップグレードまで居座る）。
+		$this->assertContains(
+			PluginUpgrade::OPTION_MIGRATION_ATTEMPTS,
+			$this->deletedOptions,
+			'完走したのに試行回数の記録を消していない'
+		);
 		$this->assertConditionsMet();
 	}
 
@@ -510,6 +822,13 @@ final class PluginUpgradeTest extends TestCase {
 
 		PluginUpgrade::runOffersMigrationBatch();
 
+		// 未完のうちは試行回数を消さない。ここで消すと、バッチを跨いで同じ商品が
+		// 失敗し続けても回数が 1 に戻り続け、上限に永久に届かない（＝諦めが働かない）。
+		$this->assertNotContains(
+			PluginUpgrade::OPTION_MIGRATION_ATTEMPTS,
+			$this->deletedOptions,
+			'移行の途中で試行回数の記録を消している'
+		);
 		$this->assertConditionsMet();
 	}
 

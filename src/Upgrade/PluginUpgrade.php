@@ -72,6 +72,57 @@ final class PluginUpgrade {
 	public const PRESERVED_POST_IDS_CAP = 50;
 
 	/**
+	 * 移行の保存が何度やっても効かず、移行を諦めた商品の延べ件数。
+	 *
+	 * 書き込みの失敗は差し戻して再試行するのが正しい（一時的な失敗なら次の実行で通る）が、
+	 * **恒久的な失敗ではそれが移行全体を永久に止める**——別プラグインの
+	 * `update_post_meta` フィルタが書き込みを握り潰している、meta 行が壊れている等の
+	 * 商品は毎回同じ場所で例外を投げ、カーソルが前進しないため **その商品より
+	 * 後ろの post ID は 1 件も移行されない**。一定回数で諦めて先へ進め、諦めたことを
+	 * ここへ記録して運用に見せる（沈黙の禁止）。
+	 */
+	public const OPTION_MIGRATION_FAILED_COUNT = 'affilicard_offers_migration_failed_count';
+
+	/**
+	 * 上記の「移行できなかった商品」の post ID（重複なし・先頭
+	 * {@see self::FAILED_POST_IDS_CAP} 件）。温存件数と同じく、件数だけでは運用が
+	 * 何もできないため、通知から編集画面へ辿れるように控える。
+	 */
+	public const OPTION_MIGRATION_FAILED_POST_IDS = 'affilicard_offers_migration_failed_post_ids';
+
+	/** 通知に出す「移行できなかった商品」の post ID 保持上限。 */
+	public const FAILED_POST_IDS_CAP = 50;
+
+	/**
+	 * 保存に失敗した商品ごとの試行回数（post ID => 回数）。
+	 *
+	 * **成功した商品は 1 件も載らない。** 失敗して、かつまだ諦めていない商品だけが
+	 * 載り、成功したら消し、諦めたら消す（諦めた記録は上の 2 option が引き取る）。
+	 * さらに書き込みの失敗はその実行を例外で終わらせる（＝1 回の実行で新たに
+	 * 載り得るのは実質 1 件）ため、カタログの規模に比例して育つことはない。
+	 * 完走時（{@see self::finishOffersMigration()}）に option ごと削除し、
+	 * アンインストール時は Uninstall::OPTION_KEYS が消す。
+	 */
+	public const OPTION_MIGRATION_ATTEMPTS = 'affilicard_offers_migration_attempts';
+
+	/**
+	 * 同じ商品の保存をこの回数まで試し、超えたら諦める。
+	 *
+	 * 一時的な失敗（DB の一時エラー等）を 1 回で見限らない程度には多く、
+	 * 恒久的な失敗でカタログの残りを待たせない程度には少なくする。
+	 */
+	public const MIGRATION_MAX_ATTEMPTS = 3;
+
+	/**
+	 * 試行回数を同時に覚えておく商品数の上限（option の肥大を防ぐ最後の歯止め）。
+	 *
+	 * 上限に達している状態で未知の商品が失敗したら、その商品は再試行せず即座に諦める。
+	 * ここまで来ているインストールは「再試行すれば直る」状態ではなく、移行が終わらない
+	 * ことの方が害が大きいためである（諦めた商品は通知に出る）。
+	 */
+	public const MIGRATION_ATTEMPTS_CAP = 100;
+
+	/**
 	 * offers 移行バッチが使う Action Scheduler の group。
 	 * Uninstall::cleanupQueue() が同じ値をリテラルで unschedule する。
 	 */
@@ -278,7 +329,35 @@ final class PluginUpgrade {
 	 * @return list<int>
 	 */
 	public static function preservedWithoutRegularUrlPostIds(): array {
-		$raw = get_option( self::OPTION_MIGRATION_PRESERVED_POST_IDS, array() );
+		return self::normalisePostIdList( get_option( self::OPTION_MIGRATION_PRESERVED_POST_IDS, array() ) );
+	}
+
+	/**
+	 * 保存に失敗し続けて移行を諦めた商品の延べ件数。
+	 *
+	 * 件数と post ID 一覧を分けて持つ理由は温存側と同じ——一覧には上限があり、
+	 * 上限を超えた分は件数にだけ現れる。
+	 */
+	public static function migrationFailedCount(): int {
+		return (int) get_option( self::OPTION_MIGRATION_FAILED_COUNT, 0 );
+	}
+
+	/**
+	 * 上記のうち控えている post ID（最大 {@see self::FAILED_POST_IDS_CAP} 件）。
+	 *
+	 * @return list<int>
+	 */
+	public static function migrationFailedPostIds(): array {
+		return self::normalisePostIdList( get_option( self::OPTION_MIGRATION_FAILED_POST_IDS, array() ) );
+	}
+
+	/**
+	 * option から読んだ post ID 一覧を正の整数・重複なしへ正規化する。
+	 *
+	 * @param mixed $raw
+	 * @return list<int>
+	 */
+	private static function normalisePostIdList( $raw ): array {
 		if ( ! is_array( $raw ) ) {
 			return array();
 		}
@@ -379,6 +458,14 @@ final class PluginUpgrade {
 	 * 無い商品（既に offers[] 形式・listing 自体が無い）でも META_SCHEMA_VERSION は
 	 * SchemaVersion::CURRENT へ更新する（スキーマのバージョンは商品単位の meta であり、
 	 * この商品の listing 内容に変更があったかどうかとは独立している）。
+	 *
+	 * **保存の失敗は数回まで差し戻し、それを超えたら諦めて先へ進む。** 差し戻し
+	 * （例外）はカーソルを止めて次の実行で同じ商品からやり直させる正しい振る舞いだが、
+	 * 恒久的に保存できない商品が 1 件でもあると、それが移行全体を永久に止めてしまう
+	 * （その商品より後ろの post ID は 1 件も移行されない）。
+	 * {@see self::MIGRATION_MAX_ATTEMPTS} 回試して駄目なら諦め、post ID を記録して
+	 * 通知に出す。諦めた商品は旧形式のまま残り、読み側のフォールバック
+	 * （LegacyOffer::offersWithFallback()）が従来どおり描く。
 	 */
 	private static function migrateOneProduct( int $postId ): void {
 		$raw      = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
@@ -401,11 +488,110 @@ final class PluginUpgrade {
 		}
 
 		if ( $changed ) {
-			$stored = self::writeMigratedListings( $postId, $migrated );
+			try {
+				$stored = self::writeMigratedListings( $postId, $migrated );
+			} catch ( OffersMigrationWriteFailure $failure ) {
+				if ( self::recordMigrationFailure( $postId ) ) {
+					// まだ諦めない。差し戻してカーソルを止め、次の実行で同じ商品からやり直す。
+					throw $failure;
+				}
+
+				self::giveUpOnProduct( $postId );
+
+				// **ここで return する。** 何も格納されていないのだから、
+				// 温存件数（countPreservedWithoutRegularUrl）へ渡す「保存後の形」は
+				// 存在しない——渡すと、実際には保存されていない offer について
+				// 「温存しました」と数えることになる。派生 meta の同期も同じ理由で
+				// 行わない（listings は旧形式のままなので、META_SCHEMA_VERSION を
+				// CURRENT へ進めると移行していない商品を移行済みと記録してしまう）。
+				return;
+			}
+
+			// 保存できた＝この商品の失敗は解消した。試行回数を持ち越さない。
+			self::forgetMigrationAttempts( $postId );
 			self::countPreservedWithoutRegularUrl( $postId, $stored );
 		}
 
 		( new ProductRepository() )->syncDerivedMeta( $postId );
+	}
+
+	/**
+	 * 保存に失敗した商品の試行回数を 1 つ進め、**まだ差し戻す（再試行する）か**を返す。
+	 *
+	 * 上限に達した回は回数を書かない（直後に {@see self::giveUpOnProduct()} が
+	 * 記録を引き取って option から消すため、書いても無駄な往復になる）。
+	 *
+	 * @return bool true なら呼び出し元は例外を投げ直す（次の実行で同じ商品を再試行）。
+	 */
+	private static function recordMigrationFailure( int $postId ): bool {
+		$attempts = self::migrationAttempts();
+		$previous = isset( $attempts[ $postId ] ) ? (int) $attempts[ $postId ] : 0;
+		$attempt  = $previous + 1;
+
+		if ( $attempt >= self::MIGRATION_MAX_ATTEMPTS ) {
+			return false;
+		}
+
+		// 未知の商品なのに上限まで埋まっている＝再試行で直る状態ではない。
+		// option を育てずに諦める（諦めたことは通知に出る）。
+		if ( 0 === $previous && count( $attempts ) >= self::MIGRATION_ATTEMPTS_CAP ) {
+			return false;
+		}
+
+		$attempts[ $postId ] = $attempt;
+		update_option( self::OPTION_MIGRATION_ATTEMPTS, $attempts, false );
+
+		return true;
+	}
+
+	/**
+	 * この商品の移行を諦める。試行回数の記録を落とし、件数と post ID を控える。
+	 *
+	 * 諦めた商品はカーソルが通り過ぎるため、以後のバッチで再訪しない
+	 * （＝ここで控えた記録が唯一の痕跡になる。だから完走後も消さない）。
+	 */
+	private static function giveUpOnProduct( int $postId ): void {
+		self::forgetMigrationAttempts( $postId );
+
+		update_option( self::OPTION_MIGRATION_FAILED_COUNT, self::migrationFailedCount() + 1, false );
+
+		$ids = self::migrationFailedPostIds();
+		if ( in_array( $postId, $ids, true ) || count( $ids ) >= self::FAILED_POST_IDS_CAP ) {
+			return;
+		}
+		$ids[] = $postId;
+		update_option( self::OPTION_MIGRATION_FAILED_POST_IDS, $ids, false );
+	}
+
+	/**
+	 * 試行回数の記録（post ID => 回数）。
+	 *
+	 * @return array<int, int>
+	 */
+	private static function migrationAttempts(): array {
+		$raw = get_option( self::OPTION_MIGRATION_ATTEMPTS, array() );
+		if ( ! is_array( $raw ) ) {
+			return array();
+		}
+		$attempts = array();
+		foreach ( $raw as $id => $count ) {
+			$id    = (int) $id;
+			$count = (int) $count;
+			if ( $id > 0 && $count > 0 ) {
+				$attempts[ $id ] = $count;
+			}
+		}
+		return $attempts;
+	}
+
+	/** 1 商品ぶんの試行回数を記録から落とす（成功・諦めのどちらでも呼ぶ）。 */
+	private static function forgetMigrationAttempts( int $postId ): void {
+		$attempts = self::migrationAttempts();
+		if ( ! isset( $attempts[ $postId ] ) ) {
+			return;
+		}
+		unset( $attempts[ $postId ] );
+		update_option( self::OPTION_MIGRATION_ATTEMPTS, $attempts, false );
 	}
 
 	/**
@@ -440,7 +626,7 @@ final class PluginUpgrade {
 	 *
 	 * @param list<mixed> $listings
 	 * @return list<array<string, mixed>> 実際に格納された listings。
-	 * @throws \RuntimeException 書き込み後の読み直しが $stored と一致しないとき.
+	 * @throws OffersMigrationWriteFailure 書き込み後の読み直しが $stored と一致しないとき.
 	 */
 	private static function writeMigratedListings( int $postId, array $listings ): array {
 		return OfferPromotionTrigger::withSuppression(
@@ -455,7 +641,7 @@ final class PluginUpgrade {
 							? JsonField::decode( $raw, array() )
 							: ( is_array( $raw ) ? $raw : array() );
 						if ( $persisted !== $stored ) {
-							throw new \RuntimeException(
+							throw new OffersMigrationWriteFailure(
 								// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- HTML 出力ではなく Action Scheduler のログ／PHP エラーログに残る例外メッセージ。埋め込むのは post ID（int）のみで外部入力を含まない。
 								sprintf( 'affilicard: offers 移行の保存に失敗しました（post %d）。', $postId )
 							);
@@ -537,6 +723,20 @@ final class PluginUpgrade {
 	 */
 	private static function finishOffersMigration(): void {
 		delete_option( self::OPTION_MIGRATION_CURSOR );
+		// 試行回数は「再試行するかどうか」を決めるためだけの作業用データで、移行が
+		// 終われば意味を失う（諦めた商品の記録は別 option が持ち、通知のために残す）。
+		delete_option( self::OPTION_MIGRATION_ATTEMPTS );
+
+		$failed = self::migrationFailedCount();
+		if ( $failed > 0 ) {
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- 諦めた商品は AS 側では完全に不可視になるため、CLI 運用の補助としてログにも残す（運用への表示は Admin\OffersMigrationNotice が担う）。
+			error_log(
+				sprintf(
+					'affilicard: offers 移行で %d 件の商品を新形式へ保存できませんでした。これらは旧形式のまま残り、読み取り時のフォールバックで表示されます。',
+					$failed
+				)
+			);
+		}
 
 		$preserved = self::preservedWithoutRegularUrlCount();
 		if ( $preserved > 0 ) {

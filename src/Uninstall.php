@@ -40,6 +40,16 @@ final class Uninstall {
 		// Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS のリテラル値
 		// （温存が起きた商品の post ID 一覧）。
 		'affilicard_offers_migration_preserved_post_ids',
+		// Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_ATTEMPTS のリテラル値
+		// （保存に失敗した商品ごとの試行回数。完走時にも削除するが、未完のまま
+		// アンインストールされた場合はここでしか消えない）。
+		'affilicard_offers_migration_attempts',
+		// Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_FAILED_COUNT のリテラル値
+		// （新形式へ保存できず移行を諦めた商品の延べ件数）。
+		'affilicard_offers_migration_failed_count',
+		// Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_FAILED_POST_IDS のリテラル値
+		// （同上の post ID 一覧）。
+		'affilicard_offers_migration_failed_post_ids',
 	);
 
 	/**
@@ -62,6 +72,9 @@ final class Uninstall {
 	private static function deleteUserMeta(): void {
 		// Affilicard\Admin\OffersMigrationNotice::DISMISS_META のリテラル値。
 		delete_metadata( 'user', 0, 'affilicard_offers_migration_notice_dismissed', '', true );
+		// Affilicard\Admin\OffersMigrationNotice::DISMISS_FAILED_META のリテラル値
+		// （「移行できなかった商品」通知を閉じた時点の件数）。
+		delete_metadata( 'user', 0, 'affilicard_offers_migration_failed_notice_dismissed', '', true );
 	}
 
 	public static function run(): void {

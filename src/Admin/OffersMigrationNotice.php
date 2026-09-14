@@ -23,6 +23,12 @@ use Affilicard\Upgrade\PluginUpgrade;
  *    `ProductSchema::sanitizeOffers()` は常時この形の offer を弾くため、通常 URL を
  *    追加しない限りいずれ黙って消える。「確認してほしい」ではなく「消える前に
  *    通常 URL を追加してほしい」と明示する。確認したら消せるよう dismiss できる。
+ * 3. **新形式へ保存できず、移行を諦めた商品がある**。2 とは状況が違う——2 はデータが
+ *    移行できた上で「次の保存で消える」猶予の話、3 は**そもそも書き込みが効かず
+ *    旧形式のまま取り残された**商品の話である。表示は読み取り時のフォールバックで
+ *    続くので即座に壊れはしないが、原因（別プラグインの meta フィルタ・壊れた meta 行）
+ *    を取り除かない限り直らない。混ぜて書くと運用が取るべき行動を誤るため、
+ *    別の通知として別の文言で出す。
  *
  * 表示は affilicard 管理画面に限定する（CronDisabledNotice と同じ判定）。
  */
@@ -40,6 +46,19 @@ final class OffersMigrationNotice {
 
 	/** 「今後表示しない」リンクのアクション名（nonce/クエリ引数）。 */
 	private const DISMISS_ACTION = 'affilicard_dismiss_offers_migration_notice';
+
+	/**
+	 * 「移行できなかった商品」通知の dismiss を記録するユーザーメタキー。
+	 *
+	 * 温存通知と同じく、記録するのは真偽値ではなく「閉じた時点の件数」である
+	 * （閉じたあとのバッチが件数を増やすことがあるため）。温存通知とキーを分けるのは、
+	 * 片方を閉じたらもう片方まで黙る状態を避けるため——2 つは別の事象で、運用が
+	 * 取るべき行動も違う。
+	 */
+	private const DISMISS_FAILED_META = 'affilicard_offers_migration_failed_notice_dismissed';
+
+	/** 「移行できなかった商品」通知の dismiss アクション名（nonce/クエリ引数）。 */
+	private const DISMISS_FAILED_ACTION = 'affilicard_dismiss_offers_migration_failed_notice';
 
 	public static function register(): void {
 		add_action( 'admin_notices', array( self::class, 'maybeRender' ) );
@@ -85,6 +104,25 @@ final class OffersMigrationNotice {
 		return $count > $dismissed_at;
 	}
 
+	/**
+	 * 移行を諦めた（新形式へ保存できなかった）商品の件数を出すべきか。
+	 *
+	 * 判定は温存通知と同じ——affilicard の画面に限定し、閉じた時点より件数が増えたら
+	 * 出し直す。件数は完走後も残る（カーソルが通り過ぎた商品は二度と再訪しないため、
+	 * この記録が唯一の痕跡である）。
+	 */
+	public static function shouldShowFailed(): bool {
+		if ( ! self::isAffilicardScreen() ) {
+			return false;
+		}
+		$count = PluginUpgrade::migrationFailedCount();
+		if ( $count < 1 ) {
+			return false;
+		}
+		$dismissed_at = (int) get_user_meta( get_current_user_id(), self::DISMISS_FAILED_META, true );
+		return $count > $dismissed_at;
+	}
+
 	public static function maybeRender(): void {
 		if ( self::shouldShowPending() ) {
 			echo '<div class="notice notice-warning"><p>';
@@ -94,6 +132,8 @@ final class OffersMigrationNotice {
 			);
 			echo '</p></div>';
 		}
+
+		self::maybeRenderFailed();
 
 		if ( ! self::shouldShowPreserved() ) {
 			return;
@@ -123,6 +163,42 @@ final class OffersMigrationNotice {
 	}
 
 	/**
+	 * 新形式へ保存できず移行を諦めた商品を出す。
+	 *
+	 * **温存通知とは別の文言にする。** 温存は「データは移行できたが、身元が無いので
+	 * 次の保存で消える」猶予の話であり、運用が取るべき行動は「通常 URL を追加する」。
+	 * こちらは「書き込み自体が効かず旧形式のまま取り残された」話で、行動は
+	 * 「保存を妨げている原因を取り除く」である。混ぜると誤った対処へ誘導する。
+	 */
+	private static function maybeRenderFailed(): void {
+		if ( ! self::shouldShowFailed() ) {
+			return;
+		}
+
+		$dismiss_url = wp_nonce_url(
+			add_query_arg( self::DISMISS_FAILED_ACTION, '1' ),
+			self::DISMISS_FAILED_ACTION
+		);
+
+		echo '<div class="notice notice-error"><p>';
+		echo esc_html(
+			sprintf(
+				/* translators: %d: 移行できなかった商品の件数。 */
+				__(
+					'affilicard: データ移行で、購入リンクを新しい形式へ保存できなかった商品が %d 件あります。書き込みが繰り返し失敗したため、これらの商品は移行の対象から外しました（旧形式のまま残り、表示は従来どおりのフォールバックで続きます）。別のプラグインが meta の保存を書き換えている、または meta の値が壊れている可能性があります。原因を取り除いたうえで、下記の商品を開いて保存し直してください。',
+					'affilicard'
+				),
+				PluginUpgrade::migrationFailedCount()
+			)
+		);
+		echo ' <a href="' . esc_url( $dismiss_url ) . '">'
+			. esc_html__( 'この通知を今後表示しない', 'affilicard' ) . '</a>';
+		echo '</p>';
+		self::renderPostLinks( PluginUpgrade::migrationFailedPostIds(), PluginUpgrade::FAILED_POST_IDS_CAP );
+		echo '</div>';
+	}
+
+	/**
 	 * 温存が起きた商品への編集リンクを列挙する。
 	 *
 	 * 件数だけを告げる通知は運用上何もできない——「12 件消えます」と言われても、
@@ -131,7 +207,19 @@ final class OffersMigrationNotice {
 	 * 導線にする。ID の保持には上限があるため、上限に達している場合はその旨を添える。
 	 */
 	private static function renderPreservedPostLinks(): void {
-		$ids = PluginUpgrade::preservedWithoutRegularUrlPostIds();
+		self::renderPostLinks(
+			PluginUpgrade::preservedWithoutRegularUrlPostIds(),
+			PluginUpgrade::PRESERVED_POST_IDS_CAP
+		);
+	}
+
+	/**
+	 * 商品 post ID の一覧を編集画面へのリンクとして出す（温存・移行失敗で共用）。
+	 *
+	 * @param list<int> $ids 控えてある post ID。
+	 * @param int       $cap 控える上限（達していればその旨を添える）。
+	 */
+	private static function renderPostLinks( array $ids, int $cap ): void {
 		if ( array() === $ids ) {
 			return;
 		}
@@ -155,12 +243,12 @@ final class OffersMigrationNotice {
 		// 1 商品が温存 offer を 2 つ持てば差分は「存在しない商品」を指す。控えている
 		// post ID は上限（PRESERVED_POST_IDS_CAP）で打ち切るため、上限に達したかどうか
 		// だけを伝える（打ち切った先に何件あるかは記録していない＝数えられない）。
-		if ( count( $ids ) >= PluginUpgrade::PRESERVED_POST_IDS_CAP ) {
+		if ( count( $ids ) >= $cap ) {
 			echo '<p>' . esc_html(
 				sprintf(
 					/* translators: %d: 一覧に出す商品数の上限。 */
 					__( '商品の一覧は先頭 %d 件までです。これ以外にも対象商品がある場合は表示されません。', 'affilicard' ),
-					PluginUpgrade::PRESERVED_POST_IDS_CAP
+					$cap
 				)
 			) . '</p>';
 		}
@@ -171,17 +259,32 @@ final class OffersMigrationNotice {
 	 * 除いてリダイレクトする（CronDisabledNotice と同じ手順）。
 	 */
 	public static function maybeHandleDismiss(): void {
-		if ( ! isset( $_GET[ self::DISMISS_ACTION ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce は直後の check_admin_referer で検証する。
-			return;
+		if ( isset( $_GET[ self::DISMISS_ACTION ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce は直後の check_admin_referer で検証する。
+			self::dismiss(
+				self::DISMISS_ACTION,
+				self::DISMISS_META,
+				PluginUpgrade::preservedWithoutRegularUrlCount()
+			);
 		}
-		check_admin_referer( self::DISMISS_ACTION );
+
+		if ( isset( $_GET[ self::DISMISS_FAILED_ACTION ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce は直後の check_admin_referer で検証する。
+			self::dismiss(
+				self::DISMISS_FAILED_ACTION,
+				self::DISMISS_FAILED_META,
+				PluginUpgrade::migrationFailedCount()
+			);
+		}
+	}
+
+	/**
+	 * dismiss の共通処理。nonce を検証し、「閉じた時点の件数」をユーザーメタへ残して
+	 * クエリ引数を除いてリダイレクトする。
+	 */
+	private static function dismiss( string $action, string $meta, int $count ): void {
+		check_admin_referer( $action );
 		// 真偽値ではなく「閉じた時点の件数」を残す（後続バッチの増分で出し直すため）。
-		update_user_meta(
-			get_current_user_id(),
-			self::DISMISS_META,
-			PluginUpgrade::preservedWithoutRegularUrlCount()
-		);
-		wp_safe_redirect( remove_query_arg( array( self::DISMISS_ACTION, '_wpnonce' ) ) );
+		update_user_meta( get_current_user_id(), $meta, $count );
+		wp_safe_redirect( remove_query_arg( array( $action, '_wpnonce' ) ) );
 		exit;
 	}
 

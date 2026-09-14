@@ -52,12 +52,28 @@ final class OffersMigrationNoticeTest extends TestCase {
 			->andReturn( $count );
 	}
 
-	/** @param int $dismissed 「閉じた時点の温存件数」として記録されている値（0＝未 dismiss）。 */
-	private function stubUser( int $dismissed ): void {
+	/** 移行を諦めた（新形式へ保存できなかった）商品の件数。 */
+	private function stubFailed( int $count, array $ids = array() ): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_FAILED_COUNT, 0 )
+			->andReturn( $count );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_FAILED_POST_IDS, array() )
+			->andReturn( $ids );
+	}
+
+	/**
+	 * @param int      $dismissed        「閉じた時点の温存件数」として記録されている値（0＝未 dismiss）。
+	 * @param int|null $dismissed_failed 「閉じた時点の移行失敗件数」（null なら未 dismiss の 0）。
+	 */
+	private function stubUser( int $dismissed, ?int $dismissed_failed = null ): void {
 		WP_Mock::userFunction( 'get_current_user_id' )->andReturn( 7 );
 		WP_Mock::userFunction( 'get_user_meta' )
 			->with( 7, 'affilicard_offers_migration_notice_dismissed', true )
 			->andReturn( $dismissed );
+		WP_Mock::userFunction( 'get_user_meta' )
+			->with( 7, 'affilicard_offers_migration_failed_notice_dismissed', true )
+			->andReturn( null === $dismissed_failed ? 0 : $dismissed_failed );
 	}
 
 	public function test_移行が未完なら未完通知を出す(): void {
@@ -164,6 +180,7 @@ final class OffersMigrationNoticeTest extends TestCase {
 		$this->stubScreen( 'affilicard_product' );
 		$this->stubCursor( false );
 		$this->stubPreserved( 2 );
+		$this->stubFailed( 0 );
 		$this->stubUser( 0 );
 		WP_Mock::userFunction( 'get_option' )
 			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS, array() )
@@ -222,6 +239,7 @@ final class OffersMigrationNoticeTest extends TestCase {
 		$this->stubCursor( false );
 		// 1 商品が温存 offer を 2 件持つ状況（件数 2・商品 1）。
 		$this->stubPreserved( 2 );
+		$this->stubFailed( 0 );
 		$this->stubUser( 0 );
 		WP_Mock::userFunction( 'get_option' )
 			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS, array() )
@@ -241,5 +259,108 @@ final class OffersMigrationNoticeTest extends TestCase {
 
 		$this->assertStringContainsString( '商品501', $output );
 		$this->assertStringNotContainsString( 'ほか', $output, '存在しない商品を隠れ件数として報告している' );
+	}
+
+	/**
+	 * 移行を諦めた商品は通知に出す。
+	 *
+	 * 諦めた商品はカーソルが通り過ぎて二度と再訪しないため、記録と通知が唯一の痕跡である。
+	 * 黙って旧形式のまま取り残すと、原因（別プラグインの meta フィルタ等）が永久に直らない。
+	 */
+	public function test_移行を諦めた商品があれば通知を出す(): void {
+		$this->stubScreen( 'affilicard_product' );
+		$this->stubFailed( 2, array( 909 ) );
+		$this->stubUser( 0 );
+
+		$this->assertTrue( OffersMigrationNotice::shouldShowFailed() );
+	}
+
+	public function test_諦めた商品が0件なら通知しない(): void {
+		$this->stubScreen( 'affilicard_product' );
+		$this->stubFailed( 0 );
+
+		$this->assertFalse( OffersMigrationNotice::shouldShowFailed() );
+	}
+
+	public function test_諦め通知はaffilicard以外の画面では出さない(): void {
+		$this->stubScreen( 'post' );
+		$this->stubFailed( 2, array( 909 ) );
+
+		$this->assertFalse( OffersMigrationNotice::shouldShowFailed() );
+	}
+
+	/** dismiss は件数で覚える（諦めた商品が増えたら出し直す）。 */
+	public function test_dismiss後に諦めた件数が増えたら通知を出し直す(): void {
+		$this->stubScreen( 'affilicard_product' );
+		$this->stubFailed( 5, array( 909 ) );
+		$this->stubUser( 0, 1 );
+
+		$this->assertTrue( OffersMigrationNotice::shouldShowFailed() );
+	}
+
+	/**
+	 * 温存通知を閉じても諦め通知は黙らない（dismiss の記録キーが別）。
+	 *
+	 * 2 つは別の事象で、運用が取るべき行動も違う。片方を閉じたらもう片方まで
+	 * 隠れる作りにすると、より深刻な「移行できていない」方が見えなくなる。
+	 */
+	public function test_温存通知をdismissしても諦め通知は出る(): void {
+		$this->stubScreen( 'affilicard_product' );
+		$this->stubPreserved( 3 );
+		$this->stubFailed( 2, array( 909 ) );
+		$this->stubUser( 3 );
+
+		$this->assertFalse( OffersMigrationNotice::shouldShowPreserved() );
+		$this->assertTrue( OffersMigrationNotice::shouldShowFailed() );
+	}
+
+	/**
+	 * 諦め通知は温存通知と別の文言で、対象商品への導線を出す。
+	 *
+	 * 温存は「データは移行できたが次の保存で消える」猶予の話、諦めは「書き込み自体が
+	 * 効かず旧形式のまま取り残された」話である。同じ文言に畳むと、運用は誤った対処
+	 * （通常 URL の追加）へ誘導される。
+	 */
+	public function test_諦め通知は温存通知と別の文言で対象商品への導線を出す(): void {
+		$this->stubEditPosts( true );
+		$this->stubScreen( 'affilicard_product' );
+		$this->stubCursor( false );
+		$this->stubPreserved( 1 );
+		$this->stubFailed( 1, array( 909 ) );
+		$this->stubUser( 0 );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS, array() )
+			->andReturn( array( 501 ) );
+		WP_Mock::userFunction( 'get_edit_post_link' )
+			->andReturnUsing(
+				static function ( $id ): string {
+					return 'https://example.test/wp-admin/post.php?post=' . (int) $id . '&action=edit';
+				}
+			);
+		WP_Mock::userFunction( 'get_the_title' )
+			->andReturnUsing(
+				static function ( $id ): string {
+					return '商品' . (int) $id;
+				}
+			);
+		WP_Mock::userFunction( 'wp_nonce_url' )->andReturn( 'https://example.test/dismiss' );
+		WP_Mock::userFunction( 'add_query_arg' )->andReturn( 'https://example.test/current' );
+		WP_Mock::userFunction( '__', array( 'return_arg' => 0 ) );
+		WP_Mock::passthruFunction( 'esc_html' );
+		WP_Mock::passthruFunction( 'esc_html__' );
+		WP_Mock::passthruFunction( 'esc_url' );
+
+		ob_start();
+		OffersMigrationNotice::maybeRender();
+		$output = (string) ob_get_clean();
+
+		// 諦め: 保存できなかったこと・旧形式のまま残ること。
+		$this->assertStringContainsString( '新しい形式へ保存できなかった商品が 1 件', $output );
+		$this->assertStringContainsString( '旧形式のまま残り', $output );
+		// 温存: 次の保存で消えること（＝別の事象として併記されている）。
+		$this->assertStringContainsString( '購入リンクを維持した listing が 1 件', $output );
+		// 諦めた商品への導線。
+		$this->assertStringContainsString( 'post=909&action=edit', $output, '諦めた商品への導線が無い' );
+		$this->assertStringContainsString( '商品909', $output );
 	}
 }
