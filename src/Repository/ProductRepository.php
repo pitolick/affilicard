@@ -251,7 +251,12 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 *
 	 * ロックの流儀・best-effort 続行の理由は updateListing() と同じ。
 	 *
-	 * @param array<string, mixed> $offer 更新後の購入リンク 1 件。
+	 * @param array<string, mixed> $patch          取得が変えたフィールドだけの差分。
+	 *                                             ロック内で読み直した購入リンクへマージする。
+	 * @param string               $targetIdentity 取得前に確定させたマージ先の identity。
+	 *                                             $patch 自身から求めてはならない——取得は
+	 *                                             regular_url を上書きしうるため、external_id を
+	 *                                             持たない購入リンクでは前後で identity が変わる。
 	 */
 	public function updateListingOffer( int $postId, string $platform, array $patch, string $targetIdentity ): bool {
 		global $wpdb;
