@@ -32,7 +32,7 @@
 
 'use strict';
 
-const { execSync } = require( 'child_process' );
+const { execFileSync } = require( 'child_process' );
 const fs = require( 'fs' );
 const { request: pwRequest } = require( '@playwright/test' );
 
@@ -61,12 +61,31 @@ function getApiContext() {
 }
 
 /**
- * `wp-env run tests-cli <cmd>` を実行し、`ℹ Starting ...` / `✔ Ran ...` の
+ * `wp-env run tests-cli <args...>` をシェルを介さずに実行し、標準出力をそのまま返す。
+ *
+ * **値をシェル文字列へ埋め込まない。** テンプレートリテラルでコマンド行を組み立てると、
+ * 引数に含まれる `;` や `$(...)` がシェルにそのまま解釈される（コマンドインジェクション）。
+ * execFileSync に argv 配列で渡せばシェル自体が介在せず、値は 1 引数のまま届く
+ * （空白を含む検索語のクォートも不要になる）。
+ *
+ * @param {string[]} args wp-cli 側の argv。
+ * @return {string} 標準出力（バナー込み）。
+ */
+function wpEnvExec( args ) {
+	return execFileSync( 'npx', [ 'wp-env', 'run', 'tests-cli', ...args ], {
+		encoding: 'utf8',
+	} );
+}
+
+/**
+ * `wp-env run tests-cli <args...>` を実行し、`ℹ Starting ...` / `✔ Ran ...` の
  * バナー行を取り除いた実コマンドの標準出力だけを返す。
  * （バナーはコマンド出力と改行無しで連結されるため、末尾を正規表現で切り落とす）
+ *
+ * @param {string[]} args wp-cli 側の argv。
  */
-function runWpCli( cmd ) {
-	const raw = execSync( `npx wp-env run tests-cli ${ cmd }`, { encoding: 'utf8' } );
+function runWpCli( args ) {
+	const raw = wpEnvExec( args );
 	return raw.replace( /^ℹ[^\n]*\n\n/, '' ).replace( /✔ Ran `.*$/s, '' ).trim();
 }
 
@@ -82,9 +101,16 @@ function runWpCli( cmd ) {
  * 商品を作るテスト用に wp-cli 側で行う。
  */
 function cleanupStaleFixtures( titleSearch ) {
-	const ids = runWpCli(
-		`wp post list --post_type=affilicard_product --post_status=any "--s=${ titleSearch }" --field=ID --format=csv`
-	)
+	const ids = runWpCli( [
+		'wp',
+		'post',
+		'list',
+		'--post_type=affilicard_product',
+		'--post_status=any',
+		`--s=${ titleSearch }`,
+		'--field=ID',
+		'--format=csv',
+	] )
 		.split( /\r?\n/ )
 		.map( ( s ) => s.trim() )
 		.filter( Boolean );
@@ -93,7 +119,7 @@ function cleanupStaleFixtures( titleSearch ) {
 		return;
 	}
 
-	runWpCli( `wp post delete ${ ids.join( ' ' ) } --force` );
+	runWpCli( [ 'wp', 'post', 'delete', ...ids, '--force' ] );
 }
 
 /**
@@ -101,11 +127,13 @@ function cleanupStaleFixtures( titleSearch ) {
  * seed.php / global-setup.js と同じ「マーカー行を探す」方式（シェルクォート問題を避ける）。
  */
 function runEvalFileJson( relativePathUnderPlugin, args, marker ) {
-	const argStr = args.map( ( a ) => String( a ) ).join( ' ' );
-	const raw = execSync(
-		`npx wp-env run tests-cli wp eval-file --use-include wp-content/plugins/affilicard/${ relativePathUnderPlugin } ${ argStr }`,
-		{ encoding: 'utf8' }
-	);
+	const raw = wpEnvExec( [
+		'wp',
+		'eval-file',
+		'--use-include',
+		`wp-content/plugins/affilicard/${ relativePathUnderPlugin }`,
+		...args.map( ( a ) => String( a ) ),
+	] );
 	const idx = raw.indexOf( marker );
 	if ( -1 === idx ) {
 		throw new Error( `${ relativePathUnderPlugin } did not output ${ marker }. Output:\n${ raw }` );
@@ -187,7 +215,15 @@ async function readListings( id ) {
  * @return {string[]} 格納順（sort 済みではない）。
  */
 function readMetaValues( postId, metaKey ) {
-	const raw = runWpCli( `wp post meta list ${ postId } --keys=${ metaKey } --format=json` );
+	const raw = runWpCli( [
+		'wp',
+		'post',
+		'meta',
+		'list',
+		String( postId ),
+		`--keys=${ metaKey }`,
+		'--format=json',
+	] );
 	if ( '' === raw ) {
 		return [];
 	}
