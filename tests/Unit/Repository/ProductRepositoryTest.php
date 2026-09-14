@@ -1232,8 +1232,7 @@ final class ProductRepositoryTest extends TestCase {
 				'platform'    => 'rakuten-kobo',
 				'external_id' => 'r-1',
 				'price'       => '693',
-			),
-			'external_id:r-1'
+			)
 		);
 
 		$this->assertTrue( $ok );
