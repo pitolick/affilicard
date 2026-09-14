@@ -83,4 +83,31 @@ final class FetchStatusTest extends TestCase {
 			FetchStatus::fromLegacyMessage( 'No matching product was found' )
 		);
 	}
+
+	/**
+	 * 翻訳済みの「自動取得の対象外」も UNSUPPORTED として拾う。
+	 *
+	 * JS 側（src/Admin/components/ListingsEditor.jsx の
+	 * fetchStatusFromLegacyMessage()）に同じ規則を二重に持たせているため、
+	 * 片方だけ訳語を拾う状態にならないよう両言語で同じケースを固定する。
+	 * 対応する JS のテストは tests/js/components/ListingsEditor.test.jsx。
+	 */
+	public function test_翻訳済みの対象外メッセージもUNSUPPORTEDとして扱う(): void {
+		$this->translations['対応する自動 Provider がありません'] = 'No automatic provider is available';
+
+		$this->assertSame(
+			FetchStatus::UNSUPPORTED,
+			FetchStatus::fromLegacyMessage( 'No automatic provider is available' )
+		);
+	}
+
+	/** 訳語を足しても、翻訳前に保存された日本語リテラルは従来どおり写る。 */
+	public function test_訳語があっても日本語リテラルは従来どおり写る(): void {
+		$this->translations['該当する商品が見つかりませんでした'] = 'No matching product was found';
+
+		$this->assertSame(
+			FetchStatus::TERMINAL,
+			FetchStatus::fromLegacyMessage( '該当する商品が見つかりませんでした' )
+		);
+	}
 }

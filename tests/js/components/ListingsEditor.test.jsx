@@ -13,6 +13,7 @@ import {
 	withNormalisedOffers,
 } from '../../../src/Admin/components/ListingsEditor';
 import { fetchPlatforms } from '../../../src/Admin/api/platforms';
+import { resetLocaleData, setLocaleData } from '@wordpress/i18n';
 
 const platforms = [
 	{ code: 'dmm-books', name: 'DMM Books' },
@@ -882,6 +883,85 @@ describe( 'withNormalisedOffers（Affilicard\\Pricing\\LegacyOffer::offersWithFa
 		expect(
 			withNormalisedOffers( flatListing() ).offers[ 0 ].fetch_status
 		).toBe( '' );
+	} );
+
+	describe( '翻訳済みの旧 fetch_error（PHP の FetchStatus::matchesLegacy() と同じ規則）', () => {
+		// v3 の ListingRefresher は __() の戻り値を fetch_error に保存していたため、
+		// affilicard の翻訳を入れているサイトでは日本語リテラルと一致しない。
+		// PHP（FetchStatus::fromLegacyMessage）は現在ロケールの訳語も拾うので、
+		// JS が日本語リテラルしか見ないと恒久失敗が transient に化け、
+		// fallback_on_terminal が ON のとき編集画面の保存でサーバと違う
+		// fetch_status を書き込んでしまう。
+		afterEach( () => {
+			resetLocaleData();
+		} );
+
+		test( '翻訳済みの恒久失敗メッセージも terminal として扱う', () => {
+			setLocaleData(
+				{
+					'': { domain: 'affilicard', lang: 'en_US' },
+					該当する商品が見つかりませんでした: [ 'No matching product was found' ],
+				},
+				'affilicard'
+			);
+
+			expect(
+				withNormalisedOffers(
+					flatListing( { fetch_error: 'No matching product was found' } )
+				).offers[ 0 ].fetch_status
+			).toBe( 'terminal' );
+		} );
+
+		test( '翻訳済みの対象外メッセージも unsupported として扱う', () => {
+			setLocaleData(
+				{
+					'': { domain: 'affilicard', lang: 'en_US' },
+					'対応する自動 Provider がありません': [
+						'No automatic provider is available',
+					],
+				},
+				'affilicard'
+			);
+
+			expect(
+				withNormalisedOffers(
+					flatListing( { fetch_error: 'No automatic provider is available' } )
+				).offers[ 0 ].fetch_status
+			).toBe( 'unsupported' );
+		} );
+
+		test( '翻訳が入っていても日本語リテラルは従来どおり写る', () => {
+			// 訳語を足したせいで、翻訳前に保存された値を取りこぼしてはいけない。
+			setLocaleData(
+				{
+					'': { domain: 'affilicard', lang: 'en_US' },
+					該当する商品が見つかりませんでした: [ 'No matching product was found' ],
+				},
+				'affilicard'
+			);
+
+			expect(
+				withNormalisedOffers(
+					flatListing( { fetch_error: '該当する商品が見つかりませんでした' } )
+				).offers[ 0 ].fetch_status
+			).toBe( 'terminal' );
+		} );
+
+		test( '訳語と無関係な文言は transient のまま', () => {
+			setLocaleData(
+				{
+					'': { domain: 'affilicard', lang: 'en_US' },
+					該当する商品が見つかりませんでした: [ 'No matching product was found' ],
+				},
+				'affilicard'
+			);
+
+			expect(
+				withNormalisedOffers(
+					flatListing( { fetch_error: 'Something else went wrong' } )
+				).offers[ 0 ].fetch_status
+			).toBe( 'transient' );
+		} );
 	} );
 } );
 

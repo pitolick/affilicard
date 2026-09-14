@@ -126,6 +126,16 @@ function hasFlatFetchFields(listing) {
  * いずれにも一致しない値は transient へ倒す（恒久と誤認して購入リンクを
  * 飛ばすより安全）。
  *
+ * **原文だけでなく現在ロケールの訳語も拾う**（PHP の
+ * `FetchStatus::matchesLegacy()` と同じ規則）。v3 の ListingRefresher は
+ * `__()` の戻り値を fetch_error へ保存していたため、affilicard の翻訳を
+ * 入れているサイトの値は日本語リテラルと一致しない。ここでリテラルだけを
+ * 見ると、サーバが terminal と判定する listing を編集画面だけが transient と
+ * 見なし、fallback_on_terminal が ON のとき保存で誤った fetch_status を
+ * 書き込む。`wp_set_script_translations()` は 3 つのハンドル全てに登録済みなので
+ * （src/Plugin.php / src/PostType/ProductMetaBox.php / src/Block/Block.php）、
+ * `__()` は PHP と同じ訳語を返す。
+ *
  * @param {string} message
  * @return {string}
  */
@@ -134,10 +144,16 @@ function fetchStatusFromLegacyMessage(message) {
 	if (trimmed === '') {
 		return '';
 	}
-	if (trimmed === '対応する自動 Provider がありません') {
+	if (
+		trimmed === '対応する自動 Provider がありません' ||
+		trimmed === __('対応する自動 Provider がありません', 'affilicard')
+	) {
 		return 'unsupported';
 	}
-	if (trimmed === '該当する商品が見つかりませんでした') {
+	if (
+		trimmed === '該当する商品が見つかりませんでした' ||
+		trimmed === __('該当する商品が見つかりませんでした', 'affilicard')
+	) {
 		return 'terminal';
 	}
 	return 'transient';
