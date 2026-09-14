@@ -716,6 +716,29 @@ describe( 'withNormalisedOffers（Affilicard\\Pricing\\LegacyOffer::offersWithFa
 		expect( normalised.platform ).toBe( 'rakuten-kobo' );
 	} );
 
+	test( '写した後は flat な取得結果フィールドを listing から取り除く', () => {
+		const normalised = withNormalisedOffers( flatListing() );
+
+		// PHP の PluginUpgrade::LEGACY_FETCH_FIELDS と同じ一覧を落とす。
+		expect( normalised ).not.toHaveProperty( 'external_id' );
+		expect( normalised ).not.toHaveProperty( 'regular_url' );
+		expect( normalised ).not.toHaveProperty( 'affiliate_url' );
+		expect( normalised ).not.toHaveProperty( 'price' );
+		expect( normalised ).not.toHaveProperty( 'search_key' );
+		// 設定フィールドは残る。
+		expect( normalised.platform ).toBe( 'rakuten-kobo' );
+	} );
+
+	test( '購入リンクを全て削除した後に再度正規化しても復活しない', () => {
+		// 1 回目: flat から offers[0] を合成し、旧フィールドを落とす。
+		const normalised = withNormalisedOffers( flatListing() );
+		// 利用者が唯一の購入リンクを削除する。
+		const emptied = { ...normalised, offers: [] };
+
+		// 2 回目: 旧フィールドが残っていると、ここで削除した購入リンクが復活する。
+		expect( withNormalisedOffers( emptied ).offers ).toEqual( [] );
+	} );
+
 	test( '取得結果フィールドを持たない listing は 0 件のまま', () => {
 		const normalised = withNormalisedOffers( {
 			platform: 'rakuten-kobo',

@@ -152,7 +152,38 @@ export function withNormalisedOffers(listing) {
 	} else if (!hasFlatFetchFields(listing)) {
 		return { ...listing, offers: [] };
 	}
-	return { ...listing, offers: [legacyOffer(listing)] };
+	return { ...withoutLegacyFetchFields(listing), offers: [legacyOffer(listing)] };
+}
+
+/**
+ * flat な取得結果フィールドを listing から取り除く。
+ *
+ * `Affilicard\Upgrade\PluginUpgrade::LEGACY_FETCH_FIELDS`（PHP）と同じ一覧。
+ * 残したままにすると、購入リンクを 1 件も持たない状態にしたときに
+ * withNormalisedOffers() が旧フィールドから再生成し、**削除したはずの購入リンクが
+ * 復活する**。移行バッチも同じ理由でこれらを unset している。
+ *
+ * @param {Object} listing
+ * @return {Object}
+ */
+function withoutLegacyFetchFields(listing) {
+	const stripped = { ...listing };
+	for (const field of [
+		'external_id',
+		'regular_url',
+		'affiliate_url',
+		'price',
+		'list_price',
+		'badge',
+		'image_url',
+		'search_key',
+		'fetch_error',
+		'last_fetched_at',
+		'last_verified_at',
+	]) {
+		delete stripped[field];
+	}
+	return stripped;
 }
 
 function platformName(platforms, code) {
