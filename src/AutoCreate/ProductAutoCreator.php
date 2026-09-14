@@ -18,6 +18,9 @@ use Affilicard\Repository\ProductRepositoryInterface;
  */
 final class ProductAutoCreator {
 
+	/** GET_LOCK の待ち時間（秒）。ProductRepository の listing ロックと揃える。 */
+	private const LOCK_TIMEOUT = 10;
+
 	public function __construct(
 		private ProviderRegistry $registry,
 		private ProductRepositoryInterface $repository
@@ -59,11 +62,59 @@ final class ProductAutoCreator {
 		if ( ! $result->isHit() ) {
 			return WorkOutcome::TRANSIENT_FAILURE;
 		}
-		$post_id = $this->repository->save(
-			$this->buildProductData( $definition->code, $definition->name, $externalId, $result->data )
-		);
-		// save 失敗（0）はリトライで解決し得るため一時失敗。
-		return $post_id > 0 ? WorkOutcome::SUCCESS : WorkOutcome::TRANSIENT_FAILURE;
+
+		return $this->createLocked( $definition->code, $definition->name, $externalId, $result->data );
+	}
+
+	/**
+	 * 「まだ無ければ作る」を名前付きロックの中で行う。
+	 *
+	 * **上の事前チェックだけでは重複商品を防げない。** Action Scheduler の
+	 * `unique=true` は原子的ではなく、同じ platform + external ID の
+	 * `affilicard_autocreate` が 2 つ同時に走り得る。両方が事前チェックで null を
+	 * 見て、両方が wp_insert_post() する窓が fetch（数百 ms〜数秒）のぶんだけ開く。
+	 * external_id の一意性を担保しているのは post meta のミラーだけで、DB 制約は
+	 * 無いため、入ってしまった重複は自動では解消しない。
+	 *
+	 * そこで fetch の**後**にロックを取り、その中で findByExternalId() をやり直し、
+	 * 依然として不在のときだけ保存する。ロックを fetch の前に取らないのは、
+	 * 外部 API の待ち時間ぶんロックを握り続けないため。
+	 *
+	 * **ロックを取れなければ保存しない（TRANSIENT_FAILURE）。** 取れない＝別の worker が
+	 * 同じキーで作成中なので、ここで押し通すと重複商品ができる——ロックを置く意味が
+	 * 無くなる。一時失敗として返せば AutoCreateHandler が backoff して再投入し、
+	 * 次の試行では先着が作った商品を事前チェックが引いて no-op（SUCCESS）で終わる。
+	 * ProductRepository::updateListing() のロックが best-effort で続行するのとは
+	 * 逆の判断だが、あちらは「取得済みの値を捨てない」ためで、こちらは
+	 * 「取り消せない重複を作らない」ためである。
+	 *
+	 * @param array<string, mixed> $fetched
+	 */
+	private function createLocked( string $platformCode, string $platformName, string $externalId, array $fetched ): WorkOutcome {
+		global $wpdb;
+
+		// GET_LOCK の名前は 64 バイト以内。external ID は長さも文字種も外部由来なので
+		// ハッシュへ畳む（prefix 22 + md5 32 = 54 バイト）。
+		$lock = 'affilicard_autocreate_' . md5( $platformCode . '|' . $externalId );
+		$got  = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $lock, self::LOCK_TIMEOUT ) );
+		if ( $got <= 0 ) {
+			return WorkOutcome::TRANSIENT_FAILURE;
+		}
+
+		try {
+			// ロックの中で引き直す。fetch のあいだに別経路が作り終えていれば no-op。
+			if ( null !== $this->repository->findByExternalId( $platformCode, $externalId ) ) {
+				return WorkOutcome::SUCCESS;
+			}
+
+			$post_id = $this->repository->save(
+				$this->buildProductData( $platformCode, $platformName, $externalId, $fetched )
+			);
+			// save 失敗（0）はリトライで解決し得るため一時失敗。
+			return $post_id > 0 ? WorkOutcome::SUCCESS : WorkOutcome::TRANSIENT_FAILURE;
+		} finally {
+			$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock ) );
+		}
 	}
 
 	/**

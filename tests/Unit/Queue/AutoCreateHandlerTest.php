@@ -53,6 +53,9 @@ final class AutoCreateHandlerTest extends TestCase {
 		$wpdb->options = 'wp_options';
 		$wpdb->shouldReceive( 'prepare' )->andReturnUsing( static fn( string $query, ...$args ) => $query );
 		$wpdb->shouldReceive( 'query' )->andReturn( $queryReturn );
+		// ProductAutoCreator::createLocked() の GET_LOCK（重複商品を防ぐ名前付きロック）。
+		// 1 = 取得成功。取れない場合の挙動は ProductAutoCreatorTest が受け持つ。
+		$wpdb->shouldReceive( 'get_var' )->andReturn( '1' );
 		$GLOBALS['wpdb'] = $wpdb;
 
 		WP_Mock::userFunction( 'add_option' )->andReturn( true );

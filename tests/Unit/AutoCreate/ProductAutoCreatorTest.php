@@ -16,15 +16,54 @@ use WP_Mock;
 use WP_Mock\Tools\TestCase;
 
 final class ProductAutoCreatorTest extends TestCase {
+
+	/**
+	 * GET_LOCK の戻り値（1＝取得成功／0＝タイムアウト）。
+	 *
+	 * $wpdb モックの中から参照するためプロパティに置く。テストの中で
+	 * モックを登録し直す方式にすると、先に登録した設定が残って無言で効かない。
+	 *
+	 * @var int
+	 */
+	private int $lockResult = 1;
+
+	/** @var array<int, string> prepare() に渡された SQL テンプレート。 */
+	private array $capturedSql = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
 		WP_Mock::userFunction( '__' )->andReturnUsing( static fn( $t ) => $t );
+		$this->lockResult  = 1;
+		$this->capturedSql = array();
+		$this->mockLockWpdb();
 	}
 	public function tearDown(): void {
 		WP_Mock::tearDown();
 		Mockery::close();
+		unset( $GLOBALS['wpdb'] );
 		parent::tearDown();
+	}
+
+	/**
+	 * 自動作成が発行する GET_LOCK/RELEASE_LOCK を捕捉する $wpdb モックを
+	 * $GLOBALS に設定する（ProductRepositoryTest::mockLockWpdb と同じ流儀）。
+	 */
+	private function mockLockWpdb(): void {
+		$wpdb = Mockery::mock();
+		$wpdb->shouldReceive( 'prepare' )->andReturnUsing(
+			function ( string $query ) {
+				$this->capturedSql[] = $query;
+				return $query;
+			}
+		);
+		$wpdb->shouldReceive( 'get_var' )->andReturnUsing(
+			function () {
+				return (string) $this->lockResult;
+			}
+		);
+		$wpdb->shouldReceive( 'query' )->andReturn( 1 );
+		$GLOBALS['wpdb'] = $wpdb;
 	}
 
 	private function stubPlatformsOption(): void {
@@ -234,6 +273,63 @@ final class ProductAutoCreatorTest extends TestCase {
 		$this->assertSame( FetchStatus::NONE, $offers[0]['fetch_status'] );
 		// 取得結果が listing 直下に残っていないこと。
 		$this->assertArrayNotHasKey( 'external_id', $saved['listings'][0] );
+	}
+
+	public function test_ロックの中で引き直し先着が作っていれば保存しない(): void {
+		// Action Scheduler の unique=true は原子的ではないため、同じキーの
+		// autocreate が 2 つ同時に走り得る。fetch（数百 ms〜数秒）のあいだに
+		// 先着が商品を作り終えていれば、ロックの中の引き直しがそれを拾う。
+		$this->stubRakutenPlatform();
+		$registry = $this->rakutenProvider( FetchResult::hit( array( 'external_id' => 'abc' ) ) );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		// 1 回目（fetch 前の事前チェック）は不在、2 回目（ロックの中）は先着が作った商品。
+		$repo->shouldReceive( 'findByExternalId' )
+			->with( 'rakuten-kobo', 'abc' )
+			->andReturn( null, array( 'id' => 7 ) );
+		$repo->shouldReceive( 'save' )->never();
+
+		$got = ( new ProductAutoCreator( $registry, $repo ) )->create( 'rakuten-kobo', 'abc' );
+
+		$this->assertSame( WorkOutcome::SUCCESS, $got );
+		// ロックは取り、必ず返す。
+		$this->assertStringContainsString( 'GET_LOCK', $this->capturedSql[0] );
+		$this->assertStringContainsString( 'RELEASE_LOCK', $this->capturedSql[1] );
+	}
+
+	public function test_ロックを取れなければ保存せず一時失敗を返す(): void {
+		// ロック無しで押し通すと重複商品ができる（external_id に DB 制約は無い）。
+		// 一時失敗なら AutoCreateHandler が backoff して再投入し、次の試行では
+		// 先着が作った商品を事前チェックが引いて no-op で終わる。
+		$this->lockResult = 0;
+		$this->stubRakutenPlatform();
+		$registry = $this->rakutenProvider( FetchResult::hit( array( 'external_id' => 'abc' ) ) );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'findByExternalId' )->andReturn( null );
+		$repo->shouldReceive( 'save' )->never();
+
+		$got = ( new ProductAutoCreator( $registry, $repo ) )->create( 'rakuten-kobo', 'abc' );
+
+		$this->assertSame( WorkOutcome::TRANSIENT_FAILURE, $got );
+		// 取れていないロックを返しに行かない。
+		$this->assertSame( 1, count( $this->capturedSql ) );
+		$this->assertStringContainsString( 'GET_LOCK', $this->capturedSql[0] );
+	}
+
+	public function test_保存した後はロックを必ず返す(): void {
+		$this->stubRakutenPlatform();
+		$registry = $this->rakutenProvider( FetchResult::hit( array( 'external_id' => 'abc' ) ) );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'findByExternalId' )->andReturn( null );
+		$repo->shouldReceive( 'save' )->once()->andReturn( 42 );
+
+		$got = ( new ProductAutoCreator( $registry, $repo ) )->create( 'rakuten-kobo', 'abc' );
+
+		$this->assertSame( WorkOutcome::SUCCESS, $got );
+		$this->assertStringContainsString( 'GET_LOCK', $this->capturedSql[0] );
+		$this->assertStringContainsString( 'RELEASE_LOCK', $this->capturedSql[1] );
 	}
 
 	public function test_既存商品があれば作らない(): void {
