@@ -504,4 +504,82 @@ final class ProductSchemaTest extends TestCase {
 		// sanitize_callback は維持される（送信された値は引き続き sanitize する）。
 		$this->assertArrayHasKey( 'sanitize_callback', $args['listings'] );
 	}
+
+	/**
+	 * REST の入力は配列・オブジェクトを含み得る。`(string)` キャストは配列を
+	 * "Array"（＋警告）に、__toString を持たないオブジェクトを致命的エラーにする。
+	 * 前者は「身元が "Array" の購入リンク」が保存される形で沈黙するため、
+	 * 非スカラーは空文字として扱う。
+	 */
+	public function test_sanitizeListings_非スカラーの購入リンクフィールドは空文字にする(): void {
+		$got = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform' => 'rakuten-kobo',
+					'offers'   => array(
+						array(
+							'external_id'  => 'ok-1',
+							'regular_url'  => array( 'https://example.test/a' ),
+							'price'        => array( '660' ),
+							'badge'        => array(),
+							'search_key'   => new \stdClass(),
+							'fetch_status' => array( 'terminal' ),
+						),
+					),
+				),
+			)
+		);
+
+		$offer = $got[0]['offers'][0];
+		// スカラーのフィールドは従来どおり。
+		$this->assertSame( 'ok-1', $offer['external_id'] );
+		// 非スカラーは "Array" ではなく空文字。
+		$this->assertSame( '', $offer['regular_url'] );
+		$this->assertSame( '', $offer['price'] );
+		$this->assertSame( '', $offer['badge'] );
+		$this->assertSame( '', $offer['search_key'] );
+		$this->assertSame( '', $offer['fetch_status'] );
+	}
+
+	public function test_sanitizeListings_身元が非スカラーだけの購入リンクは捨てる(): void {
+		// "Array" という身元で保存されると、再同定も生死判定もできない購入リンクが残る。
+		$got = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform' => 'rakuten-kobo',
+					'offers'   => array(
+						array(
+							'external_id' => array( 'x' ),
+							'regular_url' => array( 'https://example.test/a' ),
+							'price'       => '660',
+						),
+					),
+				),
+			)
+		);
+
+		$this->assertSame( array(), $got[0]['offers'] );
+	}
+
+	public function test_sanitizeListings_platformが非スカラーならlistingごと捨てる(): void {
+		$got = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform' => array( 'rakuten-kobo' ),
+					'offers'   => array(
+						array( 'external_id' => 'ok-1' ),
+					),
+				),
+				array(
+					'platform' => 'dmm-books',
+					'offers'   => array(
+						array( 'external_id' => 'ok-2' ),
+					),
+				),
+			)
+		);
+
+		$this->assertCount( 1, $got );
+		$this->assertSame( 'dmm-books', $got[0]['platform'] );
+	}
 }

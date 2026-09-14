@@ -240,7 +240,7 @@ final class ProductSchema {
 				continue;
 			}
 
-			$platform = isset( $entry['platform'] ) ? (string) sanitize_key( (string) $entry['platform'] ) : '';
+			$platform = (string) sanitize_key( self::stringField( $entry, 'platform' ) );
 			if ( '' === $platform ) {
 				continue;
 			}
@@ -258,9 +258,9 @@ final class ProductSchema {
 			$row = array(
 				'platform'              => $platform,
 				'enabled'               => isset( $entry['enabled'] ) ? (bool) $entry['enabled'] : true,
-				'update_mode'           => isset( $entry['update_mode'] ) ? (string) sanitize_key( (string) $entry['update_mode'] ) : 'auto',
+				'update_mode'           => isset( $entry['update_mode'] ) ? (string) sanitize_key( self::stringField( $entry, 'update_mode' ) ) : 'auto',
 				'auto_update'           => isset( $entry['auto_update'] ) ? (bool) $entry['auto_update'] : true,
-				'button_label_override' => isset( $entry['button_label_override'] ) ? (string) sanitize_text_field( (string) $entry['button_label_override'] ) : '',
+				'button_label_override' => (string) sanitize_text_field( self::stringField( $entry, 'button_label_override' ) ),
 				'platform_extras'       => $platform_extras,
 				'offers'                => self::sanitizeOffers( $entry ),
 			);
@@ -269,6 +269,24 @@ final class ProductSchema {
 		}
 
 		return $result;
+	}
+
+	/**
+	 * 配列から文字列フィールドを安全に取り出す（非スカラーは空文字）。
+	 *
+	 * **REST の入力は配列・オブジェクトを含み得る。** `(string)` キャストは配列なら
+	 * 警告を出したうえで "Array" という値を作り、`__toString` を持たないオブジェクトでは
+	 * 致命的エラーになる。前者は「でたらめな身元・URL が保存される」形で沈黙するため、
+	 * 弾かずに通す方が危険である（身元が "Array" の offer は再同定も生死判定もできない）。
+	 *
+	 * 非スカラーは「値なし」と同じ空文字に倒す。スカラーの扱いは従来どおり
+	 * （bool の "1"／数値の文字列化を含め `(string)` と同じ）。
+	 * sanitizeListings() の platform_extras が既に取っているのと同じ流儀。
+	 *
+	 * @param array<string, mixed> $source
+	 */
+	private static function stringField( array $source, string $key ): string {
+		return isset( $source[ $key ] ) && is_scalar( $source[ $key ] ) ? (string) $source[ $key ] : '';
 	}
 
 	/**
@@ -298,8 +316,8 @@ final class ProductSchema {
 				continue;
 			}
 
-			$regular    = isset( $offer['regular_url'] ) ? (string) esc_url_raw( (string) $offer['regular_url'] ) : '';
-			$externalId = isset( $offer['external_id'] ) ? (string) sanitize_text_field( (string) $offer['external_id'] ) : '';
+			$regular    = (string) esc_url_raw( self::stringField( $offer, 'regular_url' ) );
+			$externalId = (string) sanitize_text_field( self::stringField( $offer, 'external_id' ) );
 			if ( '' === $regular && '' === $externalId && ! self::$preserveOffersWithoutRegularUrl ) {
 				// 身元（spec §3-4: external_id、無ければ regular_url）を 1 つも持たない offer は
 				// 生死の判定も再同定もできず永久に残るため弾く。
@@ -329,15 +347,15 @@ final class ProductSchema {
 				'display_order'    => isset( $offer['display_order'] ) ? (int) $offer['display_order'] : OfferSelector::DEFAULT_ORDER,
 				'external_id'      => $externalId,
 				'regular_url'      => $regular,
-				'affiliate_url'    => isset( $offer['affiliate_url'] ) ? (string) esc_url_raw( (string) $offer['affiliate_url'] ) : '',
-				'price'            => isset( $offer['price'] ) ? (string) sanitize_text_field( (string) $offer['price'] ) : '',
-				'list_price'       => isset( $offer['list_price'] ) ? (string) sanitize_text_field( (string) $offer['list_price'] ) : '',
-				'badge'            => isset( $offer['badge'] ) ? (string) sanitize_text_field( (string) $offer['badge'] ) : '',
-				'image_url'        => isset( $offer['image_url'] ) ? (string) esc_url_raw( (string) $offer['image_url'] ) : '',
-				'search_key'       => isset( $offer['search_key'] ) ? (string) sanitize_text_field( (string) $offer['search_key'] ) : '',
-				'fetch_status'     => isset( $offer['fetch_status'] ) ? (string) sanitize_key( (string) $offer['fetch_status'] ) : '',
-				'last_fetched_at'  => isset( $offer['last_fetched_at'] ) ? (string) sanitize_text_field( (string) $offer['last_fetched_at'] ) : '',
-				'last_verified_at' => isset( $offer['last_verified_at'] ) ? (string) sanitize_text_field( (string) $offer['last_verified_at'] ) : '',
+				'affiliate_url'    => (string) esc_url_raw( self::stringField( $offer, 'affiliate_url' ) ),
+				'price'            => (string) sanitize_text_field( self::stringField( $offer, 'price' ) ),
+				'list_price'       => (string) sanitize_text_field( self::stringField( $offer, 'list_price' ) ),
+				'badge'            => (string) sanitize_text_field( self::stringField( $offer, 'badge' ) ),
+				'image_url'        => (string) esc_url_raw( self::stringField( $offer, 'image_url' ) ),
+				'search_key'       => (string) sanitize_text_field( self::stringField( $offer, 'search_key' ) ),
+				'fetch_status'     => (string) sanitize_key( self::stringField( $offer, 'fetch_status' ) ),
+				'last_fetched_at'  => (string) sanitize_text_field( self::stringField( $offer, 'last_fetched_at' ) ),
+				'last_verified_at' => (string) sanitize_text_field( self::stringField( $offer, 'last_verified_at' ) ),
 			);
 		}
 
