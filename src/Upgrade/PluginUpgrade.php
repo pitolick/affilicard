@@ -81,6 +81,15 @@ final class PluginUpgrade {
 	 * 1 回のバッチで走査する商品数。QueueMaintenance::sweep() の既定値（200）と揃える。
 	 * 大規模インストールでも 1 回の実行時間が伸びないよう、必ずこの単位に区切って処理する。
 	 */
+	/**
+	 * listing が offers[] を持つようになったバージョン。
+	 *
+	 * 移行バッチを積むのはここより前から上がってきたときだけである。バージョンが
+	 * 変わるたびに積むと、完走でカーソルを消したあと次の通常更新でまた 0 から
+	 * 全商品を走査し、商品ごとに syncDerivedMeta() まで動かし直すことになる。
+	 */
+	public const OFFERS_INTRODUCED_IN = '4.0.0';
+
 	public const MIGRATION_BATCH_SIZE = 200;
 
 	/** offers 移行時、listing 直下から取り除いて offers[0] へ移す v3 以前の flat フィールド。 */
@@ -97,6 +106,20 @@ final class PluginUpgrade {
 		'last_fetched_at',
 		'last_verified_at',
 	);
+
+	/**
+	 * 保存済みバージョンから見て offers 移行が要るか。
+	 *
+	 * 空文字（バージョン option が無い）は「いつからか分からない」なので積む。
+	 * 新規インストールでも商品が 0 件なら 1 巡で完走して終わるため実害はなく、
+	 * option を失った既存サイトを取りこぼす方が痛い。
+	 */
+	private static function needsOffersMigrationFrom( string $storedVersion ): bool {
+		if ( '' === $storedVersion ) {
+			return true;
+		}
+		return version_compare( $storedVersion, self::OFFERS_INTRODUCED_IN, '<' );
+	}
 
 	public static function maybeUpgrade( string $currentVersion ): void {
 		// offers 移行バッチ（HOOK_MIGRATE_OFFERS）は Action Scheduler のランナーが処理する
@@ -131,7 +154,11 @@ final class PluginUpgrade {
 			return;
 		}
 
-		self::scheduleOffersMigration();
+		// offers 導入前から上がってきたときだけ移行を積む。中断した移行の積み直しは
+		// 上の isOffersMigrationPending() が担うので、ここを絞っても取りこぼさない。
+		if ( self::needsOffersMigrationFrom( $stored ) ) {
+			self::scheduleOffersMigration();
+		}
 
 		update_option( self::OPTION_VERSION, $currentVersion, false );
 	}

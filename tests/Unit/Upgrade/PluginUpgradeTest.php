@@ -344,7 +344,35 @@ final class PluginUpgradeTest extends TestCase {
 		$this->assertSame( array(), $migrated['offers'] );
 	}
 
-	public function test_バージョン更新時にoffers移行の開始トリガーを積む(): void {
+	/**
+	 * offers 導入後の通常更新では移行を積み直さない。
+	 *
+	 * 積むと、完走でカーソルを消したあと次の更新でまた 0 から全商品を走査し、
+	 * 商品ごとに syncDerivedMeta() まで動かし直すことになる。
+	 */
+	public function test_offers導入後の通常更新では移行を積み直さない(): void {
+		$this->stubNoMigrationPending();
+		WP_Mock::userFunction( 'get_option' )->with( PluginUpgrade::OPTION_VERSION, '' )->andReturn( '4.0.0' );
+		WP_Mock::userFunction( 'add_option' )
+			->once()
+			->with( PluginUpgrade::OPTION_STOCKTAKE_BASELINE, \Mockery::type( 'string' ), '', false )
+			->andReturn( true );
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->with( PluginUpgrade::OPTION_VERSION, '4.0.1', false );
+		// 移行のカーソルもジョブも作られない。
+		WP_Mock::userFunction( 'add_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0, '', false )
+			->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		PluginUpgrade::maybeUpgrade( '4.0.1' );
+
+		$this->assertConditionsMet();
+	}
+
+	/** offers 導入前（4.0.0 未満）から上がってきたときは移行を積む。 */
+	public function test_offers導入前からの更新なら移行の開始トリガーを積む(): void {
 		$this->stubNoMigrationPending();
 		$this->expectMigrationMarkerCreated();
 		WP_Mock::userFunction( 'get_option' )->with( PluginUpgrade::OPTION_VERSION, '' )->andReturn( '3.5.0' );
