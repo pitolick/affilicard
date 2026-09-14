@@ -187,6 +187,14 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * ロック取得に失敗（0/null）しても RMW は best-effort で続行する（fetch は既に成功済みで、
 	 * ロック不能を理由に更新を捨てる方が有害。取得可否は挙動を変えない安全弁）。
 	 *
+	 * **updateListingOffer() はここと逆に、ロックを取れなければ何も書かず false を返す。**
+	 * 非対称なのは呼び出し側の事情が違うためである——あちらは
+	 * {@see \Affilicard\Cron\ListingRefresher::refreshOne()} が false を一時失敗として扱い
+	 * 再投入するので、書かずに諦めても取得した値は次の試行で保存し直される。こちらには
+	 * その再試行を持つ呼び出し側が無く（現状 production からの呼び出しは無い）、false を
+	 * 返しても誰も拾い直さないため、書かない方が失うものが大きい。再試行できない
+	 * 呼び出し側を増やさない限り、この非対称は保つこと。
+	 *
 	 * @param array<string, mixed> $listingFields refreshListing() が返すフィールド完全形の listing
 	 *                                             （購入リンク配列 offers を含む）。
 	 */
@@ -249,7 +257,9 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * {@see LegacyOffer::offersWithFallback()} で offers[] へ写してから突き合わせる
 	 * （読み取り側・移行バッチと同じ写像を通す）。
 	 *
-	 * ロックの流儀・best-effort 続行の理由は updateListing() と同じ。
+	 * ロックの流儀（名前・タイムアウト・finally での解放）は updateListing() と同じだが、
+	 * **ロックを取れなかったときの扱いだけが逆**である（取れなければ何も書かず false）。
+	 * 理由は updateListing() の PHPDoc に書いた非対称のとおり。
 	 *
 	 * @param array<string, mixed> $patch          取得が変えたフィールドだけの差分。
 	 *                                             ロック内で読み直した購入リンクへマージする。
@@ -263,6 +273,16 @@ final class ProductRepository implements ProductRepositoryInterface {
 
 		$lock = "affilicard_listing_{$postId}";
 		$got  = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $lock, 10 ) );
+		if ( $got <= 0 ) {
+			// **ロック無しで read-modify-write に入らない。** ロックを取れない窓は
+			// まさに誰かが同じ meta を書いている窓であり、そこで読み書きすると
+			// 管理画面の保存を丸ごと巻き戻す（lost update）。false は
+			// ListingRefresher::refreshOne() が一時失敗として扱って再投入するため、
+			// 取得した価格は次の試行で保存し直される——取りこぼしにはならない。
+			// 全体を置き換える updateListing() が best-effort で続行するのとは
+			// 逆の判断（理由は同関数の PHPDoc）。
+			return false;
+		}
 
 		try {
 			$raw      = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
@@ -303,9 +323,8 @@ final class ProductRepository implements ProductRepositoryInterface {
 
 			return false;
 		} finally {
-			if ( $got > 0 ) {
-				$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock ) );
-			}
+			// ここへ来るのはロックを取れたときだけ（取れなければ上で return 済み）。
+			$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock ) );
 		}
 	}
 

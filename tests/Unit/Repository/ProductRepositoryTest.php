@@ -1718,6 +1718,51 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	/**
+	 * ロックを取れない窓は、まさに誰かが同じ meta を書いている窓である。そこで
+	 * read-modify-write に入ると、並行している管理画面の保存を丸ごと巻き戻す。
+	 * false は ListingRefresher が一時失敗として扱い再投入するため、取得した価格は
+	 * 次の試行で保存し直される（updateListing() の best-effort とは逆の判断）。
+	 */
+	public function test_updateListingOffer_ロックを取れなければ何も書かずfalseを返す(): void {
+		$captured = array();
+		$this->mockLockWpdb( 0, $captured );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => 'r-1',
+								'price'       => '500',
+							),
+						),
+					),
+				)
+			);
+		WP_Mock::userFunction( 'update_post_meta' )->never();
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'external_id' => 'r-1',
+				'price'       => '693',
+			),
+			'external_id:r-1'
+		);
+
+		$this->assertFalse( $ok );
+		// 取れていないロックを返しに行かない（GET_LOCK だけで終わる）。
+		$this->assertCount( 1, $captured );
+		$this->assertStringContainsString( 'GET_LOCK', $captured[0] );
+		$this->assertConditionsMet();
+	}
+
 	/** 該当 platform の listing 自体が無ければ false（保存しない）。 */
 	public function test_updateListingOffer_一致platformが無ければfalseで保存しない(): void {
 		$this->mockLockWpdb( 1 );

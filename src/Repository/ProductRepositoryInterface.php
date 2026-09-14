@@ -39,7 +39,9 @@ interface ProductRepositoryInterface {
 	 * fetch した 1 件」に限ることで、古い値そのものを持ち込まない。
 	 *
 	 * 該当 platform が無い、または身元が一致する offer が現在の listing に無い（fetch 中に
-	 * 削除された）場合は、**追加せず** false を返す。
+	 * 削除された）場合は、**追加せず** false を返す。ロックを取れなかったとき・保存自体に
+	 * 失敗したときも false を返す（保存できていないのに成功と報告しない）。呼び出し側は
+	 * false を一時失敗として扱い、再試行すること。
 	 *
 	 * **マージ先は $targetIdentity で指定する。$offer 自身から求めてはならない。**
 	 * 取得結果は regular_url を上書きしうるため、external_id を持たない購入リンクでは
