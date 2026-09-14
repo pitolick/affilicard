@@ -32,10 +32,11 @@
 
 ### Security
 
-- **一般設定の読み取り（`GET /affilicard/v1/settings`）の許可を `manage_options` から `edit_posts` へ緩め、同時に返す範囲を権限で絞った**。
-  - **緩めた側**: 商品カード編集画面（サイドバー）が `fallback_on_terminal` をこの endpoint から読む必要があるが、`affilicard_product` の capability_type は `post` で Editor は `manage_options` を持たない。従来は Editor に 403 が返り、呼び出し側が既定値（false）へ黙って倒れて「使用中」の印が設定と食い違っていた。読み取りの許可 capability は `edit_posts`（商品自体の read 許可と同じ）になった
-  - **絞った側**: `manage_options` を持たない呼び出し元へ返すのは **`fallback_on_terminal` の 1 つだけ**で、キューの状態・保持期間・スロットル上書きなど一般設定オブジェクトの残りは返さない（`manage_options` を持つ呼び出し元には従来どおり全体を返す）。認証情報はいずれの場合も含まない
-  - 書き込み（`PUT`）は `manage_options` のまま。URL は変更していない
+- **編集画面向けの設定読み取りに `GET /affilicard/v1/editor-settings` を新設した**（`edit_posts` で読める）。
+  - **背景**: 商品カード編集画面（サイドバー）が `fallback_on_terminal` を読む必要があるが、`affilicard_product` の capability_type は `post` で Editor は `manage_options` を持たない。`/settings` を読ませると 403 が返り、呼び出し側が既定値（false）へ黙って倒れて「使用中」の印が設定と食い違う
+  - **返すのは `fallback_on_terminal` の 1 つだけ**。キューの状態・保持期間・スロットル上書きなど一般設定オブジェクトの残りは返さない。認証情報は含まない
+  - **`GET /affilicard/v1/settings` は `manage_options` 必須のまま**で、一般設定オブジェクト全体を返す。書き込み（`PUT`）も従来どおり `manage_options`
+  - 1 つの endpoint で権限により中身を出し分けるのではなく URL を分けたのは、そうしないと「管理者専用の URL」なのか「誰でも読める URL」なのかが呼び出し側から判別できないため
 
 ### Notes
 

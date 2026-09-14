@@ -25,6 +25,15 @@ final class PriceFreshness {
 		if ( null === $platform ) {
 			return false;
 		}
+		// **恒久失敗（TERMINAL）の購入リンクは価格を出さない。** terminal はストア側から
+		// 商品が消えたことを意味する。取得は失敗しているので last_verified_at は据え置かれ、
+		// 鮮度ゲートだけでも最長 TTL ぶんで自然に消えるが、その間は「もう買えない商品の
+		// 値段」を出し続けることになる。読者に対して誤りなので即座に隠す。
+		$status = isset( $offer['fetch_status'] ) ? (string) $offer['fetch_status'] : '';
+		if ( FetchStatus::isTerminal( $status ) ) {
+			return false;
+		}
+
 		$price = isset( $offer['price'] ) ? trim( (string) $offer['price'] ) : '';
 		if ( '' === $price ) {
 			return false;

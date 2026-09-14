@@ -124,12 +124,20 @@ abstract class ThrottledActionHandler {
 		// 枠を確保する。今日は refreshTargetCount() の既定 1 で従来と同じ挙動だが、選択係
 		// （OfferSelector）が複数件を返すようになったとき、ここを直さなくても枠が自動的に
 		// 広がる（表示を増やした瞬間に 429 を起こす事故を防ぐ）。
-		$slots   = max( 1, $this->refreshTargetCount( $args ) );
-		$nowMs   = (int) round( microtime( true ) * 1000 );
-		$acquire = $this->limiter->tryAcquire( $account, $interval * $slots, $nowMs );
-		if ( ! $acquire['ok'] ) {
-			$this->throttleWait( $args, (int) ceil( $acquire['next_ms'] / 1000 ) );
-			return;
+		//
+		// **0 件なら枠を取らない。** refreshTargetCount() が 0 を返すのは「listing が
+		// 削除済み・無効・fetch 不要」のときで、performWork() は API を一度も呼ばない。
+		// ここで枠を取ると account の最終リクエスト時刻だけが進み、実際に fetch したい
+		// 後続のジョブを無駄に待たせる。既定実装（1）はそのまま——上書きしていない
+		// ハンドラは件数を知らないので、従来どおり 1 件ぶん確保する。
+		$slots = $this->refreshTargetCount( $args );
+		if ( $slots > 0 ) {
+			$nowMs   = (int) round( microtime( true ) * 1000 );
+			$acquire = $this->limiter->tryAcquire( $account, $interval * $slots, $nowMs );
+			if ( ! $acquire['ok'] ) {
+				$this->throttleWait( $args, (int) ceil( $acquire['next_ms'] / 1000 ) );
+				return;
+			}
 		}
 
 		// account を獲得できた＝競合待ちから抜けて進捗した。待機カウンタをリセットする。

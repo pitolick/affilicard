@@ -45,6 +45,30 @@ final class ThrottledActionHandlerTest extends TestCase {
 	 *
 	 * @param array{0?: int, 1?: int} $captured
 	 */
+	/**
+	 * 枠取りが「一度も起きない」ことを見るための wpdb スタブ。
+	 *
+	 * mockRateLimiterWpdbCapturing() は prepare()/query() を once() で要求するため、
+	 * 呼ばれないと Mockery の期待未達で落ちる——「呼ばれないのが正しい」ケースには使えない。
+	 * こちらは呼ばれたら $called を立てるだけで、回数は要求しない。
+	 */
+	private function mockRateLimiterWpdbAllowingNoCall( bool &$called ): void {
+		$wpdb          = Mockery::mock();
+		$wpdb->options = 'wp_options';
+		$wpdb->shouldReceive( 'prepare' )
+			->andReturnUsing(
+				static function ( string $query ) use ( &$called ): string {
+					$called = true;
+					return $query;
+				}
+			);
+		$wpdb->shouldReceive( 'query' )->andReturn( 1 );
+		$GLOBALS['wpdb'] = $wpdb;
+
+		WP_Mock::userFunction( 'add_option' )->andReturn( true );
+		WP_Mock::userFunction( 'wp_cache_delete' )->andReturn( true );
+	}
+
 	private function mockRateLimiterWpdbCapturing( array &$captured ): void {
 		$wpdb          = Mockery::mock();
 		$wpdb->options = 'wp_options';
@@ -157,5 +181,26 @@ final class ThrottledActionHandlerTest extends TestCase {
 		$handler->trigger( array() );
 
 		$this->assertSame( 2200, $captured[0] - $captured[1] );
+	}
+
+	/**
+	 * 対象 0 件ならレート制限の枠を取らない。
+	 *
+	 * refreshTargetCount() が 0 を返すのは「listing が削除済み・無効・fetch 不要」の
+	 * ときで、performWork() は API を一度も呼ばない。ここで枠を取ると account の
+	 * 最終リクエスト時刻だけが進み、実際に fetch したい後続のジョブを無駄に待たせる。
+	 */
+	public function test_対象が0件なら枠を取らない(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		$acquired = false;
+		$this->mockRateLimiterWpdbAllowingNoCall( $acquired );
+		WP_Mock::userFunction( 'delete_transient' )->andReturn( true );
+
+		$handler = $this->handlerWithTargetCount( 0, new RateLimiter(), $this->registry() );
+		$handler->trigger( array() );
+
+		$this->assertFalse( $acquired, 'tryAcquire() が呼ばれている（枠を消費している）' );
 	}
 }

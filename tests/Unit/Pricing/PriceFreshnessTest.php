@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Tests\Unit\Pricing;
 
 use Affilicard\Platform\PlatformDefinition;
+use Affilicard\Pricing\FetchStatus;
 use Affilicard\Pricing\PriceFreshness;
 use PHPUnit\Framework\TestCase;
 
@@ -23,6 +24,34 @@ final class PriceFreshnessTest extends TestCase {
 		$offer = array(
 			'price'            => '693',
 			'last_verified_at' => gmdate( 'c', $now - 3600 ), // 1時間前
+		);
+		$this->assertTrue( PriceFreshness::isPriceDisplayable( $offer, $this->platform( 24 ), $now ) );
+	}
+
+	/**
+	 * 恒久失敗（TERMINAL）の購入リンクは、価格が新しくても表示しない。
+	 *
+	 * terminal はストア側から商品が消えたことを意味する。取得は失敗しているので
+	 * last_verified_at は据え置かれ、鮮度ゲートだけでも最長 TTL ぶんで自然に消えるが、
+	 * その間は「もう買えない商品の値段」を出し続けることになる。
+	 */
+	public function test_恒久失敗の購入リンクは鮮度内でも非表示(): void {
+		$now   = 1_800_000_000;
+		$offer = array(
+			'price'            => '693',
+			'last_verified_at' => gmdate( 'c', $now - 3600 ), // 1時間前＝鮮度は充分
+			'fetch_status'     => FetchStatus::TERMINAL,
+		);
+		$this->assertFalse( PriceFreshness::isPriceDisplayable( $offer, $this->platform( 24 ), $now ) );
+	}
+
+	/** 一時失敗は隠さない（次の取得で直る見込みがあり、価格自体は最後に確認できた値）。 */
+	public function test_一時失敗の購入リンクは鮮度内なら表示可(): void {
+		$now   = 1_800_000_000;
+		$offer = array(
+			'price'            => '693',
+			'last_verified_at' => gmdate( 'c', $now - 3600 ),
+			'fetch_status'     => FetchStatus::TRANSIENT,
 		);
 		$this->assertTrue( PriceFreshness::isPriceDisplayable( $offer, $this->platform( 24 ), $now ) );
 	}
