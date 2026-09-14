@@ -5,7 +5,7 @@ import { __ } from '@wordpress/i18n';
 import { ListingsEditor } from './ListingsEditor';
 import { ExtrasEditor } from './ExtrasEditor';
 import { StockStatusSelect } from './StockStatusSelect';
-import { fetchSettings } from '../api/settings';
+import { fetchEditorSettings } from '../api/settings';
 
 const PRODUCT_TYPE_OPTIONS = [
 	{ value: 'generic', label: __('汎用', 'affilicard') },
@@ -24,11 +24,11 @@ export function ProductSettingsPanel() {
 
 	// 「使用中」の印は GeneralSettings::fallbackOnTerminal()（サイト全体設定）に
 	// 依存する。CardHtmlBuilder が描画側へ渡しているのと同じ値を、ここでは
-	// REST 経由（fetchSettings）で取得して ListingsEditor へ渡す。取得前/失敗時は
+	// REST 経由（fetchEditorSettings）で取得して ListingsEditor へ渡す。取得前/失敗時は
 	// PHP 側の既定（OFF）に合わせて false のまま進める。
 	const [generalSettings, setGeneralSettings] = useState(null);
 	useEffect(() => {
-		fetchSettings()
+		fetchEditorSettings()
 			.then(setGeneralSettings)
 			.catch(() => setGeneralSettings({}));
 	}, []);

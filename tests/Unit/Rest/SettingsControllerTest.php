@@ -146,7 +146,15 @@ final class SettingsControllerTest extends TestCase {
 	 * （ProductRestController が商品自体の read 許可を edit_posts に
 	 * 合わせているのと同じ capability）。
 	 */
-	public function test_can_read_settings_checks_edit_posts_not_manage_options(): void {
+	/**
+	 * 編集画面向けルートの許可判定は edit_posts。
+	 *
+	 * affilicard_product の capability_type は 'post' で、Editor は manage_options を
+	 * 持たない。ここを manage_options にすると商品編集画面のサイドバーが 403 になり、
+	 * 呼び出し側が既定 false へ倒れて「使用中」の印が ON 設定なのに間違う。
+	 * 一般設定そのもの（/settings）は manage_options 必須のままである。
+	 */
+	public function test_編集画面向けルートの許可はedit_postsで判定する(): void {
 		WP_Mock::userFunction( 'current_user_can' )
 			->with( 'edit_posts' )
 			->andReturn( true );
@@ -173,8 +181,15 @@ final class SettingsControllerTest extends TestCase {
 	 * 緩めたつもりが読み取り面ごと広がる。公開プラグインでは、広げた endpoint は
 	 * そのまま固定化する。
 	 */
-	public function test_manage_optionsが無い読み手にはfallback_on_terminalだけ返す(): void {
-		$this->stubManageOptions( false );
+	/**
+	 * 商品編集画面向けのルートは `fallback_on_terminal` 1 項目だけを返す。
+	 *
+	 * `/settings` は manage_options 必須（管理者向けの設定オブジェクト全体を返す）。
+	 * 編集画面が必要とするのはこの真偽値 1 つだけなので、権限で中身を出し分けるのでは
+	 * なく URL を分けてある——そうしないと呼び出し側から「管理者専用の URL」なのか
+	 * 「誰でも読める URL」なのか判別できない。
+	 */
+	public function test_編集画面向けルートはfallback_on_terminalだけ返す(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn(
@@ -185,12 +200,48 @@ final class SettingsControllerTest extends TestCase {
 			);
 
 		$controller = new SettingsController();
-		$request    = new WP_REST_Request( 'GET', '/affilicard/v1/settings' );
+		$request    = new WP_REST_Request( 'GET', '/affilicard/v1/editor-settings' );
 
-		$response = $controller->get( $request );
+		$response = $controller->getEditorSettings( $request );
 		$data     = $response->get_data();
 
 		$this->assertSame( 200, $response->get_status() );
 		$this->assertSame( array( 'fallback_on_terminal' => true ), $data );
+	}
+
+	/**
+	 * 権限の契約を「ルート登録」の段で固定する。
+	 *
+	 * コールバック単体（canManageOptions / canReadSettings）のテストだけでは、
+	 * どのルートにどちらを結線したかが固定されない。緩い方を /settings に繋いでも
+	 * 従来のテストは全て通ってしまう。
+	 */
+	public function test_ルートごとの権限コールバックを固定する(): void {
+		$routes = array();
+		WP_Mock::userFunction( 'register_rest_route' )
+			->andReturnUsing(
+				static function ( $namespace, $route, $args ) use ( &$routes ): bool {
+					$routes[ $route ] = $args;
+					return true;
+				}
+			);
+
+		( new SettingsController() )->registerRoutes( 'affilicard/v1' );
+
+		$this->assertArrayHasKey( '/settings', $routes );
+		$this->assertArrayHasKey( '/editor-settings', $routes );
+
+		foreach ( $routes['/settings'] as $entry ) {
+			$this->assertSame(
+				'canManageOptions',
+				$entry['permission_callback'][1],
+				sprintf( '/settings の %s は manage_options 必須でなければならない', $entry['methods'] )
+			);
+		}
+
+		foreach ( $routes['/editor-settings'] as $entry ) {
+			$this->assertSame( 'GET', $entry['methods'], '/editor-settings は読み取り専用' );
+			$this->assertSame( 'canReadSettings', $entry['permission_callback'][1] );
+		}
 	}
 }

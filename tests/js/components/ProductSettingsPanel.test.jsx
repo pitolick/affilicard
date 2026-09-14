@@ -5,7 +5,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { setEntityMeta, _reset, getLastSetterCall, clearLastSetterCall } from '@wordpress/core-data';
 import { fetchPlatforms } from '../../../src/Admin/api/platforms';
-import { fetchSettings } from '../../../src/Admin/api/settings';
+import { fetchEditorSettings } from '../../../src/Admin/api/settings';
 import { ProductSettingsPanel } from '../../../src/Admin/components/ProductSettingsPanel';
 
 beforeEach( () => {
@@ -13,7 +13,7 @@ beforeEach( () => {
 	fetchPlatforms.mockResolvedValue( [ { code: 'dmm-books', name: 'DMM Books' } ] );
 	// ListingsEditor の「使用中」判定に使う GeneralSettings::fallbackOnTerminal()。
 	// 既定 OFF（PHP 側の既定と揃える）。
-	fetchSettings.mockResolvedValue( { fallback_on_terminal: false } );
+	fetchEditorSettings.mockResolvedValue( { fallback_on_terminal: false } );
 } );
 
 describe( 'ProductSettingsPanel', () => {
@@ -98,13 +98,13 @@ describe( 'ProductSettingsPanel', () => {
 		expect( getLastSetterCall() ).toMatchObject( { affilicard_mask_blur: true } );
 	} );
 
-	// GeneralSettings::fallbackOnTerminal() は REST（fetchSettings）経由で取得し
+	// GeneralSettings::fallbackOnTerminal() は REST（fetchEditorSettings）経由で取得し
 	// ListingsEditor まで配線している。これまで ListingsEditor 単体には ON の
 	// テストがあったが、ProductSettingsPanel からの配線そのものは未検証だった
 	// （配線先の endpoint が権限で 403 になっていても、ListingsEditor 単体テストは
-	// 気づけない）。ここでは実際に fetchSettings → 「使用中」表示までを通す。
+	// 気づけない）。ここでは実際に fetchEditorSettings → 「使用中」表示までを通す。
 	test( 'fallback_on_terminal=ON がサイト設定から「使用中」の印まで届く', async () => {
-		fetchSettings.mockResolvedValue( { fallback_on_terminal: true } );
+		fetchEditorSettings.mockResolvedValue( { fallback_on_terminal: true } );
 		setEntityMeta( {
 			affilicard_listings: [
 				{
