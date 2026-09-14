@@ -508,6 +508,54 @@ final class PluginUpgradeTest extends TestCase {
 	 * 商品は旧形式のまま残るのに温存件数と派生 meta は新形式が保存された前提で進み、
 	 * カーソルまで前進して二度と再試行されない。
 	 */
+	/**
+	 * 例外で中断しても、そこまでに片付いた商品ぶんはカーソルを進める。
+	 *
+	 * 進めないと、失敗した商品より手前の（既に移行済みの）商品を毎回やり直すことに
+	 * なる。移行は冪等なので壊れはしないが、諦めるまでのあいだ syncDerivedMeta() を
+	 * 無駄に走らせ続ける。失敗した商品そのものはカーソルに含めない——次回の実行で
+	 * 必ず再試行されるようにするためである。
+	 */
+	public function test_例外で中断しても成功した商品ぶんはカーソルを進める(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 901, 909 ) );
+
+		// 909 は書き込みが握り潰される商品。901 より先に登録する——Mockery は
+		// 同じ引数に一致する期待のうち最初に登録したものを使うため、後から
+		// 登録すると下の汎用スタブに吸われて 909 が普通に成功してしまう。
+		$this->stubUnwritableProduct( 909 );
+
+		// 901 は移行するものが無い（listings 空）＝書き込みなしで成功する。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( \Mockery::type( 'int' ), ProductPostType::META_LISTINGS, true )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( \Mockery::type( 'int' ) )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'update_post_meta' )
+			->with( \Mockery::type( 'int' ), ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT )
+			->andReturn( true );
+
+		$writes = array();
+		$this->captureOptionWrites( $writes );
+
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( 'offers 移行の保存に失敗しました' );
+
+		try {
+			PluginUpgrade::runOffersMigrationBatch();
+		} finally {
+			$this->assertSame(
+				901,
+				$writes[ PluginUpgrade::OPTION_MIGRATION_CURSOR ] ?? null,
+				'成功した 901 までカーソルを進めていない（次回も 901 からやり直してしまう）'
+			);
+		}
+	}
+
 	public function test_保存が効かなかった商品は移行を完了させず例外で差し戻す(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0 )

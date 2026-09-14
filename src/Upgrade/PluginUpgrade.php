@@ -384,8 +384,22 @@ final class PluginUpgrade {
 		$after = (int) get_option( self::OPTION_MIGRATION_CURSOR, 0 );
 		$ids   = self::fetchProductIdsForMigration( $after, self::MIGRATION_BATCH_SIZE );
 
-		foreach ( $ids as $id ) {
-			self::migrateOneProduct( $id );
+		// **例外を投げる前に、そこまでに片付いた商品ぶんのカーソルを進める。**
+		// 進めないと、失敗した商品より手前の（既に移行済みの）商品を毎回やり直す
+		// ことになる。移行自体は冪等なので壊れはしないが、諦めるまでのあいだ
+		// syncDerivedMeta() を無駄に走らせ続ける。失敗した商品そのものはカーソルに
+		// 含めない——次回の実行で必ず再試行されるようにするためである。
+		$done = 0;
+		try {
+			foreach ( $ids as $id ) {
+				self::migrateOneProduct( $id );
+				++$done;
+			}
+		} catch ( OffersMigrationWriteFailure $failure ) {
+			if ( $done > 0 ) {
+				update_option( self::OPTION_MIGRATION_CURSOR, (int) $ids[ $done - 1 ], false );
+			}
+			throw $failure;
 		}
 
 		if ( count( $ids ) < self::MIGRATION_BATCH_SIZE ) {
