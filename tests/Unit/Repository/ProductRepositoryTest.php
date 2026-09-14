@@ -1232,7 +1232,8 @@ final class ProductRepositoryTest extends TestCase {
 				'platform'    => 'rakuten-kobo',
 				'external_id' => 'r-1',
 				'price'       => '693',
-			)
+			),
+			'external_id:r-1'
 		);
 
 		$this->assertTrue( $ok );
@@ -1431,7 +1432,8 @@ final class ProductRepositoryTest extends TestCase {
 				'display_order' => 10,
 				'external_id'   => 'r-1',
 				'price'         => '693',
-			)
+			),
+			'external_id:r-1'
 		);
 
 		$this->assertTrue( $ok );
@@ -1495,7 +1497,8 @@ final class ProductRepositoryTest extends TestCase {
 				'display_order' => 10,
 				'external_id'   => 'sale',
 				'price'         => '0',
-			)
+			),
+			'external_id:sale'
 		);
 
 		$this->assertTrue( $ok );
@@ -1504,6 +1507,64 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertSame( '660', $saved[0]['offers'][0]['price'] );
 		$this->assertSame( 'sale', $saved[0]['offers'][1]['external_id'] );
 		$this->assertSame( '0', $saved[0]['offers'][1]['price'] );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 取得で regular_url が変わっても、取得前の identity で正しい購入リンクへ書き戻す。
+	 *
+	 * external_id を持たない購入リンクでは identity が regular_url そのものなので、
+	 * 取得結果が別 URL を返すと「更新後の offer から identity を求める」実装は
+	 * マージ先を見失う。false が返って価格が永久に入らなくなるため、マージ先は
+	 * 呼び出し側が取得前に確定させて渡す。
+	 */
+	public function test_updateListingOffer_取得で通常URLが変わっても取得前の識別子で書き戻す(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => '',
+								'regular_url' => 'https://example.test/old',
+								'price'       => '',
+							),
+						),
+					),
+				)
+			);
+
+		$saved = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$saved ) {
+					$saved = $value;
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'external_id' => '',
+				// 取得結果が返した新しい URL。identity はこちらではなく取得前の値。
+				'regular_url' => 'https://example.test/new',
+				'price'       => '693',
+			),
+			'regular_url:https://example.test/old'
+		);
+
+		$this->assertTrue( $ok );
+		$this->assertCount( 1, $saved[0]['offers'], '購入リンクが重複してはいけない' );
+		$this->assertSame( 'https://example.test/new', $saved[0]['offers'][0]['regular_url'] );
+		$this->assertSame( '693', $saved[0]['offers'][0]['price'] );
 		$this->assertConditionsMet();
 	}
 
@@ -1546,7 +1607,8 @@ final class ProductRepositoryTest extends TestCase {
 				'external_id'  => '',
 				'regular_url'  => 'https://example.test/manual',
 				'fetch_status' => 'unsupported',
-			)
+			),
+			'regular_url:https://example.test/manual'
 		);
 
 		$this->assertTrue( $ok );
@@ -1589,7 +1651,8 @@ final class ProductRepositoryTest extends TestCase {
 			array(
 				'external_id' => 'r-1',
 				'price'       => '693',
-			)
+			),
+			'external_id:r-1'
 		);
 
 		$this->assertFalse( $ok );
@@ -1606,7 +1669,7 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'update_post_meta' )->never();
 
 		$repo = new ProductRepository();
-		$ok   = $repo->updateListingOffer( 7, 'rakuten-kobo', array( 'external_id' => 'r-1' ) );
+		$ok   = $repo->updateListingOffer( 7, 'rakuten-kobo', array( 'external_id' => 'r-1' ), 'external_id:r-1' );
 
 		$this->assertFalse( $ok );
 		$this->assertConditionsMet();
@@ -1651,7 +1714,8 @@ final class ProductRepositoryTest extends TestCase {
 				'external_id' => 'flat-1',
 				'regular_url' => 'https://example.test/flat',
 				'price'       => '550',
-			)
+			),
+			'external_id:flat-1'
 		);
 
 		$this->assertTrue( $ok );

@@ -7,6 +7,7 @@ use Affilicard\Platform\PlatformConfig;
 use Affilicard\Pricing\FetchStatus;
 use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\ListingEligibility;
+use Affilicard\Pricing\OfferIdentity;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Queue\WorkOutcome;
@@ -71,7 +72,7 @@ class ListingRefresher {
 				// 実行時に無効化・手動化された listing は対象外（no-op）＝SUCCESS。failed 化させない。
 				return WorkOutcome::SUCCESS;
 			}
-			list( $refreshed, $outcome ) = $this->refreshListing( $listing, (string) $product['title'] );
+			list( $refreshed, $outcome, $targetIdentity ) = $this->refreshListing( $listing, (string) $product['title'] );
 			if ( null === $refreshed ) {
 				// 更新すべき購入リンクが無い＝保存するものも無い。ここで listing を書き戻すと、
 				// fetch もしていないのに fetch 前の写しで管理画面の編集を巻き戻す。
@@ -85,7 +86,7 @@ class ListingRefresher {
 			// 削除された購入リンクを取りこぼしても、リトライでは OfferSelector が「そのとき
 			// 現存する」購入リンクを選び直すため自然に解消する（無限には回らない——
 			// ThrottledActionHandler::backoff() が MAX_ATTEMPTS で打ち切る）。
-			$saved = $this->repository->updateListingOffer( $postId, $platform, $refreshed );
+			$saved = $this->repository->updateListingOffer( $postId, $platform, $refreshed, $targetIdentity );
 			if ( ! $saved ) {
 				return WorkOutcome::TRANSIENT_FAILURE;
 			}
@@ -140,7 +141,8 @@ class ListingRefresher {
 	 * 更新すべき購入リンクが無いときは offer に null を返す（保存を行わせない）。
 	 *
 	 * @param array<string, mixed> $listing
-	 * @return array{0: array<string, mixed>|null, 1: WorkOutcome} 更新後 offer と outcome のタプル
+	 * @return array{0: array<string, mixed>|null, 1: WorkOutcome, 2: string} 更新後 offer、outcome、
+	 *   取得前に確定させたマージ先 identity のタプル
 	 */
 	private function refreshListing( array $listing, string $productTitle ): array {
 		// 移行前の flat な listing（offers を持たず取得結果フィールドが listing 直下に並ぶ
@@ -157,9 +159,13 @@ class ListingRefresher {
 		if ( array() === $targets ) {
 			// 更新すべき購入リンクが無い（offers が空）＝何もしない。リトライで解決し得るため
 			// give-up はせず transient 扱いにする。
-			return array( null, WorkOutcome::TRANSIENT_FAILURE );
+			return array( null, WorkOutcome::TRANSIENT_FAILURE, '' );
 		}
 		$offer = $targets[0];
+		// **マージ先の identity は fetch の前に確定させる。** 取得結果は regular_url を
+		// 上書きしうるので、external_id を持たない購入リンクでは取得後に identity が
+		// 変わる。取得後の値で探すと保存側が相手を見失い、価格が永久に入らなくなる。
+		$targetIdentity = OfferIdentity::of( $offer );
 
 		$platformCode = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
 		$externalId   = isset( $offer['external_id'] ) ? (string) $offer['external_id'] : '';
@@ -178,7 +184,7 @@ class ListingRefresher {
 			// 状態としては恒久的だが、リトライ分類（give-up するかどうか）はここでは変えない
 			// ――give-up するのは「該当なし・無効 ID」（TERMINAL）のときだけ。
 			$offer['fetch_status'] = FetchStatus::UNSUPPORTED;
-			return array( $offer, WorkOutcome::TRANSIENT_FAILURE );
+			return array( $offer, WorkOutcome::TRANSIENT_FAILURE, $targetIdentity );
 		}
 
 		$context = array(
@@ -194,12 +200,12 @@ class ListingRefresher {
 			// 恒久失敗（該当なし・無効 ID）。last_verified_at は更新せず（表示鮮度据え置き）、
 			// TERMINAL_FAILURE を返してハンドラに give-up させる。
 			$offer['fetch_status'] = FetchStatus::TERMINAL;
-			return array( $offer, WorkOutcome::TERMINAL_FAILURE );
+			return array( $offer, WorkOutcome::TERMINAL_FAILURE, $targetIdentity );
 		}
 		if ( ! $result->isHit() ) {
 			// 一時失敗（API 到達不可・エラー・認証未設定等）。リトライで解決し得るため give-up しない。
 			$offer['fetch_status'] = FetchStatus::TRANSIENT;
-			return array( $offer, WorkOutcome::TRANSIENT_FAILURE );
+			return array( $offer, WorkOutcome::TRANSIENT_FAILURE, $targetIdentity );
 		}
 
 		$fetched               = $result->data;
@@ -223,6 +229,6 @@ class ListingRefresher {
 		$fetched_affiliate      = isset( $fetched['affiliate_url'] ) ? (string) $fetched['affiliate_url'] : '';
 		$offer['affiliate_url'] = '' !== $fetched_affiliate ? $fetched_affiliate : ( $offer['affiliate_url'] ?? '' );
 
-		return array( $offer, WorkOutcome::SUCCESS );
+		return array( $offer, WorkOutcome::SUCCESS, $targetIdentity );
 	}
 }

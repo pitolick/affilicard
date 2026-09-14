@@ -253,7 +253,7 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 *
 	 * @param array<string, mixed> $offer 更新後の購入リンク 1 件。
 	 */
-	public function updateListingOffer( int $postId, string $platform, array $offer ): bool {
+	public function updateListingOffer( int $postId, string $platform, array $offer, string $targetIdentity ): bool {
 		global $wpdb;
 
 		$lock = "affilicard_listing_{$postId}";
@@ -265,7 +265,6 @@ final class ProductRepository implements ProductRepositoryInterface {
 				? JsonField::decode( $raw, array() )
 				: ( is_array( $raw ) ? $raw : array() );
 
-			$identity = OfferIdentity::of( $offer );
 
 			foreach ( $listings as $index => $listing ) {
 				if ( ! is_array( $listing ) || ( $listing['platform'] ?? '' ) !== $platform ) {
@@ -275,7 +274,7 @@ final class ProductRepository implements ProductRepositoryInterface {
 				$merged  = array();
 				$written = false;
 				foreach ( LegacyOffer::offersWithFallback( $listing ) as $existing ) {
-					if ( ! $written && is_array( $existing ) && OfferIdentity::of( $existing ) === $identity ) {
+					if ( ! $written && is_array( $existing ) && OfferIdentity::of( $existing ) === $targetIdentity ) {
 						$merged[] = $offer;
 						$written  = true;
 						continue;
