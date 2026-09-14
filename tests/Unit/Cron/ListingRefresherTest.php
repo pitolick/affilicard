@@ -123,10 +123,12 @@ final class ListingRefresherTest extends TestCase {
 				),
 			)
 		);
-		$this->savedOffer = null;
+		$this->savedOffer    = null;
+		$this->savedIdentity = null;
 		$repo->shouldReceive( 'updateListingOffer' )->andReturnUsing(
-			function ( int $postId, string $platform, array $offer ) use ( $saveOk ): bool {
-				$this->savedOffer = $offer;
+			function ( int $postId, string $platform, array $patch, string $identity ) use ( $saveOk ): bool {
+				$this->savedOffer    = $patch;
+				$this->savedIdentity = $identity;
 				return $saveOk;
 			}
 		);
@@ -143,6 +145,8 @@ final class ListingRefresherTest extends TestCase {
 	 * @var array<string, mixed>|null
 	 */
 	private ?array $savedOffer = null;
+
+	private ?string $savedIdentity = null;
 
 	/**
 	 * v2.4.0: 死コード化した run()/refreshProduct()/runForPlatform() 系は削除済み
@@ -259,10 +263,12 @@ final class ListingRefresherTest extends TestCase {
 			)
 		);
 		$repo->shouldReceive( 'updateListingOffer' )->once()->andReturnUsing(
-			function ( int $postId, string $platform, array $offer ) {
-				$this->assertSame( '600', $offer['price'] );
-				$this->assertSame( 'https://example.test/existing-r', $offer['regular_url'] );
-				$this->assertSame( 'https://example.test/existing-a', $offer['affiliate_url'] );
+			function ( int $postId, string $platform, array $patch ) {
+				$this->assertSame( '600', $patch['price'] );
+				// 取得が空文字を返した URL は**パッチに載らない**。キーが無ければ保存側の
+				// マージで既存値がそのまま残り、空で潰れようがない。
+				$this->assertArrayNotHasKey( 'regular_url', $patch );
+				$this->assertArrayNotHasKey( 'affiliate_url', $patch );
 				return true;
 			}
 		);
@@ -323,9 +329,10 @@ final class ListingRefresherTest extends TestCase {
 			)
 		);
 		$repo->shouldReceive( 'updateListingOffer' )->once()->andReturnUsing(
-			function ( int $postId, string $platform, array $offer ) {
-				$this->assertSame( '2020-01-01T00:00:00+09:00', $offer['last_verified_at'] );
-				$this->assertSame( '500', $offer['price'] );
+			function ( int $postId, string $platform, array $patch ) {
+				// transient 失敗では表示鮮度も価格も触らない＝どちらもパッチに載らない。
+				$this->assertArrayNotHasKey( 'last_verified_at', $patch );
+				$this->assertArrayNotHasKey( 'price', $patch );
 				return true;
 			}
 		);
@@ -455,10 +462,11 @@ final class ListingRefresherTest extends TestCase {
 			)
 		);
 		$repo->shouldReceive( 'updateListingOffer' )->once()->andReturnUsing(
-			function ( int $postId, string $platform, array $offer ) {
-				// transient 失敗でも保存はされる（fetch_status を記録するため）が price は維持される。
-				$this->assertSame( '500', $offer['price'] );
-				$this->assertSame( FetchStatus::TRANSIENT, $offer['fetch_status'] );
+			function ( int $postId, string $platform, array $patch ) {
+				// transient 失敗でも保存はされる（fetch_status を記録するため）が、価格は
+				// パッチに載らない＝マージで既存値が維持される。
+				$this->assertArrayNotHasKey( 'price', $patch );
+				$this->assertSame( FetchStatus::TRANSIENT, $patch['fetch_status'] );
 				return true;
 			}
 		);
@@ -504,11 +512,11 @@ final class ListingRefresherTest extends TestCase {
 			)
 		);
 		$repo->shouldReceive( 'updateListingOffer' )->once()->andReturnUsing(
-			function ( int $postId, string $platform, array $offer ) {
-				$this->assertSame( '500', $offer['price'] );
-				$this->assertSame( FetchStatus::TERMINAL, $offer['fetch_status'] );
+			function ( int $postId, string $platform, array $patch ) {
+				$this->assertArrayNotHasKey( 'price', $patch );
+				$this->assertSame( FetchStatus::TERMINAL, $patch['fetch_status'] );
 				// terminal でも last_verified_at は更新しない（価格の表示鮮度は据え置き）。
-				$this->assertSame( '2020-01-01T00:00:00+09:00', $offer['last_verified_at'] );
+				$this->assertArrayNotHasKey( 'last_verified_at', $patch );
 				return true;
 			}
 		);
@@ -695,7 +703,8 @@ final class ListingRefresherTest extends TestCase {
 		$this->assertSame( WorkOutcome::SUCCESS, $outcome );
 		// 保存へ渡すのは選ばれた 1 件だけ。後続（normal）は渡さない＝触りようがない。
 		$this->assertNotNull( $this->savedOffer );
-		$this->assertSame( 'sale', $this->savedOffer['external_id'] );
+		// どの購入リンクを更新するかは identity で指定する（パッチには載らない）。
+		$this->assertSame( 'external_id:sale', $this->savedIdentity );
 		$this->assertSame( '0', $this->savedOffer['price'] );
 	}
 
@@ -830,9 +839,13 @@ final class ListingRefresherTest extends TestCase {
 
 		// 渡ったのは表示順 10 の 'sale'（配列では 2 番目）1 件だけ。
 		$this->assertNotNull( $this->savedOffer );
-		$this->assertSame( 'sale', $this->savedOffer['external_id'] );
+		$this->assertSame( 'external_id:sale', $this->savedIdentity );
 		$this->assertSame( '0', $this->savedOffer['price'] );
 		$this->assertArrayNotHasKey( 'offers', $this->savedOffer );
+		// 管理者が持つ項目は取得側から送らない＝同時編集を巻き戻しようがない。
+		$this->assertArrayNotHasKey( 'display_order', $this->savedOffer );
+		$this->assertArrayNotHasKey( 'search_key', $this->savedOffer );
+		$this->assertArrayNotHasKey( 'external_id', $this->savedOffer );
 	}
 
 	/**
@@ -977,8 +990,9 @@ final class ListingRefresherTest extends TestCase {
 			)
 		);
 		$repo->shouldReceive( 'updateListingOffer' )->once()->andReturnUsing(
-			function ( int $postId, string $platform, array $offer ): bool {
-				$this->savedOffer = $offer;
+			function ( int $postId, string $platform, array $patch, string $identity ): bool {
+				$this->savedOffer    = $patch;
+				$this->savedIdentity = $identity;
 				return true;
 			}
 		);
@@ -987,10 +1001,12 @@ final class ListingRefresherTest extends TestCase {
 
 		$this->assertSame( WorkOutcome::SUCCESS, $outcome );
 		$this->assertNotNull( $this->savedOffer );
-		$this->assertSame( 'flat-1', $this->savedOffer['external_id'] );
+		// flat な listing でも identity は同じ規則で決まる。
+		$this->assertSame( 'external_id:flat-1', $this->savedIdentity );
 		$this->assertSame( '550', $this->savedOffer['price'] );
 		$this->assertSame( FetchStatus::NONE, $this->savedOffer['fetch_status'] );
-		$this->assertSame( 'https://example.test/flat', $this->savedOffer['regular_url'] );
+		// 取得が返さなかった URL はパッチに載らない（既存値がマージで残る）。
+		$this->assertArrayNotHasKey( 'regular_url', $this->savedOffer );
 	}
 
 	/**

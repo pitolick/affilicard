@@ -72,8 +72,8 @@ class ListingRefresher {
 				// 実行時に無効化・手動化された listing は対象外（no-op）＝SUCCESS。failed 化させない。
 				return WorkOutcome::SUCCESS;
 			}
-			list( $refreshed, $outcome, $targetIdentity ) = $this->refreshListing( $listing, (string) $product['title'] );
-			if ( null === $refreshed ) {
+			list( $patch, $outcome, $targetIdentity ) = $this->refreshListing( $listing, (string) $product['title'] );
+			if ( null === $patch ) {
 				// 更新すべき購入リンクが無い＝保存するものも無い。ここで listing を書き戻すと、
 				// fetch もしていないのに fetch 前の写しで管理画面の編集を巻き戻す。
 				return $outcome;
@@ -86,7 +86,7 @@ class ListingRefresher {
 			// 削除された購入リンクを取りこぼしても、リトライでは OfferSelector が「そのとき
 			// 現存する」購入リンクを選び直すため自然に解消する（無限には回らない——
 			// ThrottledActionHandler::backoff() が MAX_ATTEMPTS で打ち切る）。
-			$saved = $this->repository->updateListingOffer( $postId, $platform, $refreshed, $targetIdentity );
+			$saved = $this->repository->updateListingOffer( $postId, $platform, $patch, $targetIdentity );
 			if ( ! $saved ) {
 				return WorkOutcome::TRANSIENT_FAILURE;
 			}
@@ -141,8 +141,8 @@ class ListingRefresher {
 	 * 更新すべき購入リンクが無いときは offer に null を返す（保存を行わせない）。
 	 *
 	 * @param array<string, mixed> $listing
-	 * @return array{0: array<string, mixed>|null, 1: WorkOutcome, 2: string} 更新後 offer、outcome、
-	 *   取得前に確定させたマージ先 identity のタプル
+	 * @return array{0: array<string, mixed>|null, 1: WorkOutcome, 2: string} 取得が変えた
+	 *   フィールドだけの差分、outcome、取得前に確定させたマージ先 identity のタプル
 	 */
 	private function refreshListing( array $listing, string $productTitle ): array {
 		// 移行前の flat な listing（offers を持たず取得結果フィールドが listing 直下に並ぶ
@@ -175,16 +175,21 @@ class ListingRefresher {
 		// last_verified_at と同様に gmdate('c')（実 UTC）で記録する。
 		$now = gmdate( 'c' );
 
-		$definition               = PlatformConfig::find( $platformCode );
-		$provider                 = null !== $definition ? $this->registry->get( $definition->provider ) : null;
-		$offer['last_fetched_at'] = $now;
+		$definition = PlatformConfig::find( $platformCode );
+		$provider   = null !== $definition ? $this->registry->get( $definition->provider ) : null;
+
+		// **返すのは offer 全体ではなく「取得が変えたフィールドだけ」のパッチである。**
+		// offer 全体を返すと、保存側が fetch 前のスナップショットで最新の offer を置き換え、
+		// fetch 中に管理者が行った並べ替え（display_order）や search_key の編集が巻き戻る。
+		// display_order / search_key / external_id は管理者のもので、取得は触らない。
+		$patch = array( 'last_fetched_at' => $now );
 
 		if ( null === $provider || ! $provider->isAutomatic() || '' === $externalId ) {
 			// 自動 Provider 未対応・external_id 無し＝この購入リンクは自動取得の対象外。
 			// 状態としては恒久的だが、リトライ分類（give-up するかどうか）はここでは変えない
 			// ――give-up するのは「該当なし・無効 ID」（TERMINAL）のときだけ。
-			$offer['fetch_status'] = FetchStatus::UNSUPPORTED;
-			return array( $offer, WorkOutcome::TRANSIENT_FAILURE, $targetIdentity );
+			$patch['fetch_status'] = FetchStatus::UNSUPPORTED;
+			return array( $patch, WorkOutcome::TRANSIENT_FAILURE, $targetIdentity );
 		}
 
 		$context = array(
@@ -199,36 +204,42 @@ class ListingRefresher {
 		if ( $result->isTerminalMiss() ) {
 			// 恒久失敗（該当なし・無効 ID）。last_verified_at は更新せず（表示鮮度据え置き）、
 			// TERMINAL_FAILURE を返してハンドラに give-up させる。
-			$offer['fetch_status'] = FetchStatus::TERMINAL;
-			return array( $offer, WorkOutcome::TERMINAL_FAILURE, $targetIdentity );
+			$patch['fetch_status'] = FetchStatus::TERMINAL;
+			return array( $patch, WorkOutcome::TERMINAL_FAILURE, $targetIdentity );
 		}
 		if ( ! $result->isHit() ) {
 			// 一時失敗（API 到達不可・エラー・認証未設定等）。リトライで解決し得るため give-up しない。
-			$offer['fetch_status'] = FetchStatus::TRANSIENT;
-			return array( $offer, WorkOutcome::TRANSIENT_FAILURE, $targetIdentity );
+			$patch['fetch_status'] = FetchStatus::TRANSIENT;
+			return array( $patch, WorkOutcome::TRANSIENT_FAILURE, $targetIdentity );
 		}
 
 		$fetched               = $result->data;
-		$offer['fetch_status'] = FetchStatus::NONE;
+		$patch['fetch_status'] = FetchStatus::NONE;
 		// PriceFreshness::isPriceDisplayable() は time()（実 UTC epoch）と比較するため、
 		// last_verified_at も実 UTC で記録する必要がある。current_time('c') はサイトのローカル
 		// 時刻に '+00:00' を付与するだけで実 UTC ではない（wp-env 等 UTC 以外のタイムゾーンだと
 		// ずれる）ため、last_fetched_at とは別に gmdate('c') で書く。
-		$offer['last_verified_at'] = gmdate( 'c' );
-		$offer['price']            = isset( $fetched['price'] ) ? (string) $fetched['price'] : ( $offer['price'] ?? '' );
-		$offer['list_price']       = isset( $fetched['list_price'] ) ? (string) $fetched['list_price'] : ( $offer['list_price'] ?? '' );
-		$offer['badge']            = isset( $fetched['badge'] ) ? (string) $fetched['badge'] : ( $offer['badge'] ?? '' );
-		$offer['image_url']        = isset( $fetched['image_url'] ) ? (string) $fetched['image_url'] : ( $offer['image_url'] ?? '' );
+		$patch['last_verified_at'] = gmdate( 'c' );
+
+		// **取得が返さなかった項目はパッチに入れない。** 以前は取得前の値を書き戻していたが、
+		// それでは fetch 中に管理者が編集した値を古い写しで上書きしてしまう。キーを落とせば
+		// 保存側のマージで最新の値がそのまま残る。
+		foreach ( array( 'price', 'list_price', 'badge', 'image_url' ) as $field ) {
+			if ( isset( $fetched[ $field ] ) ) {
+				$patch[ $field ] = (string) $fetched[ $field ];
+			}
+		}
 
 		// regular_url / affiliate_url は isset() だけで判定すると、Provider が空文字を
 		// 返した場合に既存の保存値を空で上書きしてしまう（isset('') === true のため）。
-		// 空文字の fetch 結果では既存値を保持し、非空の場合のみ更新する。
-		$fetched_regular      = isset( $fetched['regular_url'] ) ? (string) $fetched['regular_url'] : '';
-		$offer['regular_url'] = '' !== $fetched_regular ? $fetched_regular : ( $offer['regular_url'] ?? '' );
+		// 空文字の fetch 結果ではキー自体を落とし、非空の場合のみパッチへ載せる。
+		foreach ( array( 'regular_url', 'affiliate_url' ) as $field ) {
+			$value = isset( $fetched[ $field ] ) ? (string) $fetched[ $field ] : '';
+			if ( '' !== $value ) {
+				$patch[ $field ] = $value;
+			}
+		}
 
-		$fetched_affiliate      = isset( $fetched['affiliate_url'] ) ? (string) $fetched['affiliate_url'] : '';
-		$offer['affiliate_url'] = '' !== $fetched_affiliate ? $fetched_affiliate : ( $offer['affiliate_url'] ?? '' );
-
-		return array( $offer, WorkOutcome::SUCCESS, $targetIdentity );
+		return array( $patch, WorkOutcome::SUCCESS, $targetIdentity );
 	}
 }

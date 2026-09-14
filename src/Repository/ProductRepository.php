@@ -253,7 +253,7 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 *
 	 * @param array<string, mixed> $offer 更新後の購入リンク 1 件。
 	 */
-	public function updateListingOffer( int $postId, string $platform, array $offer, string $targetIdentity ): bool {
+	public function updateListingOffer( int $postId, string $platform, array $patch, string $targetIdentity ): bool {
 		global $wpdb;
 
 		$lock = "affilicard_listing_{$postId}";
@@ -275,7 +275,10 @@ final class ProductRepository implements ProductRepositoryInterface {
 				$written = false;
 				foreach ( LegacyOffer::offersWithFallback( $listing ) as $existing ) {
 					if ( ! $written && is_array( $existing ) && OfferIdentity::of( $existing ) === $targetIdentity ) {
-						$merged[] = $offer;
+						// **置換ではなくマージする。** $patch は取得が変えたフィールドだけを
+						// 持ち、ロック内で読み直した $existing に載せる。こうしないと fetch 中の
+						// 並べ替え（display_order）や search_key の編集が古い写しで巻き戻る。
+						$merged[] = array_merge( $existing, $patch );
 						$written  = true;
 						continue;
 					}

@@ -1511,6 +1511,65 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	/**
+	 * fetch 中の並べ替え・編集を、取得結果の書き戻しで巻き戻さない。
+	 *
+	 * 渡すのは「取得が変えたフィールドだけ」の差分で、ロック内で読み直した最新の
+	 * 購入リンクへマージする。offer 全体を置き換える実装だと、fetch 前のスナップショットに
+	 * 入っていた古い display_order や search_key が復活してしまう。
+	 */
+	public function test_updateListingOffer_fetch中の並べ替えと編集を巻き戻さない(): void {
+		$this->mockLockWpdb( 1 );
+
+		// ロック内で読み直した「最新」の状態。管理者が並べ替え、search_key も直した後。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id'   => 'r-1',
+								'display_order' => 50,
+								'search_key'    => '管理者が直した検索キー',
+								'price'         => '500',
+							),
+						),
+					),
+				)
+			);
+
+		$saved = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$saved ) {
+					$saved = $value;
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		// 取得が変えたのは価格と取得状態だけ。display_order / search_key は送らない。
+		$ok = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'price'        => '693',
+				'fetch_status' => '',
+			),
+			'external_id:r-1'
+		);
+
+		$this->assertTrue( $ok );
+		$offer = $saved[0]['offers'][0];
+		$this->assertSame( '693', $offer['price'], '取得した価格は反映される' );
+		$this->assertSame( 50, $offer['display_order'], '並べ替えが巻き戻ってはいけない' );
+		$this->assertSame( '管理者が直した検索キー', $offer['search_key'], '編集が巻き戻ってはいけない' );
+		$this->assertConditionsMet();
+	}
+
+	/**
 	 * 取得で regular_url が変わっても、取得前の identity で正しい購入リンクへ書き戻す。
 	 *
 	 * external_id を持たない購入リンクでは identity が regular_url そのものなので、
