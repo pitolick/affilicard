@@ -265,7 +265,6 @@ final class ProductRepository implements ProductRepositoryInterface {
 				? JsonField::decode( $raw, array() )
 				: ( is_array( $raw ) ? $raw : array() );
 
-
 			foreach ( $listings as $index => $listing ) {
 				if ( ! is_array( $listing ) || ( $listing['platform'] ?? '' ) !== $platform ) {
 					continue;
