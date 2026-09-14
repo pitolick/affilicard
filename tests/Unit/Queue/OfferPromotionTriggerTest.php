@@ -265,6 +265,43 @@ final class OfferPromotionTriggerTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	/**
+	 * 移行前の flat な listing でも繰り上がりを拾う。
+	 *
+	 * offers を直読みすると、掃引（QueueMaintenance）と価格更新（ListingRefresher）は
+	 * フォールバックで扱えるのに、ここだけ拾わないという不整合になる。
+	 */
+	public function test_移行前のflat_listingでも投入する(): void {
+		$this->stubRakutenPlatform();
+		$this->stubGeneralSettings();
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->once()
+			->with( 123, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform'        => 'rakuten-kobo',
+						'enabled'         => true,
+						'update_mode'     => 'auto',
+						'auto_update'     => true,
+						// offers キーが無い＝移行前の形。
+						'external_id'     => 'flat-1',
+						'regular_url'     => 'https://example.test/flat',
+						'last_fetched_at' => gmdate( 'c', time() - 30 * 3600 ),
+					),
+				)
+			);
+		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
+		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 500 );
+
+		$this->trigger()->onListingsSaved( 123 );
+
+		$this->assertConditionsMet();
+	}
+
 	public function test_自動更新の対象外なら投入しない(): void {
 		// enabled=false（ListingEligibility::isAutoEligible が最初に弾く）。この経路は
 		// GeneralSettings/PlatformConfig を一切読まないため、それらの option はスタブしない。

@@ -5,6 +5,7 @@ namespace Affilicard\Queue;
 
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductPostType;
+use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\ListingEligibility;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Pricing\PriceFreshness;
@@ -168,8 +169,13 @@ final class OfferPromotionTrigger {
 			return;
 		}
 
-		$offers  = isset( $listing['offers'] ) && is_array( $listing['offers'] ) ? $listing['offers'] : array();
-		$targets = OfferSelector::select( $offers, GeneralSettings::fallbackOnTerminal() );
+		// 移行前の flat な listing も対象にする。ListingRefresher / QueueMaintenance は
+		// 既に LegacyOffer::offersWithFallback() を通しており、ここだけ offers を直読み
+		// すると「掃引と価格更新は扱えるのに繰り上がりだけ拾わない」不整合になる。
+		$targets = OfferSelector::select(
+			LegacyOffer::offersWithFallback( $listing ),
+			GeneralSettings::fallbackOnTerminal()
+		);
 		if ( array() === $targets ) {
 			return;
 		}
