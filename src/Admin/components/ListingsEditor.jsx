@@ -176,7 +176,7 @@ function legacyOffer(listing) {
  * 編集画面へ入ってきた listing の購入リンクを offers[] へ揃える。
  *
  * `Affilicard\Pricing\LegacyOffer::offersWithFallback()`（PHP、
- * src/Pricing/LegacyOffer.php）と同じ規則——`offers` が非空ならそのまま、
+ * src/Pricing/LegacyOffer.php）と同じ規則——`offers` が非空ならその中身が正、
  * 空・不在なら flat な取得結果フィールドから 1 件を合成し、そのフィールドも
  * 無ければ 0 件。移行バッチが当該商品へ到達する前でも編集画面が同じ購入リンクを
  * 見るようにするためで、揃えずに渡すと「編集・追加・並べ替え・保存のどれをしても
@@ -187,7 +187,10 @@ function legacyOffer(listing) {
  * 判定するため）。分岐を変えるときは両方直し、
  * tests/js/components/ListingsEditor.test.jsx の一致確認テストも一緒に直すこと。
  *
- * 変換が要らない listing は同じ参照をそのまま返す（無駄な再生成をしない）。
+ * 旧 flat な取得結果フィールドは**どちらの枝でも**落とす（残すと、購入リンクを
+ * 全件削除した次の描画でそこから 1 件が再生成され、削除が無言で取り消される）。
+ *
+ * 変換も除去も要らない listing は同じ参照をそのまま返す（無駄な再生成をしない）。
  *
  * @param {Object} listing
  * @return {Object}
@@ -196,14 +199,28 @@ export function withNormalisedOffers(listing) {
 	if (!listing || typeof listing !== 'object') {
 		return listing;
 	}
-	if (Array.isArray(listing.offers)) {
-		if (listing.offers.length > 0 || !hasFlatFetchFields(listing)) {
-			return listing;
-		}
-	} else if (!hasFlatFetchFields(listing)) {
-		return { ...listing, offers: [] };
+	const offers = Array.isArray(listing.offers) ? listing.offers : [];
+	// 非空の offers が正（PHP の offersWithFallback と同じ優先順位）。
+	// 空・不在で flat な取得結果フィールドを持つときだけ 1 件を合成する。
+	const next =
+		offers.length === 0 && hasFlatFetchFields(listing)
+			? [legacyOffer(listing)]
+			: offers;
+
+	// **旧 flat フィールドは offers が非空でも必ず落とす。** 合成した経路だけで
+	// 落としていると、`offers` と旧フィールドの両方を持つ listing
+	// （移行前に外部パイプラインが offers を書いた等）で旧フィールドが残り、
+	// 購入リンクを全件削除した次の描画でそこから 1 件が再生成される
+	// ——削除が無言で取り消される。
+	if (
+		next === offers &&
+		Array.isArray(listing.offers) &&
+		!hasLegacyFetchField(listing)
+	) {
+		// 変換も除去も要らない listing は同じ参照を返す（無駄な再生成をしない）。
+		return listing;
 	}
-	return { ...withoutLegacyFetchFields(listing), offers: [legacyOffer(listing)] };
+	return { ...withoutLegacyFetchFields(listing), offers: next };
 }
 
 /**
@@ -217,24 +234,40 @@ export function withNormalisedOffers(listing) {
  * @param {Object} listing
  * @return {Object}
  */
+const LEGACY_FETCH_FIELDS = [
+	'external_id',
+	'regular_url',
+	'affiliate_url',
+	'price',
+	'list_price',
+	'badge',
+	'image_url',
+	'search_key',
+	'fetch_error',
+	'last_fetched_at',
+	'last_verified_at',
+];
+
 function withoutLegacyFetchFields(listing) {
 	const stripped = { ...listing };
-	for (const field of [
-		'external_id',
-		'regular_url',
-		'affiliate_url',
-		'price',
-		'list_price',
-		'badge',
-		'image_url',
-		'search_key',
-		'fetch_error',
-		'last_fetched_at',
-		'last_verified_at',
-	]) {
+	for (const field of LEGACY_FETCH_FIELDS) {
 		delete stripped[field];
 	}
 	return stripped;
+}
+
+/**
+ * 旧 flat な取得結果フィールドを 1 つでも「持っている」か（空文字でも持っている）。
+ *
+ * 合成の可否を決める hasFlatFetchFields() とは別物。あちらは「購入リンクを
+ * 1 件合成するに足る中身があるか」（空文字は中身なし）で、こちらは
+ * 「落とすべきキーが残っているか」を見る。
+ *
+ * @param {Object} listing
+ * @return {boolean}
+ */
+function hasLegacyFetchField(listing) {
+	return LEGACY_FETCH_FIELDS.some((field) => field in listing);
 }
 
 function platformName(platforms, code) {

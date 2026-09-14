@@ -776,6 +776,41 @@ describe( 'withNormalisedOffers（Affilicard\\Pricing\\LegacyOffer::offersWithFa
 		expect( withNormalisedOffers( emptied ).offers ).toEqual( [] );
 	} );
 
+	test( 'offers と旧 flat フィールドが併存していても offers が勝ち旧フィールドは落とす', () => {
+		// 移行前に外部パイプラインが offers を書いた listing など、両方を持つ形。
+		const listing = flatListing( {
+			offers: [
+				{ display_order: 100, external_id: 'kept', regular_url: 'https://example.test/kept' },
+			],
+		} );
+
+		const normalised = withNormalisedOffers( listing );
+
+		// 非空の offers が正（旧フィールドから合成し直さない）。
+		expect( normalised.offers ).toHaveLength( 1 );
+		expect( normalised.offers[ 0 ].external_id ).toBe( 'kept' );
+		// 旧フィールドは落ちる。
+		expect( normalised ).not.toHaveProperty( 'external_id' );
+		expect( normalised ).not.toHaveProperty( 'regular_url' );
+		expect( normalised ).not.toHaveProperty( 'price' );
+		expect( normalised.platform ).toBe( 'rakuten-kobo' );
+	} );
+
+	test( 'offers と旧 flat フィールドが併存する listing でも全削除が取り消されない', () => {
+		const normalised = withNormalisedOffers(
+			flatListing( {
+				offers: [
+					{ display_order: 100, external_id: 'kept', regular_url: 'https://example.test/kept' },
+				],
+			} )
+		);
+		// 利用者が購入リンクを全て削除する。
+		const emptied = { ...normalised, offers: [] };
+
+		// 旧フィールドが残っていると、ここで削除した購入リンクが復活する。
+		expect( withNormalisedOffers( emptied ).offers ).toEqual( [] );
+	} );
+
 	test( 'display_order は PHP の (int) キャストと同じ整数へ揃える', () => {
 		// PHP の LegacyOffer::toOffer() は
 		// isset() ? (int) $listing['display_order'] : DEFAULT_ORDER。
