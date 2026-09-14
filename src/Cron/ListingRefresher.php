@@ -124,10 +124,44 @@ class ListingRefresher {
 			// refreshListing() と同じフォールバックを通す。ここだけ offers を直接読むと、
 			// 移行前の flat な listing で「refreshOne は fetch するのに枠は 0 件ぶんしか
 			// 確保しない」というズレが生まれる。
-			$offers = LegacyOffer::offersWithFallback( $listing );
-			return count( OfferSelector::select( $offers, GeneralSettings::fallbackOnTerminal() ) );
+			$offers   = LegacyOffer::offersWithFallback( $listing );
+			$selected = OfferSelector::select( $offers, GeneralSettings::fallbackOnTerminal() );
+
+			// 選ばれても実際に外部 API を叩かない購入リンク（自動 Provider 未対応・
+			// external_id 無し）はレート制限の枠を使わない。判定は refreshListing() と
+			// 同じ willFetch() に委ねる——条件をここへ写すと、片方だけ変えたときに
+			// 「枠は取るのに叩かない／叩くのに枠が無い」というズレが生まれる。
+			$count = 0;
+			foreach ( $selected as $offer ) {
+				if ( is_array( $offer ) && $this->willFetch( $listing, $offer ) ) {
+					++$count;
+				}
+			}
+			return $count;
 		}
 		return 0;
+	}
+
+	/**
+	 * この購入リンクが実際に外部 API を叩くか。
+	 *
+	 * refreshListing() が UNSUPPORTED で早期に返す条件と同じものを、枠取り
+	 * （{@see self::targetCount()}）からも参照できるよう 1 箇所に置く。
+	 *
+	 * @param array<string, mixed> $listing
+	 * @param array<string, mixed> $offer
+	 */
+	private function willFetch( array $listing, array $offer ): bool {
+		$externalId = isset( $offer['external_id'] ) ? (string) $offer['external_id'] : '';
+		if ( '' === $externalId ) {
+			return false;
+		}
+		$definition = PlatformConfig::find( isset( $listing['platform'] ) ? (string) $listing['platform'] : '' );
+		if ( null === $definition ) {
+			return false;
+		}
+		$provider = $this->registry->get( $definition->provider );
+		return null !== $provider && $provider->isAutomatic();
 	}
 
 	/**
@@ -184,7 +218,7 @@ class ListingRefresher {
 		// display_order / search_key / external_id は管理者のもので、取得は触らない。
 		$patch = array( 'last_fetched_at' => $now );
 
-		if ( null === $provider || ! $provider->isAutomatic() || '' === $externalId ) {
+		if ( ! $this->willFetch( $listing, $offer ) ) {
 			// 自動 Provider 未対応・external_id 無し＝この購入リンクは自動取得の対象外。
 			// 状態としては恒久的だが、リトライ分類（give-up するかどうか）はここでは変えない
 			// ――give-up するのは「該当なし・無効 ID」（TERMINAL）のときだけ。

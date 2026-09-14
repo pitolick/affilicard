@@ -855,6 +855,9 @@ final class ListingRefresherTest extends TestCase {
 	 * offers が1件（fallback 既定 OFF）なら選択結果どおり 1。
 	 */
 	public function test_targetCount_offersが1件なら1を返す(): void {
+		// targetCount() は「実際に外部 API を叩くか」を refreshListing() と同じ
+		// willFetch() で判定するため、platform 定義の解決を通る。
+		$this->stubRakutenPlatform();
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array() );
@@ -867,9 +870,38 @@ final class ListingRefresherTest extends TestCase {
 			)
 		);
 
-		$count = ( new ListingRefresher( new ProviderRegistry(), $repo ) )->targetCount( 20, 'rakuten-kobo' );
+		$registry = $this->rakutenProvider( FetchResult::hit( array( 'price' => '100' ) ) );
+		$count    = ( new ListingRefresher( $registry, $repo ) )->targetCount( 20, 'rakuten-kobo' );
 
 		$this->assertSame( 1, $count );
+	}
+
+	/**
+	 * 選ばれても外部 API を叩かない購入リンクは枠を使わない。
+	 *
+	 * refreshListing() は自動 Provider 未対応・external_id 無しの購入リンクを
+	 * fetch せず UNSUPPORTED で返す。ここで枠を取ると、叩きもしないのに
+	 * レート制限を 1 件ぶん焼くことになる。
+	 */
+	public function test_targetCount_外部APIを叩かない購入リンクは0を返す(): void {
+		$this->stubRakutenPlatform();
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		$repo = $this->repoWithOffers(
+			array(
+				array(
+					// external_id が無い＝自動取得の対象外（fetch されない）。
+					'external_id' => '',
+					'regular_url' => 'https://example.test/manual',
+				),
+			)
+		);
+
+		$registry = $this->rakutenProvider( FetchResult::hit( array( 'price' => '100' ) ) );
+		$count    = ( new ListingRefresher( $registry, $repo ) )->targetCount( 20, 'rakuten-kobo' );
+
+		$this->assertSame( 0, $count );
 	}
 
 	/** offers が空なら OfferSelector::select() の選択結果も空＝0（refreshOne 自身も fetch しない）。 */
@@ -1014,6 +1046,9 @@ final class ListingRefresherTest extends TestCase {
 	 * ここが 0 を返すと、レート制限の枠を確保しないまま外部 API を叩くことになる。
 	 */
 	public function test_targetCount_移行前のflat_listingでも1を返す(): void {
+		// targetCount() は「実際に外部 API を叩くか」を refreshListing() と同じ
+		// willFetch() で判定するため、platform 定義の解決を通る。
+		$this->stubRakutenPlatform();
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array() );
@@ -1034,7 +1069,8 @@ final class ListingRefresherTest extends TestCase {
 			)
 		);
 
-		$count = ( new ListingRefresher( new ProviderRegistry(), $repo ) )->targetCount( 32, 'rakuten-kobo' );
+		$registry = $this->rakutenProvider( FetchResult::hit( array( 'price' => '100' ) ) );
+		$count    = ( new ListingRefresher( $registry, $repo ) )->targetCount( 32, 'rakuten-kobo' );
 
 		$this->assertSame( 1, $count );
 	}
