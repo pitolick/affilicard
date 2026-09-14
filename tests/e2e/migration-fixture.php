@@ -38,7 +38,7 @@ declare(strict_types=1);
  * 環境に既存の商品数（このリポジトリでは 2026-09 時点で 185 件超）次第で複数回に
  * 分かれ得るため、`isOffersMigrationPending()` が false になるまでループする。
  *
- * **このファイルには `declare(strict_types=1);` を置けない**（seed.php と同じ理由）。
+ * 呼び出し側は `--use-include` を必ず付けること（seed.php と同じ理由）。
  * 出力: 1 行 `MIGRATION_JSON:{...}`
  */
 
