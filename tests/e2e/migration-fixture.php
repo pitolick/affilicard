@@ -63,6 +63,14 @@ foreach (
 	wp_delete_post( (int) $stale_id, true );
 }
 
+// 温存カウンタと温存 post ID の記録も消す。商品だけ消してこれらを残すと、
+// post ID の記録は上限（PRESERVED_POST_IDS_CAP=50）付きなので実行を重ねるうちに
+// 削除済み ID で埋まり、今回のフィクスチャが記録されなくなる。そうなると
+// 「どの商品かへ辿れる」ことを見る通知の E2E が落ちる。件数の方も同じ理由で
+// 際限なく積み上がるため、毎回 0 から数え直す。
+delete_option( PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL );
+delete_option( PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS );
+
 /**
  * `$repo->save()`/`saveMeta()` は使わない。saveMeta() は無条件に
  * META_SCHEMA_VERSION を SchemaVersion::CURRENT へ更新してしまい、
