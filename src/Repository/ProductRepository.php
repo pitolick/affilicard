@@ -289,6 +289,9 @@ final class ProductRepository implements ProductRepositoryInterface {
 			$listings = is_string( $raw )
 				? JsonField::decode( $raw, array() )
 				: ( is_array( $raw ) ? $raw : array() );
+			// 書き込み前の姿を控える（update_post_meta() の false を「失敗」と
+			// 「値が変わらなかった」に切り分けるため。下の保存を参照）。
+			$before = $listings;
 
 			foreach ( $listings as $index => $listing ) {
 				if ( ! is_array( $listing ) || ( $listing['platform'] ?? '' ) !== $platform ) {
@@ -316,9 +319,25 @@ final class ProductRepository implements ProductRepositoryInterface {
 
 				$listing['offers']  = $merged;
 				$listings[ $index ] = $listing;
+				$next               = array_values( $listings );
 
-				update_post_meta( $postId, ProductPostType::META_LISTINGS, array_values( $listings ) );
-				return true;
+				// **update_post_meta() の false を握り潰さない。** 握り潰すと、取得した
+				// 価格が保存されていないのに呼び出し側は成功として完了し、再試行もしない
+				// （＝サイレントなデータロス）。
+				//
+				// ただし false は「失敗」と「値が変わらなかった」の両方で返る
+				// （WordPress は既存値と一致すると書かずに false を返す）。戻り値だけでは
+				// 切り分けられないので、書く前に自分で比較して「変わらない」を先に
+				// 除いてから呼ぶ——PluginUpgrade::writeMigratedListings() が読み直しで
+				// 同じ切り分けをしているのと同じ趣旨で、こちらは保存前の値を控えて行う
+				// （書き込みは sanitize_meta を通るため、読み直した値は渡した値と
+				// 一致するとは限らない）。
+				if ( $next === $before ) {
+					// 書くものが無い＝既に望みの状態。成功として返す。
+					return true;
+				}
+
+				return false !== update_post_meta( $postId, ProductPostType::META_LISTINGS, $next );
 			}
 
 			return false;

@@ -1719,6 +1719,90 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	/**
+	 * update_post_meta() が失敗したら false を返す（成功として報告しない）。
+	 *
+	 * 握り潰すと、取得した価格が保存されていないのに ListingRefresher は成功として
+	 * 完了し、再試行もしない——サイレントなデータロスになる。
+	 */
+	public function test_updateListingOffer_meta書き込みに失敗したらfalseを返す(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => 'r-1',
+								'price'       => '500',
+							),
+						),
+					),
+				)
+			);
+		// 書き込み失敗。値は変わっている（500 → 693）ので「変わらなかった」ではない。
+		WP_Mock::userFunction( 'update_post_meta' )->once()->andReturn( false );
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'external_id' => 'r-1',
+				'price'       => '693',
+			),
+			'external_id:r-1'
+		);
+
+		$this->assertFalse( $ok );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 値が変わらないときは書かずに true を返す。
+	 *
+	 * update_post_meta() は「既存値と同じ」でも false を返すため、戻り値をそのまま
+	 * 成否に使うと、取得結果が前回と同じだっただけの正常系が失敗として扱われ、
+	 * リトライを繰り返して最後は failed になる。
+	 */
+	public function test_updateListingOffer_値が変わらなければ書かずにtrueを返す(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => 'r-1',
+								'price'       => '693',
+							),
+						),
+					),
+				)
+			);
+		WP_Mock::userFunction( 'update_post_meta' )->never();
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'external_id' => 'r-1',
+				'price'       => '693',
+			),
+			'external_id:r-1'
+		);
+
+		$this->assertTrue( $ok );
+		$this->assertConditionsMet();
+	}
+
+	/**
 	 * ロックを取れない窓は、まさに誰かが同じ meta を書いている窓である。そこで
 	 * read-modify-write に入ると、並行している管理画面の保存を丸ごと巻き戻す。
 	 * false は ListingRefresher が一時失敗として扱い再投入するため、取得した価格は
