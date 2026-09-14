@@ -28,7 +28,14 @@ use Affilicard\Upgrade\PluginUpgrade;
  */
 final class OffersMigrationNotice {
 
-	/** 「今後表示しない」を記録するユーザーメタキー（温存通知のみ）。 */
+	/**
+	 * 「今後表示しない」を記録するユーザーメタキー（温存通知のみ）。
+	 *
+	 * **記録するのは真偽値ではなく「閉じた時点の温存件数」である。** 移行はバッチで
+	 * 進むため、閉じたあとのバッチが温存件数を増やすことがある。真偽値で覚えると
+	 * その増分を誰にも知らせないまま、次の保存で ProductSchema::sanitizeOffers() が
+	 * 該当の購入リンクを消してしまう。件数を覚えておき、増えたら出し直す。
+	 */
 	private const DISMISS_META = 'affilicard_offers_migration_notice_dismissed';
 
 	/** 「今後表示しない」リンクのアクション名（nonce/クエリ引数）。 */
@@ -69,10 +76,13 @@ final class OffersMigrationNotice {
 		if ( ! self::isAffilicardScreen() ) {
 			return false;
 		}
-		if ( PluginUpgrade::preservedWithoutRegularUrlCount() < 1 ) {
+		$count = PluginUpgrade::preservedWithoutRegularUrlCount();
+		if ( $count < 1 ) {
 			return false;
 		}
-		return 1 !== (int) get_user_meta( get_current_user_id(), self::DISMISS_META, true );
+		// 閉じた時点より増えていれば出し直す。未設定なら (int) '' === 0 で必ず出る。
+		$dismissed_at = (int) get_user_meta( get_current_user_id(), self::DISMISS_META, true );
+		return $count > $dismissed_at;
 	}
 
 	public static function maybeRender(): void {
@@ -165,7 +175,12 @@ final class OffersMigrationNotice {
 			return;
 		}
 		check_admin_referer( self::DISMISS_ACTION );
-		update_user_meta( get_current_user_id(), self::DISMISS_META, 1 );
+		// 真偽値ではなく「閉じた時点の件数」を残す（後続バッチの増分で出し直すため）。
+		update_user_meta(
+			get_current_user_id(),
+			self::DISMISS_META,
+			PluginUpgrade::preservedWithoutRegularUrlCount()
+		);
 		wp_safe_redirect( remove_query_arg( array( self::DISMISS_ACTION, '_wpnonce' ) ) );
 		exit;
 	}

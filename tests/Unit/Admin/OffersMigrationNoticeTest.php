@@ -52,6 +52,7 @@ final class OffersMigrationNoticeTest extends TestCase {
 			->andReturn( $count );
 	}
 
+	/** @param int $dismissed 「閉じた時点の温存件数」として記録されている値（0＝未 dismiss）。 */
 	private function stubUser( int $dismissed ): void {
 		WP_Mock::userFunction( 'get_current_user_id' )->andReturn( 7 );
 		WP_Mock::userFunction( 'get_user_meta' )
@@ -104,12 +105,29 @@ final class OffersMigrationNoticeTest extends TestCase {
 		$this->assertFalse( OffersMigrationNotice::shouldShowPreserved() );
 	}
 
-	public function test_dismiss済みなら温存通知を出さない(): void {
+	public function test_同じ件数でdismiss済みなら温存通知を出さない(): void {
 		$this->stubScreen( 'affilicard_product' );
 		$this->stubPreserved( 3 );
-		$this->stubUser( 1 );
+		$this->stubUser( 3 );
 
 		$this->assertFalse( OffersMigrationNotice::shouldShowPreserved() );
+	}
+
+	/**
+	 * dismiss したあとのバッチが温存件数を増やしたら出し直す。
+	 *
+	 * 真偽値で覚えると、増分を誰にも知らせないまま次の保存で
+	 * ProductSchema::sanitizeOffers() が該当の購入リンクを消してしまう。
+	 */
+	public function test_dismiss後に温存件数が増えたら通知を出し直す(): void {
+		$this->stubScreen( 'affilicard_product' );
+		// 温存 1 件のときに閉じ、その後のバッチで 5 件へ増えた状態。
+		// 記録値が 1 なのは意図的——真偽値で覚える実装だと「閉じた」と解釈して
+		// 隠してしまい、このテストが素通りしなくなる。
+		$this->stubPreserved( 5 );
+		$this->stubUser( 1 );
+
+		$this->assertTrue( OffersMigrationNotice::shouldShowPreserved() );
 	}
 
 	/**
