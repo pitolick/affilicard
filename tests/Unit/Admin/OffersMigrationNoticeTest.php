@@ -17,12 +17,24 @@ use WP_Mock\Tools\TestCase;
  */
 final class OffersMigrationNoticeTest extends TestCase {
 
+	/**
+	 * $_GET の退避（dismiss 系テストが書き換えるため）。
+	 *
+	 * **掃除は tearDown で行う。** テスト本体の末尾で戻すと、途中で失敗したときに
+	 * 書き換えたまま次のテストへ漏れる。
+	 *
+	 * @var array<string, mixed>
+	 */
+	private array $originalGet = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		$this->originalGet = $_GET; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- テストの退避であり入力の処理ではない。
 	}
 
 	public function tearDown(): void {
+		$_GET = $this->originalGet;
 		WP_Mock::tearDown();
 		parent::tearDown();
 	}
@@ -404,7 +416,6 @@ final class OffersMigrationNoticeTest extends TestCase {
 		}
 
 		$this->assertSame( 2, $saved, '表示した件数（2）ではなく別の値で閉じている' );
-		$_GET = array();
 	}
 
 	/**
@@ -438,8 +449,6 @@ final class OffersMigrationNoticeTest extends TestCase {
 		} catch ( \RuntimeException $e ) {
 			$this->assertSame( 'nonce mismatch', $e->getMessage() );
 		}
-
-		$_GET = array();
 	}
 
 	/**
