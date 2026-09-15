@@ -248,6 +248,10 @@ final class ProductSchemaTest extends TestCase {
 
 	public function test_regular_urlもexternal_idも無いofferは弾く(): void {
 		// 識別子を 1 つも持たない offer は、生死の判定も再同定もできず永久に残る。
+		//
+		// **affiliate_url があっても残さない。** リダイレクタは転送先が 404 でも 302 を
+		// 返すため、アフィリエイト URL では生死を判定できない（spec §3-3）。
+		// この fixture の 1 件目がまさにその形で、残す実装にすると落ちる。
 		$result = ProductSchema::sanitizeListings(
 			array(
 				array(
