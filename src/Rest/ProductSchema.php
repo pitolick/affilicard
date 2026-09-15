@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Rest;
 
+use Affilicard\Pricing\FetchStatus;
 use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Stock\StockStatus;
@@ -345,7 +346,7 @@ final class ProductSchema {
 
 			// 識別子が重複したら後勝ち（同じ SKU を 2 つ並べない）。
 			$byKey[ $key ] = array(
-				'display_order'    => isset( $offer['display_order'] ) ? (int) $offer['display_order'] : OfferSelector::DEFAULT_ORDER,
+				'display_order'    => OfferSelector::normaliseOrder( $offer['display_order'] ?? null ),
 				'external_id'      => $externalId,
 				'regular_url'      => $regular,
 				'affiliate_url'    => (string) esc_url_raw( self::stringField( $offer, 'affiliate_url' ) ),
@@ -354,7 +355,7 @@ final class ProductSchema {
 				'badge'            => (string) sanitize_text_field( self::stringField( $offer, 'badge' ) ),
 				'image_url'        => (string) esc_url_raw( self::stringField( $offer, 'image_url' ) ),
 				'search_key'       => (string) sanitize_text_field( self::stringField( $offer, 'search_key' ) ),
-				'fetch_status'     => (string) sanitize_key( self::stringField( $offer, 'fetch_status' ) ),
+				'fetch_status'     => FetchStatus::normalise( (string) sanitize_key( self::stringField( $offer, 'fetch_status' ) ) ),
 				'last_fetched_at'  => (string) sanitize_text_field( self::stringField( $offer, 'last_fetched_at' ) ),
 				'last_verified_at' => (string) sanitize_text_field( self::stringField( $offer, 'last_verified_at' ) ),
 			);

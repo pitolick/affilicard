@@ -170,6 +170,15 @@ do {
 	++$guard;
 } while ( PluginUpgrade::isOffersMigrationPending() && $guard < 100 );
 
+// **積まれた継続アクションを片付ける。** runOffersMigrationBatch() はバッチが
+// 上限件数に達した回に次回ぶんを Action Scheduler へ積む。このループはその次回を
+// 同期的に自分で回してしまうので、積まれたアクションだけが残る。完走でカーソルは
+// 消えているため、残ったアクションが後から実行されると post ID 0 から全商品を
+// 走査し直し、E2E 実行のたびにキューが汚れていく。
+if ( function_exists( 'as_unschedule_all_actions' ) ) {
+	as_unschedule_all_actions( PluginUpgrade::HOOK_MIGRATE_OFFERS );
+}
+
 $preserved_after = PluginUpgrade::preservedWithoutRegularUrlCount();
 
 $read = static function ( int $id ): array {

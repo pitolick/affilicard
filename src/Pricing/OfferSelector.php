@@ -62,7 +62,7 @@ final class OfferSelector {
 			if ( ! is_array( $offer ) ) {
 				continue;
 			}
-			$order     = isset( $offer['display_order'] ) ? (int) $offer['display_order'] : self::DEFAULT_ORDER;
+			$order     = self::normaliseOrder( $offer['display_order'] ?? null );
 			$indexed[] = array( $order, $i, $offer );
 			++$i;
 		}
@@ -75,5 +75,31 @@ final class OfferSelector {
 		);
 
 		return array_map( static fn( array $row ): array => $row[2], $indexed );
+	}
+
+	/**
+	 * display_order を整数へ揃える唯一の場所。
+	 *
+	 * **不正値は最優先（0）ではなく既定値へ倒す。** `(int)` で畳むと空文字も
+	 * 非数値文字列も 0 になり、打ち間違いや壊れた入力が「いちばん先に表示される
+	 * 購入リンク」に化ける。並び順の指定が読めないなら、指定が無いときと同じ
+	 * 扱い（DEFAULT_ORDER）にするのが安全側である。
+	 *
+	 * 小数は切り捨てる（`(int)` と同じ）。JS 側（ListingsEditor の
+	 * offerDisplayOrder）はこの規則の写しなので、変えるときは両方直すこと。
+	 *
+	 * @param mixed $raw
+	 */
+	public static function normaliseOrder( $raw ): int {
+		if ( is_int( $raw ) ) {
+			return $raw;
+		}
+		if ( is_float( $raw ) ) {
+			return (int) $raw;
+		}
+		if ( is_string( $raw ) && is_numeric( trim( $raw ) ) ) {
+			return (int) trim( $raw );
+		}
+		return self::DEFAULT_ORDER;
 	}
 }

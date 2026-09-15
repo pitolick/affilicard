@@ -653,30 +653,37 @@ describe( 'selectInUseOffer（Affilicard\\Pricing\\OfferSelector::select() と�
 		expect( selectInUseOffer( offers, false ).external_id ).toBe( 'explicit' );
 	} );
 
-	test( 'display_order が空文字なら 0（PHP の (int) キャストと同じ）', () => {
-		// PHP: isset() は true なので既定値ではなく (int) '' ＝ 0 ＝ 最優先。
-		// 既定値（100）へ倒すと、保存前の「使用中」の印が保存後に PHP が選ぶ行とずれる。
+	test( 'display_order が空文字なら既定値（読めない値は最優先にしない）', () => {
+		// PHP: OfferSelector::normaliseOrder( '' ) === DEFAULT_ORDER。
+		// (int) で畳むと 0 ＝ 最優先になり、壊れた入力が先頭に化ける。
 		const offers = [
 			offer( 10, 'ten' ),
 			{ display_order: '', external_id: 'empty', regular_url: 'https://example.test/e' },
 		];
-		expect( selectInUseOffer( offers, false ).external_id ).toBe( 'empty' );
+		expect( selectInUseOffer( offers, false ).external_id ).toBe( 'ten' );
 	} );
 
-	test( 'display_order が数字でない文字列でも 0', () => {
-		// PHP: (int) 'あ' === 0。JS の Number() は NaN になり並べ替えが未定義になる。
+	test( 'display_order が数字でない文字列なら既定値', () => {
 		const offers = [
 			offer( 10, 'ten' ),
 			{ display_order: 'あ', external_id: 'bogus', regular_url: 'https://example.test/b' },
 		];
-		expect( selectInUseOffer( offers, false ).external_id ).toBe( 'bogus' );
+		expect( selectInUseOffer( offers, false ).external_id ).toBe( 'ten' );
 	} );
 
-	test( 'display_order が数字で始まる文字列は先頭の数値だけを読む', () => {
-		// PHP: (int) '12abc' === 12。
+	test( 'display_order が数字で始まるだけの文字列なら既定値', () => {
+		// PHP の is_numeric( '12abc' ) は false。先頭の数値を拾わない。
 		const offers = [
 			offer( 50, 'fifty' ),
 			{ display_order: '12abc', external_id: 'twelve', regular_url: 'https://example.test/t' },
+		];
+		expect( selectInUseOffer( offers, false ).external_id ).toBe( 'fifty' );
+	} );
+
+	test( 'display_order が数値文字列なら整数として読む', () => {
+		const offers = [
+			offer( 50, 'fifty' ),
+			{ display_order: '12', external_id: 'twelve', regular_url: 'https://example.test/t' },
 		];
 		expect( selectInUseOffer( offers, false ).external_id ).toBe( 'twelve' );
 	} );
@@ -812,21 +819,20 @@ describe( 'withNormalisedOffers（Affilicard\\Pricing\\LegacyOffer::offersWithFa
 		expect( withNormalisedOffers( emptied ).offers ).toEqual( [] );
 	} );
 
-	test( 'display_order は PHP の (int) キャストと同じ整数へ揃える', () => {
-		// PHP の LegacyOffer::toOffer() は
-		// isset() ? (int) $listing['display_order'] : DEFAULT_ORDER。
+	test( 'display_order は PHP の normaliseOrder() と同じ整数へ揃える', () => {
+		// 読めない値は最優先（0）ではなく既定値（100）へ倒す。
 		expect(
 			withNormalisedOffers( flatListing( { display_order: '' } ) ).offers[ 0 ]
 				.display_order
-		).toBe( 0 );
+		).toBe( 100 );
 		expect(
 			withNormalisedOffers( flatListing( { display_order: 'あ' } ) ).offers[ 0 ]
 				.display_order
-		).toBe( 0 );
+		).toBe( 100 );
 		expect(
 			withNormalisedOffers( flatListing( { display_order: '12abc' } ) )
 				.offers[ 0 ].display_order
-		).toBe( 12 );
+		).toBe( 100 );
 		expect(
 			withNormalisedOffers( flatListing( { display_order: '3' } ) ).offers[ 0 ]
 				.display_order

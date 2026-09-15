@@ -110,4 +110,28 @@ final class FetchStatusTest extends TestCase {
 			FetchStatus::fromLegacyMessage( '該当する商品が見つかりませんでした' )
 		);
 	}
+
+	/**
+	 * 未知の fetch_status は TRANSIENT へ倒す。
+	 *
+	 * sanitize_key() は任意の文字列を通すため、打ち間違いや外部ツールの誤りが
+	 * そのまま格納される。未知の値は管理画面で文言が出ず isTerminal() も偽になり、
+	 * 「壊れているのに正常に見える」状態になる。terminal と誤認して購入リンクを
+	 * 飛ばすより、一時失敗として次の取得に任せる方が安全である。
+	 */
+	public function test_未知のfetch_statusはTRANSIENTへ倒す(): void {
+		$this->assertSame( FetchStatus::TRANSIENT, FetchStatus::normalise( 'typo' ) );
+	}
+
+	/** 空は成功（NONE）。 */
+	public function test_空のfetch_statusはNONEになる(): void {
+		$this->assertSame( FetchStatus::NONE, FetchStatus::normalise( '' ) );
+	}
+
+	/** 定義済みの値はそのまま通す。 */
+	public function test_定義済みのfetch_statusはそのまま通す(): void {
+		foreach ( array( FetchStatus::UNSUPPORTED, FetchStatus::TRANSIENT, FetchStatus::TERMINAL ) as $known ) {
+			$this->assertSame( $known, FetchStatus::normalise( $known ) );
+		}
+	}
 }

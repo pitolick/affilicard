@@ -54,8 +54,14 @@ final class OfferSelectorTest extends TestCase {
 	 * tests/js/components/ListingsEditor.test.jsx の同名ケースと対になっている。
 	 * どちらかを変えるときは必ず両方直すこと。
 	 */
-	public function test_display_orderが空文字なら0として扱う(): void {
-		// isset() は true なので既定値ではなく (int) '' ＝ 0 ＝ 最優先。
+	/**
+	 * 読めない display_order は「指定なし」と同じ扱い（既定値）にする。
+	 *
+	 * `(int)` で畳むと空文字も非数値文字列も 0 になり、打ち間違いや壊れた入力が
+	 * 「いちばん先に表示される購入リンク」に化ける。並び順の指定が読めないなら、
+	 * 指定が無いときと同じ扱いにするのが安全側である。
+	 */
+	public function test_display_orderが空文字なら既定値として扱う(): void {
 		$offers = array(
 			$this->offer( 10, 'ten' ),
 			array(
@@ -65,10 +71,10 @@ final class OfferSelectorTest extends TestCase {
 			),
 		);
 		$got    = OfferSelector::select( $offers, false );
-		$this->assertSame( 'empty', $got[0]['external_id'] );
+		$this->assertSame( 'ten', $got[0]['external_id'] );
 	}
 
-	public function test_display_orderが数字でない文字列でも0として扱う(): void {
+	public function test_display_orderが数字でない文字列なら既定値として扱う(): void {
 		$offers = array(
 			$this->offer( 10, 'ten' ),
 			array(
@@ -78,14 +84,29 @@ final class OfferSelectorTest extends TestCase {
 			),
 		);
 		$got    = OfferSelector::select( $offers, false );
-		$this->assertSame( 'bogus', $got[0]['external_id'] );
+		$this->assertSame( 'ten', $got[0]['external_id'] );
 	}
 
-	public function test_display_orderが数字で始まる文字列は先頭の数値だけを読む(): void {
+	/** 数字で始まるだけの文字列も「読めない」に倒す（先頭の数値を拾わない）。 */
+	public function test_display_orderが数字で始まるだけの文字列なら既定値として扱う(): void {
 		$offers = array(
 			$this->offer( 50, 'fifty' ),
 			array(
 				'display_order' => '12abc',
+				'external_id'   => 'twelve',
+				'regular_url'   => 'https://example.test/t',
+			),
+		);
+		$got    = OfferSelector::select( $offers, false );
+		$this->assertSame( 'fifty', $got[0]['external_id'] );
+	}
+
+	/** 数値文字列は従来どおり読む。 */
+	public function test_display_orderが数値文字列なら整数として読む(): void {
+		$offers = array(
+			$this->offer( 50, 'fifty' ),
+			array(
+				'display_order' => '12',
 				'external_id'   => 'twelve',
 				'regular_url'   => 'https://example.test/t',
 			),

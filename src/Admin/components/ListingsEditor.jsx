@@ -27,46 +27,34 @@ const DEFAULT_DISPLAY_ORDER = 100;
  * @param {*} value
  * @return {number}
  */
-function phpIntCast(value) {
-	if (typeof value === 'boolean') {
-		return value ? 1 : 0;
-	}
-	if (typeof value === 'number') {
-		return Number.isFinite(value) ? Math.trunc(value) : 0;
-	}
-	if (typeof value !== 'string') {
-		// 配列・オブジェクトの display_order は保存され得ない（PHP 側は必ず
-		// 整数へ畳んでから格納する）。壊れた値なので 0 に倒す。
-		return 0;
-	}
-	// PHP が数値文字列の先頭で許す空白は " \t\n\r\v\f" だけ（\s より狭い）。
-	const leading = /^[ \t\n\r\v\f]*[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?/.exec(
-		value
-	);
-	if (!leading) {
-		return 0;
-	}
-	const parsed = Number(leading[0]);
-	return Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
-}
-
 /**
  * offer の display_order を PHP と同じ規則で整数へ揃える唯一の場所。
  *
- * **既定値（100）を当てるのは「値が無い」ときだけ。** PHP は
- * `isset($offer['display_order']) ? (int) ... : DEFAULT_ORDER` なので、
- * キーが無い・null のときだけ既定値で、空文字が入っていれば `(int) ''` ＝ 0
- * （＝最優先）である。JS が空文字も既定値に倒すと、保存前の編集画面が
- * 「使用中」と印を付ける行と、保存後に PHP が選ぶ行が食い違う。
+ * PHP 側は `Affilicard\Pricing\OfferSelector::normaliseOrder()`。
+ *
+ * **読めない値は最優先（0）ではなく既定値（100）へ倒す。** `(int)` 相当で畳むと
+ * 空文字も非数値文字列も 0 になり、打ち間違いや壊れた入力が「いちばん先に
+ * 表示される購入リンク」に化ける。並び順の指定が読めないなら、指定が無いときと
+ * 同じ扱いにするのが安全側である。
+ *
+ * 数値文字列は読む（'12' → 12）。数字で始まるだけの文字列（'12abc'）は読まない
+ * ——PHP の `is_numeric()` が false を返すのに合わせる。小数は切り捨てる。
  *
  * @param {*} raw
  * @return {number}
  */
 function offerDisplayOrder(raw) {
-	if (raw === undefined || raw === null) {
-		return DEFAULT_DISPLAY_ORDER;
+	if (typeof raw === 'number') {
+		return Number.isFinite(raw) ? Math.trunc(raw) : DEFAULT_DISPLAY_ORDER;
 	}
-	return phpIntCast(raw);
+	if (typeof raw === 'string') {
+		const trimmed = raw.trim();
+		// PHP の is_numeric() 相当。全体が数値として読めるときだけ受け取る。
+		if (trimmed !== '' && /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(trimmed)) {
+			return Math.trunc(Number(trimmed));
+		}
+	}
+	return DEFAULT_DISPLAY_ORDER;
 }
 
 const EMPTY_LISTING = {

@@ -87,4 +87,24 @@ final class FetchStatus {
 		}
 		return function_exists( '__' ) && (string) __( $source, 'affilicard' ) === $message; // phpcs:ignore WordPress.WP.I18n.NonSingularStringLiteralText -- $source は本メソッドの呼び出し元が渡すリテラルのみ。
 	}
+
+	/**
+	 * 保存してよい値へ揃える。
+	 *
+	 * sanitize_key() は任意の文字列を通すため、打ち間違いや外部ツールの誤りが
+	 * そのまま格納される。未知の status は管理画面で文言が出ず、isTerminal() も
+	 * 偽になるので「壊れているのに正常に見える」。
+	 *
+	 * 空は NONE（成功）。非空の未知値は **TRANSIENT** へ倒す——terminal と誤認して
+	 * 購入リンクを飛ばすより、一時失敗として扱って次の取得に任せる方が安全である
+	 * （{@see self::fromLegacyMessage()} が未知の文言を TRANSIENT にするのと同じ判断）。
+	 */
+	public static function normalise( string $status ): string {
+		$status = trim( $status );
+		if ( '' === $status ) {
+			return self::NONE;
+		}
+		$known = array( self::UNSUPPORTED, self::TRANSIENT, self::TERMINAL );
+		return in_array( $status, $known, true ) ? $status : self::TRANSIENT;
+	}
 }
