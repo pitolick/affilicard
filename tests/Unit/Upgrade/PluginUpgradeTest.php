@@ -1096,7 +1096,8 @@ final class PluginUpgradeTest extends TestCase {
 	public function test_カーソルが残っていればバージョンが同じでも移行を積み直す(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, false )
-			->andReturn( 480 );
+			// DB からは文字列で返る（int を返すスタブは本番より緩い）。
+			->andReturn( '480' );
 		// 既に走っている移行のカーソルを 0 へ巻き戻さない（add_option なので既存キーは不変）。
 		WP_Mock::userFunction( 'add_option' )
 			->once()
@@ -1121,7 +1122,8 @@ final class PluginUpgradeTest extends TestCase {
 	public function test_カーソルが0でも未完とみなす(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, false )
-			->andReturn( 0 );
+			// DB からは文字列で返る。'0' でも「カーソルが存在する＝未完」と読めること。
+			->andReturn( '0' );
 
 		$this->assertTrue( PluginUpgrade::isOffersMigrationPending() );
 	}

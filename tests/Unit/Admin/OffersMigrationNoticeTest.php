@@ -52,6 +52,15 @@ final class OffersMigrationNoticeTest extends TestCase {
 	}
 
 	/** @param int|false $cursor カーソル option の値（false は未設定＝移行なし）。 */
+	/**
+	 * 移行カーソルのスタブ。
+	 *
+	 * **数値は文字列で返す。** WordPress は option / user meta を DB から文字列として
+	 * 返すため、int を返すスタブは本番より緩い。厳密比較を書いたときに、テストだけ
+	 * 通って本番で落ちる状態を作らないようにする。未設定だけが false。
+	 *
+	 * @param string|false $cursor
+	 */
 	private function stubCursor( $cursor ): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, false )
@@ -78,20 +87,25 @@ final class OffersMigrationNoticeTest extends TestCase {
 	 * @param int      $dismissed        「閉じた時点の温存件数」として記録されている値（0＝未 dismiss）。
 	 * @param int|null $dismissed_failed 「閉じた時点の移行失敗件数」（null なら未 dismiss の 0）。
 	 */
+	/**
+	 * @param int      $dismissed        「閉じた時点の温存件数」として記録されている値（0＝未 dismiss）。
+	 * @param int|null $dismissed_failed 同・諦め通知側。
+	 */
 	private function stubUser( int $dismissed, ?int $dismissed_failed = null ): void {
 		WP_Mock::userFunction( 'get_current_user_id' )->andReturn( 7 );
+		// user meta も DB からは文字列で返る（stubCursor の説明と同じ理由）。
 		WP_Mock::userFunction( 'get_user_meta' )
 			->with( 7, 'affilicard_offers_migration_notice_dismissed', true )
-			->andReturn( $dismissed );
+			->andReturn( (string) $dismissed );
 		WP_Mock::userFunction( 'get_user_meta' )
 			->with( 7, 'affilicard_offers_migration_failed_notice_dismissed', true )
-			->andReturn( null === $dismissed_failed ? 0 : $dismissed_failed );
+			->andReturn( (string) ( null === $dismissed_failed ? 0 : $dismissed_failed ) );
 	}
 
 	public function test_移行が未完なら未完通知を出す(): void {
 		$this->stubEditPosts( true );
 		$this->stubScreen( 'affilicard_product' );
-		$this->stubCursor( 480 );
+		$this->stubCursor( '480' );
 
 		$this->assertTrue( OffersMigrationNotice::shouldShowPending() );
 	}
@@ -100,7 +114,7 @@ final class OffersMigrationNoticeTest extends TestCase {
 	public function test_カーソルが0でも未完通知を出す(): void {
 		$this->stubEditPosts( true );
 		$this->stubScreen( 'affilicard_product' );
-		$this->stubCursor( 0 );
+		$this->stubCursor( '0' );
 
 		$this->assertTrue( OffersMigrationNotice::shouldShowPending() );
 	}
@@ -119,7 +133,7 @@ final class OffersMigrationNoticeTest extends TestCase {
 	 */
 	public function test_移行が未完でも温存件数を出す(): void {
 		$this->stubScreen( 'affilicard_product' );
-		$this->stubCursor( 480 );
+		$this->stubCursor( '480' );
 		$this->stubPreserved( 3 );
 		$this->stubUser( 0 );
 
@@ -169,7 +183,7 @@ final class OffersMigrationNoticeTest extends TestCase {
 	public function test_未完通知は商品画面以外にも出す(): void {
 		$this->stubEditPosts( true );
 		$this->stubScreen( 'post' );
-		$this->stubCursor( 480 );
+		$this->stubCursor( '480' );
 
 		$this->assertTrue( OffersMigrationNotice::shouldShowPending() );
 	}
@@ -234,7 +248,7 @@ final class OffersMigrationNoticeTest extends TestCase {
 	public function test_edit_postsを持たない利用者には未完通知を出さない(): void {
 		$this->stubEditPosts( false );
 		$this->stubScreen( 'profile' );
-		$this->stubCursor( 480 );
+		$this->stubCursor( '480' );
 
 		$this->assertFalse( OffersMigrationNotice::shouldShowPending() );
 	}
