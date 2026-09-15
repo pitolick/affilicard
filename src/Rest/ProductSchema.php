@@ -345,6 +345,13 @@ final class ProductSchema {
 			}
 
 			// 識別子が重複したら後勝ち（同じ SKU を 2 つ並べない）。
+			//
+			// **位置も後の出現に合わせる。** 値だけ差し替えて最初の位置に残すと、
+			// display_order が同値のときの並び（OfferSelector は配列の出現順で
+			// 同順位を解く）が入力順とずれる。例: 同じ身元の A・別の B・再び A を
+			// 同順位で並べると、入力順は B → A なのに A が先に選ばれてしまう。
+			unset( $byKey[ $key ] );
+
 			$byKey[ $key ] = array(
 				'display_order'    => OfferSelector::normaliseOrder( $offer['display_order'] ?? null ),
 				'external_id'      => $externalId,

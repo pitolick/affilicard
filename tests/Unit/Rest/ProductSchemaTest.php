@@ -364,6 +364,50 @@ final class ProductSchemaTest extends TestCase {
 		$this->assertSame( '200', $result[0]['offers'][0]['price'] );
 	}
 
+	/**
+	 * 後勝ちでマージするとき、配列上の位置も後の出現に合わせる。
+	 *
+	 * 値だけ差し替えて最初の位置に残すと、display_order が同値のときの並び
+	 * （OfferSelector は同順位を配列の出現順で解く）が入力順とずれる。
+	 * ここでは同じ身元の A・別の B・再び A を同順位で並べる。入力順では
+	 * B → A なので、マージ後も B が先に来なければならない。
+	 */
+	public function test_後勝ちのマージは配列上の位置も後の出現に合わせる(): void {
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform' => 'rakuten-kobo',
+					'offers'   => array(
+						array(
+							'display_order' => 100,
+							'external_id'   => 'dup',
+							'regular_url'   => 'https://example.test/a',
+							'price'         => '100',
+						),
+						array(
+							'display_order' => 100,
+							'external_id'   => 'other',
+							'regular_url'   => 'https://example.test/other',
+							'price'         => '150',
+						),
+						array(
+							'display_order' => 100,
+							'external_id'   => 'dup',
+							'regular_url'   => 'https://example.test/b',
+							'price'         => '200',
+						),
+					),
+				),
+			)
+		);
+
+		$offers = $result[0]['offers'];
+		$this->assertCount( 2, $offers );
+		$this->assertSame( 'other', $offers[0]['external_id'], '後勝ちした offer が先頭に居座っている' );
+		$this->assertSame( 'dup', $offers[1]['external_id'] );
+		$this->assertSame( '200', $offers[1]['price'] );
+	}
+
 	public function test_external_idが空ならregular_urlが識別子になる(): void {
 		$result = ProductSchema::sanitizeListings(
 			array(
