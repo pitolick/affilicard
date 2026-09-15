@@ -497,5 +497,4 @@ final class OffersMigrationNoticeTest extends TestCase {
 			sprintf( '表示（%s）と dismiss URL（%d 件）で件数が食い違っている', $output, $nonce_count )
 		);
 	}
-
 }
