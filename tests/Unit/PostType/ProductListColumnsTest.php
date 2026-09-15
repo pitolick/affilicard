@@ -276,6 +276,56 @@ final class ProductListColumnsTest extends TestCase {
 		$this->assertStringContainsString( '—', $output );
 	}
 
+	/**
+	 * 恒久失敗（terminal）は、URL フォールバックでも価格非表示でもなくても警告を出す。
+	 *
+	 * アフィリエイト URL があり価格が空の terminal な購入リンクは、フォールバックにも
+	 * 価格非表示にも該当しない。取得状態を見ないと一覧は em dash を出すだけで、
+	 * 「もう買えない商品」であることが運用に伝わらない。
+	 */
+	public function test_renderColumn_取得状態がterminalなら警告を出す(): void {
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 654, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'dmm-books',
+						'offers'   => array(
+							array(
+								// フォールバックではない（アフィリエイト URL あり）。
+								'affiliate_url' => 'https://aff.example.com/abc',
+								'regular_url'   => 'https://example.com/product',
+								// 価格が空なので価格非表示の判定にも掛からない。
+								'price'         => '',
+								'fetch_status'  => FetchStatus::TERMINAL,
+							),
+						),
+					),
+				)
+			);
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					array(
+						'code'     => 'dmm-books',
+						'provider' => 'dmm-ebook',
+					),
+				)
+			);
+		WP_Mock::userFunction( 'as_has_scheduled_action' )->andReturn( false );
+
+		ob_start();
+		ProductListColumns::renderColumn( ProductListColumns::COLUMN_KEY, 654 );
+		$output = (string) ob_get_clean();
+
+		$this->assertStringNotContainsString( '—', $output, '取得状態を無視して em dash を出している' );
+		$this->assertStringContainsString( '商品が見つかりません', $output );
+	}
+
 	public function test_renderColumn_echoes_price_hidden_warning_when_price_unverified(): void {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 321, ProductPostType::META_LISTINGS, true )

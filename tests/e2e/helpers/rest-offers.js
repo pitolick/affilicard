@@ -36,7 +36,29 @@ const { execFileSync } = require( 'child_process' );
 const fs = require( 'fs' );
 const { request: pwRequest } = require( '@playwright/test' );
 
-const BASE_URL = process.env.WP_BASE_URL || 'http://localhost:8889';
+const BASE_URL = assertSafeBaseUrl( process.env.WP_BASE_URL || 'http://localhost:8889' );
+
+/**
+ * Basic 認証を載せる相手が平文 HTTP のリモートホストでないことを確かめる。
+ *
+ * この helper は管理者の Application Password を Authorization ヘッダで送る。
+ * WP_BASE_URL に非ループバックの http:// を指定した CI 設定があると、その認証情報が
+ * 経路上へ平文で流れる。ローカル（wp-env）は http のままで良いので、ループバック
+ * だけを例外にして、それ以外は https を要求する。
+ *
+ * @param {string} raw
+ * @return {string}
+ */
+function assertSafeBaseUrl( raw ) {
+	const url = new URL( raw );
+	const loopback = [ 'localhost', '127.0.0.1', '::1', '[::1]' ];
+	if ( url.protocol === 'https:' || loopback.includes( url.hostname ) ) {
+		return raw;
+	}
+	throw new Error(
+		`WP_BASE_URL (${ raw }) は平文 HTTP のリモートホストです。管理者の Application Password を送るため、ループバック以外では https を使ってください。`
+	);
+}
 
 function getAuthHeaders() {
 	const creds = JSON.parse( fs.readFileSync( 'artifacts/app-credentials.json', 'utf8' ) );

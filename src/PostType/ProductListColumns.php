@@ -189,6 +189,7 @@ final class ProductListColumns {
 		$now_ts           = time();
 		$has_fallback     = false;
 		$has_hidden_price = false;
+		$has_bad_status   = false;
 		$has_pending      = false;
 		$error_notes      = array();
 		foreach ( $listings as $listing ) {
@@ -222,9 +223,17 @@ final class ProductListColumns {
 				}
 			}
 
+			// 取得状態が「成功以外」なら、URL フォールバックでも価格非表示でもなくても
+			// 警告の対象にする。恒久失敗（terminal）でアフィリエイト URL があり価格が
+			// 空、という組み合わせをここで落とすと、一覧は em dash を出すだけで
+			// 「もう買えない商品」であることが運用に伝わらない。
+			$offer_status   = isset( $offer['fetch_status'] ) ? (string) $offer['fetch_status'] : FetchStatus::NONE;
+			$is_status_bad  = FetchStatus::NONE !== $offer_status;
+			$has_bad_status = $has_bad_status || $is_status_bad;
+
 			// キュー状態/取得状態の問い合わせは、既に警告が出ている listing に限定する
 			// （警告の無い listing まで毎回 Action Scheduler に問い合わせるのは無駄なため）。
-			if ( ! $is_fallback && ! $is_price_hidden ) {
+			if ( ! $is_fallback && ! $is_price_hidden && ! $is_status_bad ) {
 				continue;
 			}
 
@@ -267,7 +276,13 @@ final class ProductListColumns {
 		if ( $has_fallback ) {
 			echo '<span class="dashicons dashicons-warning" style="color:#dba617" title="' . esc_attr( __( 'アフィリエイト URL 未設定、通常 URL にフォールバック中', 'affilicard' ) . $queue_note ) . '"></span>';
 		}
-		if ( ! $has_hidden_price && ! $has_fallback ) {
+		// 価格非表示にもフォールバックにも該当しないが取得状態が悪い（例: terminal で
+		// アフィリエイト URL があり価格は空）ケース。上の 2 つのアイコンは出ないので、
+		// ここで出さないと em dash になり運用に何も伝わらない。
+		if ( ! $has_hidden_price && ! $has_fallback && $has_bad_status ) {
+			echo '<span class="dashicons dashicons-warning" style="color:#dba617" title="' . esc_attr( __( '自動取得に問題があります', 'affilicard' ) . $queue_note ) . '"></span>';
+		}
+		if ( ! $has_hidden_price && ! $has_fallback && ! $has_bad_status ) {
 			echo '<span aria-hidden="true">—</span>';
 		}
 	}

@@ -57,7 +57,7 @@ final class LegacyOffer {
 	 */
 	public static function toOffer( array $listing ): array {
 		return array(
-			'display_order'    => isset( $listing['display_order'] ) ? (int) $listing['display_order'] : OfferSelector::DEFAULT_ORDER,
+			'display_order'    => OfferSelector::normaliseOrder( $listing['display_order'] ?? null ),
 			'external_id'      => ScalarField::string( $listing, 'external_id' ),
 			'regular_url'      => ScalarField::string( $listing, 'regular_url' ),
 			'affiliate_url'    => ScalarField::string( $listing, 'affiliate_url' ),

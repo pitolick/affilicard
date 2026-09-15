@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Tests\Unit\Pricing;
 
 use Affilicard\Pricing\LegacyOffer;
+use Affilicard\Pricing\OfferSelector;
 use PHPUnit\Framework\TestCase;
 
 final class LegacyOfferTest extends TestCase {
@@ -60,5 +61,43 @@ final class LegacyOfferTest extends TestCase {
 
 		$this->assertSame( 'r-1', $offer['external_id'] );
 		$this->assertSame( '693', $offer['price'] );
+	}
+
+	/**
+	 * 読めない display_order は既定値へ倒す（OfferSelector::normaliseOrder と同じ規則）。
+	 *
+	 * ここだけ `(int)` で畳むと、v3 の flat listing で読めない値のとき PHP は 0
+	 * （＝最優先）、編集画面は 100 として扱う。しかも移行後も 0 のまま保存され、
+	 * 後から追加した購入リンクより常に先へ来てしまう。
+	 */
+	public function test_読めないdisplay_orderは既定値へ倒す(): void {
+		foreach ( array(
+			'（空文字）' => '',
+			'非数値'   => 'あ',
+			'数字始まり' => '12abc',
+		) as $label => $raw ) {
+			$offer = LegacyOffer::toOffer(
+				array(
+					'external_id'   => 'x',
+					'display_order' => $raw,
+				)
+			);
+			$this->assertSame(
+				OfferSelector::DEFAULT_ORDER,
+				$offer['display_order'],
+				sprintf( '%s を既定値へ倒していない', $label )
+			);
+		}
+	}
+
+	/** 数値文字列は従来どおり読む。 */
+	public function test_数値文字列のdisplay_orderは整数として読む(): void {
+		$offer = LegacyOffer::toOffer(
+			array(
+				'external_id'   => 'x',
+				'display_order' => '12',
+			)
+		);
+		$this->assertSame( 12, $offer['display_order'] );
 	}
 }

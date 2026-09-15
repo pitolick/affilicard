@@ -170,6 +170,14 @@ do {
 	++$guard;
 } while ( PluginUpgrade::isOffersMigrationPending() && $guard < 100 );
 
+// ガード上限で抜けた＝移行が終わっていない。このまま続けると、未完の状態で
+// 一部の assertion だけが通り「移行できている」と誤って読める。
+if ( PluginUpgrade::isOffersMigrationPending() ) {
+	throw new RuntimeException(
+		sprintf( 'offers 移行が %d 回のバッチで完了しませんでした（未完のまま E2E を続けない）。', $guard )
+	);
+}
+
 // **積まれた継続アクションを片付ける。** runOffersMigrationBatch() はバッチが
 // 上限件数に達した回に次回ぶんを Action Scheduler へ積む。このループはその次回を
 // 同期的に自分で回してしまうので、積まれたアクションだけが残る。完走でカーソルは
