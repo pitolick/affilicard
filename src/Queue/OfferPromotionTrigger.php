@@ -55,12 +55,15 @@ use Affilicard\Settings\GeneralSettings;
  * onListingsSaved() は $inFlight を `finally` で必ず解放し、実行が完全に終わった後の
  * 独立した呼び出しは毎回きちんと評価する。
  *
- * かつて存在した「60秒の短期クールダウン」（商品単位の transient）は撤去した。
- * 外部ツールが複数の購入リンクを立て続けに削除するケースを吸収する目的だったが、
- * 実際にはリクエスト跨ぎでも上と同じ「genuinely later write が無視される」事故を
- * 再現するだけで、しかも `PriceFreshness::needsRefetch()` 自身が platform 単位で持つ
- * クールダウンと `Enqueuer::enqueueManual()` の unique=true（pending を必ず 1 件に
- * 収束させる）がすでに十分な歯止めになっており、二重には要らなかった。
+ * 2 層目は **時間窓ではなく「同じジョブが既に pending か」** で判定する。設計当初は
+ * 商品単位の 60 秒 transient だったが、時間窓は「窓の中で起きた最後の変更が誰にも
+ * 拾われないまま次の掃引まで待つ」事故を作る。pending の有無で抑えれば、抑止しても
+ * そのジョブが実行時に最新の listing を読むので取りこぼしが無い。
+ *
+ * 抑止する理由は churn の削減である。`Enqueuer::enqueueManual()` は「手動更新を
+ * 先頭へ繰り上げる」ため毎回 unschedule → schedule し直す。同一リクエストで複数の
+ * listing が書かれるとそのたびに Action Scheduler の行を作り直すことになる
+ * （unique=true により pending は 1 件へ収束するので壊れはしない）。
  */
 final class OfferPromotionTrigger {
 
@@ -211,7 +214,26 @@ final class OfferPromotionTrigger {
 			return;
 		}
 
-		// 2層目: Enqueuer::enqueueManual() 自体が unique=true のため、1層目をすり抜けても
+		// 2層目: 同じジョブが既に pending なら投入しない。
+		//
+		// enqueueManual() は「手動更新を先頭へ繰り上げる」ため毎回 unschedule →
+		// schedule し直す。同一リクエストで複数の listing が書かれると、そのたびに
+		// Action Scheduler の行を作り直すことになる（pending は 1 件に収束するので
+		// 壊れはしないが、無駄なキューの churn が出る）。
+		//
+		// 時間窓（transient）ではなく「pending の有無」で抑えるのは、更新を取りこぼさない
+		// ためである。pending なジョブは後で実行されるとき最新の listing を読むので、
+		// 抑止しても内容は反映される。時間窓だと、窓の中で起きた最後の変更が誰にも
+		// 拾われないまま次の掃引まで待つことになる。
+		$pending_args = array(
+			'post_id'  => $postId,
+			'platform' => $platform,
+		);
+		if ( as_has_scheduled_action( Enqueuer::HOOK_REFRESH, $pending_args, $this->enqueuer->group( $account ) ) ) {
+			return;
+		}
+
+		// 3層目: enqueueManual() 自体が unique=true のため、1・2 層をすり抜けても
 		// pending は 1 件に収束する。
 		$this->enqueuer->enqueueManual( $postId, $platform, $account );
 	}

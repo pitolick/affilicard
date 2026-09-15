@@ -101,8 +101,11 @@ module.exports = async () => {
 		.map( ( l ) => l.trim() )
 		.find( ( l ) => /^[A-Za-z0-9]{20,}$/.test( l ) );
 	if ( ! appPassword ) {
+		// **生の出力を載せない。** 抽出の正規表現が合わなかっただけで、出力そのものには
+		// 生成されたパスワードが含まれている可能性がある。CI のログに残ると漏洩になる。
 		throw new Error(
-			`application-password create did not output a password. Output:\n${ appPassOut }`
+			'application-password create did not output a recognisable password. ' +
+				'Re-run with the command output inspected locally (not logged here).'
 		);
 	}
 	fs.writeFileSync(

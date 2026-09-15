@@ -26,9 +26,25 @@ use WP_Mock\Tools\TestCase;
  */
 final class OfferPromotionTriggerTest extends TestCase {
 
+	/**
+	 * 「同じジョブが既に pending か」の既定応答。
+	 *
+	 * **ここで登録するのは意図的である。** WP_Mock::userFunction() は同じ関数名を
+	 * 再登録しても最初の期待が残るため、個別テストからは差し替えられない。
+	 * pending 扱いにしたいテストはこのプロパティを true にする。
+	 *
+	 * @var bool
+	 */
+	private bool $alreadyPending = false;
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		$this->alreadyPending = false;
+		WP_Mock::userFunction( 'as_has_scheduled_action' )
+			->andReturnUsing(
+				fn (): bool => $this->alreadyPending
+			);
 		OfferPromotionTrigger::resetForTests();
 	}
 
@@ -160,6 +176,46 @@ final class OfferPromotionTriggerTest extends TestCase {
 	 * API のレート制限を焼き切る。移行は形状を変えるだけで購入リンクの内容は
 	 * 変えていないので、繰り上がりの契機ではない。
 	 */
+	/**
+	 * 同じジョブが既に pending なら投入しない。
+	 *
+	 * enqueueManual() は「手動更新を先頭へ繰り上げる」ため毎回 unschedule →
+	 * schedule し直す。同一リクエストで複数の listing が書かれるとそのたびに
+	 * Action Scheduler の行を作り直すことになり、無駄な churn が出る。
+	 *
+	 * 時間窓ではなく「pending の有無」で抑えるので、更新を取りこぼさない——
+	 * pending なジョブは実行時に最新の listing を読む。
+	 */
+	public function test_同じジョブが既にpendingなら投入しない(): void {
+		$this->stubRakutenPlatform();
+		$this->stubGeneralSettings();
+		$this->alreadyPending = true;
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->once()
+			->with( 123, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				$this->listings(
+					array(
+						array(
+							'display_order'   => 100,
+							'external_id'     => 'stale',
+							'regular_url'     => 'https://example.test/s',
+							'last_fetched_at' => gmdate( 'c', time() - 30 * 3600 ),
+						),
+					)
+				)
+			);
+		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
+		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$this->trigger()->onListingsSaved( 123 );
+
+		$this->assertConditionsMet();
+	}
+
 	public function test_一括書き込みの抑止中は投入しない(): void {
 		// get_post_meta も get_post_status も呼ばれない（0層目で即 return する）。
 		WP_Mock::userFunction( 'get_post_meta' )->never();
