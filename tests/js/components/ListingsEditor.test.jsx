@@ -311,6 +311,12 @@ describe( 'ListingsEditor 購入リンク（offers）', () => {
 	// このブロックのテストは platforms を直接渡し、fetchPlatforms の内部フェッチを
 	// 経由しない（プラットフォーム読み込みの非同期待ちは上の describe で別途検証済み）。
 
+	// 翻訳を差し替えるテストがあるため、**掃除は afterEach で行う**。テスト本体の
+	// 末尾で戻すと、アサーションが落ちたときに訳語が残って次のテストへ漏れる。
+	afterEach( () => {
+		resetLocaleData();
+	} );
+
 	const twoOffers = [
 		{ display_order: 10, external_id: 'sale', regular_url: 'https://example.test/sale' },
 		{ display_order: 100, external_id: 'normal', regular_url: 'https://example.test/normal' },
@@ -637,7 +643,6 @@ describe( 'ListingsEditor 購入リンク（offers）', () => {
 		);
 
 		expect( screen.getByText( 'Product not found' ) ).toBeInTheDocument();
-		resetLocaleData();
 	} );
 } );
 
