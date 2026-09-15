@@ -11,6 +11,7 @@ use Affilicard\Pricing\OfferSelector;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Settings\GeneralSettings;
+use Affilicard\Util\JsonField;
 
 /**
  * listings meta の保存を契機に、今使う購入リンクが古ければ即時取得を 1 件積む。
@@ -144,12 +145,18 @@ final class OfferPromotionTrigger {
 				return;
 			}
 
-			$listings = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
-			if ( is_array( $listings ) ) {
-				$now = time();
-				foreach ( $listings as $listing ) {
-					$this->maybeEnqueue( $postId, $listing, $now );
-				}
+			// listings meta は配列とは限らず **JSON 文字列でも入りうる**。他の読み手
+			// （PluginUpgrade::migrateOneProduct() / ProductRepository::listingSummary() /
+			// ProductListColumns::renderFallbackColumn()）はいずれも JsonField::decode() で
+			// 文字列形も復号しており、ここだけ is_array() で弾くと、外部ツールが JSON で
+			// 書いた商品は maybeEnqueue() に一度も到達しない——繰り上がった購入リンクが
+			// 古いまま即時取得されず、次の掃引まで待たされる。
+			$raw      = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
+			$listings = is_array( $raw ) ? $raw : ( is_string( $raw ) ? JsonField::decode( $raw, array() ) : array() );
+
+			$now = time();
+			foreach ( $listings as $listing ) {
+				$this->maybeEnqueue( $postId, $listing, $now );
 			}
 		} finally {
 			// 実行が正常終了・例外いずれでも、次の（同一リクエスト内かどうかを問わない）

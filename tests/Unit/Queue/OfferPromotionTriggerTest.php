@@ -168,6 +168,71 @@ final class OfferPromotionTriggerTest extends TestCase {
 	}
 
 	/**
+	 * listings meta が JSON 文字列で入っていても投入する。
+	 *
+	 * meta は配列とは限らない——`JsonField::encode()` を通した保存や外部ツールの
+	 * 直書きで JSON 文字列になる。他の読み手（PluginUpgrade::migrateOneProduct() /
+	 * ProductRepository::listingSummary() / ProductListColumns）はいずれも
+	 * `JsonField::decode()` で文字列形を復号している。ここだけ `is_array()` で弾くと、
+	 * JSON で書かれた商品は繰り上がりの即時取得が一度も積まれず、古い価格のまま
+	 * 次の掃引まで待たされる。
+	 */
+	public function test_listings_meta_がJSON文字列でも投入する(): void {
+		$this->stubRakutenPlatform();
+		$this->stubGeneralSettings();
+
+		$listings_json = (string) json_encode(
+			$this->listings(
+				array(
+					array(
+						'display_order'   => 100,
+						'external_id'     => 'json-shaped',
+						'regular_url'     => 'https://example.test/j',
+						'last_fetched_at' => gmdate( 'c', time() - 30 * 3600 ),
+					),
+				)
+			)
+		);
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->once()
+			->with( 123, ProductPostType::META_LISTINGS, true )
+			->andReturn( $listings_json );
+		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( RefreshHandler::giveUpTransientKey( 123, 'rakuten-kobo' ) )
+			->andReturn( false );
+
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once()
+			->with(
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 123,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten'
+			);
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 123,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten',
+				true,
+				Enqueuer::PRIORITY_MANUAL
+			)
+			->andReturn( 500 );
+
+		$this->trigger()->onListingsSaved( 123 );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
 	 * 一括書き込み（アップグレード移行など）の窓の中では、何も読まず何も投入しない。
 	 *
 	 * 移行は全商品の listings を書き直すが、移行した offer は元の（多くは古い）
