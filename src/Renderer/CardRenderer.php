@@ -6,6 +6,7 @@ namespace Affilicard\Renderer;
 use Affilicard\Platform\PlatformDefinition;
 use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferSelector;
+use Affilicard\Pricing\OfferUrl;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Stock\StockStatus;
 
@@ -381,7 +382,7 @@ final class CardRenderer {
 			$offer = $selected[0];
 			// URL が無い offer は CTA 行を出さない＝非表示扱い。
 			// renderListings の行と renderTimestamp の日付計算を同一集合に揃える。
-			if ( '' === $this->ctaHref( $offer ) ) {
+			if ( '' === OfferUrl::ctaHref( $offer ) ) {
 				continue;
 			}
 			$out[] = array(
@@ -471,7 +472,7 @@ final class CardRenderer {
 			$platform = $entry['platform'];
 			$code     = $platform->code;
 
-			$url = $this->ctaHref( $offer );
+			$url = OfferUrl::ctaHref( $offer );
 
 			$block_override = isset( $cta_overrides[ $code ] ) ? trim( (string) $cta_overrides[ $code ] ) : '';
 			$override       = isset( $listing['button_label_override'] ) ? trim( (string) $listing['button_label_override'] ) : '';
@@ -533,31 +534,6 @@ final class CardRenderer {
 				. '</li>';
 		}
 		return '' === $rows ? '' : '<ul class="affilicard-card__listings">' . $rows . '</ul>';
-	}
-
-	/**
-	 * 購入リンクの href を決める。アフィリエイト URL が無ければ通常 URL へ倒れる。
-	 *
-	 * visibleListings()（表示可否の判定）と renderListings()（CTA の href 出力）の
-	 * 両方が同じ規則を見るための唯一の場所。
-	 *
-	 * `esc_url_raw()` で検証してから採否を決める（CodeRabbit round 2）。offers[] 経路の
-	 * データは保存時に `ProductSchema::sanitizeOffers()` が既に esc_url_raw() を通しており
-	 * 通常は無意味だが、v3 以前の flat な listing は `LegacyOffer::offersWithFallback()`
-	 * （{@see LegacyOffer}）が保存時のサニタイズを経ていない生の post meta をそのままここへ渡す。affiliate_url が
-	 * 不正（javascript: 等の危険スキーム）で regular_url が正当な場合、検証せずに採用すると
-	 * 出力直前の esc_url() だけがそれを空文字へ落とし、使える regular_url があるのに
-	 * href="" の壊れた CTA になる。ここで検証すれば不正な affiliate_url を素通りさせず
-	 * regular_url へフォールバックできる。
-	 *
-	 * @param array<string, mixed> $offer
-	 */
-	private function ctaHref( array $offer ): string {
-		$affiliate = isset( $offer['affiliate_url'] ) ? (string) esc_url_raw( trim( (string) $offer['affiliate_url'] ) ) : '';
-		if ( '' !== $affiliate ) {
-			return $affiliate;
-		}
-		return isset( $offer['regular_url'] ) ? (string) esc_url_raw( trim( (string) $offer['regular_url'] ) ) : '';
 	}
 
 	/**

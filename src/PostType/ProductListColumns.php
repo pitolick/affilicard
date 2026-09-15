@@ -7,6 +7,7 @@ use Affilicard\Platform\PlatformConfig;
 use Affilicard\Pricing\FetchStatus;
 use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferSelector;
+use Affilicard\Pricing\OfferUrl;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Settings\GeneralSettings;
@@ -205,9 +206,10 @@ final class ProductListColumns {
 			$selected = OfferSelector::select( $offers, $fallback_enabled );
 			$offer    = array() !== $selected ? $selected[0] : array();
 
-			$affiliate   = isset( $offer['affiliate_url'] ) ? (string) $offer['affiliate_url'] : '';
-			$regular     = isset( $offer['regular_url'] ) ? (string) $offer['regular_url'] : '';
-			$is_fallback = ( '' === $affiliate && '' !== $regular );
+			// 判定は OfferUrl に委ねる（カードの CTA が使うのと同一の規則）。素の空判定だと、
+			// affiliate_url が不正で regular_url が正当な offer——カードは regular_url で
+			// 描画している＝正真正銘のフォールバック中——にこの列だけ警告を出さない。
+			$is_fallback = OfferUrl::isRegularUrlFallback( $offer );
 			if ( $is_fallback ) {
 				$has_fallback = true;
 			}

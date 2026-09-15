@@ -23,6 +23,20 @@ final class ProductRepositoryTest extends TestCase {
 					return $text;
 				}
 			);
+		// 実 WordPress の esc_url_raw() は javascript:/data: 等の危険スキームを排除して
+		// 空文字を返す。フォールバック判定（OfferUrl）はカードの CTA と同じこの検証を
+		// 通すため、passthru ではなく危険スキームの排除だけ最小限に再現する
+		// （CardRendererTest と同じ stub）。
+		WP_Mock::userFunction( 'esc_url_raw' )
+			->andReturnUsing(
+				static function ( $value ) {
+					$value = is_scalar( $value ) ? (string) $value : '';
+					if ( 1 === preg_match( '/^\s*(javascript|data|vbscript)\s*:/i', $value ) ) {
+						return '';
+					}
+					return $value;
+				}
+			);
 	}
 
 	public function tearDown(): void {
@@ -805,6 +819,70 @@ final class ProductRepositoryTest extends TestCase {
 						'external_id'   => 'a',
 						'regular_url'   => 'https://example.test/a',
 						'affiliate_url' => 'https://example.test/a?aff=1',
+					),
+				),
+			),
+		);
+
+		$method = new ReflectionMethod( ProductRepository::class, 'hasFallbackListing' );
+		$method->setAccessible( true );
+
+		$this->assertFalse( $method->invoke( null, $listings ) );
+	}
+
+	/**
+	 * 不正な affiliate_url は「無い」と同じ——カードは regular_url を出しているので
+	 * ダッシュボードの件数も「フォールバック中」と数える。
+	 *
+	 * 判定を素の空判定（`'' === $affiliate`）で書いていたころは、この商品だけ
+	 * カードの実物と答えが食い違っていた（`CardRenderer::ctaHref()` は
+	 * `esc_url_raw()` で検証してから採否を決めるため regular_url へ倒れる）。
+	 */
+	public function test_不正なアフィリURLの商品もフォールバックとして数える(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'display_order' => 10,
+						'external_id'   => 'a',
+						'regular_url'   => 'https://example.test/a',
+						'affiliate_url' => 'javascript:alert(1)',
+					),
+				),
+			),
+		);
+
+		$method = new ReflectionMethod( ProductRepository::class, 'hasFallbackListing' );
+		$method->setAccessible( true );
+
+		$this->assertTrue( $method->invoke( null, $listings ) );
+	}
+
+	/**
+	 * 通常 URL も不正なら出せる URL が 1 つも無い——フォールバックではない。
+	 *
+	 * この購入リンクはカード側でも表示対象から外れる（CardRenderer::visibleListings()）。
+	 * 「素の商品 URL を出している」件数に混ぜると、出ていないものを数えることになる。
+	 */
+	public function test_通常URLも不正なら出せるURLが無くフォールバックではない(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'display_order' => 10,
+						'external_id'   => 'a',
+						'regular_url'   => 'javascript:alert(1)',
+						'affiliate_url' => '',
 					),
 				),
 			),

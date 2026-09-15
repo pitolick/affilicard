@@ -8,6 +8,7 @@ use Affilicard\PostType\ProductPostType;
 use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferIdentity;
 use Affilicard\Pricing\OfferSelector;
+use Affilicard\Pricing\OfferUrl;
 use Affilicard\Schema\SchemaVersion;
 use Affilicard\Settings\GeneralSettings;
 use Affilicard\Stock\StockStatus;
@@ -715,7 +716,8 @@ final class ProductRepository implements ProductRepositoryInterface {
 
 	/**
 	 * 1 件以上の listing について、OfferSelector::select() が選んだ購入リンク（offer）が
-	 * affiliate_url='' かつ regular_url!='' か判定する。
+	 * 素の商品 URL へフォールバックしているか判定する（規則は {@see OfferUrl}——
+	 * カードの CTA と同じ `esc_url_raw()` 検証を通す）。
 	 *
 	 * 「アフィリ URL が無いため素の商品 URL を出している」状態はもはや listing 自体の
 	 * フィールドではなく、選択された offer の性質である。選択結果が空（0 件）の listing は
@@ -740,10 +742,10 @@ final class ProductRepository implements ProductRepositoryInterface {
 				continue;
 			}
 
-			$offer     = $selected[0];
-			$affiliate = isset( $offer['affiliate_url'] ) ? (string) $offer['affiliate_url'] : '';
-			$regular   = isset( $offer['regular_url'] ) ? (string) $offer['regular_url'] : '';
-			if ( '' === $affiliate && '' !== $regular ) {
+			// 判定は OfferUrl に委ねる（カードの CTA が使うのと同一の規則）。素の空判定だと、
+			// affiliate_url が不正で regular_url が正当な offer——カードは regular_url で
+			// 描画している＝正真正銘のフォールバック中——をこの件数だけが取りこぼす。
+			if ( OfferUrl::isRegularUrlFallback( $selected[0] ) ) {
 				return true;
 			}
 		}
