@@ -90,6 +90,21 @@ final class RefreshHandler extends ThrottledActionHandler {
 	 * refreshOne() が実際に fetch する件数（OfferSelector::select() の選択結果件数）。
 	 * ThrottledActionHandler::run() が performWork() の**前**にこれを呼び、レート制限の
 	 * 枠をこの件数に比例させて確保する。
+	 *
+	 * **ここと refreshOne() は listing を別々に読む（意図的に受容している競合）。**
+	 * 2 回の読み取りの間に管理画面が同じ listing を保存すると、確保した枠と実際の
+	 * fetch 件数がずれる。ずれは今日の選択係が 0 or 1 件しか返さないため最大 1 件で、
+	 * 「枠を取ったのに fetch しない（account の次の要求が 1 間隔ぶん無駄に遅れる）」か
+	 * 「枠を取らずに fetch する（1 要求が間隔より早く出る）」のどちらかに収まり、
+	 * いずれも次の呼び出しで解消する。
+	 *
+	 * スナップショットを共有しないのは、手段がどれも割に合わないためである。
+	 * ロックは refreshOne() が外部 API を叩くあいだ保持することになり有害。
+	 * このハンドラはリクエストごとに 1 つ生成されて複数アクションで再利用されるので、
+	 * インスタンスへ memo すると別アクションへ古い listing を配ってしまい今より悪い。
+	 * 選択結果を performWork() へ引き渡す形は ThrottledActionHandler の契約
+	 * （全ハンドラ共通）を変えることになる。窓はこの 2 呼び出しの間だけで外部 I/O を
+	 * 挟まず、影響も上記のとおり有界なので、現状は受容する。
 	 */
 	protected function refreshTargetCount( array $args ): int {
 		return $this->refresher->targetCount( (int) $args['post_id'], (string) $args['platform'] );
