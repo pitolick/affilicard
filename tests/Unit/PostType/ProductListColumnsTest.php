@@ -326,6 +326,55 @@ final class ProductListColumnsTest extends TestCase {
 		$this->assertStringContainsString( '商品が見つかりません', $output );
 	}
 
+	/**
+	 * 未知の fetch_status でも、警告アイコンに理由が添えられる。
+	 *
+	 * 保存時のサニタイズを経ていないデータ（移行前の flat listing・外部ツールの
+	 * 直書き）には未知の値が入りうる。素通しすると label() が空を返し、警告アイコン
+	 * だけ出て理由が書かれていない状態になる。
+	 */
+	public function test_renderColumn_未知の取得状態でも理由を添える(): void {
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 655, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'dmm-books',
+						'offers'   => array(
+							array(
+								'affiliate_url' => 'https://aff.example.com/abc',
+								'regular_url'   => 'https://example.com/product',
+								'price'         => '',
+								'fetch_status'  => 'typo',
+							),
+						),
+					),
+				)
+			);
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					array(
+						'code'     => 'dmm-books',
+						'provider' => 'dmm-ebook',
+					),
+				)
+			);
+		WP_Mock::userFunction( 'as_has_scheduled_action' )->andReturn( false );
+
+		ob_start();
+		ProductListColumns::renderColumn( ProductListColumns::COLUMN_KEY, 655 );
+		$output = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'dashicons-warning', $output );
+		// 未知の値は TRANSIENT へ倒れるので、その文言が理由として出る。
+		$this->assertStringContainsString( '一時的に取得できませんでした', $output );
+	}
+
 	public function test_renderColumn_echoes_price_hidden_warning_when_price_unverified(): void {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 321, ProductPostType::META_LISTINGS, true )

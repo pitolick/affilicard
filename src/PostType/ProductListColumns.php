@@ -227,7 +227,13 @@ final class ProductListColumns {
 			// 警告の対象にする。恒久失敗（terminal）でアフィリエイト URL があり価格が
 			// 空、という組み合わせをここで落とすと、一覧は em dash を出すだけで
 			// 「もう買えない商品」であることが運用に伝わらない。
-			$offer_status   = isset( $offer['fetch_status'] ) ? (string) $offer['fetch_status'] : FetchStatus::NONE;
+			// 読み取り側でも normalise() を通す。保存時のサニタイズを経ていないデータ
+			// （移行前の flat listing・外部ツールの直書き）には未知の値が入りうる。
+			// 素通しすると label() が空を返し、is_status_bad だけ真になって
+			// 「警告アイコンは出るが理由が書かれていない」状態になる。
+			$offer_status   = FetchStatus::normalise(
+				isset( $offer['fetch_status'] ) ? (string) $offer['fetch_status'] : FetchStatus::NONE
+			);
 			$is_status_bad  = FetchStatus::NONE !== $offer_status;
 			$has_bad_status = $has_bad_status || $is_status_bad;
 
@@ -261,8 +267,7 @@ final class ProductListColumns {
 			// リトライ分類上は TRANSIENT_FAILURE 側に寄るが、人間が読む一覧では
 			// 「自動取得の対象外（恒久）」と「一時的に取得できない」を区別できないと
 			// 一覧が嘘をつくことになるため、4値それぞれ別の文言を出す。
-			$status = isset( $offer['fetch_status'] ) ? (string) $offer['fetch_status'] : FetchStatus::NONE;
-			$label  = self::sanitizeStatusLabel( FetchStatus::label( $status ) );
+			$label = self::sanitizeStatusLabel( FetchStatus::label( $offer_status ) );
 			if ( '' !== $label && ! in_array( $label, $error_notes, true ) ) {
 				$error_notes[] = $label;
 			}
