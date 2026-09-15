@@ -343,17 +343,27 @@ export function selectInUseOffer(offers, fallbackOnTerminal) {
 	return survivor ?? sorted[0];
 }
 
-const FETCH_STATUS_LABELS = {
-	unsupported: __('自動取得の対象外です', 'affilicard'),
-	transient: __('一時的に取得できませんでした', 'affilicard'),
-	terminal: __('商品が見つかりません', 'affilicard'),
-};
-
-// `Affilicard\Pricing\FetchStatus::label()`（PHP）と同じ文言。
-// unsupported と transient は再試行の分類こそ同じだが、人に見せる意味は別なので
-// 文言も分ける（自動取得対象外 ≠ 一時的な失敗）。
+/**
+ * `Affilicard\Pricing\FetchStatus::label()`（PHP）と同じ文言。
+ *
+ * unsupported と transient は再試行の分類こそ同じだが、人に見せる意味は別なので
+ * 文言も分ける（自動取得対象外 ≠ 一時的な失敗）。
+ *
+ * **`__()` は呼ばれるたびに評価する。** モジュール直下の定数へ畳むと、翻訳が
+ * 読み込まれる前（wp_set_script_translations が配る JSON の適用前）に評価され、
+ * 原文のまま固定されてしまう。
+ */
 function offerStatusLabel(status) {
-	return FETCH_STATUS_LABELS[status] ?? '';
+	switch (status) {
+		case 'unsupported':
+			return __('自動取得の対象外です', 'affilicard');
+		case 'transient':
+			return __('一時的に取得できませんでした', 'affilicard');
+		case 'terminal':
+			return __('商品が見つかりません', 'affilicard');
+		default:
+			return '';
+	}
 }
 
 // アフィリエイト URL 未設定・通常 URL 設定済みなら、カード描画は通常 URL へ

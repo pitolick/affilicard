@@ -609,6 +609,36 @@ describe( 'ListingsEditor 購入リンク（offers）', () => {
 
 		expect( screen.getByText( label ) ).toBeInTheDocument();
 	} );
+
+	/**
+	 * 取得状態の文言は、翻訳が読み込まれた後でも訳される。
+	 *
+	 * モジュール直下の定数へ畳むと、wp_set_script_translations が配る翻訳が
+	 * 適用される前に __() が評価され、原文のまま固定される。ここでは
+	 * モジュール読み込み後に setLocaleData するので、呼び出し時評価でなければ
+	 * 原文が返って落ちる。
+	 */
+	test( '取得状態の文言は後から読み込まれた翻訳を反映する', () => {
+		setLocaleData(
+			{
+				'': { domain: 'affilicard', lang: 'en_US' },
+				商品が見つかりません: [ 'Product not found' ],
+			},
+			'affilicard'
+		);
+
+		const offers = [ { display_order: 100, external_id: 'x', regular_url: 'https://example.test/x', fetch_status: 'terminal' } ];
+		render(
+			<ListingsEditor
+				listings={ listingWithOffers( offers ) }
+				platforms={ platforms }
+				onChange={ jest.fn() }
+			/>
+		);
+
+		expect( screen.getByText( 'Product not found' ) ).toBeInTheDocument();
+		resetLocaleData();
+	} );
 } );
 
 describe( 'selectInUseOffer（Affilicard\\Pricing\\OfferSelector::select() と同じ規則であることの固定）', () => {
