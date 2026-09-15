@@ -142,7 +142,11 @@ final class OffersMigrationNotice {
 			return;
 		}
 
-		$dismiss_url = self::dismissUrl( self::DISMISS_ACTION, PluginUpgrade::preservedWithoutRegularUrlCount() );
+		// **件数は 1 回だけ読む。** URL 用と表示用で読み直すと、その間に移行バッチが
+		// 件数を増やしたとき「文言は N+1 件なのに nonce に載るのは N 件」になり、
+		// 閉じた直後にまた通知が出る。
+		$count       = PluginUpgrade::preservedWithoutRegularUrlCount();
+		$dismiss_url = self::dismissUrl( self::DISMISS_ACTION, $count );
 
 		echo '<div class="notice notice-warning"><p>';
 		echo esc_html(
@@ -152,7 +156,7 @@ final class OffersMigrationNotice {
 					'affilicard: データ移行で、通常 URL（商品ページ URL）も外部 ID も持たないまま購入リンクを維持した listing が %d 件あります。このままではこの購入リンクは生死を確認できず棚卸しの対象外になるだけでなく、この商品を次に保存する（別プラットフォームの価格更新による自動保存も含む）と自動的に削除されます。消える前に、この購入リンクへ通常 URL を追加してください。',
 					'affilicard'
 				),
-				PluginUpgrade::preservedWithoutRegularUrlCount()
+				$count
 			)
 		);
 		echo ' <a href="' . esc_url( $dismiss_url ) . '">'
@@ -175,7 +179,9 @@ final class OffersMigrationNotice {
 			return;
 		}
 
-		$dismiss_url = self::dismissUrl( self::DISMISS_FAILED_ACTION, PluginUpgrade::migrationFailedCount() );
+		// 件数は 1 回だけ読む（温存通知と同じ理由）。
+		$count       = PluginUpgrade::migrationFailedCount();
+		$dismiss_url = self::dismissUrl( self::DISMISS_FAILED_ACTION, $count );
 
 		echo '<div class="notice notice-error"><p>';
 		echo esc_html(
@@ -185,7 +191,7 @@ final class OffersMigrationNotice {
 					'affilicard: データ移行で、購入リンクを新しい形式へ保存できなかった商品が %d 件あります。書き込みが繰り返し失敗したため、これらの商品は移行の対象から外しました（旧形式のまま残り、表示は従来どおりのフォールバックで続きます）。別のプラグインが meta の保存を書き換えている、または meta の値が壊れている可能性があります。原因を取り除いたうえで、下記の商品を開いて保存し直してください。',
 					'affilicard'
 				),
-				PluginUpgrade::migrationFailedCount()
+				$count
 			)
 		);
 		echo ' <a href="' . esc_url( $dismiss_url ) . '">'

@@ -441,4 +441,61 @@ final class OffersMigrationNoticeTest extends TestCase {
 
 		$_GET = array();
 	}
+
+	/**
+	 * 表示件数と dismiss URL の件数は同じスナップショットを使う。
+	 *
+	 * URL 用と表示用で件数を読み直すと、その間に移行バッチが件数を増やしたとき
+	 * 「文言は N+1 件なのに nonce に載るのは N 件」になり、閉じた直後にまた通知が出る。
+	 * ここでは読むたびに増える get_option をスタブし、1 回しか読まないことを固定する。
+	 */
+	public function test_表示件数とdismissURLの件数が食い違わない(): void {
+		$this->stubEditPosts( true );
+		$this->stubScreen( 'affilicard_product' );
+		$this->stubCursor( false );
+		$this->stubFailed( 0 );
+		$this->stubUser( 0 );
+
+		// 呼ばれるたびに 1 件ずつ増える（並行する移行バッチの再現）。
+		$reads = 0;
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL, 0 )
+			->andReturnUsing(
+				static function () use ( &$reads ): int {
+					++$reads;
+					return $reads;
+				}
+			);
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS, array() )
+			->andReturn( array() );
+
+		$nonce_count = null;
+		WP_Mock::userFunction( 'add_query_arg' )
+			->andReturnUsing(
+				static function ( $args ) use ( &$nonce_count ): string {
+					if ( is_array( $args ) && isset( $args['affilicard_dismissed_count'] ) ) {
+						$nonce_count = (int) $args['affilicard_dismissed_count'];
+					}
+					return 'https://example.test/current';
+				}
+			);
+		WP_Mock::userFunction( 'wp_nonce_url' )->andReturn( 'https://example.test/dismiss' );
+		WP_Mock::userFunction( '__', array( 'return_arg' => 0 ) );
+		WP_Mock::passthruFunction( 'esc_html' );
+		WP_Mock::passthruFunction( 'esc_html__' );
+		WP_Mock::passthruFunction( 'esc_url' );
+
+		ob_start();
+		OffersMigrationNotice::maybeRender();
+		$output = (string) ob_get_clean();
+
+		$this->assertNotNull( $nonce_count, 'dismiss URL に件数が載っていない' );
+		$this->assertStringContainsString(
+			(string) $nonce_count . ' 件',
+			$output,
+			sprintf( '表示（%s）と dismiss URL（%d 件）で件数が食い違っている', $output, $nonce_count )
+		);
+	}
+
 }
