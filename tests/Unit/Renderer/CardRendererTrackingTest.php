@@ -62,9 +62,11 @@ final class CardRendererTrackingTest extends TestCase {
 				'extras'       => array(),
 				'listings'     => array(
 					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://aff.example/x',
+						'platform' => 'example-store',
+						'enabled'  => true,
+						'offers'   => array(
+							array( 'affiliate_url' => 'https://aff.example/x' ),
+						),
 					),
 				),
 				'modified'     => '2026-08-13 00:00:00',

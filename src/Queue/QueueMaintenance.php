@@ -5,7 +5,9 @@ namespace Affilicard\Queue;
 
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductPostType;
+use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\ListingEligibility;
+use Affilicard\Pricing\OfferSelector;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Repository\ProductRepositoryInterface;
@@ -250,15 +252,34 @@ final class QueueMaintenance {
 					continue;
 				}
 
-				// B: give-up マーカーが立つ listing（terminal failure 済み＝廃盤/無効 ID）は
-				// GIVEUP_COOLDOWN の間スキップする。
-				if ( get_transient( RefreshHandler::giveUpTransientKey( $id, $platform ) ) ) {
+				// v4.0.0: 判定対象は listing 自身ではなく OfferSelector が選んだ購入リンク
+				// （表示中の offer）。選択結果が空（offers が空）なら更新すべき購入リンクが
+				// 無いためスキップする。
+				// 移行前の flat な listing（offers を持たない v3 以前の形）も
+				// LegacyOffer::offersWithFallback() で拾う。offers を直接読むと、
+				// 移行バッチが止まっているインストールでその商品が掃引から恒久的に
+				// 外れ、自動更新が二度と走らない。
+				$targets = OfferSelector::select(
+					LegacyOffer::offersWithFallback( $listing ),
+					GeneralSettings::fallbackOnTerminal()
+				);
+				if ( array() === $targets ) {
 					continue;
 				}
 
-				// 直近の試行から TTL（リード分だけ前倒し）を経過していない listing は
+				// B: give-up マーカーが立つ listing（terminal failure 済み＝廃盤/無効 ID）は
+				// GIVEUP_COOLDOWN の間スキップする。マーカーは (post_id, platform) 単位で
+				// しか立たないため、判定は「今使う購入リンク自身が terminal か」まで含めて
+				// RefreshHandler::isGivenUp() に委ねる（選択の後に置くのはそのため）。
+				// そうしないと、恒久失敗した購入リンクのマーカーが、繰り上げた別の
+				// 購入リンク（一度も失敗していない）まで TTL のあいだ止めてしまう。
+				if ( RefreshHandler::isGivenUp( $id, $platform, $targets[0] ) ) {
+					continue;
+				}
+
+				// 直近の試行から TTL（リード分だけ前倒し）を経過していない購入リンクは
 				// まだ積まない（perpetual retry の抑止）。
-				if ( ! PriceFreshness::needsRefetch( $listing, $def, $now, $this->sweepLeadSeconds ) ) {
+				if ( ! PriceFreshness::needsRefetch( $targets[0], $def, $now, $this->sweepLeadSeconds ) ) {
 					continue;
 				}
 

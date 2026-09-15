@@ -4,6 +4,9 @@ declare(strict_types=1);
 namespace Affilicard\Renderer;
 
 use Affilicard\Platform\PlatformDefinition;
+use Affilicard\Pricing\LegacyOffer;
+use Affilicard\Pricing\OfferSelector;
+use Affilicard\Pricing\OfferUrl;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Stock\StockStatus;
 
@@ -11,7 +14,9 @@ use Affilicard\Stock\StockStatus;
  * 商品データ + platform 定義から商品カードの HTML 文字列を生成する純粋なレンダラ。
  *
  * 副作用を持たず（DB/option を読まない）、入力はすべて引数で受け取る。
- * WordPress の escape 関数のみに依存する。
+ * WordPress の escape 関数のみに依存する。fallback_on_terminal のような設定値も
+ * 呼び出し元（CardHtmlBuilder）が GeneralSettings を読んで $options 経由で渡す
+ * ——このクラス自身は一切 option を読まない。
  */
 final class CardRenderer {
 
@@ -39,14 +44,16 @@ final class CardRenderer {
 			}
 		}
 
-		$hide             = isset( $options['hide_platforms'] ) && is_array( $options['hide_platforms'] ) ? array_map( 'strval', $options['hide_platforms'] ) : array();
-		$only             = isset( $options['only_platforms'] ) && is_array( $options['only_platforms'] ) ? array_map( 'strval', $options['only_platforms'] ) : array();
-		$fallback_image   = isset( $options['image_url'] ) ? (string) $options['image_url'] : '';
-		$visible_listings = $this->visibleListings(
+		$hide                 = isset( $options['hide_platforms'] ) && is_array( $options['hide_platforms'] ) ? array_map( 'strval', $options['hide_platforms'] ) : array();
+		$only                 = isset( $options['only_platforms'] ) && is_array( $options['only_platforms'] ) ? array_map( 'strval', $options['only_platforms'] ) : array();
+		$fallback_image       = isset( $options['image_url'] ) ? (string) $options['image_url'] : '';
+		$fallback_on_terminal = ! empty( $options['fallback_on_terminal'] );
+		$visible_listings     = $this->visibleListings(
 			isset( $product['listings'] ) && is_array( $product['listings'] ) ? $product['listings'] : array(),
 			$by_code,
 			$hide,
-			$only
+			$only,
+			$fallback_on_terminal
 		);
 		// 商品画像を出さない設定のときは、画像カラムごと描画しない。
 		// 画像だけ空にしてプレースホルダに落とすと「画像がありません」と出て
@@ -168,10 +175,7 @@ final class CardRenderer {
 
 		if ( $is_available ) {
 			$html .= $this->renderListings(
-				isset( $product['listings'] ) && is_array( $product['listings'] ) ? $product['listings'] : array(),
-				$by_code,
-				$hide,
-				$only,
+				$visible_listings,
 				$cta_overrides,
 				$is_preorder,
 				$tracking
@@ -182,7 +186,7 @@ final class CardRenderer {
 		$html .= '</div>'; // __inner
 
 		if ( $is_available ) {
-			$html .= $this->renderTimestamp( $visible_listings, $by_code );
+			$html .= $this->renderTimestamp( $visible_listings );
 		}
 
 		$html .= '</div>'; // __card
@@ -288,23 +292,21 @@ final class CardRenderer {
 	 * 表示中の価格 listing が1件も無ければ空文字（免責文言は出さない＝手動/未確認/期限切れのみの
 	 * カードでは価格の裏付けが無いため注記自体を出さない）。
 	 *
-	 * @param list<array<string, mixed>>        $listings 対象 listing 群（visibleListings() の戻り）
-	 * @param array<string, PlatformDefinition> $by_code  code => PlatformDefinition
+	 * 判定対象は各 listing について OfferSelector::select() が選んだ購入リンク（offer）である。
+	 *
+	 * @param list<array{listing: array<string, mixed>, offer: array<string, mixed>, platform: PlatformDefinition}> $entries visibleListings() の戻り
 	 */
-	private function renderTimestamp( array $listings, array $by_code ): string {
+	private function renderTimestamp( array $entries ): string {
 		$now_ts = time();
 		$latest = 0;
-		foreach ( $listings as $listing ) {
-			if ( ! is_array( $listing ) ) {
-				continue;
-			}
-			$code     = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
-			$platform = '' !== $code && isset( $by_code[ $code ] ) ? $by_code[ $code ] : null;
-			if ( ! PriceFreshness::isPriceDisplayable( $listing, $platform, $now_ts ) ) {
+		foreach ( $entries as $entry ) {
+			$offer    = $entry['offer'];
+			$platform = $entry['platform'];
+			if ( ! PriceFreshness::isPriceDisplayable( $offer, $platform, $now_ts ) ) {
 				// CTA 行の価格スパンと同じ集合（表示中のみ）に揃える。
 				continue;
 			}
-			$at = isset( $listing['last_verified_at'] ) ? trim( (string) $listing['last_verified_at'] ) : '';
+			$at = isset( $offer['last_verified_at'] ) ? trim( (string) $offer['last_verified_at'] ) : '';
 			$ts = '' !== $at ? strtotime( $at ) : false;
 			if ( false !== $ts && $ts > $latest ) {
 				$latest = $ts;
@@ -326,25 +328,27 @@ final class CardRenderer {
 	}
 
 	/**
-	 * @param list<array<string, mixed>>        $listings
-	 * @param array<string, PlatformDefinition> $by_code
-	 * @param list<string>                      $hide
-	 * @param list<string>                      $only          許可リスト（空 = 全表示）
-	 * @param array<string, string>             $cta_overrides ブロック属性由来の CTA ラベル上書き（code→label）
-	 */
-	/**
-	 * 表示対象（platform 既知・hide 非該当・only 許可・platform/listing 有効）の listing だけを、
-	 * platform の displayOrder 昇順（同値は元の出現順）で返す。
-	 * CTA 行（renderListings）と日時フッター（renderTimestamp）が同一集合・同一順序を見るための共有フィルタ。
+	 * 表示対象（platform 既知・hide 非該当・only 許可・platform/listing 有効）の listing について、
+	 * platform の displayOrder 昇順（同値は元の出現順）で並べたうえで、各 listing に対して
+	 * OfferSelector::select() が選んだ購入リンク（offer）を組にして返す。
+	 *
+	 * **購入リンクの選択はここ 1 箇所でしか行わない。** CTA ボタン（renderListings）・書影
+	 * （selectCardImage）・日時フッター（renderTimestamp）は全員この戻り値の offer だけを見る
+	 * ため、ボタンと書影が別の offer を指すといったズレが構造的に起こらない。
+	 *
+	 * offer が選べない（0 件）listing、または選ばれた offer に CTA へ出せる URL が無い listing は
+	 * 戻り値から除く＝非表示扱いにする。
 	 *
 	 * @param list<array<string, mixed>>        $listings
 	 * @param array<string, PlatformDefinition> $by_code
 	 * @param list<string>                      $hide
-	 * @param list<string>                      $only     許可リスト（空 = 全表示）
-	 * @return list<array<string, mixed>>
+	 * @param list<string>                      $only                 許可リスト（空 = 全表示）
+	 * @param bool                              $fallback_on_terminal GeneralSettings::fallbackOnTerminal()（呼び出し元が解決して渡す。
+	 *                                                                CardRenderer 自身は option を読まない）
+	 * @return list<array{listing: array<string, mixed>, offer: array<string, mixed>, platform: PlatformDefinition}>
 	 */
-	private function visibleListings( array $listings, array $by_code, array $hide, array $only ): array {
-		$out = array();
+	private function visibleListings( array $listings, array $by_code, array $hide, array $only, bool $fallback_on_terminal ): array {
+		$filtered = array();
 		foreach ( $listings as $listing ) {
 			if ( ! is_array( $listing ) ) {
 				continue;
@@ -362,16 +366,32 @@ final class CardRenderer {
 			if ( isset( $listing['enabled'] ) && false === (bool) $listing['enabled'] ) {
 				continue;
 			}
-			// URL が無い listing は CTA 行を出さない＝非表示扱い。
-			// renderListings の行と renderTimestamp の日付計算を同一集合に揃える。
-			$affiliate = isset( $listing['affiliate_url'] ) ? trim( (string) $listing['affiliate_url'] ) : '';
-			$regular   = isset( $listing['regular_url'] ) ? trim( (string) $listing['regular_url'] ) : '';
-			if ( '' === $affiliate && '' === $regular ) {
+			$filtered[] = $listing;
+		}
+
+		$sorted = $this->sortByDisplayOrder( $filtered, $by_code );
+
+		$out = array();
+		foreach ( $sorted as $listing ) {
+			$offers   = LegacyOffer::offersWithFallback( $listing );
+			$selected = OfferSelector::select( $offers, $fallback_on_terminal );
+			if ( array() === $selected ) {
+				// 選べる購入リンクが無い listing は CTA 行を出さない＝非表示扱い。
 				continue;
 			}
-			$out[] = $listing;
+			$offer = $selected[0];
+			// URL が無い offer は CTA 行を出さない＝非表示扱い。
+			// renderListings の行と renderTimestamp の日付計算を同一集合に揃える。
+			if ( '' === OfferUrl::ctaHref( $offer ) ) {
+				continue;
+			}
+			$out[] = array(
+				'listing'  => $listing,
+				'offer'    => $offer,
+				'platform' => $by_code[ (string) $listing['platform'] ],
+			);
 		}
-		return $this->sortByDisplayOrder( $out, $by_code );
+		return $out;
 	}
 
 	/**
@@ -422,12 +442,15 @@ final class CardRenderer {
 	 * （書影だけを別の優先度で選ぶ設定）は撤去した。設定はあるのに描画へ効かない値を
 	 * 増やさないため、順序の概念を displayOrder 1 本に統合する。
 	 *
-	 * @param list<array<string, mixed>> $visibleListings visibleListings() の戻り（displayOrder 昇順）
+	 * 判定対象は各 listing について OfferSelector::select() が選んだ購入リンク（offer）である。
+	 * CTA ボタンと書影が別の offer を指すことがない（visibleListings() が両方の唯一の出所）。
+	 *
+	 * @param list<array{listing: array<string, mixed>, offer: array<string, mixed>, platform: PlatformDefinition}> $visibleListings visibleListings() の戻り（displayOrder 昇順）
 	 */
 	private function selectCardImage( array $visibleListings, string $fallback ): string {
-		foreach ( $visibleListings as $listing ) {
-			$img = isset( $listing['image_url'] ) ? trim( (string) $listing['image_url'] ) : '';
-			// esc_url_raw は javascript: 等の危険スキームを空文字にする。空になった listing は飛ばす。
+		foreach ( $visibleListings as $entry ) {
+			$img = isset( $entry['offer']['image_url'] ) ? trim( (string) $entry['offer']['image_url'] ) : '';
+			// esc_url_raw は javascript: 等の危険スキームを空文字にする。空になった offer は飛ばす。
 			$img = esc_url_raw( $img );
 			if ( '' !== $img ) {
 				return $img;
@@ -436,19 +459,20 @@ final class CardRenderer {
 		return $fallback;
 	}
 
-	private function renderListings( array $listings, array $by_code, array $hide, array $only, array $cta_overrides = array(), bool $is_preorder = false, array $tracking = array() ): string {
+	/**
+	 * @param list<array{listing: array<string, mixed>, offer: array<string, mixed>, platform: PlatformDefinition}> $visible_listings visibleListings() の戻り（render() から渡される。ここで選択をやり直さない）
+	 * @param array<string, string>                                                                                 $cta_overrides    ブロック属性由来の CTA ラベル上書き（code→label）
+	 */
+	private function renderListings( array $visible_listings, array $cta_overrides = array(), bool $is_preorder = false, array $tracking = array() ): string {
 		$rows   = '';
 		$now_ts = time();
-		foreach ( $this->visibleListings( $listings, $by_code, $hide, $only ) as $listing ) {
-			$code     = (string) $listing['platform'];
-			$platform = $by_code[ $code ];
+		foreach ( $visible_listings as $entry ) {
+			$listing  = $entry['listing'];
+			$offer    = $entry['offer'];
+			$platform = $entry['platform'];
+			$code     = $platform->code;
 
-			$affiliate = isset( $listing['affiliate_url'] ) ? trim( (string) $listing['affiliate_url'] ) : '';
-			$regular   = isset( $listing['regular_url'] ) ? trim( (string) $listing['regular_url'] ) : '';
-			$url       = '' !== $affiliate ? $affiliate : $regular;
-			if ( '' === $url ) {
-				continue;
-			}
+			$url = OfferUrl::ctaHref( $offer );
 
 			$block_override = isset( $cta_overrides[ $code ] ) ? trim( (string) $cta_overrides[ $code ] ) : '';
 			$override       = isset( $listing['button_label_override'] ) ? trim( (string) $listing['button_label_override'] ) : '';
@@ -477,9 +501,9 @@ final class CardRenderer {
 			// API 確認済み・鮮度内（PriceFreshness::isPriceDisplayable）のときだけ表示する。
 			// 手動入力／未確認／TTL 期限切れの listing は CTA ボタンのみを残す。
 			$pricing = '';
-			if ( PriceFreshness::isPriceDisplayable( $listing, $platform, $now_ts ) ) {
-				$price    = isset( $listing['price'] ) ? trim( (string) $listing['price'] ) : '';
-				$list_raw = isset( $listing['list_price'] ) ? trim( (string) $listing['list_price'] ) : '';
+			if ( PriceFreshness::isPriceDisplayable( $offer, $platform, $now_ts ) ) {
+				$price    = isset( $offer['price'] ) ? trim( (string) $offer['price'] ) : '';
+				$list_raw = isset( $offer['list_price'] ) ? trim( (string) $offer['list_price'] ) : '';
 
 				// 通常価格(取り消し線): list_price と price が共に正の数値で list_price > price のときのみ。
 				$list_num  = self::priceToNumber( $list_raw );
@@ -495,7 +519,7 @@ final class CardRenderer {
 					$pricing     .= '<span class="affilicard-card__price">¥' . esc_html( $price_no_yen ) . '</span>';
 					$pricing     .= '<span class="affilicard-card__tax">' . esc_html__( '（税込）', 'affilicard' ) . '</span>';
 				}
-				$badge = isset( $listing['badge'] ) ? trim( (string) $listing['badge'] ) : '';
+				$badge = isset( $offer['badge'] ) ? trim( (string) $offer['badge'] ) : '';
 				if ( '' !== $badge ) {
 					$pricing .= '<span class="affilicard-card__discount">' . esc_html( $badge ) . '</span>';
 				}

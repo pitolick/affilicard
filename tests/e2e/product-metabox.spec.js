@@ -7,6 +7,7 @@ test.describe( 'affilicard_product サイドバー設定 — core-data save', ()
 		page,
 	} ) => {
 		const affUrl = 'https://example.com/aff-sidebar';
+		const regularUrl = 'https://example.com/product-sidebar';
 
 		await page.goto( '/wp-admin/post-new.php?post_type=affilicard_product' );
 
@@ -40,6 +41,17 @@ test.describe( 'affilicard_product サイドバー設定 — core-data save', ()
 		await expandSection( 'プラットフォーム listing' );
 		await page.getByRole( 'button', { name: 'listing を追加' } ).click();
 		await page.getByLabel( 'プラットフォーム' ).last().selectOption( 'dmm-books' );
+		// 購入リンク（offer）は listing 追加時点では 0 件（「購入リンクがありません」）
+		// のため、フィールドを触る前に「購入リンクを追加」でまず 1 件作る必要がある
+		// （Task 15 の並べ替え UI 導入で listing 直下から offers[] へ分離された）。
+		await page.getByRole( 'button', { name: '購入リンクを追加' } ).click();
+		// 追加直後の購入リンクの PanelBody は閉じた状態（openKeys の初期値は空集合）で
+		// 始まるため、中のフィールドを触る前に開く。external_id 未入力なので
+		// タイトルは固定文言になる。
+		await expandSection( '（外部 ID 未設定）' );
+		// この購入リンクは外部 ID を持たないため、身元は regular_url だけ。
+		// 空のまま保存すると ProductSchema::sanitizeOffers() が破棄する。
+		await page.getByLabel( '通常 URL' ).last().fill( regularUrl );
 		await page.getByLabel( 'アフィリエイト URL' ).last().fill( affUrl );
 
 		await page.getByRole( 'button', { name: 'Publish', exact: true } ).click();
@@ -63,6 +75,10 @@ test.describe( 'affilicard_product サイドバー設定 — core-data save', ()
 		);
 		await expandSection( 'Affilicard 商品設定' );
 		await expandSection( 'プラットフォーム listing' );
+		await expandSection( '（外部 ID 未設定）' );
+		await expect(
+			page.getByLabel( '通常 URL' ).last()
+		).toHaveValue( regularUrl );
 		await expect(
 			page.getByLabel( 'アフィリエイト URL' ).last()
 		).toHaveValue( affUrl );

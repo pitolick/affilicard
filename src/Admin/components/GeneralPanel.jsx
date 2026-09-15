@@ -219,6 +219,19 @@ export function GeneralPanel() {
 						'affilicard'
 					)}
 				/>
+
+				<ToggleControl
+					label={__(
+						'商品が見つからない購入リンクを飛ばして、次の購入リンクを表示する',
+						'affilicard'
+					)}
+					checked={Boolean(settings.fallback_on_terminal)}
+					onChange={(v) => update({ fallback_on_terminal: v })}
+					help={__(
+						'一時的な取得エラー（API 障害・レート制限など）では切り替えません。ストア側で商品ページが無くなった場合だけ切り替わります。',
+						'affilicard'
+					)}
+				/>
 			</div>
 
 			<div className="affilicard-general-panel__actions">

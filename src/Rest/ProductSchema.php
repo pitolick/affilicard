@@ -3,7 +3,11 @@ declare(strict_types=1);
 
 namespace Affilicard\Rest;
 
+use Affilicard\Pricing\FetchStatus;
+use Affilicard\Pricing\LegacyOffer;
+use Affilicard\Pricing\OfferSelector;
 use Affilicard\Stock\StockStatus;
+use Affilicard\Util\ScalarField;
 
 /**
  * `/products` 系エンドポイントの input schema を返す。
@@ -11,6 +15,50 @@ use Affilicard\Stock\StockStatus;
  * register_rest_route の args として渡すことを想定。
  */
 final class ProductSchema {
+
+	/**
+	 * 移行中だけ「身元（regular_url / external_id）を 1 つも持たない offer を弾く」
+	 * ルールを外すフラグ。
+	 *
+	 * 既定は false（＝新規保存では必ず弾く）。{@see self::withLegacyOfferPreservation()}
+	 * の実行中だけ true になる。
+	 *
+	 * @var bool
+	 */
+	private static bool $preserveOffersWithoutRegularUrl = false;
+
+	/**
+	 * 「身元（regular_url / external_id）を 1 つも持たない offer を弾く」ルールを外して
+	 * $callback を実行する。
+	 *
+	 * このルールは新規入力向けである（生死を判定できない offer を今後は作らせない）。
+	 * v3 以前のインストールには手入力で affiliate_url だけを持つ listing（身元を 1 つも
+	 * 持たない形）が実在し得るため、
+	 * 移行に遡って適用すると復元不能な形でデータが消える。
+	 *
+	 * **移行の書き込みが `update_post_meta()` を通ると、WordPress は `update_metadata()`
+	 * の中で `sanitize_meta()` を走らせる。** ProductMeta::register() が META_LISTINGS に
+	 * `sanitize_callback => ProductSchema::sanitizeListings` を登録しているため、移行が
+	 * メモリ上でどれだけ丁寧に温存しても、保存の瞬間に sanitizeOffers() が同じ offer を
+	 * 落としてしまう。この窓はその一点だけを無効化するためにある。
+	 *
+	 * sanitize 自体は止めない（esc_url_raw / sanitize_text_field / whitelist はそのまま
+	 * 通す）。フィルタを外して生値を書く方式より窓が狭く、移行が壊れた値を保存する
+	 * 余地を残さないため。窓は移行の書き込み 1 回分に限定し、finally で必ず戻す。
+	 *
+	 * @template T
+	 * @param callable():T $callback
+	 * @return T
+	 */
+	public static function withLegacyOfferPreservation( callable $callback ) {
+		$previous                              = self::$preserveOffersWithoutRegularUrl;
+		self::$preserveOffersWithoutRegularUrl = true;
+		try {
+			return $callback();
+		} finally {
+			self::$preserveOffersWithoutRegularUrl = $previous;
+		}
+	}
 
 	/**
 	 * @return array<string, array<string, mixed>>
@@ -176,8 +224,9 @@ final class ProductSchema {
 	 *
 	 * - 各エントリの platform は文字列必須（空文字なら除外）
 	 * - enabled / auto_update は bool キャスト
-	 * - URL 系は esc_url_raw、文字列フィールドは sanitize_text_field
-	 * - 欠損フィールドはデフォルトで補完する
+	 * - listing が持つのは設定 6 フィールド（platform / enabled / update_mode /
+	 *   auto_update / button_label_override / platform_extras）のみで、
+	 *   購入リンクは {@see self::sanitizeOffers()} が `offers[]` へまとめる
 	 *
 	 * @param mixed $listings
 	 * @return list<array<string, mixed>>
@@ -193,7 +242,7 @@ final class ProductSchema {
 				continue;
 			}
 
-			$platform = isset( $entry['platform'] ) ? (string) sanitize_key( (string) $entry['platform'] ) : '';
+			$platform = (string) sanitize_key( self::stringField( $entry, 'platform' ) );
 			if ( '' === $platform ) {
 				continue;
 			}
@@ -211,26 +260,121 @@ final class ProductSchema {
 			$row = array(
 				'platform'              => $platform,
 				'enabled'               => isset( $entry['enabled'] ) ? (bool) $entry['enabled'] : true,
-				'update_mode'           => isset( $entry['update_mode'] ) ? (string) sanitize_key( (string) $entry['update_mode'] ) : 'auto',
+				'update_mode'           => isset( $entry['update_mode'] ) ? (string) sanitize_key( self::stringField( $entry, 'update_mode' ) ) : 'auto',
 				'auto_update'           => isset( $entry['auto_update'] ) ? (bool) $entry['auto_update'] : true,
-				'external_id'           => isset( $entry['external_id'] ) ? (string) sanitize_text_field( (string) $entry['external_id'] ) : '',
-				'regular_url'           => isset( $entry['regular_url'] ) ? (string) esc_url_raw( (string) $entry['regular_url'] ) : '',
-				'affiliate_url'         => isset( $entry['affiliate_url'] ) ? (string) esc_url_raw( (string) $entry['affiliate_url'] ) : '',
-				'price'                 => isset( $entry['price'] ) ? (string) sanitize_text_field( (string) $entry['price'] ) : '',
-				'list_price'            => isset( $entry['list_price'] ) ? (string) sanitize_text_field( (string) $entry['list_price'] ) : '',
-				'badge'                 => isset( $entry['badge'] ) ? (string) sanitize_text_field( (string) $entry['badge'] ) : '',
-				'image_url'             => isset( $entry['image_url'] ) ? (string) esc_url_raw( (string) $entry['image_url'] ) : '',
-				'button_label_override' => isset( $entry['button_label_override'] ) ? (string) sanitize_text_field( (string) $entry['button_label_override'] ) : '',
-				'last_fetched_at'       => isset( $entry['last_fetched_at'] ) ? (string) sanitize_text_field( (string) $entry['last_fetched_at'] ) : '',
-				'last_verified_at'      => isset( $entry['last_verified_at'] ) ? (string) sanitize_text_field( (string) $entry['last_verified_at'] ) : '',
-				'search_key'            => isset( $entry['search_key'] ) ? (string) sanitize_text_field( (string) $entry['search_key'] ) : '',
-				'fetch_error'           => isset( $entry['fetch_error'] ) ? (string) sanitize_text_field( (string) $entry['fetch_error'] ) : '',
+				'button_label_override' => (string) sanitize_text_field( self::stringField( $entry, 'button_label_override' ) ),
 				'platform_extras'       => $platform_extras,
+				'offers'                => self::sanitizeOffers( $entry ),
 			);
 
 			$result[] = $row;
 		}
 
 		return $result;
+	}
+
+	/**
+	 * 配列から文字列フィールドを安全に取り出す（非スカラーは空文字）。
+	 *
+	 * **REST の入力は配列・オブジェクトを含み得る。** `(string)` キャストは配列なら
+	 * 警告を出したうえで "Array" という値を作り、`__toString` を持たないオブジェクトでは
+	 * 致命的エラーになる。前者は「でたらめな身元・URL が保存される」形で沈黙するため、
+	 * 弾かずに通す方が危険である（身元が "Array" の offer は再同定も生死判定もできない）。
+	 *
+	 * 非スカラーは「値なし」と同じ空文字に倒す。スカラーの扱いは従来どおり
+	 * （bool の "1"／数値の文字列化を含め `(string)` と同じ）。
+	 * sanitizeListings() の platform_extras が既に取っているのと同じ流儀。
+	 *
+	 * @param array<string, mixed> $source
+	 */
+	private static function stringField( array $source, string $key ): string {
+		return ScalarField::string( $source, $key );
+	}
+
+	/**
+	 * listing から購入リンク（offers）を取り出して正規化する。
+	 *
+	 * `offers` が無い場合は、v3 以前の flat な取得結果フィールドを offers[0] へ
+	 * 畳む。これにより外部の投稿パイプラインの改修を待たずにリリースできる。
+	 *
+	 * @param array<string, mixed> $entry
+	 * @return list<array<string, mixed>>
+	 */
+	private static function sanitizeOffers( array $entry ): array {
+		$raw = array();
+		if ( isset( $entry['offers'] ) && is_array( $entry['offers'] ) ) {
+			$raw = $entry['offers'];
+		} elseif ( LegacyOffer::hasFlatFetchFields( $entry ) ) {
+			// 畳み込みは LegacyOffer に委ねる。ここで $entry をそのまま offer として扱うと
+			// 旧 `fetch_error`（文言）が `fetch_status`（コード）へ写らず、失敗していた
+			// 購入リンクが以後ずっと「取得成功」として振る舞う（移行バッチが到達する前に
+			// 別プラットフォームの価格更新などで保存された商品で実際に起きる）。
+			$raw = array( LegacyOffer::toOffer( $entry ) );
+		}
+
+		$byKey = array();
+		foreach ( $raw as $index => $offer ) {
+			if ( ! is_array( $offer ) ) {
+				continue;
+			}
+
+			$regular    = (string) esc_url_raw( self::stringField( $offer, 'regular_url' ) );
+			$externalId = (string) sanitize_text_field( self::stringField( $offer, 'external_id' ) );
+			if ( '' === $regular && '' === $externalId && ! self::$preserveOffersWithoutRegularUrl ) {
+				// 身元（spec §3-4: external_id、無ければ regular_url）を 1 つも持たない offer は
+				// 生死の判定も再同定もできず永久に残るため弾く。
+				//
+				// **regular_url だけを必須にしない。** それは新規入力向けのルール（§3-3）で
+				// あって、保存のたびに既存データへ遡って適用してよいものではない——
+				// ProductRepository::updateListing() は 1 platform の更新でも商品の全 listing を
+				// 再 sanitize するため、移行が温存した購入リンクが「別プラットフォームの
+				// 定期価格更新」で数時間後に消えていた。external_id があれば再同定できる。
+				//
+				// 移行中（withLegacyOfferPreservation）はこのルール自体を外す——身元を
+				// 1 つも持たない既存データもアップグレードでは消さないため。
+				//
+				// **affiliate_url は身元にならない（§3-3）。** リダイレクタは転送先が 404 でも
+				// 302 を返すため、アフィリエイト URL では生死を判定できない。affiliate_url
+				// だけの offer を残すと、二度と検証も再同定もできないまま永久に居座る。
+				// 配列位置（下の 'idx:' キー）で代用することもしない——並べ替えや途中の
+				// 削除で位置が変わると別の offer を指すことになり、識別子として使えない。
+				// あれは移行の温存モードでだけ使う、その場限りの束ね方である。
+				continue;
+			}
+			if ( '' !== $externalId ) {
+				$key = 'id:' . $externalId;
+			} elseif ( '' !== $regular ) {
+				$key = 'url:' . $regular;
+			} else {
+				// 温存された offer は識別子を 1 つも持たないことがある。'url:' で
+				// 束ねると複数の温存 offer が 1 件に潰れて消えるため、位置で分ける。
+				$key = 'idx:' . $index;
+			}
+
+			// 識別子が重複したら後勝ち（同じ SKU を 2 つ並べない）。
+			//
+			// **位置も後の出現に合わせる。** 値だけ差し替えて最初の位置に残すと、
+			// display_order が同値のときの並び（OfferSelector は配列の出現順で
+			// 同順位を解く）が入力順とずれる。例: 同じ身元の A・別の B・再び A を
+			// 同順位で並べると、入力順は B → A なのに A が先に選ばれてしまう。
+			unset( $byKey[ $key ] );
+
+			$byKey[ $key ] = array(
+				'display_order'    => OfferSelector::normaliseOrder( $offer['display_order'] ?? null ),
+				'external_id'      => $externalId,
+				'regular_url'      => $regular,
+				'affiliate_url'    => (string) esc_url_raw( self::stringField( $offer, 'affiliate_url' ) ),
+				'price'            => (string) sanitize_text_field( self::stringField( $offer, 'price' ) ),
+				'list_price'       => (string) sanitize_text_field( self::stringField( $offer, 'list_price' ) ),
+				'badge'            => (string) sanitize_text_field( self::stringField( $offer, 'badge' ) ),
+				'image_url'        => (string) esc_url_raw( self::stringField( $offer, 'image_url' ) ),
+				'search_key'       => (string) sanitize_text_field( self::stringField( $offer, 'search_key' ) ),
+				'fetch_status'     => FetchStatus::normalise( (string) sanitize_key( self::stringField( $offer, 'fetch_status' ) ) ),
+				'last_fetched_at'  => (string) sanitize_text_field( self::stringField( $offer, 'last_fetched_at' ) ),
+				'last_verified_at' => (string) sanitize_text_field( self::stringField( $offer, 'last_verified_at' ) ),
+			);
+		}
+
+		return array_values( $byKey );
 	}
 }

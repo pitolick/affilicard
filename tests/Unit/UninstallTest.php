@@ -10,9 +10,23 @@ use WP_Mock\Tools\TestCase;
 
 final class UninstallTest extends TestCase {
 
+	/** @var list<array{0:string,1:int,2:string,3:mixed,4:bool}> */
+	private array $deletedMeta = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		// run() は必ずユーザーメタの一括削除を通る。**捕捉はここでしか行えない**
+		// ——WP_Mock::userFunction() を同じ関数名で再登録しても最初の期待が残り、
+		// 個別テストでの上書きは黙って無視されるため。
+		$this->deletedMeta = array();
+		WP_Mock::userFunction( 'delete_metadata' )
+			->andReturnUsing(
+				function ( $type, $objectId, $key, $value, $deleteAll ): bool {
+					$this->deletedMeta[] = array( $type, $objectId, $key, $value, $deleteAll );
+					return true;
+				}
+			);
 	}
 
 	public function tearDown(): void {
@@ -65,6 +79,29 @@ final class UninstallTest extends TestCase {
 				}
 			)
 			->andReturn( true );
+	}
+
+	/**
+	 * アンインストールでユーザーメタも消す。
+	 *
+	 * OPTION_KEYS の掃除は options テーブルしか触らないため、移行通知の「閉じた」印は
+	 * ユーザーメタとして全ユーザーに残り続けていた。ユーザー数ぶん個別に消すのは
+	 * 現実的でないので delete-all で一括削除する。
+	 */
+	public function test_run_はユーザーメタも全ユーザーぶん消す(): void {
+		$captured = array();
+		$this->mockWpdb( $captured );
+		$this->stubQueueCleanup();
+		WP_Mock::userFunction( 'delete_option' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->andReturn( array() );
+
+		Uninstall::run();
+
+		$this->assertContains(
+			array( 'user', 0, 'affilicard_offers_migration_notice_dismissed', '', true ),
+			$this->deletedMeta,
+			'移行通知の dismissed フラグを全ユーザーぶん消していない'
+		);
 	}
 
 	public function test_run_deletes_known_options_and_all_products(): void {
@@ -140,6 +177,27 @@ final class UninstallTest extends TestCase {
 		// （final-fix-report.md Important 1）。
 		$this->assertContains( \Affilicard\Queue\SweepCursor::OPTION_KEY, Uninstall::OPTION_KEYS );
 		$this->assertContains( \Affilicard\Queue\QueueMaintenance::OPTION_LAST_COMPLETED, Uninstall::OPTION_KEYS );
+		// offers 移行が書く 3 option。漏れるとアンインストール→再インストールで
+		// 「未完」の印・温存件数・温存 post ID 一覧が残留し、通知が出続ける
+		// （CodeRabbit Minor #4: OPTION_MIGRATION_PRESERVED_POST_IDS が抜けていた）。
+		$this->assertContains( \Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_CURSOR, Uninstall::OPTION_KEYS );
+		$this->assertContains(
+			\Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL,
+			Uninstall::OPTION_KEYS
+		);
+		$this->assertContains(
+			\Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS,
+			Uninstall::OPTION_KEYS
+		);
+	}
+
+	/**
+	 * cleanupQueue() が unschedule する 'affilicard-migration' は
+	 * PluginUpgrade::MIGRATION_GROUP と同じ値である（Uninstall.php 自身は vendor/ 不在
+	 * フォールバックのため当該クラスを参照できずリテラルで持つ——'affilicard-sweep' と同じ理由）。
+	 */
+	public function test_migrationグループのリテラルはPluginUpgradeの定数と一致する(): void {
+		$this->assertSame( \Affilicard\Upgrade\PluginUpgrade::MIGRATION_GROUP, 'affilicard-migration' );
 	}
 
 	public function test_run_deletes_provider_credentials_via_wpdb_like(): void {
@@ -204,6 +262,12 @@ final class UninstallTest extends TestCase {
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )
 			->once()
 			->with( '', array(), 'affilicard-sweep' )
+			->andReturn( null );
+		// offers 移行バッチの group も同様に unschedule する（移行が未完のまま
+		// アンインストールされると継続ジョブが pending で残る）。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )
+			->once()
+			->with( '', array(), 'affilicard-migration' )
 			->andReturn( null );
 
 		Uninstall::run();

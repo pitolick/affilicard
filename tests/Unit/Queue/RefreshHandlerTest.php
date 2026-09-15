@@ -145,6 +145,7 @@ final class RefreshHandlerTest extends TestCase {
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once(); // rescheduleRefresh
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 );
 		$refresher->shouldNotReceive( 'refreshOne' );
 
 		$handler = new RefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry() );
@@ -184,6 +185,7 @@ final class RefreshHandlerTest extends TestCase {
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 888 );
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 );
 		$refresher->shouldNotReceive( 'refreshOne' );
 
 		$handler = new RefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry() );
@@ -206,6 +208,7 @@ final class RefreshHandlerTest extends TestCase {
 		$this->mockRateLimiterWpdb( 1 ); // CAS の UPDATE が 1 行 = 獲得成功（経過済）
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 );
 		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( WorkOutcome::TRANSIENT_FAILURE );
 
 		// throttle 獲得成功 → 待機カウンタはリセットされる（listing が進捗したため）。
@@ -255,6 +258,7 @@ final class RefreshHandlerTest extends TestCase {
 		$this->mockRateLimiterWpdb( 1 ); // CAS の UPDATE が 1 行 = 獲得成功（経過済）
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 );
 		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( WorkOutcome::TERMINAL_FAILURE );
 
 		// throttle 獲得成功 → 待機カウンタはリセットされる。
@@ -295,6 +299,7 @@ final class RefreshHandlerTest extends TestCase {
 		$this->mockRateLimiterWpdb( 1 ); // CAS の UPDATE が 1 行 = 獲得成功（経過済）
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 );
 		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( WorkOutcome::TRANSIENT_FAILURE );
 
 		// throttle 獲得成功 → 待機カウンタはリセットされる（listing が進捗したため）。
@@ -350,6 +355,7 @@ final class RefreshHandlerTest extends TestCase {
 			->andReturn( true );
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 );
 		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
 		// B: fetch 成功で give-up マーカーを delete（復旧した listing は通常周期に戻る）。
 		WP_Mock::userFunction( 'delete_transient' )
@@ -386,6 +392,7 @@ final class RefreshHandlerTest extends TestCase {
 			->andReturn( true );
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 );
 		$refresher->shouldReceive( 'refreshOne' )->once()->with( 12, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
 		// B: fetch 成功で give-up マーカーを delete（復旧した listing は通常周期に戻る）。
 		WP_Mock::userFunction( 'delete_transient' )

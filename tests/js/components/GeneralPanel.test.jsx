@@ -353,3 +353,39 @@ describe( '棚卸し設定', () => {
 		);
 	} );
 } );
+
+describe( 'フォールバック設定', () => {
+	test( 'フォールバック設定を切り替えられる', async () => {
+		const initial = {
+			cache_ttl_seconds: 86400,
+			default_product_type: 'generic',
+			cron_enabled: false,
+			fallback_on_terminal: false,
+		};
+		fetchSettings.mockResolvedValue( initial );
+		updateSettings.mockResolvedValue( {
+			...initial,
+			fallback_on_terminal: true,
+		} );
+		render( <GeneralPanel /> );
+
+		const toggle = await screen.findByLabelText(
+			'商品が見つからない購入リンクを飛ばして、次の購入リンクを表示する'
+		);
+		expect( toggle.checked ).toBe( false );
+
+		fireEvent.click( toggle );
+		expect( toggle.checked ).toBe( true );
+
+		const saveButton = await screen.findByRole( 'button', {
+			name: '保存',
+		} );
+		fireEvent.click( saveButton );
+
+		await waitFor( () =>
+			expect( updateSettings ).toHaveBeenCalledWith(
+				expect.objectContaining( { fallback_on_terminal: true } )
+			)
+		);
+	} );
+} );

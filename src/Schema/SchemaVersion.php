@@ -10,7 +10,7 @@ namespace Affilicard\Schema;
  */
 final class SchemaVersion {
 
-	public const CURRENT = '1';
+	public const CURRENT = '2';
 
 	public static function current(): string {
 		return self::CURRENT;

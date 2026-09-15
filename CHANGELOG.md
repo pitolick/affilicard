@@ -4,6 +4,45 @@
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-09-14
+
+### Added
+
+- **listing が複数の購入リンク（offers）を優先順で保持できるように**なった。使用中の 1 件がストア側で消滅したときに次点の購入リンクへ切り替える挙動は **opt-in（既定 OFF）** で、一般設定の「商品が見つからない購入リンクを飛ばして、次の購入リンクを表示する」（REST の `fallback_on_terminal`）を ON にすると有効になる。OFF のままなら表示は従来どおり先頭の購入リンク固定で、この設定を触らない限り挙動は変わらない
+- 商品カードの管理画面に、購入リンクを並べ替え・追加・削除できる UI を追加（`listings[].offers[]`。表示順は各 offer の `display_order` で決まる）
+- 既存インストール向けに、旧形式（listing 直下に取得結果フィールドが並ぶ flat な形）を新形式へ変換する一度きりの移行バッチを追加。大規模カタログでも 1 リクエストの実行時間が伸びないよう分割実行する
+- 購入リンクの繰り上がり（使用中の 1 件が外れて次点に切り替わる）を検知し、即時の再取得ジョブを積む
+
+### Changed (BREAKING)
+
+- **取得結果フィールドの置き場所が変わった**: `listings[].external_id` / `regular_url` / `affiliate_url` / `price` / `list_price` / `badge` / `image_url` / `search_key` / `last_fetched_at` / `last_verified_at` は、すべて `listings[].offers[].*` の下へ移動した。`listings[]` 直下に残るのは `platform` / `enabled` / `update_mode` / `auto_update` / `button_label_override` / `platform_extras` の設定系フィールドのみ
+- **`listings[].fetch_error`（日本語の文言を保存する文字列）を廃止**。代わりに `listings[].offers[].fetch_status` を参照する。値は `''`（成功）/ `'unsupported'`（自動取得の対象外）/ `'transient'`（一時失敗）/ `'terminal'`（恒久失敗）のいずれか。表示用の文言はコードから都度生成する（保存しない）
+- **`affilicard_extid_<platform>` post meta が複数値**になった（1 platform に対して購入リンクの数だけ値を持つ）。単一値としての読み出し（`get_post_meta( $id, $key, true )`）は最初の 1 件しか返さないため、外部から複数値を前提に読み替えが必要な場合は `get_post_meta( $id, $key, false )` を使うこと
+- 書き込み側の互換: REST（`POST /wp/v2/affilicard_product` の `meta.affilicard_listings`）は引き続き**旧来の flat な形も受理**し、`offers[0]` へ自動的に正規化する（旧 `fetch_error` の文言も `fetch_status` へ写す）。外部の投稿パイプライン側の改修を待たずに本バージョンへ上げられる。
+  **ただし flat な書き込みは、その platform の `offers[]` を丸ごと置き換える**。`listings` は platform 単位で置換されるため、flat な形で 1 platform を書くと**その platform が持っていた次点以降の購入リンクはすべて消える**——本機能が保持するために存在するデータそのものである。次点を残したまま更新するには、`offers[]` を含む形（残したい購入リンクを列挙した配列）で書くこと
+
+### Fixed
+
+- **移行そのものの書き込み**で、`regular_url` を持たず `affiliate_url` のみを持つ listing（手入力で温存されていたデータ）が消えていた不具合を修正した。移行はこの形の購入リンクも温存し、対象商品への編集リンク付きで管理画面に通知する
+- **保存時に購入リンクを落とす条件を「身元を 1 つも持たないとき」に絞った**。以前は `regular_url` が空というだけで落としていたため、外部 ID（`external_id`）だけを持つ購入リンク——再同定できる、生きたデータ——が、**同じ商品の別プラットフォームの定期価格更新**（1 platform の更新でも商品の全 listing を再 sanitize する）で数時間後に消えていた。現在は `regular_url` と `external_id` の**両方**が空の場合だけ落とす。
+  **既知の制限**: どちらも持たない購入リンク（手入力で `affiliate_url` だけを設定していたもの）は、移行では温存するものの、次にこの商品を保存した時点で削除される。管理画面の通知が名指しする商品には、消える前に通常 URL を追加すること
+- 移行が終わる前のカードが空になっていた不具合を修正した。移行はバッチで進むため、v4 のコードが動き始めてから当該商品にバッチが到達するまでのあいだ、旧形式のまま残った listing の購入ボタン・価格・書影がすべて落ちていた（Action Scheduler が停止しているインストールでは恒久化する）。描画側で旧形式を読めるようにし、移行中である旨の通知も管理画面全体に出すようにした
+- 商品一覧の「最終同期」列が、移行後のすべての商品で空欄（—）になっていた不具合を修正した
+- 購入リンク編集 UI の身元判定・権限・必須項目まわりの不具合を修正
+
+### Security
+
+- **編集画面向けの設定読み取りに `GET /affilicard/v1/editor-settings` を新設した**（`edit_posts` で読める）。
+  - **背景**: 商品カード編集画面（サイドバー）が `fallback_on_terminal` を読む必要があるが、`affilicard_product` の capability_type は `post` で Editor は `manage_options` を持たない。`/settings` を読ませると 403 が返り、呼び出し側が既定値（false）へ黙って倒れて「使用中」の印が設定と食い違う
+  - **返すのは `fallback_on_terminal` の 1 つだけ**。キューの状態・保持期間・スロットル上書きなど一般設定オブジェクトの残りは返さない。認証情報は含まない
+  - **`GET /affilicard/v1/settings` は `manage_options` 必須のまま**で、一般設定オブジェクト全体を返す。書き込み（`PUT`）も従来どおり `manage_options`
+  - 1 つの endpoint で権限により中身を出し分けるのではなく URL を分けたのは、そうしないと「管理者専用の URL」なのか「誰でも読める URL」なのかが呼び出し側から判別できないため
+
+### Notes
+
+- **ダウングレードはできない**。v3 系のコードは `listings[].offers[]` を読めないため、v4 で保存した商品を v3 へ戻すと**すべての商品カードで購入ボタン・価格・書影が欠落する**
+- **読み取り側の追随が必要**。`listings[].fetch_error` を見て分岐していた外部コードは、v4 移行後は `fetch_error` キー自体が存在しなくなるため、**エラーにならないまま何もしない（判定が常に外れる）状態で沈黙する**。`listings[].offers[].fetch_status` へ書き換えること
+
 ## [3.5.1] - 2026-09-08
 
 ### Changed

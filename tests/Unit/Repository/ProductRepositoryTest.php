@@ -6,7 +6,9 @@ namespace Affilicard\Tests\Unit\Repository;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Schema\SchemaVersion;
+use Affilicard\Settings\GeneralSettings;
 use Mockery;
+use ReflectionMethod;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
 
@@ -19,6 +21,20 @@ final class ProductRepositoryTest extends TestCase {
 			->andReturnUsing(
 				static function ( $text ) {
 					return $text;
+				}
+			);
+		// 実 WordPress の esc_url_raw() は javascript:/data: 等の危険スキームを排除して
+		// 空文字を返す。フォールバック判定（OfferUrl）はカードの CTA と同じこの検証を
+		// 通すため、passthru ではなく危険スキームの排除だけ最小限に再現する
+		// （CardRendererTest と同じ stub）。
+		WP_Mock::userFunction( 'esc_url_raw' )
+			->andReturnUsing(
+				static function ( $value ) {
+					$value = is_scalar( $value ) ? (string) $value : '';
+					if ( 1 === preg_match( '/^\s*(javascript|data|vbscript)\s*:/i', $value ) ) {
+						return '';
+					}
+					return $value;
 				}
 			);
 	}
@@ -422,15 +438,16 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'wp_insert_post' )->andReturn( 700 );
 
 		$mirror_calls = array();
-		WP_Mock::userFunction( 'update_post_meta' )
+		WP_Mock::userFunction( 'add_post_meta' )
 			->andReturnUsing(
-				function ( $post_id, $key, $value ) use ( &$mirror_calls ) {
-					if ( 0 === strpos( $key, ProductPostType::META_EXTID_PREFIX ) ) {
-						$mirror_calls[ $key ] = $value;
+				function ( $post_id, $key, $value, $unique ) use ( &$mirror_calls ) {
+					if ( 0 === strpos( (string) $key, ProductPostType::META_EXTID_PREFIX ) ) {
+						$mirror_calls[ $key ][] = $value;
 					}
 					return true;
 				}
 			);
+		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
 
 		$repo = new ProductRepository();
 		$repo->save(
@@ -439,17 +456,32 @@ final class ProductRepositoryTest extends TestCase {
 				'product_type' => 'ebook',
 				'listings'     => array(
 					array(
-						'platform'    => 'dmm-books',
-						'external_id' => 'dmm-ext-1',
+						'platform' => 'dmm-books',
+						'offers'   => array(
+							array(
+								'external_id' => 'dmm-ext-1',
+								'regular_url' => 'https://example.test/dmm-ext-1',
+							),
+						),
 					),
 					array(
-						'platform'    => 'amazon-kindle',
-						'external_id' => 'B0XXX',
+						'platform' => 'amazon-kindle',
+						'offers'   => array(
+							array(
+								'external_id' => 'B0XXX',
+								'regular_url' => 'https://example.test/B0XXX',
+							),
+						),
 					),
-					// external_id 欠損は無視する。
+					// external_id 欠損の購入リンクは無視する。
 					array(
-						'platform'    => 'rakuten-kobo',
-						'external_id' => '',
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => '',
+								'regular_url' => 'https://example.test/rakuten',
+							),
+						),
 					),
 				),
 			)
@@ -457,8 +489,8 @@ final class ProductRepositoryTest extends TestCase {
 
 		$this->assertSame(
 			array(
-				ProductPostType::externalIdMetaKey( 'dmm-books' )     => 'dmm-ext-1',
-				ProductPostType::externalIdMetaKey( 'amazon-kindle' ) => 'B0XXX',
+				ProductPostType::externalIdMetaKey( 'dmm-books' )     => array( 'dmm-ext-1' ),
+				ProductPostType::externalIdMetaKey( 'amazon-kindle' ) => array( 'B0XXX' ),
 			),
 			$mirror_calls
 		);
@@ -466,8 +498,8 @@ final class ProductRepositoryTest extends TestCase {
 
 	public function test_save_deletes_stale_external_id_mirror_meta(): void {
 		// 既存は dmm-books の extid mirror を持つが、新 listing は amazon-kindle のみ。
-		// 旧 affilicard_extid_dmm-books が delete_post_meta で削除され、
-		// 新 affilicard_extid_amazon-kindle が書かれることを検証する。
+		// 旧 affilicard_extid_dmm-books の値が delete_post_meta で個別に削除され、
+		// 新 affilicard_extid_amazon-kindle が add_post_meta で書かれることを検証する。
 		WP_Mock::userFunction( 'wp_insert_post' )->andReturn( 800 );
 
 		// 全 meta 列挙: extid mirror + 無関係 meta を返す。
@@ -479,26 +511,31 @@ final class ProductRepositoryTest extends TestCase {
 					ProductPostType::META_PRODUCT_TYPE => array( 'ebook' ),
 				)
 			);
+		// 「既に mirror 済みか」の判定(add_post_meta 前の重複防止チェック)。既存値なし。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 800, Mockery::any(), false )
+			->andReturn( array() );
 
 		WP_Mock::userFunction( 'delete_post_meta' )
 			->once()
-			->with( 800, ProductPostType::externalIdMetaKey( 'dmm-books' ) )
+			->with( 800, ProductPostType::externalIdMetaKey( 'dmm-books' ), 'old-ext' )
 			->andReturn( true );
 		// 無関係 meta は削除されないこと。
 		WP_Mock::userFunction( 'delete_post_meta' )
-			->with( 800, ProductPostType::META_PRODUCT_TYPE )
+			->with( 800, ProductPostType::META_PRODUCT_TYPE, Mockery::any() )
 			->never();
 
 		$mirror_calls = array();
-		WP_Mock::userFunction( 'update_post_meta' )
+		WP_Mock::userFunction( 'add_post_meta' )
 			->andReturnUsing(
-				function ( $post_id, $key, $value ) use ( &$mirror_calls ) {
+				function ( $post_id, $key, $value, $unique ) use ( &$mirror_calls ) {
 					if ( 0 === strpos( (string) $key, ProductPostType::META_EXTID_PREFIX ) ) {
-						$mirror_calls[ $key ] = $value;
+						$mirror_calls[ $key ][] = $value;
 					}
 					return true;
 				}
 			);
+		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
 
 		$repo = new ProductRepository();
 		$repo->save(
@@ -507,15 +544,20 @@ final class ProductRepositoryTest extends TestCase {
 				'product_type' => 'ebook',
 				'listings'     => array(
 					array(
-						'platform'    => 'amazon-kindle',
-						'external_id' => 'B0NEW',
+						'platform' => 'amazon-kindle',
+						'offers'   => array(
+							array(
+								'external_id' => 'B0NEW',
+								'regular_url' => 'https://example.test/B0NEW',
+							),
+						),
 					),
 				),
 			)
 		);
 
 		$this->assertSame(
-			array( ProductPostType::externalIdMetaKey( 'amazon-kindle' ) => 'B0NEW' ),
+			array( ProductPostType::externalIdMetaKey( 'amazon-kindle' ) => array( 'B0NEW' ) ),
 			$mirror_calls
 		);
 		$this->assertConditionsMet();
@@ -675,14 +717,24 @@ final class ProductRepositoryTest extends TestCase {
 			->once()
 			->andReturn( array( 1, 2, 3 ) );
 
+		// hasFallbackListing() は listing 自体ではなく OfferSelector::select() が
+		// 選んだ offer を見るため、フォールバック判定用フィールドは offers[] に置く。
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 1, ProductPostType::META_LISTINGS, true )
 			->andReturn(
 				array(
 					array(
-						'platform'      => 'a',
-						'affiliate_url' => '',
-						'regular_url'   => 'https://example.com/r',
+						'platform' => 'a',
+						'offers'   => array(
+							array(
+								'affiliate_url' => '',
+								'regular_url'   => 'https://example.com/r',
+							),
+						),
 					),
 				)
 			);
@@ -691,9 +743,13 @@ final class ProductRepositoryTest extends TestCase {
 			->andReturn(
 				array(
 					array(
-						'platform'      => 'b',
-						'affiliate_url' => 'https://example.com/a',
-						'regular_url'   => 'https://example.com/r',
+						'platform' => 'b',
+						'offers'   => array(
+							array(
+								'affiliate_url' => 'https://example.com/a',
+								'regular_url'   => 'https://example.com/r',
+							),
+						),
 					),
 				)
 			);
@@ -702,15 +758,165 @@ final class ProductRepositoryTest extends TestCase {
 			->andReturn(
 				array(
 					array(
-						'platform'      => 'c',
-						'affiliate_url' => '',
-						'regular_url'   => 'https://example.com/r3',
+						'platform' => 'c',
+						'offers'   => array(
+							array(
+								'affiliate_url' => '',
+								'regular_url'   => 'https://example.com/r3',
+							),
+						),
 					),
 				)
 			);
 
 		$repo = new ProductRepository();
 		$this->assertSame( 2, $repo->countFallbackProducts() );
+	}
+
+	/**
+	 * hasFallbackListing() は private static のため、production コードに
+	 * テスト専用の公開エントリポイントを追加せずリフレクションで直接叩く。
+	 */
+	public function test_アフィリURL欠落の判定は選択された購入リンクを見る(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'display_order' => 10,
+						'external_id'   => 'a',
+						'regular_url'   => 'https://example.test/a',
+						'affiliate_url' => '',
+					),
+				),
+			),
+		);
+
+		$method = new ReflectionMethod( ProductRepository::class, 'hasFallbackListing' );
+		$method->setAccessible( true );
+
+		$this->assertTrue( $method->invoke( null, $listings ) );
+	}
+
+	/**
+	 * 先頭 offer に affiliate_url があればフォールバック表示ではない。
+	 */
+	public function test_アフィリURLがある購入リンクが選択されればフォールバックではない(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'display_order' => 10,
+						'external_id'   => 'a',
+						'regular_url'   => 'https://example.test/a',
+						'affiliate_url' => 'https://example.test/a?aff=1',
+					),
+				),
+			),
+		);
+
+		$method = new ReflectionMethod( ProductRepository::class, 'hasFallbackListing' );
+		$method->setAccessible( true );
+
+		$this->assertFalse( $method->invoke( null, $listings ) );
+	}
+
+	/**
+	 * 不正な affiliate_url は「無い」と同じ——カードは regular_url を出しているので
+	 * ダッシュボードの件数も「フォールバック中」と数える。
+	 *
+	 * 判定を素の空判定（`'' === $affiliate`）で書いていたころは、この商品だけ
+	 * カードの実物と答えが食い違っていた（`CardRenderer::ctaHref()` は
+	 * `esc_url_raw()` で検証してから採否を決めるため regular_url へ倒れる）。
+	 */
+	public function test_不正なアフィリURLの商品もフォールバックとして数える(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'display_order' => 10,
+						'external_id'   => 'a',
+						'regular_url'   => 'https://example.test/a',
+						'affiliate_url' => 'javascript:alert(1)',
+					),
+				),
+			),
+		);
+
+		$method = new ReflectionMethod( ProductRepository::class, 'hasFallbackListing' );
+		$method->setAccessible( true );
+
+		$this->assertTrue( $method->invoke( null, $listings ) );
+	}
+
+	/**
+	 * 通常 URL も不正なら出せる URL が 1 つも無い——フォールバックではない。
+	 *
+	 * この購入リンクはカード側でも表示対象から外れる（CardRenderer::visibleListings()）。
+	 * 「素の商品 URL を出している」件数に混ぜると、出ていないものを数えることになる。
+	 */
+	public function test_通常URLも不正なら出せるURLが無くフォールバックではない(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'display_order' => 10,
+						'external_id'   => 'a',
+						'regular_url'   => 'javascript:alert(1)',
+						'affiliate_url' => '',
+					),
+				),
+			),
+		);
+
+		$method = new ReflectionMethod( ProductRepository::class, 'hasFallbackListing' );
+		$method->setAccessible( true );
+
+		$this->assertFalse( $method->invoke( null, $listings ) );
+	}
+
+	/**
+	 * v3 以前の flat な listing（offers キー無し）でも LegacyOffer::offersWithFallback()
+	 * 経由でフォールバック判定の対象になる。これが抜けると、移行バッチが当該商品へ
+	 * 到達するまでの窓でフォールバック中の商品がダッシュボードの件数から漏れる。
+	 */
+	public function test_アフィリURL欠落の判定はoffersが無いflatなlistingでも機能する(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		$listings = array(
+			array(
+				'platform'      => 'rakuten-kobo',
+				'external_id'   => 'a',
+				'regular_url'   => 'https://example.test/a',
+				'affiliate_url' => '',
+			),
+		);
+
+		$method = new ReflectionMethod( ProductRepository::class, 'hasFallbackListing' );
+		$method->setAccessible( true );
+
+		$this->assertTrue( $method->invoke( null, $listings ) );
 	}
 
 	// -------------------------------------------------------
@@ -770,6 +976,9 @@ final class ProductRepositoryTest extends TestCase {
 		);
 
 		// 各 post の共通モック
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
 		WP_Mock::userFunction( 'get_option' )
 			->with( 'affilicard_platforms', array() )
 			->andReturn(
@@ -831,6 +1040,9 @@ final class ProductRepositoryTest extends TestCase {
 			);
 
 		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_option' )
 			->with( 'affilicard_platforms', array() )
 			->andReturn( array() );
 		WP_Mock::userFunction( 'get_post_meta' )
@@ -864,6 +1076,9 @@ final class ProductRepositoryTest extends TestCase {
 
 		// enabled プラットフォーム 0 件
 		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_option' )
 			->with( 'affilicard_platforms', array() )
 			->andReturn( array() );
 		WP_Mock::userFunction( 'get_post_meta' )
@@ -880,17 +1095,25 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	public function test_listingSummary_returns_first_platform_and_price(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 99, ProductPostType::META_LISTINGS, true )
 			->andReturn(
 				array(
 					array(
 						'platform' => 'dmm-books',
-						'price'    => '¥660',
+						'offers'   => array(
+							array( 'price' => '¥660' ),
+						),
 					),
 					array(
 						'platform' => 'amazon-kindle',
-						'price'    => '¥550',
+						'offers'   => array(
+							array( 'price' => '¥550' ),
+						),
 					),
 				)
 			);
@@ -903,6 +1126,9 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	public function test_listingSummary_returns_empty_when_no_listings(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 98, ProductPostType::META_LISTINGS, true )
 			->andReturn( array() );
@@ -914,6 +1140,83 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertSame( '', $result['platform'] );
 	}
 
+	/**
+	 * v3 以前の flat な listing（offers キー無し・取得結果フィールドが listing 直下）でも
+	 * LegacyOffer::offersWithFallback() 経由で offers[0] 相当へ変換してから価格を選ぶ。
+	 * これが抜けると、移行バッチが当該商品へ到達するまでの窓で管理画面の商品検索結果の
+	 * 価格が空欄になる。
+	 */
+	public function test_listingSummary_offersが無いflatなlistingでも旧フィールドから価格を返す(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 97, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform'      => 'dmm-books',
+						'external_id'   => 'X1',
+						'regular_url'   => 'https://example.test/X1',
+						'affiliate_url' => 'https://example.test/X1?aff=1',
+						'price'         => '¥660',
+					),
+				)
+			);
+
+		$repo   = new ProductRepository();
+		$result = $repo->listingSummary( 97 );
+
+		$this->assertSame( '¥660', $result['price'] );
+		$this->assertSame( 'dmm-books', $result['platform'] );
+	}
+
+	/**
+	 * 先頭（表示順 10）が terminal でも、fallback_on_terminal 設定 OFF なら
+	 * 先頭の購入リンクの価格を出す（OfferSelector::select の既定挙動）。
+	 */
+	public function test_価格サマリは選択された購入リンクから作る(): void {
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'display_order' => 10,
+						'external_id'   => 'a',
+						'regular_url'   => 'https://example.test/a',
+						'price'         => '0',
+					),
+					array(
+						'display_order' => 100,
+						'external_id'   => 'b',
+						'regular_url'   => 'https://example.test/b',
+						'price'         => '660',
+					),
+				),
+			),
+		);
+		$this->assertSame( '0', $this->summaryPriceFor( $listings ) );
+	}
+
+	/**
+	 * listingSummary() の price だけを取り出すヘルパ。get_post_meta / get_option の
+	 * 間接呼び出し（GeneralSettings::fallbackOnTerminal 既定 OFF）をまとめる。
+	 *
+	 * @param array<int, mixed> $listings
+	 */
+	private function summaryPriceFor( array $listings ): string {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 501, ProductPostType::META_LISTINGS, true )
+			->andReturn( $listings );
+
+		$repo = new ProductRepository();
+		return $repo->listingSummary( 501 )['price'];
+	}
+
 	public function test_syncDerivedMeta_mirrors_external_ids_and_sets_schema_version(): void {
 		$repo = new ProductRepository();
 		WP_Mock::userFunction( 'get_post_meta' )
@@ -921,8 +1224,13 @@ final class ProductRepositoryTest extends TestCase {
 			->andReturn(
 				array(
 					array(
-						'platform'    => 'dmm-books',
-						'external_id' => 'X1',
+						'platform' => 'dmm-books',
+						'offers'   => array(
+							array(
+								'external_id' => 'X1',
+								'regular_url' => 'https://example.test/X1',
+							),
+						),
 					),
 				)
 			);
@@ -930,8 +1238,12 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 42 )
 			->andReturn( array() );
-		WP_Mock::userFunction( 'update_post_meta' )
-			->once()->with( 42, 'affilicard_extid_dmm-books', 'X1' )->andReturn( true );
+		// 「既に mirror 済みか」の判定(add_post_meta 前の重複防止チェック)。既存値なし。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, Mockery::any(), false )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'add_post_meta' )
+			->once()->with( 42, 'affilicard_extid_dmm-books', 'X1', false )->andReturn( true );
 		WP_Mock::userFunction( 'update_post_meta' )
 			->once()->with( 42, ProductPostType::META_SCHEMA_VERSION, \Affilicard\Schema\SchemaVersion::CURRENT )->andReturn( true );
 		$repo->syncDerivedMeta( 42 );
@@ -1073,6 +1385,607 @@ final class ProductRepositoryTest extends TestCase {
 
 		$this->assertTrue( $ok );
 		$this->assertSame( '693', $saved[0]['price'] );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * $listingFields に offers[] を含めた場合、対象 listing の置き換え先として
+	 * そのまま保存される（シグネチャは不変・offers はほかのフィールドと同様に扱う）。
+	 */
+	public function test_updateListing_offersを含むlistingFieldsをそのまま保存する(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => 'r-1',
+								'price'       => '500',
+							),
+						),
+					),
+				)
+			);
+
+		$saved = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$saved ) {
+					$saved = $value;
+					return true;
+				}
+			);
+
+		$new_offers = array(
+			array(
+				'display_order' => 10,
+				'external_id'   => 'r-1',
+				'price'         => '693',
+			),
+			array(
+				'display_order' => 100,
+				'external_id'   => 'r-2',
+				'price'         => '999',
+			),
+		);
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListing(
+			42,
+			'rakuten-kobo',
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => $new_offers,
+			)
+		);
+
+		$this->assertTrue( $ok );
+		$this->assertSame( $new_offers, $saved[0]['offers'] );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * A（PR レビュー Round2）: fetch 中に管理画面が別の購入リンクを追加していても、
+	 * 価格更新はその編集を巻き戻さない。
+	 *
+	 * updateListing() は呼び出し側が持っている listing 全体で置き換えるため、
+	 * ロックの中で読み直しても「書き込む値が fetch 前の写し」であり、追加・削除・
+	 * 並べ替えが消える。updateListingOffer() は今回 fetch した 1 件だけを受け取り、
+	 * 読み直した listing へ差し込むので、並行編集が残る。
+	 */
+	public function test_updateListingOffer_fetch中に追加された購入リンクを保持して1件だけ差し替える(): void {
+		$captured = array();
+		$this->mockLockWpdb( 1, $captured );
+
+		// ロックの中で読み直した「今」の listing。r-2 は fetch のあいだに管理者が追加した。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'display_order' => 10,
+								'external_id'   => 'r-1',
+								'price'         => '500',
+							),
+							array(
+								'display_order' => 20,
+								'external_id'   => 'r-2',
+								'price'         => '800',
+							),
+						),
+					),
+					array(
+						'platform' => 'dmm-books',
+						'offers'   => array( array( 'external_id' => 'd-1' ) ),
+					),
+				)
+			);
+
+		$saved = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$saved ) {
+					$this->assertSame( 42, $post_id );
+					$this->assertSame( ProductPostType::META_LISTINGS, $key );
+					$saved = $value;
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'display_order' => 10,
+				'external_id'   => 'r-1',
+				'price'         => '693',
+			),
+			'external_id:r-1'
+		);
+
+		$this->assertTrue( $ok );
+		$this->assertCount( 2, $saved[0]['offers'] );
+		$this->assertSame( '693', $saved[0]['offers'][0]['price'] );
+		// 追加された購入リンクは残る（旧経路ではここが消えていた）。
+		$this->assertSame( 'r-2', $saved[0]['offers'][1]['external_id'] );
+		$this->assertSame( '800', $saved[0]['offers'][1]['price'] );
+		// 別 platform も不変。
+		$this->assertSame( 'dmm-books', $saved[1]['platform'] );
+		$this->assertStringContainsString( 'GET_LOCK', $captured[0] );
+		$this->assertStringContainsString( 'RELEASE_LOCK', $captured[1] );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 突き合わせは配列の添字ではなく身元（external_id）で行う。offers は複数の
+	 * 書き込み元から届き、位置は安定しないため、添字で書き戻すと別の購入リンクを
+	 * 上書きする。
+	 */
+	public function test_updateListingOffer_識別子で突き合わせ配列の位置に依存しない(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'display_order' => 100,
+								'external_id'   => 'normal',
+								'price'         => '660',
+							),
+							array(
+								'display_order' => 10,
+								'external_id'   => 'sale',
+								'price'         => '',
+							),
+						),
+					),
+				)
+			);
+
+		$saved = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$saved ) {
+					$saved = $value;
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'display_order' => 10,
+				'external_id'   => 'sale',
+				'price'         => '0',
+			),
+			'external_id:sale'
+		);
+
+		$this->assertTrue( $ok );
+		// 配列の 2 番目にいる 'sale' が更新され、1 番目の 'normal' は無傷。
+		$this->assertSame( 'normal', $saved[0]['offers'][0]['external_id'] );
+		$this->assertSame( '660', $saved[0]['offers'][0]['price'] );
+		$this->assertSame( 'sale', $saved[0]['offers'][1]['external_id'] );
+		$this->assertSame( '0', $saved[0]['offers'][1]['price'] );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * fetch 中の並べ替え・編集を、取得結果の書き戻しで巻き戻さない。
+	 *
+	 * 渡すのは「取得が変えたフィールドだけ」の差分で、ロック内で読み直した最新の
+	 * 購入リンクへマージする。offer 全体を置き換える実装だと、fetch 前のスナップショットに
+	 * 入っていた古い display_order や search_key が復活してしまう。
+	 */
+	public function test_updateListingOffer_fetch中の並べ替えと編集を巻き戻さない(): void {
+		$this->mockLockWpdb( 1 );
+
+		// ロック内で読み直した「最新」の状態。管理者が並べ替え、search_key も直した後。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id'   => 'r-1',
+								'display_order' => 50,
+								'search_key'    => '管理者が直した検索キー',
+								'price'         => '500',
+							),
+						),
+					),
+				)
+			);
+
+		$saved = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$saved ) {
+					$saved = $value;
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		// 取得が変えたのは価格と取得状態だけ。display_order / search_key は送らない。
+		$ok = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'price'        => '693',
+				'fetch_status' => '',
+			),
+			'external_id:r-1'
+		);
+
+		$this->assertTrue( $ok );
+		$offer = $saved[0]['offers'][0];
+		$this->assertSame( '693', $offer['price'], '取得した価格は反映される' );
+		$this->assertSame( 50, $offer['display_order'], '並べ替えが巻き戻ってはいけない' );
+		$this->assertSame( '管理者が直した検索キー', $offer['search_key'], '編集が巻き戻ってはいけない' );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 取得で regular_url が変わっても、取得前の identity で正しい購入リンクへ書き戻す。
+	 *
+	 * external_id を持たない購入リンクでは identity が regular_url そのものなので、
+	 * 取得結果が別 URL を返すと「更新後の offer から identity を求める」実装は
+	 * マージ先を見失う。false が返って価格が永久に入らなくなるため、マージ先は
+	 * 呼び出し側が取得前に確定させて渡す。
+	 */
+	public function test_updateListingOffer_取得で通常URLが変わっても取得前の識別子で書き戻す(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => '',
+								'regular_url' => 'https://example.test/old',
+								'price'       => '',
+							),
+						),
+					),
+				)
+			);
+
+		$saved = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$saved ) {
+					$saved = $value;
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'external_id' => '',
+				// 取得結果が返した新しい URL。identity はこちらではなく取得前の値。
+				'regular_url' => 'https://example.test/new',
+				'price'       => '693',
+			),
+			'regular_url:https://example.test/old'
+		);
+
+		$this->assertTrue( $ok );
+		$this->assertCount( 1, $saved[0]['offers'], '購入リンクが重複してはいけない' );
+		$this->assertSame( 'https://example.test/new', $saved[0]['offers'][0]['regular_url'] );
+		$this->assertSame( '693', $saved[0]['offers'][0]['price'] );
+		$this->assertConditionsMet();
+	}
+
+	/** external_id を持たない購入リンクは通常 URL（regular_url）で突き合わせる。 */
+	public function test_updateListingOffer_external_idが空なら通常URLで突き合わせる(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => '',
+								'regular_url' => 'https://example.test/manual',
+								'price'       => '',
+							),
+						),
+					),
+				)
+			);
+
+		$saved = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$saved ) {
+					$saved = $value;
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'external_id'  => '',
+				'regular_url'  => 'https://example.test/manual',
+				'fetch_status' => 'unsupported',
+			),
+			'regular_url:https://example.test/manual'
+		);
+
+		$this->assertTrue( $ok );
+		$this->assertCount( 1, $saved[0]['offers'] );
+		$this->assertSame( 'unsupported', $saved[0]['offers'][0]['fetch_status'] );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * fetch のあいだに管理者が削除した購入リンクは、**復活させない**。
+	 *
+	 * 末尾に追加し直すと削除操作が無言で取り消される。何も保存せず false を返し、
+	 * 呼び出し側（ListingRefresher）に一時失敗として扱わせる——リトライでは
+	 * OfferSelector が「そのとき現存する」購入リンクを選び直すため自然に解消する。
+	 */
+	public function test_updateListingOffer_fetch中に削除された購入リンクは追加せずfalseを返す(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => 'r-2',
+								'price'       => '800',
+							),
+						),
+					),
+				)
+			);
+		WP_Mock::userFunction( 'update_post_meta' )->never();
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'external_id' => 'r-1',
+				'price'       => '693',
+			),
+			'external_id:r-1'
+		);
+
+		$this->assertFalse( $ok );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * update_post_meta() が失敗したら false を返す（成功として報告しない）。
+	 *
+	 * 握り潰すと、取得した価格が保存されていないのに ListingRefresher は成功として
+	 * 完了し、再試行もしない——サイレントなデータロスになる。
+	 */
+	public function test_updateListingOffer_meta書き込みに失敗したらfalseを返す(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => 'r-1',
+								'price'       => '500',
+							),
+						),
+					),
+				)
+			);
+		// 書き込み失敗。値は変わっている（500 → 693）ので「変わらなかった」ではない。
+		WP_Mock::userFunction( 'update_post_meta' )->once()->andReturn( false );
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'external_id' => 'r-1',
+				'price'       => '693',
+			),
+			'external_id:r-1'
+		);
+
+		$this->assertFalse( $ok );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 値が変わらないときは書かずに true を返す。
+	 *
+	 * update_post_meta() は「既存値と同じ」でも false を返すため、戻り値をそのまま
+	 * 成否に使うと、取得結果が前回と同じだっただけの正常系が失敗として扱われ、
+	 * リトライを繰り返して最後は failed になる。
+	 */
+	public function test_updateListingOffer_値が変わらなければ書かずにtrueを返す(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => 'r-1',
+								'price'       => '693',
+							),
+						),
+					),
+				)
+			);
+		WP_Mock::userFunction( 'update_post_meta' )->never();
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'external_id' => 'r-1',
+				'price'       => '693',
+			),
+			'external_id:r-1'
+		);
+
+		$this->assertTrue( $ok );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * ロックを取れない窓は、まさに誰かが同じ meta を書いている窓である。そこで
+	 * read-modify-write に入ると、並行している管理画面の保存を丸ごと巻き戻す。
+	 * false は ListingRefresher が一時失敗として扱い再投入するため、取得した価格は
+	 * 次の試行で保存し直される（updateListing() の best-effort とは逆の判断）。
+	 */
+	public function test_updateListingOffer_ロックを取れなければ何も書かずfalseを返す(): void {
+		$captured = array();
+		$this->mockLockWpdb( 0, $captured );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 42, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => 'r-1',
+								'price'       => '500',
+							),
+						),
+					),
+				)
+			);
+		WP_Mock::userFunction( 'update_post_meta' )->never();
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			42,
+			'rakuten-kobo',
+			array(
+				'external_id' => 'r-1',
+				'price'       => '693',
+			),
+			'external_id:r-1'
+		);
+
+		$this->assertFalse( $ok );
+		// 取れていないロックを返しに行かない（GET_LOCK だけで終わる）。
+		$this->assertCount( 1, $captured );
+		$this->assertStringContainsString( 'GET_LOCK', $captured[0] );
+		$this->assertConditionsMet();
+	}
+
+	/** 該当 platform の listing 自体が無ければ false（保存しない）。 */
+	public function test_updateListingOffer_一致platformが無ければfalseで保存しない(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 7, ProductPostType::META_LISTINGS, true )
+			->andReturn( array( array( 'platform' => 'dmm-books' ) ) );
+		WP_Mock::userFunction( 'update_post_meta' )->never();
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer( 7, 'rakuten-kobo', array( 'external_id' => 'r-1' ), 'external_id:r-1' );
+
+		$this->assertFalse( $ok );
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 移行前の flat な listing（offers を持たない v3 以前の形）でも、読み取り側と同じ
+	 * 写像（LegacyOffer::offersWithFallback）を通してから突き合わせる。ここで offers を
+	 * 直接読むと、移行バッチが到達していない商品の価格更新が永久に保存できない。
+	 */
+	public function test_updateListingOffer_移行前のflat_listingでもoffers化して差し替える(): void {
+		$this->mockLockWpdb( 1 );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 31, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'external_id' => 'flat-1',
+						'regular_url' => 'https://example.test/flat',
+						'price'       => '700',
+					),
+				)
+			);
+
+		$saved = null;
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) use ( &$saved ) {
+					$saved = $value;
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$ok   = $repo->updateListingOffer(
+			31,
+			'rakuten-kobo',
+			array(
+				'external_id' => 'flat-1',
+				'regular_url' => 'https://example.test/flat',
+				'price'       => '550',
+			),
+			'external_id:flat-1'
+		);
+
+		$this->assertTrue( $ok );
+		$this->assertCount( 1, $saved[0]['offers'] );
+		$this->assertSame( '550', $saved[0]['offers'][0]['price'] );
 		$this->assertConditionsMet();
 	}
 }
