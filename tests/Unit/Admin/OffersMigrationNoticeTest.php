@@ -363,4 +363,82 @@ final class OffersMigrationNoticeTest extends TestCase {
 		$this->assertStringContainsString( 'post=909&action=edit', $output, '諦めた商品への導線が無い' );
 		$this->assertStringContainsString( '商品909', $output );
 	}
+
+	/**
+	 * dismiss は「表示した件数」で閉じる（押下時の最新件数ではない）。
+	 *
+	 * 通知を出してからクリックするまでの間に後続バッチが件数を増やすことがある。
+	 * 押下時に読み直すと、利用者が見ていない分まで抑止してしまう。表示した件数を
+	 * URL で持ち回ることで「見たぶんだけ閉じる」になる。
+	 */
+	public function test_dismissは表示した件数で閉じる(): void {
+		$_GET = array(
+			'affilicard_dismiss_offers_migration_notice' => '1',
+			'affilicard_dismissed_count'                 => '2',
+		);
+
+		$saved = null;
+		WP_Mock::userFunction( 'get_current_user_id' )->andReturn( 7 );
+		WP_Mock::userFunction( 'check_admin_referer' )->once()->with( 'affilicard_dismiss_offers_migration_notice:2' );
+		WP_Mock::userFunction( 'update_user_meta' )
+			->andReturnUsing(
+				function ( $user_id, $key, $value ) use ( &$saved ): bool {
+					$saved = $value;
+					return true;
+				}
+			);
+		WP_Mock::userFunction( 'remove_query_arg' )->andReturn( 'https://example.test/back' );
+		WP_Mock::userFunction( 'wp_unslash', array( 'return_arg' => 0 ) );
+		WP_Mock::userFunction( 'sanitize_text_field', array( 'return_arg' => 0 ) );
+		WP_Mock::userFunction( 'wp_safe_redirect' )->andReturnUsing(
+			static function (): void {
+				throw new \RuntimeException( 'redirected' );
+			}
+		);
+
+		try {
+			OffersMigrationNotice::maybeHandleDismiss();
+			$this->fail( 'リダイレクトしていない' );
+		} catch ( \RuntimeException $e ) {
+			$this->assertSame( 'redirected', $e->getMessage() );
+		}
+
+		$this->assertSame( 2, $saved, '表示した件数（2）ではなく別の値で閉じている' );
+		$_GET = array();
+	}
+
+	/**
+	 * URL の件数を書き換えても nonce が一致せず弾かれる。
+	 *
+	 * 件数を nonce action に織り込んでいるので、数字だけ大きくして
+	 * 「まだ見ていない分まで閉じる」ことはできない。
+	 */
+	public function test_dismissの件数を書き換えるとnonceが一致しない(): void {
+		$_GET = array(
+			'affilicard_dismiss_offers_migration_notice' => '1',
+			'affilicard_dismissed_count'                 => '999',
+		);
+
+		WP_Mock::userFunction( 'wp_unslash', array( 'return_arg' => 0 ) );
+		WP_Mock::userFunction( 'sanitize_text_field', array( 'return_arg' => 0 ) );
+		// 改竄された件数がそのまま nonce action に入る＝発行時の action と一致しない。
+		WP_Mock::userFunction( 'check_admin_referer' )
+			->once()
+			->with( 'affilicard_dismiss_offers_migration_notice:999' )
+			->andReturnUsing(
+				static function (): void {
+					throw new \RuntimeException( 'nonce mismatch' );
+				}
+			);
+		WP_Mock::userFunction( 'update_user_meta' )->never();
+
+		try {
+			OffersMigrationNotice::maybeHandleDismiss();
+			$this->fail( 'nonce 検証を通ってしまった' );
+		} catch ( \RuntimeException $e ) {
+			$this->assertSame( 'nonce mismatch', $e->getMessage() );
+		}
+
+		$_GET = array();
+	}
 }

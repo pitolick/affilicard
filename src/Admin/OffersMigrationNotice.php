@@ -44,6 +44,9 @@ final class OffersMigrationNotice {
 	 */
 	private const DISMISS_META = 'affilicard_offers_migration_notice_dismissed';
 
+	/** 表示していた件数を運ぶクエリ引数名（nonce action にも織り込む）。 */
+	private const DISMISS_COUNT_ARG = 'affilicard_dismissed_count';
+
 	/** 「今後表示しない」リンクのアクション名（nonce/クエリ引数）。 */
 	private const DISMISS_ACTION = 'affilicard_dismiss_offers_migration_notice';
 
@@ -139,10 +142,7 @@ final class OffersMigrationNotice {
 			return;
 		}
 
-		$dismiss_url = wp_nonce_url(
-			add_query_arg( self::DISMISS_ACTION, '1' ),
-			self::DISMISS_ACTION
-		);
+		$dismiss_url = self::dismissUrl( self::DISMISS_ACTION, PluginUpgrade::preservedWithoutRegularUrlCount() );
 
 		echo '<div class="notice notice-warning"><p>';
 		echo esc_html(
@@ -175,10 +175,7 @@ final class OffersMigrationNotice {
 			return;
 		}
 
-		$dismiss_url = wp_nonce_url(
-			add_query_arg( self::DISMISS_FAILED_ACTION, '1' ),
-			self::DISMISS_FAILED_ACTION
-		);
+		$dismiss_url = self::dismissUrl( self::DISMISS_FAILED_ACTION, PluginUpgrade::migrationFailedCount() );
 
 		echo '<div class="notice notice-error"><p>';
 		echo esc_html(
@@ -260,31 +257,52 @@ final class OffersMigrationNotice {
 	 */
 	public static function maybeHandleDismiss(): void {
 		if ( isset( $_GET[ self::DISMISS_ACTION ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce は直後の check_admin_referer で検証する。
-			self::dismiss(
-				self::DISMISS_ACTION,
-				self::DISMISS_META,
-				PluginUpgrade::preservedWithoutRegularUrlCount()
-			);
+			self::dismiss( self::DISMISS_ACTION, self::DISMISS_META );
 		}
 
 		if ( isset( $_GET[ self::DISMISS_FAILED_ACTION ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce は直後の check_admin_referer で検証する。
-			self::dismiss(
-				self::DISMISS_FAILED_ACTION,
-				self::DISMISS_FAILED_META,
-				PluginUpgrade::migrationFailedCount()
-			);
+			self::dismiss( self::DISMISS_FAILED_ACTION, self::DISMISS_FAILED_META );
 		}
+	}
+
+	/**
+	 * 「今後表示しない」リンクの URL。**表示した件数を URL と nonce action の両方に載せる。**
+	 *
+	 * 押下時に最新件数を読み直すと、通知を出してからクリックするまでの間に後続バッチが
+	 * 件数を増やした場合、利用者が見ていない分まで抑止してしまう。表示した件数を
+	 * 持ち回ることで「見たぶんだけ閉じる」になる。
+	 *
+	 * 件数を nonce action にも織り込むのは改竄対策である。URL の数字だけを書き換えても
+	 * nonce が一致せず check_admin_referer() で弾かれる。
+	 */
+	private static function dismissUrl( string $action, int $count ): string {
+		return wp_nonce_url(
+			add_query_arg(
+				array(
+					$action                 => '1',
+					self::DISMISS_COUNT_ARG => (string) $count,
+				)
+			),
+			$action . ':' . $count
+		);
 	}
 
 	/**
 	 * dismiss の共通処理。nonce を検証し、「閉じた時点の件数」をユーザーメタへ残して
 	 * クエリ引数を除いてリダイレクトする。
 	 */
-	private static function dismiss( string $action, string $meta, int $count ): void {
-		check_admin_referer( $action );
+	private static function dismiss( string $action, string $meta ): void {
+		// 件数は URL から取る（表示した値）。nonce action にも同じ値が入っているので、
+		// 書き換えられていれば check_admin_referer() が弾く。
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce は直後の check_admin_referer で検証する。
+		$raw_count = isset( $_GET[ self::DISMISS_COUNT_ARG ] )
+			? sanitize_text_field( wp_unslash( $_GET[ self::DISMISS_COUNT_ARG ] ) ) // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			: '0';
+		$count     = max( 0, (int) $raw_count );
+		check_admin_referer( $action . ':' . $count );
 		// 真偽値ではなく「閉じた時点の件数」を残す（後続バッチの増分で出し直すため）。
 		update_user_meta( get_current_user_id(), $meta, $count );
-		wp_safe_redirect( remove_query_arg( array( $action, '_wpnonce' ) ) );
+		wp_safe_redirect( remove_query_arg( array( $action, self::DISMISS_COUNT_ARG, '_wpnonce' ) ) );
 		exit;
 	}
 
