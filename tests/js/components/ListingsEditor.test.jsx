@@ -894,6 +894,80 @@ describe( 'withNormalisedOffers（Affilicard\\Pricing\\LegacyOffer::offersWithFa
 		expect( normalised.offers ).toEqual( [] );
 	} );
 
+	describe( '非スカラーの flat フィールド（PHP の ScalarField::string() と同じ規則）', () => {
+		// PHP は `Affilicard\Util\ScalarField::string()` で非スカラーを「値なし」に倒す
+		// （src/Util/ScalarField.php・tests/Unit/Pricing/LegacyOfferTest.php で固定済み）。
+		// JS が `String(value)` で畳むと配列 ['r-1'] が 'r-1' に化け、PHP が捨てる入力から
+		// 編集画面だけが購入リンクを合成する。そのまま保存すると、でたらめな文字列が
+		// 本物の身元（external_id）や URL として永続化され、再同定も生死判定もできなくなる。
+
+		test( '配列しか持たない listing からは購入リンクを合成しない', () => {
+			const normalised = withNormalisedOffers( {
+				platform: 'rakuten-kobo',
+				external_id: [ 'r-1' ],
+				regular_url: [ 'https://example.test/a' ],
+			} );
+
+			expect( normalised.offers ).toEqual( [] );
+		} );
+
+		test( 'オブジェクトしか持たない listing からは購入リンクを合成しない', () => {
+			const normalised = withNormalisedOffers( {
+				platform: 'rakuten-kobo',
+				external_id: { id: 'r-1' },
+				price: { amount: 693 },
+			} );
+
+			expect( normalised.offers ).toEqual( [] );
+		} );
+
+		test( '合成する listing でも非スカラーのフィールドは空文字にする', () => {
+			const normalised = withNormalisedOffers( {
+				platform: 'rakuten-kobo',
+				regular_url: 'https://example.test/flat',
+				external_id: [ 'r-1' ],
+				affiliate_url: { href: 'https://example.test/aff' },
+				price: [ '693' ],
+			} );
+
+			expect( normalised.offers ).toHaveLength( 1 );
+			// 'r-1' / '[object Object]' ではなく空文字（PHP の toOffer() と同じ）。
+			expect( normalised.offers[ 0 ].external_id ).toBe( '' );
+			expect( normalised.offers[ 0 ].affiliate_url ).toBe( '' );
+			expect( normalised.offers[ 0 ].price ).toBe( '' );
+			// スカラーのフィールドは従来どおり残る。
+			expect( normalised.offers[ 0 ].regular_url ).toBe(
+				'https://example.test/flat'
+			);
+		} );
+
+		test( '非スカラーの fetch_status / fetch_error からは取得状態を作らない', () => {
+			const normalised = withNormalisedOffers( {
+				platform: 'rakuten-kobo',
+				regular_url: 'https://example.test/flat',
+				fetch_status: [ 'terminal' ],
+				fetch_error: [ '該当する商品が見つかりませんでした' ],
+			} );
+
+			expect( normalised.offers[ 0 ].fetch_status ).toBe( '' );
+		} );
+
+		test( 'スカラーは従来どおり文字列化する（PHP の (string) と同じ）', () => {
+			const normalised = withNormalisedOffers( {
+				platform: 'rakuten-kobo',
+				external_id: 12,
+				price: true,
+				badge: false,
+			} );
+
+			expect( normalised.offers ).toHaveLength( 1 );
+			expect( normalised.offers[ 0 ].external_id ).toBe( '12' );
+			// PHP の (string) true === '1' / (string) false === ''。
+			expect( normalised.offers[ 0 ].price ).toBe( '1' );
+			expect( normalised.offers[ 0 ].badge ).toBe( '' );
+		} );
+	} );
+
 	test( 'offers が空配列でも flat なフィールドがあれば写す', () => {
 		const normalised = withNormalisedOffers( flatListing( { offers: [] } ) );
 

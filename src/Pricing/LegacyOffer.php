@@ -111,12 +111,17 @@ final class LegacyOffer {
 	 * 既に `fetch_status` を持っていればそれを使い、無ければ旧 `fetch_error` の
 	 * 文言から写す。
 	 *
+	 * 他のフィールドと同じく {@see ScalarField::string()} で読む。`(string)` で直に
+	 * キャストすると、配列が入っていたとき「Array to string conversion」の警告を出した
+	 * うえで `'Array'` という存在しない取得状態が offer に入る。
+	 *
 	 * @param array<string, mixed> $listing
 	 */
 	private static function resolveFetchStatus( array $listing ): string {
-		if ( isset( $listing['fetch_status'] ) && '' !== (string) $listing['fetch_status'] ) {
-			return (string) $listing['fetch_status'];
+		$status = ScalarField::string( $listing, 'fetch_status' );
+		if ( '' !== $status ) {
+			return $status;
 		}
-		return FetchStatus::fromLegacyMessage( isset( $listing['fetch_error'] ) ? (string) $listing['fetch_error'] : '' );
+		return FetchStatus::fromLegacyMessage( ScalarField::string( $listing, 'fetch_error' ) );
 	}
 }

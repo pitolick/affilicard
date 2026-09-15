@@ -57,6 +57,36 @@ function offerDisplayOrder(raw) {
 	return DEFAULT_DISPLAY_ORDER;
 }
 
+/**
+ * `Affilicard\Util\ScalarField::string()`（PHP、src/Util/ScalarField.php）と同じ
+ * 「外部由来の値から文字列フィールドを読む」規則。
+ *
+ * **PHP がスカラーしか受け取らないので JS も受け取らない。** `String(value)` で畳むと
+ * 配列 `['r-1']` が `'r-1'`、オブジェクトが `'[object Object]'` になり、PHP が
+ * 「値なし」と捨てる入力から編集画面だけが購入リンクを合成する。その状態で保存すると
+ * でたらめな文字列が本物の身元（external_id）や URL として永続化され、以後の再同定も
+ * 生死判定もできなくなる。
+ *
+ * スカラーの畳み方も PHP の `(string)` に合わせる——真偽値は `true` が `'1'`、
+ * `false` が `''`。null / undefined は PHP の `isset()` が偽になるのと同じく空文字。
+ *
+ * @param {*} value
+ * @return {string}
+ */
+function scalarString(value) {
+	if (typeof value === 'string') {
+		return value;
+	}
+	if (typeof value === 'number') {
+		return String(value);
+	}
+	if (typeof value === 'boolean') {
+		// PHP の (string) true === '1' / (string) false === ''。
+		return value ? '1' : '';
+	}
+	return '';
+}
+
 const EMPTY_LISTING = {
 	platform: '',
 	enabled: true,
@@ -91,6 +121,10 @@ function emptyOffer() {
  * `Affilicard\Pricing\LegacyOffer::hasFlatFetchFields()`（PHP）と同じ判定。
  * v3 以前の flat な取得結果フィールドを 1 つでも持っているか（空文字は「持たない」）。
  *
+ * 値の読み方は legacyOffer() と同じ scalarString() を通す（PHP が
+ * `ScalarField::string()` を両方で使うのと同じ）。ここだけ別の読み方をすると、
+ * 「合成すると判定したのに合成した offer は全フィールドが空」という食い違いが出る。
+ *
  * @param {Object} listing
  * @return {boolean}
  */
@@ -102,10 +136,7 @@ function hasFlatFetchFields(listing) {
 		'price',
 		'image_url',
 		'search_key',
-	].some((key) => {
-		const value = listing?.[key];
-		return value !== undefined && value !== null && String(value) !== '';
-	});
+	].some((key) => scalarString(listing?.[key]) !== '');
 }
 
 /**
@@ -155,24 +186,25 @@ function fetchStatusFromLegacyMessage(message) {
  * @return {Object}
  */
 function legacyOffer(listing) {
-	const str = (value) =>
-		value === undefined || value === null ? '' : String(value);
+	// PHP の toOffer() は全フィールドを ScalarField::string() で読む。JS も同じ
+	// scalarString() を通す（hasFlatFetchFields() と共有する唯一の読み取り規則）。
+	const fetchStatus = scalarString(listing.fetch_status);
 	return {
 		display_order: offerDisplayOrder(listing.display_order),
-		external_id: str(listing.external_id),
-		regular_url: str(listing.regular_url),
-		affiliate_url: str(listing.affiliate_url),
-		price: str(listing.price),
-		list_price: str(listing.list_price),
-		badge: str(listing.badge),
-		image_url: str(listing.image_url),
-		search_key: str(listing.search_key),
+		external_id: scalarString(listing.external_id),
+		regular_url: scalarString(listing.regular_url),
+		affiliate_url: scalarString(listing.affiliate_url),
+		price: scalarString(listing.price),
+		list_price: scalarString(listing.list_price),
+		badge: scalarString(listing.badge),
+		image_url: scalarString(listing.image_url),
+		search_key: scalarString(listing.search_key),
 		fetch_status:
-			str(listing.fetch_status) !== ''
-				? str(listing.fetch_status)
-				: fetchStatusFromLegacyMessage(listing.fetch_error),
-		last_fetched_at: str(listing.last_fetched_at),
-		last_verified_at: str(listing.last_verified_at),
+			fetchStatus !== ''
+				? fetchStatus
+				: fetchStatusFromLegacyMessage(scalarString(listing.fetch_error)),
+		last_fetched_at: scalarString(listing.last_fetched_at),
+		last_verified_at: scalarString(listing.last_verified_at),
 	};
 }
 

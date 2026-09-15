@@ -64,6 +64,25 @@ final class LegacyOfferTest extends TestCase {
 	}
 
 	/**
+	 * 取得状態も他のフィールドと同じく非スカラーを捨てる。
+	 *
+	 * `(string)` で直にキャストすると「Array to string conversion」の警告を出したうえで
+	 * `'Array'` という存在しない取得状態が offer に入り、後段の `FetchStatus::normalise()`
+	 * が畳むため、理由の書かれない警告アイコンだけが残る。
+	 */
+	public function test_配列のfetch_statusやfetch_errorは取得状態を作らない(): void {
+		$offer = LegacyOffer::toOffer(
+			array(
+				'external_id'  => 'r-1',
+				'fetch_status' => array( 'terminal' ),
+				'fetch_error'  => array( '該当する商品が見つかりませんでした' ),
+			)
+		);
+
+		$this->assertSame( '', $offer['fetch_status'] );
+	}
+
+	/**
 	 * 読めない display_order は既定値へ倒す（OfferSelector::normaliseOrder と同じ規則）。
 	 *
 	 * ここだけ `(int)` で畳むと、v3 の flat listing で読めない値のとき PHP は 0
