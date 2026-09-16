@@ -6,6 +6,7 @@ namespace Affilicard\Upgrade;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Queue\OfferPromotionTrigger;
+use Affilicard\Repository\ListingLock;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Rest\ProductSchema;
 use Affilicard\Schema\SchemaVersion;
@@ -522,8 +523,61 @@ final class PluginUpgrade {
 	 * {@see self::MIGRATION_MAX_ATTEMPTS} 回試して駄目なら諦め、post ID を記録して
 	 * 通知に出す。諦めた商品は旧形式のまま残り、読み側のフォールバック
 	 * （LegacyOffer::offersWithFallback()）が従来どおり描く。
+	 *
+	 * **読み→変換→保存を {@see ListingLock} の中で行う。** ここは META_LISTINGS を
+	 * 丸ごと読んで丸ごと書き戻す read-modify-write であり、他の書き手
+	 * （管理画面の保存＝{@see ProductRepository::updateListing()}、価格更新＝
+	 * {@see ProductRepository::updateListingOffer()}）は同じロックを取る。ロック無しで
+	 * 走ると、読みと書きのあいだに入った更新が移行前の値へ黙って巻き戻る。しかも
+	 * writeMigratedListings() の読み直しは自分が書いた値と突き合わせるだけなので、
+	 * 巻き戻しは検出できず移行は成功に見える。価格更新に巻き戻された購入リンクは
+	 * last_fetched_at が既に押されているぶん needsRefetch() が冷却期間のあいだ
+	 * 再取得を抑止するため、古い価格がそのまま居座る。
+	 *
+	 * **{@see \Affilicard\Queue\RefreshHandler} でロックを見送ったのとは事情が違う。**
+	 * あちらのクリティカルセクションは外部 API の fetch（数百 ms〜数秒）を跨ぐが、
+	 * ここは meta の読み書きとメモリ上の変換だけで I/O を待たない。
+	 *
+	 * **ロックを取れなければ移行しない。** その窓はまさに誰かが同じ meta を書いている
+	 * 窓であり、押し通せばロックを置いた意味が無くなる。扱いは保存の失敗と同じ経路
+	 * （{@see self::deferOrGiveUp()}）に合流させる——差し戻して次の実行でやり直し、
+	 * {@see self::MIGRATION_MAX_ATTEMPTS} 回続けて取れなければ諦めて先へ進む。
+	 * 差し戻しだけにすると、ロックを握ったまま固まったセッションが 1 つあるだけで
+	 * その商品より後ろの post ID が永久に移行されなくなる（＝恒久的な保存失敗で
+	 * 諦める機構を用意したのと同じ理由）。諦めた商品は旧形式のまま残り、読み側の
+	 * フォールバックが従来どおり描く。
 	 */
 	private static function migrateOneProduct( int $postId ): void {
+		ListingLock::around(
+			$postId,
+			static function ( bool $locked ) use ( $postId ): void {
+				self::migrateOneProductLocked( $postId, $locked );
+			}
+		);
+	}
+
+	/**
+	 * {@see self::migrateOneProduct()} の本体。listing ロックの内側だけで呼ばれる。
+	 *
+	 * @param bool $locked ロックを取得できたか（取得できなくてもコールバックは呼ばれる。
+	 *                     続行するか諦めるかは呼び出し側の判断＝ここで決める）。
+	 * @throws OffersMigrationWriteFailure 移行できず、まだ諦めないとき（差し戻し）.
+	 */
+	private static function migrateOneProductLocked( int $postId, bool $locked ): void {
+		if ( ! $locked ) {
+			// 何も読まず・書かずに、保存の失敗と同じ経路へ流す（理由は上の PHPDoc）。
+			self::deferOrGiveUp(
+				$postId,
+				new OffersMigrationWriteFailure(
+					sprintf( 'affilicard: offers 移行のロックを取得できませんでした（post %d）。', $postId )
+				)
+			);
+
+			// 諦めた場合はここへ来る。移行していないのだから、温存件数も派生 meta も
+			// 触らない（下の保存失敗と同じ理由）。
+			return;
+		}
+
 		$raw      = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
 		$listings = is_string( $raw ) ? JsonField::decode( $raw, array() ) : ( is_array( $raw ) ? $raw : array() );
 
@@ -547,12 +601,7 @@ final class PluginUpgrade {
 			try {
 				$stored = self::writeMigratedListings( $postId, $migrated );
 			} catch ( OffersMigrationWriteFailure $failure ) {
-				if ( self::recordMigrationFailure( $postId ) ) {
-					// まだ諦めない。差し戻してカーソルを止め、次の実行で同じ商品からやり直す。
-					throw $failure;
-				}
-
-				self::giveUpOnProduct( $postId );
+				self::deferOrGiveUp( $postId, $failure );
 
 				// **ここで return する。** 何も格納されていないのだから、
 				// 温存件数（countPreservedWithoutRegularUrl）へ渡す「保存後の形」は
@@ -569,6 +618,29 @@ final class PluginUpgrade {
 		}
 
 		( new ProductRepository() )->syncDerivedMeta( $postId );
+	}
+
+	/**
+	 * 移行できなかった商品を「差し戻す」か「諦める」かへ振り分ける。
+	 *
+	 * 保存が効かなかった場合とロックを取れなかった場合で扱いを変えない——どちらも
+	 * 「その商品を今は移行できなかった」であり、再試行で直ることもあれば恒久的に
+	 * 直らないこともある。試行回数（{@see self::MIGRATION_MAX_ATTEMPTS}）で共通に
+	 * 見切ることで、恒久的な失敗が 1 件あっただけで残り全部の商品が移行されなくなる
+	 * 事態を防ぐ。
+	 *
+	 * 諦めた（＝例外を投げずに戻った）ときは、呼び出し側は温存件数も派生 meta も
+	 * 触らずに戻ること。移行は行われていない。
+	 *
+	 * @throws OffersMigrationWriteFailure 差し戻すとき（次の実行で同じ商品から再試行する）.
+	 */
+	private static function deferOrGiveUp( int $postId, OffersMigrationWriteFailure $failure ): void {
+		if ( self::recordMigrationFailure( $postId ) ) {
+			// まだ諦めない。差し戻してカーソルを止め、次の実行で同じ商品からやり直す。
+			throw $failure;
+		}
+
+		self::giveUpOnProduct( $postId );
 	}
 
 	/**

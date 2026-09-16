@@ -180,11 +180,11 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 *
 	 * find()→save() の全 listings 上書きは、同一商品の別 platform listing を別 account
 	 * group（affilicard-rakuten / affilicard-dmm 等）で並行更新すると後着の save が先着の
-	 * 変更を消す（lost update）。ここでは MySQL 名前付きロックで read-modify-write を
-	 * クリティカルセクション化し、META_LISTINGS をその場で再読込→対象 platform の listing
-	 * だけを $listingFields で丸ごと置換して update_post_meta することで、並行更新された
-	 * 他 platform listing を失わない。external_id は refresh で変わらないため extid ミラー
-	 * 同期（syncExternalIdMirror）は呼ばない。
+	 * 変更を消す（lost update）。ここでは {@see ListingLock} の名前付きロックで
+	 * read-modify-write をクリティカルセクション化し、META_LISTINGS をその場で再読込→
+	 * 対象 platform の listing だけを $listingFields で丸ごと置換して update_post_meta する
+	 * ことで、並行更新された他 platform listing を失わない。external_id は refresh で
+	 * 変わらないため extid ミラー同期（syncExternalIdMirror）は呼ばない。
 	 *
 	 * ロック取得に失敗（0/null）しても RMW は best-effort で続行する（fetch は既に成功済みで、
 	 * ロック不能を理由に更新を捨てる方が有害。取得可否は挙動を変えない安全弁）。
@@ -201,39 +201,35 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 *                                             （購入リンク配列 offers を含む）。
 	 */
 	public function updateListing( int $postId, string $platform, array $listingFields ): bool {
-		global $wpdb;
+		return ListingLock::around(
+			$postId,
+			static function ( bool $locked ) use ( $postId, $platform, $listingFields ): bool {
+				// **$locked は見ない（best-effort）。** ロックを取れなくても
+				// read-modify-write へ入る。理由は上の PHPDoc のとおりで、fetch は
+				// 既に成功しており、ロック不能を理由に取得済みの値を捨てる方が有害。
+				$raw      = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
+				$listings = is_string( $raw )
+					? JsonField::decode( $raw, array() )
+					: ( is_array( $raw ) ? $raw : array() );
 
-		// GET_LOCK の名前は 64 バイト以内。post ID は整数なので prefix 込みで超えない。
-		$lock = "affilicard_listing_{$postId}";
-		$got  = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $lock, 10 ) );
-
-		try {
-			$raw      = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
-			$listings = is_string( $raw )
-				? JsonField::decode( $raw, array() )
-				: ( is_array( $raw ) ? $raw : array() );
-
-			$found = false;
-			foreach ( $listings as $index => $listing ) {
-				if ( ! is_array( $listing ) || ( $listing['platform'] ?? '' ) !== $platform ) {
-					continue;
+				$found = false;
+				foreach ( $listings as $index => $listing ) {
+					if ( ! is_array( $listing ) || ( $listing['platform'] ?? '' ) !== $platform ) {
+						continue;
+					}
+					$listings[ $index ] = $listingFields;
+					$found              = true;
+					break;
 				}
-				$listings[ $index ] = $listingFields;
-				$found              = true;
-				break;
-			}
 
-			if ( ! $found ) {
-				return false;
-			}
+				if ( ! $found ) {
+					return false;
+				}
 
-			update_post_meta( $postId, ProductPostType::META_LISTINGS, array_values( $listings ) );
-			return true;
-		} finally {
-			if ( $got > 0 ) {
-				$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock ) );
+				update_post_meta( $postId, ProductPostType::META_LISTINGS, array_values( $listings ) );
+				return true;
 			}
-		}
+		);
 	}
 
 	/**
@@ -259,9 +255,11 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * {@see LegacyOffer::offersWithFallback()} で offers[] へ写してから突き合わせる
 	 * （読み取り側・移行バッチと同じ写像を通す）。
 	 *
-	 * ロックの流儀（名前・タイムアウト・finally での解放）は updateListing() と同じだが、
-	 * **ロックを取れなかったときの扱いだけが逆**である（取れなければ何も書かず false）。
-	 * 理由は updateListing() の PHPDoc に書いた非対称のとおり。
+	 * ロックの流儀（名前・タイムアウト・finally での解放）は {@see ListingLock} が
+	 * updateListing() と共通で持つが、**ロックを取れなかったときの扱いだけが逆**である
+	 * （取れなければ何も書かず false）。理由は updateListing() の PHPDoc に書いた
+	 * 非対称のとおり。だから ListingLock は取得の成否をコールバックへ渡すだけにして、
+	 * そこから先の判断は呼び出し側に置いている。
 	 *
 	 * @param array<string, mixed> $patch          取得が変えたフィールドだけの差分。
 	 *                                             ロック内で読み直した購入リンクへマージする。
@@ -271,82 +269,78 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 *                                             持たない購入リンクでは前後で identity が変わる。
 	 */
 	public function updateListingOffer( int $postId, string $platform, array $patch, string $targetIdentity ): bool {
-		global $wpdb;
-
-		$lock = "affilicard_listing_{$postId}";
-		$got  = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $lock, 10 ) );
-		if ( $got <= 0 ) {
-			// **ロック無しで read-modify-write に入らない。** ロックを取れない窓は
-			// まさに誰かが同じ meta を書いている窓であり、そこで読み書きすると
-			// 管理画面の保存を丸ごと巻き戻す（lost update）。false は
-			// ListingRefresher::refreshOne() が一時失敗として扱って再投入するため、
-			// 取得した価格は次の試行で保存し直される——取りこぼしにはならない。
-			// 全体を置き換える updateListing() が best-effort で続行するのとは
-			// 逆の判断（理由は同関数の PHPDoc）。
-			return false;
-		}
-
-		try {
-			$raw      = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
-			$listings = is_string( $raw )
-				? JsonField::decode( $raw, array() )
-				: ( is_array( $raw ) ? $raw : array() );
-			// 書き込み前の姿を控える（update_post_meta() の false を「失敗」と
-			// 「値が変わらなかった」に切り分けるため。下の保存を参照）。
-			$before = $listings;
-
-			foreach ( $listings as $index => $listing ) {
-				if ( ! is_array( $listing ) || ( $listing['platform'] ?? '' ) !== $platform ) {
-					continue;
-				}
-
-				$merged  = array();
-				$written = false;
-				foreach ( LegacyOffer::offersWithFallback( $listing ) as $existing ) {
-					if ( ! $written && is_array( $existing ) && OfferIdentity::of( $existing ) === $targetIdentity ) {
-						// **置換ではなくマージする。** $patch は取得が変えたフィールドだけを
-						// 持ち、ロック内で読み直した $existing に載せる。こうしないと fetch 中の
-						// 並べ替え（display_order）や search_key の編集が古い写しで巻き戻る。
-						$merged[] = array_merge( $existing, $patch );
-						$written  = true;
-						continue;
-					}
-					$merged[] = $existing;
-				}
-
-				if ( ! $written ) {
-					// fetch 中に削除された購入リンク。追加し直さず未保存を報告する。
+		return ListingLock::around(
+			$postId,
+			static function ( bool $locked ) use ( $postId, $platform, $patch, $targetIdentity ): bool {
+				if ( ! $locked ) {
+					// **ロック無しで read-modify-write に入らない。** ロックを取れない窓は
+					// まさに誰かが同じ meta を書いている窓であり、そこで読み書きすると
+					// 管理画面の保存を丸ごと巻き戻す（lost update）。false は
+					// ListingRefresher::refreshOne() が一時失敗として扱って再投入するため、
+					// 取得した価格は次の試行で保存し直される——取りこぼしにはならない。
+					// 全体を置き換える updateListing() が best-effort で続行するのとは
+					// 逆の判断（理由は同関数の PHPDoc）。
 					return false;
 				}
 
-				$listing['offers']  = $merged;
-				$listings[ $index ] = $listing;
-				$next               = array_values( $listings );
+				$raw      = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
+				$listings = is_string( $raw )
+					? JsonField::decode( $raw, array() )
+					: ( is_array( $raw ) ? $raw : array() );
+				// 書き込み前の姿を控える（update_post_meta() の false を「失敗」と
+				// 「値が変わらなかった」に切り分けるため。下の保存を参照）。
+				$before = $listings;
 
-				// **update_post_meta() の false を握り潰さない。** 握り潰すと、取得した
-				// 価格が保存されていないのに呼び出し側は成功として完了し、再試行もしない
-				// （＝サイレントなデータロス）。
-				//
-				// ただし false は「失敗」と「値が変わらなかった」の両方で返る
-				// （WordPress は既存値と一致すると書かずに false を返す）。戻り値だけでは
-				// 切り分けられないので、書く前に自分で比較して「変わらない」を先に
-				// 除いてから呼ぶ——PluginUpgrade::writeMigratedListings() が読み直しで
-				// 同じ切り分けをしているのと同じ趣旨で、こちらは保存前の値を控えて行う
-				// （書き込みは sanitize_meta を通るため、読み直した値は渡した値と
-				// 一致するとは限らない）。
-				if ( $next === $before ) {
-					// 書くものが無い＝既に望みの状態。成功として返す。
-					return true;
+				foreach ( $listings as $index => $listing ) {
+					if ( ! is_array( $listing ) || ( $listing['platform'] ?? '' ) !== $platform ) {
+						continue;
+					}
+
+					$merged  = array();
+					$written = false;
+					foreach ( LegacyOffer::offersWithFallback( $listing ) as $existing ) {
+						if ( ! $written && is_array( $existing ) && OfferIdentity::of( $existing ) === $targetIdentity ) {
+							// **置換ではなくマージする。** $patch は取得が変えたフィールドだけを
+							// 持ち、ロック内で読み直した $existing に載せる。こうしないと fetch 中の
+							// 並べ替え（display_order）や search_key の編集が古い写しで巻き戻る。
+							$merged[] = array_merge( $existing, $patch );
+							$written  = true;
+							continue;
+						}
+						$merged[] = $existing;
+					}
+
+					if ( ! $written ) {
+						// fetch 中に削除された購入リンク。追加し直さず未保存を報告する。
+						return false;
+					}
+
+					$listing['offers']  = $merged;
+					$listings[ $index ] = $listing;
+					$next               = array_values( $listings );
+
+					// **update_post_meta() の false を握り潰さない。** 握り潰すと、取得した
+					// 価格が保存されていないのに呼び出し側は成功として完了し、再試行もしない
+					// （＝サイレントなデータロス）。
+					//
+					// ただし false は「失敗」と「値が変わらなかった」の両方で返る
+					// （WordPress は既存値と一致すると書かずに false を返す）。戻り値だけでは
+					// 切り分けられないので、書く前に自分で比較して「変わらない」を先に
+					// 除いてから呼ぶ——PluginUpgrade::writeMigratedListings() が読み直しで
+					// 同じ切り分けをしているのと同じ趣旨で、こちらは保存前の値を控えて行う
+					// （書き込みは sanitize_meta を通るため、読み直した値は渡した値と
+					// 一致するとは限らない）。
+					if ( $next === $before ) {
+						// 書くものが無い＝既に望みの状態。成功として返す。
+						return true;
+					}
+
+					return false !== update_post_meta( $postId, ProductPostType::META_LISTINGS, $next );
 				}
 
-				return false !== update_post_meta( $postId, ProductPostType::META_LISTINGS, $next );
+				return false;
 			}
-
-			return false;
-		} finally {
-			// ここへ来るのはロックを取れたときだけ（取れなければ上で return 済み）。
-			$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock ) );
-		}
+		);
 	}
 
 	/**

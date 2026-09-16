@@ -8,6 +8,7 @@ use Affilicard\Pricing\FetchStatus;
 use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Queue\OfferPromotionTrigger;
+use Affilicard\Repository\ListingLock;
 use Affilicard\Rest\ProductSchema;
 use Affilicard\Schema\SchemaVersion;
 use Affilicard\Upgrade\PluginUpgrade;
@@ -42,6 +43,35 @@ final class PluginUpgradeTest extends TestCase {
 	private array $migrationFailedPostIds = array();
 
 	/**
+	 * listing ロックを取得できない商品の post ID（載っていない商品は取得できる）。
+	 *
+	 * **プロパティで持つのは意図的である**（上の試行回数と同じ理由）。$wpdb モックは
+	 * setUp で 1 度だけ組み立て、テストごとに変えたい値はここを書き換えて渡す。
+	 *
+	 * @var list<int>
+	 */
+	private array $lockFailurePostIds = array();
+
+	/**
+	 * 直近の GET_LOCK が対象にしたロック名（get_var の戻りを商品ごとに変えるため）。
+	 *
+	 * @var string
+	 */
+	private string $pendingLockName = '';
+
+	/**
+	 * ロックと listings 読み書きの発行順（'lock:get' / 'lock:release' /
+	 * 'listings:read' / 'listings:write'）。
+	 *
+	 * 「ロックを取っているか」だけでなく **読み書きがロックの内側にあるか** を
+	 * 主張するために順序で持つ。ロック無しで read-modify-write すると、読みと書きの
+	 * あいだに入った他の書き手の更新が移行前の値へ黙って巻き戻る。
+	 *
+	 * @var list<string>
+	 */
+	private array $lockEvents = array();
+
+	/**
 	 * setUp で登録した delete_option が拾った option キー。
 	 *
 	 * **プロパティ経由で拾うのは WP_Mock の先勝ちを避けるためである。** 同じ引数の
@@ -61,6 +91,10 @@ final class PluginUpgradeTest extends TestCase {
 		$this->migrationFailedCount   = 0;
 		$this->migrationFailedPostIds = array();
 		$this->deletedOptions         = array();
+		$this->lockFailurePostIds     = array();
+		$this->pendingLockName        = '';
+		$this->lockEvents             = array();
+		$this->mockLockWpdb();
 
 		// 移行の失敗記録（試行回数・諦めた件数／post ID）。移行が成功する経路でも
 		// 「持ち越した失敗が無いか」を見るため読まれる。
@@ -113,7 +147,42 @@ final class PluginUpgradeTest extends TestCase {
 		OfferPromotionTrigger::resetForTests();
 		WP_Mock::tearDown();
 		\Mockery::close();
+		unset( $GLOBALS['wpdb'] );
 		parent::tearDown();
+	}
+
+	/**
+	 * 移行が発行する GET_LOCK/RELEASE_LOCK を捕捉する $wpdb モックを $GLOBALS に置く
+	 * （ProductRepositoryTest::mockLockWpdb と同じ流儀）。
+	 *
+	 * 取得の成否は $lockFailurePostIds で商品ごとに切り替える——ロックを取れない商品の
+	 * 後ろにいる商品が移行され続けることを主張したいので、バッチ全体で一律にはできない。
+	 */
+	private function mockLockWpdb(): void {
+		$wpdb = \Mockery::mock();
+		$wpdb->shouldReceive( 'prepare' )->andReturnUsing(
+			function ( string $query, ...$args ) {
+				if ( str_contains( $query, 'GET_LOCK' ) ) {
+					$this->pendingLockName = isset( $args[0] ) ? (string) $args[0] : '';
+					$this->lockEvents[]    = 'lock:get';
+				} elseif ( str_contains( $query, 'RELEASE_LOCK' ) ) {
+					$this->lockEvents[] = 'lock:release';
+				}
+				return $query;
+			}
+		);
+		$wpdb->shouldReceive( 'get_var' )->andReturnUsing(
+			function (): string {
+				foreach ( $this->lockFailurePostIds as $postId ) {
+					if ( ListingLock::name( $postId ) === $this->pendingLockName ) {
+						return '0';
+					}
+				}
+				return '1';
+			}
+		);
+		$wpdb->shouldReceive( 'query' )->andReturn( 1 );
+		$GLOBALS['wpdb'] = $wpdb;
 	}
 
 	/**
@@ -897,6 +966,220 @@ final class PluginUpgradeTest extends TestCase {
 			$writes,
 			'既に記録済みの post ID を重ねて書いている'
 		);
+	}
+
+	/**
+	 * **本 finding の本丸。** 移行は listing ロックの中で読み・書きしなければならない。
+	 *
+	 * 移行は META_LISTINGS を丸ごと読んで丸ごと書き戻す read-modify-write であり、
+	 * 他の書き手（管理画面の保存＝ProductRepository::updateListing()、価格更新＝
+	 * updateListingOffer()）は同じ名前のロックを取る。ロック無しで走ると、読みと書きの
+	 * あいだに入った更新が移行前の値へ黙って巻き戻る。しかも writeMigratedListings() の
+	 * 読み直しは自分が書いた値と突き合わせるだけなので巻き戻しを検出できず、移行は
+	 * 成功に見える。
+	 *
+	 * ここでは「GET_LOCK を撃ったか」だけでなく **読み書きがその内側にあるか** を
+	 * 順序で主張する。取得だけして読みの後に撃つ実装でも通ってしまわないようにするため。
+	 */
+	public function test_移行はロックの中でlistingsを読み書きし最後に解放する(): void {
+		// external_id を空にしているのは syncDerivedMeta() の extid mirror 追加を
+		// 発生させないため（既存の完走テストと同じ形）。
+		$legacy = array_merge( $this->legacyListing(), array( 'external_id' => '' ) );
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 501 ) );
+
+		// 読みと書きを 1 つの実体で結びつつ、発行の順序を控える
+		// （expectListingsRoundTrip は順序を見ないため、ここは自前で組む）。
+		$current = array( $legacy );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 501, ProductPostType::META_LISTINGS, true )
+			->andReturnUsing(
+				function () use ( &$current ) {
+					$this->lockEvents[] = 'listings:read';
+					return $current;
+				}
+			);
+		WP_Mock::userFunction( 'update_post_meta' )
+			->with( 501, ProductPostType::META_LISTINGS, \Mockery::type( 'array' ) )
+			->andReturnUsing(
+				function ( $id, $key, $value ) use ( &$current ): bool {
+					$this->lockEvents[] = 'listings:write';
+					// WordPress の update_metadata() → sanitize_meta() 相当。
+					$current = ProductSchema::sanitizeListings( $value );
+					return true;
+				}
+			);
+		// syncDerivedMeta() の extid mirror 走査と schema version の刻印。
+		WP_Mock::userFunction( 'get_post_meta' )->with( 501 )->andReturn( array() );
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()->with( 501, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT )->andReturn( true );
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'delete_option' )->once()->with( PluginUpgrade::OPTION_MIGRATION_CURSOR );
+		WP_Mock::userFunction( 'update_option' )->never();
+
+		PluginUpgrade::runOffersMigrationBatch();
+
+		// 2 つ目の読みは writeMigratedListings() の読み直し（書けたかの照合）、
+		// 3 つ目は syncDerivedMeta() の extid ミラー再構築。どちらもロックの内側にある。
+		$this->assertSame(
+			array( 'lock:get', 'listings:read', 'listings:write', 'listings:read', 'listings:read', 'lock:release' ),
+			$this->lockEvents,
+			'listings の読み書きが listing ロックの内側で行われていない'
+		);
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 保存に失敗して差し戻す経路でもロックは必ず解放する。
+	 *
+	 * 解放し損ねると、その接続が返るまで同じ商品のロックが握られたままになり、
+	 * 管理画面の保存も価格更新も待たされる（次の移行の試行も取れない）。
+	 */
+	public function test_移行の保存に失敗してもロックを解放する(): void {
+		$this->migrationAttempts = array( 909 => 1 );
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 909 ) );
+		$this->stubUnwritableProduct( 909 );
+
+		$writes = array();
+		$this->captureOptionWrites( $writes );
+
+		// Mockery\Exception\NoMatchingExpectationException は RuntimeException を
+		// 継承しているため、型だけではモック不足と区別できない。メッセージを固定する。
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( 'offers 移行の保存に失敗しました' );
+
+		try {
+			PluginUpgrade::runOffersMigrationBatch();
+		} finally {
+			// stubUnwritableProduct() の meta スタブは順序を記録しないので、ここに
+			// 現れるのはロックの取得と解放だけである。
+			$this->assertSame(
+				array( 'lock:get', 'lock:release' ),
+				$this->lockEvents,
+				'差し戻しの例外が飛ぶ経路でロックを解放していない'
+			);
+		}
+	}
+
+	/**
+	 * ロックを取れなければ何も読まず・書かず、保存の失敗と同じ経路へ差し戻す。
+	 *
+	 * ロックを取れない窓は、まさに他の書き手が同じ meta を書いている窓である。
+	 * そこで押し通して read-modify-write すると、ちょうど保存された価格や管理画面の
+	 * 編集を移行前の値へ巻き戻す——ロックを置いた意味が無くなる。
+	 */
+	public function test_ロックを取れなければ移行せず差し戻す(): void {
+		$this->lockFailurePostIds = array( 909 );
+		$this->migrationAttempts  = array( 909 => 1 );
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 909 ) );
+		// ロックを取れないのだから meta には一切触れない（読むことすら許さない）。
+		WP_Mock::userFunction( 'get_post_meta' )->never();
+		WP_Mock::userFunction( 'update_post_meta' )->never();
+
+		$writes = array();
+		$this->captureOptionWrites( $writes );
+
+		$this->expectException( \RuntimeException::class );
+		$this->expectExceptionMessage( 'offers 移行のロックを取得できませんでした' );
+
+		try {
+			PluginUpgrade::runOffersMigrationBatch();
+		} finally {
+			// 保存の失敗とまったく同じ扱い——試行回数が 1 つ進み、まだ諦めない。
+			$this->assertSame(
+				array( 909 => 2 ),
+				$writes[ PluginUpgrade::OPTION_MIGRATION_ATTEMPTS ] ?? null,
+				'ロック取得の失敗が試行回数に乗っていない'
+			);
+			$this->assertArrayNotHasKey( PluginUpgrade::OPTION_MIGRATION_FAILED_COUNT, $writes );
+			// カーソルは進めない（次の実行で同じ商品からやり直す）。
+			$this->assertArrayNotHasKey( PluginUpgrade::OPTION_MIGRATION_CURSOR, $writes );
+			// 取れていないロックを返しに行かない。
+			$this->assertSame(
+				array( 'lock:get' ),
+				$this->lockEvents,
+				'取得できなかったロックへ RELEASE_LOCK を撃っている'
+			);
+		}
+	}
+
+	/**
+	 * ロックを取れない状態が続いたら上限で諦め、後続の商品を移行する。
+	 *
+	 * 差し戻しだけにすると、ロックを握ったまま固まったセッションが 1 つあるだけで
+	 * **その商品より後ろの post ID が永久に移行されない**（恒久的な保存失敗で諦める
+	 * 機構を用意したのと同じ理由）。諦めた商品は旧形式のまま残り、読み側の
+	 * フォールバックが従来どおり描く。
+	 */
+	public function test_ロックを取れない状態が続けば上限で諦めて後続の商品を移行する(): void {
+		$this->lockFailurePostIds = array( 909 );
+		// 909 は既に 2 回失敗している（次で上限 MIGRATION_MAX_ATTEMPTS=3 に達する）。
+		$this->migrationAttempts = array( 909 => PluginUpgrade::MIGRATION_MAX_ATTEMPTS - 1 );
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->once()->andReturn( array( 909, 910 ) );
+
+		// 909 の meta はあえてモックしない——ロックを取れていないのだから触っては
+		// ならず、触ればモック不足で落ちる。
+		$stored = null;
+		$this->expectListingsRoundTrip(
+			910,
+			array( array_merge( $this->legacyListing(), array( 'external_id' => '' ) ) ),
+			$stored
+		);
+		WP_Mock::userFunction( 'get_post_meta' )->with( 910 )->andReturn( array() );
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()->with( 910, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT )->andReturn( true );
+
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS, array() )
+			->andReturn( array() );
+
+		$writes = array();
+		$this->captureOptionWrites( $writes );
+		WP_Mock::userFunction( 'delete_option' )->once()->with( PluginUpgrade::OPTION_MIGRATION_CURSOR );
+
+		PluginUpgrade::runOffersMigrationBatch();
+
+		// 後続の商品が移行されている（＝移行が止まっていない）。
+		$this->assertCount( 1, $stored, 'ロックを取れなかった商品の後ろが移行されていない' );
+		$this->assertCount( 1, $stored[0]['offers'] );
+
+		// 諦めたことが記録されている（沈黙の禁止）。
+		$this->assertSame( 1, $writes[ PluginUpgrade::OPTION_MIGRATION_FAILED_COUNT ] ?? null );
+		$this->assertSame( array( 909 ), $writes[ PluginUpgrade::OPTION_MIGRATION_FAILED_POST_IDS ] ?? null );
+		$this->assertSame( array(), $writes[ PluginUpgrade::OPTION_MIGRATION_ATTEMPTS ] ?? null );
+
+		// 移行していない商品を温存件数に数えない。
+		$this->assertArrayNotHasKey(
+			PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL,
+			$writes,
+			'移行していない商品を温存件数に数えている'
+		);
+		$this->assertConditionsMet();
 	}
 
 	/**
