@@ -49,13 +49,7 @@ final class ListingLock {
 	 * GET_LOCK の名前は 64 バイト以内。19 + 8 + 1 + post ID の桁数なので超えない。
 	 */
 	public static function name( int $postId ): string {
-		global $wpdb;
-
-		$dbname = isset( $wpdb->dbname ) ? (string) $wpdb->dbname : '';
-		$prefix = isset( $wpdb->prefix ) ? (string) $wpdb->prefix : '';
-		$site   = substr( md5( $dbname . '|' . $prefix ), 0, 8 );
-
-		return 'affilicard_listing_' . $site . '_' . $postId;
+		return LockName::build( 'affilicard_listing', (string) $postId );
 	}
 
 	/**

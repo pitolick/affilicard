@@ -18,6 +18,13 @@ use WP_Mock\Tools\TestCase;
 final class ProductAutoCreatorTest extends TestCase {
 
 	/**
+	 * GET_LOCK / RELEASE_LOCK へ渡されたロック名。
+	 *
+	 * @var list<string>
+	 */
+	private array $capturedLockNames = array();
+
+	/**
 	 * GET_LOCK の戻り値（1＝取得成功／0＝タイムアウト）。
 	 *
 	 * $wpdb モックの中から参照するためプロパティに置く。テストの中で
@@ -52,8 +59,11 @@ final class ProductAutoCreatorTest extends TestCase {
 	private function mockLockWpdb(): void {
 		$wpdb = Mockery::mock();
 		$wpdb->shouldReceive( 'prepare' )->andReturnUsing(
-			function ( string $query ) {
+			function ( string $query, ...$args ) {
 				$this->capturedSql[] = $query;
+				if ( isset( $args[0] ) && is_string( $args[0] ) ) {
+					$this->capturedLockNames[] = $args[0];
+				}
 				return $query;
 			}
 		);
@@ -273,6 +283,44 @@ final class ProductAutoCreatorTest extends TestCase {
 		$this->assertSame( FetchStatus::NONE, $offers[0]['fetch_status'] );
 		// 取得結果が listing 直下に残っていないこと。
 		$this->assertArrayNotHasKey( 'external_id', $saved['listings'][0] );
+	}
+
+	/**
+	 * 自動作成のロック名にもサイトを区別する印が入る。
+	 *
+	 * MySQL の名前付きロックはサーバ全体で共有されるため、1 つの MySQL に複数の
+	 * WordPress が同居していると、同じストア商品 ID の自動作成が別サイトの処理を
+	 * 待たせてしまう（待たされた側は TRANSIENT_FAILURE で次の試行まで遅れる）。
+	 */
+	public function test_ロック名にサイトを区別する印が入る(): void {
+		$this->stubRakutenPlatform();
+		$registry = $this->rakutenProvider( FetchResult::hit( array( 'external_id' => 'abc' ) ) );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		// create() は 1 回につき 2 回引く（fetch 前の事前チェック／ロックの中）。
+		// 事前チェックを不在にしてロックまで到達させ、ロックの中では先着を見つけて
+		// 保存させない。2 回 create() するので 4 つ分を並べる。
+		$repo->shouldReceive( 'findByExternalId' )
+			->andReturn( null, array( 'id' => 7 ), null, array( 'id' => 7 ) );
+		$repo->shouldReceive( 'save' )->never();
+
+		$GLOBALS['wpdb']->dbname = 'wp_a';
+		$GLOBALS['wpdb']->prefix = 'wp_';
+		( new ProductAutoCreator( $registry, $repo ) )->create( 'rakuten-kobo', 'abc' );
+		$forSiteA = $this->capturedLockNames;
+
+		$this->capturedLockNames = array();
+		$GLOBALS['wpdb']->dbname = 'wp_b';
+		( new ProductAutoCreator( $registry, $repo ) )->create( 'rakuten-kobo', 'abc' );
+		$forSiteB = $this->capturedLockNames;
+
+		$this->assertNotSame( array(), $forSiteA, 'ロック名を捕捉できていない' );
+		$this->assertNotSame(
+			$forSiteA,
+			$forSiteB,
+			'DB が違うのに同じロックを奪い合っている'
+		);
+		$this->assertLessThanOrEqual( 64, strlen( $forSiteA[0] ) );
 	}
 
 	public function test_ロックの中で引き直し先着が作っていれば保存しない(): void {

@@ -8,6 +8,7 @@ use Affilicard\Pricing\FetchStatus;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Queue\WorkOutcome;
+use Affilicard\Repository\LockName;
 use Affilicard\Repository\ProductRepositoryInterface;
 
 /**
@@ -94,8 +95,12 @@ final class ProductAutoCreator {
 		global $wpdb;
 
 		// GET_LOCK の名前は 64 バイト以内。external ID は長さも文字種も外部由来なので
-		// ハッシュへ畳む（prefix 22 + md5 32 = 54 バイト）。
-		$lock = 'affilicard_autocreate_' . md5( $platformCode . '|' . $externalId );
+		// ハッシュへ畳む（prefix 21 + 1 + サイト 8 + 1 + md5 32 = 63 バイト）。
+		//
+		// **サイトを区別する印を必ず混ぜる**（{@see LockName}）。名前付きロックは
+		// MySQL サーバ全体で共有されるため、同じストア商品 ID の自動作成が別サイトの
+		// 処理を待たせてしまう。
+		$lock = LockName::build( 'affilicard_autocreate', md5( $platformCode . '|' . $externalId ) );
 		$got  = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $lock, self::LOCK_TIMEOUT ) );
 		if ( $got <= 0 ) {
 			return WorkOutcome::TRANSIENT_FAILURE;
