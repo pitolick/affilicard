@@ -198,6 +198,25 @@ final class ExternalIdMirrorTest extends TestCase {
 	}
 
 	/**
+	 * 空の offers は「購入リンクが無い」であって旧形式ではない。
+	 *
+	 * 空を旧形式とみなして listing 直下の external_id を拾い直すと、利用者が購入リンクを
+	 * 全て削除しても findByExternalId() が商品を見つけてしまい、ProductAutoCreator が
+	 * 新しい商品を作れなくなる。旧形式のフォールバックは offers キー自体が無いときだけ。
+	 */
+	public function test_offersが空配列ならlisting直下のexternal_idをミラーしない(): void {
+		$listings = array(
+			array(
+				'platform'    => 'dmm-books',
+				'offers'      => array(),
+				// 移行前の値が listing 直下に残っている状態。
+				'external_id' => 'flat-ext-1',
+			),
+		);
+		$this->assertSame( array(), $this->mirroredValuesFor( $listings, 'dmm-books' ) );
+	}
+
+	/**
 	 * findByExternalId() が渡された external_id をそのまま meta_query の value として
 	 * 素通しするだけで、listing/offer の中身を一切参照しないことを固定する。
 	 *

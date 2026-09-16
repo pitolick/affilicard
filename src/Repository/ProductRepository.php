@@ -646,7 +646,12 @@ final class ProductRepository implements ProductRepositoryInterface {
 			}
 			$meta_key = ProductPostType::externalIdMetaKey( $platform );
 
-			$offers = isset( $listing['offers'] ) && is_array( $listing['offers'] ) && array() !== $listing['offers']
+			// **空配列の offers は「購入リンクが無い」であって、旧形式ではない。**
+			// 空を旧形式とみなして listing 直下の external_id を拾い直すと、利用者が
+			// 購入リンクを全て削除しても findByExternalId() が商品を見つけてしまい、
+			// ProductAutoCreator が新しい商品を作れなくなる。
+			// 旧形式のフォールバックは offers キー自体が無いときだけ。
+			$offers = isset( $listing['offers'] ) && is_array( $listing['offers'] )
 				? $listing['offers']
 				: array( $listing );
 
