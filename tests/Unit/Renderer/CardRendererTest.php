@@ -2191,10 +2191,9 @@ final class CardRendererTest extends TestCase {
 	 * カードが空にならないこと。
 	 *
 	 * PluginUpgrade::maybeUpgrade() は移行を「積む」だけなので、Action Scheduler が
-	 * 止まっている（CronDisabledNotice が出るインストール）・商品がゴミ箱から復元された
-	 * 等の理由で、v4 のコードが flat な listing を読む状況は現実に起こる。読み側で
-	 * offers[0] を合成しないと、購入ボタン・価格・書影のすべてが落ちたカードが
-	 * カタログ全体で出続ける。
+	 * 止まっている（CronDisabledNotice が出るインストール）等の理由で、v4 のコードが
+	 * flat な listing を読む状況は現実に起こる。読み側で offers[0] を合成しないと、
+	 * 購入ボタン・価格・書影のすべてが落ちたカードがカタログ全体で出続ける。
 	 */
 	public function test_offersが無いflatなlistingでも購入ボタンと価格と書影を描画する(): void {
 		$product = $this->product(

@@ -80,6 +80,32 @@ test.describe( 'v3 flat listing → offers[] 移行（実 WP）', () => {
 		expect( result.normal.schema_version ).toBe( '2' );
 	} );
 
+	test( 'ゴミ箱の商品も移行される（復元しても取り残されない）', async () => {
+		// WP_Query の post_status='any' は exclude_from_search=true の trash を落とすため、
+		// 移行の走査が 'any' のままだとこの商品は 1 件も拾われない。移行は完走すると
+		// カーソルの option を消すので、あとでゴミ箱から復元しても二度と走査されず、
+		// 旧形式の listings と古い派生 meta を抱えたまま取り残される。
+		expect( result.trashedPostStatus ).toBe( 'trash' );
+		// 移行前は現行スキーマではなかった（saveMeta() 経由で作っていない証拠）。
+		expect( result.schemaVersionBeforeTrashed ).not.toBe( '2' );
+
+		const listings = result.trashed.listings;
+		expect( listings ).toHaveLength( 1 );
+		expect( listings[ 0 ].offers ).toHaveLength( 1 );
+		const offer = listings[ 0 ].offers[ 0 ];
+
+		expect( offer.external_id ).toBe( 'legacy-trashed' );
+		expect( offer.regular_url ).toBe( 'https://example.test/legacy-trashed' );
+		expect( offer.affiliate_url ).toBe(
+			'https://example.test/legacy-trashed-aff'
+		);
+		expect( offer.price ).toBe( '550' );
+		// v3 の flat フィールドは listing 直下に残らない。
+		expect( listings[ 0 ].external_id ).toBeUndefined();
+		// 派生 meta も再構築されている。
+		expect( result.trashed.schema_version ).toBe( '2' );
+	} );
+
 	test( 'affiliate_url だけで regular_url を持たない listing はサイレントに消えない', async () => {
 		const listings = result.affOnly.listings;
 		expect( listings ).toHaveLength( 1 );

@@ -509,6 +509,65 @@ final class PluginUpgradeTest extends TestCase {
 	 * カーソルまで前進して二度と再試行されない。
 	 */
 	/**
+	 * ゴミ箱の商品も移行の走査対象に含める。
+	 *
+	 * WP_Query の `post_status => 'any'` は `exclude_from_search` が true の status
+	 * （trash / auto-draft / inherit）を落とす。`'any'` のままだと、アップグレードした
+	 * 時点でゴミ箱にあった商品は 1 件も移行されない。しかも移行が完走するとカーソルの
+	 * option が消えるため、あとでゴミ箱から戻しても二度と走査されず、旧形式の listings と
+	 * 古い派生 meta（extid ミラー・schema_version）を抱えたまま残り続ける。
+	 *
+	 * ここでは get_posts() に渡すクエリそのものを捕まえて検証する。WP_Mock には
+	 * WP_Query の status フィルタが無いため、「ゴミ箱の商品が返ってくること」自体は
+	 * 実 WP でしか確かめられない（tests/e2e/offers-migration.spec.js がその役）。
+	 */
+	public function test_ゴミ箱の商品も移行の走査対象に含める(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0 )
+			->andReturn( 0 );
+		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
+
+		$query = array();
+		WP_Mock::userFunction( 'get_posts' )
+			->once()
+			->andReturnUsing(
+				static function ( $args ) use ( &$query ): array {
+					$query = is_array( $args ) ? $args : array();
+					// ゴミ箱の商品 1 件だけが引っかかった、という応答。
+					return array( 808 );
+				}
+			);
+
+		// 引っかかった商品は通常どおり移行される（listings は無いので書き込みは
+		// 派生 meta だけ）。ゴミ箱の投稿でも meta の読み書きは普通に通る。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 808, ProductPostType::META_LISTINGS, true )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_post_meta' )->with( 808 )->andReturn( array() );
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()->with( 808, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT )->andReturn( true );
+		WP_Mock::userFunction( 'delete_option' )->with( PluginUpgrade::OPTION_MIGRATION_CURSOR );
+		// 完走時のログ用カウンタ（温存 0 件＝ログを出さない）。
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL, 0 )
+			->andReturn( 0 );
+
+		$writes = array();
+		$this->captureOptionWrites( $writes );
+
+		PluginUpgrade::runOffersMigrationBatch();
+
+		$statuses = $query['post_status'] ?? null;
+		$this->assertIsArray( $statuses, "post_status が配列で指定されていない（'any' はゴミ箱を落とす）" );
+		$this->assertContains( 'trash', $statuses, 'ゴミ箱の商品が移行の走査対象から外れている' );
+		$this->assertContains( 'publish', $statuses, '公開中の商品が走査対象から外れている' );
+		$this->assertContains( 'draft', $statuses, '下書きの商品が走査対象から外れている' );
+		$this->assertContains( 'private', $statuses, '非公開の商品が走査対象から外れている' );
+		$this->assertNotContains( 'any', $statuses, "'any' を混ぜると結局ゴミ箱が落ちる" );
+		$this->assertConditionsMet();
+	}
+
+	/**
 	 * 例外で中断しても、そこまでに片付いた商品ぶんはカーソルを進める。
 	 *
 	 * 進めないと、失敗した商品より手前の（既に移行済みの）商品を毎回やり直すことに

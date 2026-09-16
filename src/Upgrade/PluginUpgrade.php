@@ -47,6 +47,34 @@ final class PluginUpgrade {
 	public const OPTION_MIGRATION_CURSOR = 'affilicard_offers_migration_cursor';
 
 	/**
+	 * 移行の走査対象にする post_status。
+	 *
+	 * **`'any'` は使えない。** WP_Query の `'any'` は「`exclude_from_search` が true の
+	 * status を除く全部」という意味であり、コアで `exclude_from_search => true` が付く
+	 * `trash` / `auto-draft` / `inherit` が落ちる。つまり `'any'` のままだと
+	 * **アップグレードの時点でゴミ箱にあった商品は 1 件も移行されない**。しかも移行が
+	 * 完走すると {@see self::OPTION_MIGRATION_CURSOR} が消えるため、あとでゴミ箱から
+	 * 戻しても二度と走査されず、旧形式の listings と古い派生 meta（extid ミラー・
+	 * schema_version）を抱えたまま残り続ける。
+	 *
+	 * **列挙にしてよい理由。** {@see ProductPostType::register()} は独自の post status を
+	 * 一切登録していないので、この CPT が取り得るのはコアの組み込み status だけである。
+	 *
+	 * `auto-draft` だけは意図的に外す——「新規追加」を押しただけの空の入れ物で listings を
+	 * 持たず、WP が数日で自動削除する。移行しても消える投稿へ META_SCHEMA_VERSION を
+	 * 書き足すだけになる。`inherit` はリビジョン／添付ファイル用で、この CPT の投稿は
+	 * 取らない（リビジョンは post_type=revision になる）。
+	 *
+	 * 移行の処理そのもの（{@see self::migrateOneProduct()} →
+	 * {@see \Affilicard\Repository\ProductRepository::syncDerivedMeta()}）は
+	 * post meta の読み書きしかせず、投稿の status には一切触れないため、ゴミ箱の商品を
+	 * 混ぜても「移行のついでに復活する」ようなことは起きない。
+	 *
+	 * @var list<string>
+	 */
+	public const MIGRATION_POST_STATUSES = array( 'publish', 'future', 'draft', 'pending', 'private', 'trash' );
+
+	/**
 	 * 身元（regular_url / external_id）を 1 つも持たないまま offers[0] へ持ち越した
 	 * listing の延べ件数。
 	 *
@@ -423,7 +451,8 @@ final class PluginUpgrade {
 	 *
 	 * QueueMaintenance::sweep() と同じ posts_where カーソル方式（ID 順の分割走査）を踏襲する。
 	 * 移行は post_status を問わずすべての商品が対象（棚卸し等の表示状態に関わらず
-	 * 古い meta 形状を持ち得るため、公開中に限定する掃引と異なり 'any' を見る）。
+	 * 古い meta 形状を持ち得るため、公開中に限定する掃引と異なり全 status を見る）。
+	 * 対象 status は {@see self::MIGRATION_POST_STATUSES} に明示する。
 	 *
 	 * @return list<int>
 	 */
@@ -443,7 +472,7 @@ final class PluginUpgrade {
 			$ids = get_posts(
 				array(
 					'post_type'        => ProductPostType::POST_TYPE,
-					'post_status'      => 'any',
+					'post_status'      => self::MIGRATION_POST_STATUSES,
 					'fields'           => 'ids',
 					'posts_per_page'   => $limit,
 					'orderby'          => 'ID',

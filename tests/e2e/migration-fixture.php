@@ -49,11 +49,14 @@ use Affilicard\Upgrade\PluginUpgrade;
 // リセットしないため、掃除しないと「温存カウンタの差分」の意味が壊れる
 // （前回分の温存済み listing まで再度数えてしまうことはないが、商品が際限なく
 // 積み上がるのを防ぐため。カウンタ自体は before/after の差分で比較する）。
+// **status は移行本体と同じ列挙を使う。** ここを 'any' のままにすると、ゴミ箱の
+// フィクスチャだけが掃除から漏れて実行のたびに積み上がる（'any' は
+// exclude_from_search=true の trash を落とす——本フィクスチャが検証している当の挙動）。
 foreach (
 	get_posts(
 		array(
 			'post_type'      => ProductPostType::POST_TYPE,
-			'post_status'    => 'any',
+			'post_status'    => PluginUpgrade::MIGRATION_POST_STATUSES,
 			's'              => 'E2E-MigrationFixture',
 			'fields'         => 'ids',
 			'posts_per_page' => -1,
@@ -78,9 +81,13 @@ delete_option( PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS );
  * 模すため、投稿作成は `wp_insert_post()` を使うが、listings メタだけは
  * `$wpdb->insert()` で `wp_postmeta` に直接書き込む（sanitize_meta() を一切経由しない）。
  *
+ * $status に 'trash' を渡すと、listings meta を書いたあとで `wp_trash_post()` を
+ * 通してゴミ箱へ入れる（status を直接 'trash' で insert するのではなく、運用で実際に
+ * 起こる経路をなぞる）。移行がゴミ箱の商品を拾えるかを実 WP で確かめるため。
+ *
  * @param array<int, array<string, mixed>> $listings
  */
-$make_legacy = static function ( string $title, array $listings ): int {
+$make_legacy = static function ( string $title, array $listings, string $status = 'publish' ): int {
 	global $wpdb;
 
 	$id = (int) wp_insert_post(
@@ -105,6 +112,11 @@ $make_legacy = static function ( string $title, array $listings ): int {
 	);
 	// このリクエスト内で get_post_meta() が古い値をキャッシュしないよう明示的に払う。
 	wp_cache_delete( $id, 'post_meta' );
+
+	if ( 'trash' === $status ) {
+		wp_trash_post( $id );
+		wp_cache_delete( $id, 'post_meta' );
+	}
 
 	return $id;
 };
@@ -159,8 +171,28 @@ $no_id_id = $make_legacy(
 	)
 );
 
+// ゴミ箱の商品。WP_Query の post_status='any' は exclude_from_search=true の trash を
+// 落とすため、移行の走査が 'any' のままだとこの商品は 1 件も拾われない。移行は完走すると
+// カーソルを消すので、あとで復元しても二度と走査されず旧形式のまま取り残される。
+$trashed_id = $make_legacy(
+	'E2E-MigrationFixture ゴミ箱',
+	array(
+		array(
+			'platform'         => 'rakuten-kobo',
+			'enabled'          => true,
+			'external_id'      => 'legacy-trashed',
+			'regular_url'      => 'https://example.test/legacy-trashed',
+			'affiliate_url'    => 'https://example.test/legacy-trashed-aff',
+			'price'            => '550',
+			'last_verified_at' => '2026-01-02T00:00:00+00:00',
+		),
+	),
+	'trash'
+);
+
 $schema_version_before_normal  = (string) get_post_meta( $normal_id, ProductPostType::META_SCHEMA_VERSION, true );
 $schema_version_before_affonly = (string) get_post_meta( $aff_only_id, ProductPostType::META_SCHEMA_VERSION, true );
+$schema_version_before_trashed = (string) get_post_meta( $trashed_id, ProductPostType::META_SCHEMA_VERSION, true );
 $preserved_before              = PluginUpgrade::preservedWithoutRegularUrlCount();
 
 // バッチサイズ（200）を超える既存商品がある環境でも完走するまでループする。
@@ -231,6 +263,7 @@ $resave_with_other_platform = static function ( int $id ): array {
 
 // 保存前（移行直後）の状態を先に確定させてから再保存する。
 $normal_after_migration     = $read( $normal_id );
+$trashed_after_migration    = $read( $trashed_id );
 $aff_only_after_migration   = $read( $aff_only_id );
 $no_id_after_migration      = $read( $no_id_id );
 $preserved_post_ids         = PluginUpgrade::preservedWithoutRegularUrlPostIds();
@@ -241,6 +274,9 @@ $no_id_after_resave    = $resave_with_other_platform( $no_id_id );
 echo 'MIGRATION_JSON:' . wp_json_encode(
 	array(
 		'normal'                     => $normal_after_migration,
+		'trashed'                    => $trashed_after_migration,
+		'trashedPostStatus'          => (string) get_post_status( $trashed_id ),
+		'schemaVersionBeforeTrashed' => $schema_version_before_trashed,
 		'affOnly'                    => $aff_only_after_migration,
 		'noIdentity'                 => $no_id_after_migration,
 		'affOnlyAfterResave'         => $aff_only_after_resave,

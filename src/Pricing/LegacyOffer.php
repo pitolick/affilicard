@@ -82,10 +82,15 @@ final class LegacyOffer {
 	 *
 	 * 移行バッチ（PluginUpgrade）は「積む」だけなので、v4 のコードが動き始めてから
 	 * 当該商品にバッチが到達するまでのあいだ、meta は flat のままである。この窓は
-	 * 短いとは限らない——Action Scheduler が止まっているインストール、移行の走査
-	 * （post_status=any）が拾わないゴミ箱から復元された商品、offer を持たない listing を
-	 * 飛ばす QueueMaintenance::sweep() のいずれでも恒久化し得る。読み取り側（表示・カウント）
-	 * が offers しか見ないと、その間カタログ全体のカードが購入ボタン・価格・書影を失う。
+	 * 短いとは限らない——Action Scheduler が止まっているインストール、offer を持たない
+	 * listing を飛ばす QueueMaintenance::sweep() のいずれでも恒久化し得る。読み取り側
+	 * （表示・カウント）が offers しか見ないと、その間カタログ全体のカードが購入ボタン・
+	 * 価格・書影を失う。
+	 *
+	 * （ゴミ箱の商品は移行の走査対象に含まれる。かつて post_status='any' で走査して
+	 * いた頃は「ゴミ箱から復元された商品」もこの窓の原因だったが、
+	 * {@see \Affilicard\Upgrade\PluginUpgrade::MIGRATION_POST_STATUSES} で status を
+	 * 明示するようになって解消済み。）
 	 *
 	 * **選択規則はここに持ち込まない。** 合成するのは配列だけで、どの購入リンクを
 	 * 使うかは従来どおり OfferSelector::select() が決める（決定者は 1 つ）。
