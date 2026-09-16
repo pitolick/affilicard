@@ -51,7 +51,12 @@ function offerDisplayOrder(raw) {
 		const trimmed = raw.trim();
 		// PHP の is_numeric() 相当。全体が数値として読めるときだけ受け取る。
 		if (trimmed !== '' && /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(trimmed)) {
-			return Math.trunc(Number(trimmed));
+			const parsed = Math.trunc(Number(trimmed));
+			// '1e9999' のような桁あふれは Infinity になる。画面に Infinity と出るし、
+			// 並び順も PHP の正規化結果と揃わない。読めなかった扱いにする。
+			if (Number.isFinite(parsed)) {
+				return parsed;
+			}
 		}
 	}
 	return DEFAULT_DISPLAY_ORDER;

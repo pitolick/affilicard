@@ -715,6 +715,16 @@ describe( 'selectInUseOffer（Affilicard\\Pricing\\OfferSelector::select() と�
 		expect( selectInUseOffer( offers, false ).external_id ).toBe( 'fifty' );
 	} );
 
+	test( 'display_order が桁あふれするなら既定値（Infinity にしない）', () => {
+		// '1e9999' は正規表現に一致し Number() は Infinity を返す。そのまま使うと
+		// 画面に Infinity と出るうえ、並び順が PHP の正規化結果と揃わない。
+		const offers = [
+			offer( 50, 'fifty' ),
+			{ display_order: '1e9999', external_id: 'huge', regular_url: 'https://example.test/h' },
+		];
+		expect( selectInUseOffer( offers, false ).external_id ).toBe( 'fifty' );
+	} );
+
 	test( 'display_order が数値文字列なら整数として読む', () => {
 		const offers = [
 			offer( 50, 'fifty' ),

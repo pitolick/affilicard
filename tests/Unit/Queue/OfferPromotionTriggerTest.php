@@ -301,12 +301,20 @@ final class OfferPromotionTriggerTest extends TestCase {
 	 *
 	 * 走っている最中のアクションは繰り上げようがなく、まさに今 listing を読む。
 	 */
-	public function test_実行中のジョブがあれば投入しない(): void {
+	/**
+	 * 実行中／非同期 pending（true）では抑止しない。
+	 *
+	 * as_next_scheduled_action() の true は「非同期 pending」と「実行中」の両方を意味する。
+	 * 実行中のアクションは**変更前の listing を読んで**走っているので、その最中に
+	 * 購入リンクが変わっても結果には反映されない。ここで抑止すると、その変更に対する
+	 * 即時取得が次の掃引まで失われる。
+	 */
+	public function test_実行中や非同期pendingでは抑止せず投入する(): void {
 		$this->stubStaleListing();
 		$this->nextScheduledAction = true;
 
-		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
-		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 500 );
 
 		$this->trigger()->onListingsSaved( 123 );
 

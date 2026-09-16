@@ -272,8 +272,16 @@ final class OfferPromotionTrigger {
 	 * 予定時刻は取れるが、アクションを 1 件取得して schedule オブジェクトから
 	 * 日時を取り出す手間がかかるうえ、必要なのは「次の 1 件」だけである。
 	 *
-	 * 実行中（true）は抑止する。走っている最中のアクションは繰り上げようがなく、
-	 * まさに今 listing を読んでいる。
+	 * **true は抑止しない。** as_next_scheduled_action() の true は「非同期 pending」と
+	 * 「実行中」の両方を意味する。実行中のアクションは**変更前の listing を読んで**
+	 * 走っているので、その最中に購入リンクが変わっても結果には反映されない。ここで
+	 * 抑止すると、その変更に対する即時取得が次の掃引まで失われる。
+	 *
+	 * **残る限界**: 実行中のアクションがある場合、enqueueManual() の unique=true は
+	 * 実行中のものも重複とみなすため、投入が吸収されて結果的に積まれないことがある。
+	 * それでも抑止するよりは良い（非同期 pending のケースは確実に繰り上がる）。
+	 * 完全に塞ぐには「完了後に follow-up を残す」機構が要るが、取りこぼしの帰結は
+	 * 「次の掃引まで待つ」であって取得結果の欠落ではないため、現状は受容する。
 	 *
 	 * @param array<string, mixed> $args  照合するアクション引数。
 	 * @param string               $group 照合する group。
@@ -291,7 +299,7 @@ final class OfferPromotionTrigger {
 			return false;
 		}
 		if ( true === $next ) {
-			return true;
+			return false;
 		}
 
 		return (int) $next <= $now;

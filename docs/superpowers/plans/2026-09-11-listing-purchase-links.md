@@ -719,18 +719,17 @@ Expected: FAIL — `Undefined array key "offers"`
 				continue;
 			}
 
-			// NOTE: この破棄条件は実装時に狭めた。最終実装（ProductSchema::sanitizeOffers）は
-			// 「regular_url が空」ではなく **spec §3-4 の身元（external_id と regular_url）が
-			// 両方とも空** のときだけ弾く。external_id さえあれば後から regular_url を
-			// 引き直して再同定できるため、ここで消すと復旧不能になる。
-			$regular = isset( $offer['regular_url'] ) ? (string) esc_url_raw( (string) $offer['regular_url'] ) : '';
-			if ( '' === $regular ) {
-				// 生死を判定できない offer は棚卸しの対象外になり永久に残るため弾く。
+			// 破棄するのは **spec §3-4 の身元（external_id と regular_url）が両方とも空**
+			// のときだけ。external_id さえあれば後から regular_url を引き直して再同定
+			// できるため、regular_url だけを必須にすると復旧不能なデータ消失になる。
+			$regular    = isset( $offer['regular_url'] ) ? (string) esc_url_raw( (string) $offer['regular_url'] ) : '';
+			$externalId = isset( $offer['external_id'] ) ? (string) sanitize_text_field( (string) $offer['external_id'] ) : '';
+			if ( '' === $regular && '' === $externalId ) {
+				// 身元を 1 つも持たない offer は生死の判定も再同定もできず永久に残るため弾く。
 				continue;
 			}
 
-			$externalId = isset( $offer['external_id'] ) ? (string) sanitize_text_field( (string) $offer['external_id'] ) : '';
-			$key        = '' !== $externalId ? 'id:' . $externalId : 'url:' . $regular;
+			$key = '' !== $externalId ? 'id:' . $externalId : 'url:' . $regular;
 
 			// 識別子が重複したら後勝ち（同じ SKU を 2 つ並べない）。
 			$byKey[ $key ] = array(
