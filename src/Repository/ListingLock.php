@@ -40,10 +40,22 @@ final class ListingLock {
 	/**
 	 * 商品 1 件ぶんのロック名。
 	 *
-	 * GET_LOCK の名前は 64 バイト以内。post ID は整数なので prefix 込みで超えない。
+	 * **サイトを区別する印を必ず混ぜる。** MySQL の名前付きロックは接続単位ではなく
+	 * **サーバ全体**で共有される。共有ホスティングのように 1 つの MySQL に複数の
+	 * WordPress が同居していると、`affilicard_listing_123` だけではサイト A の
+	 * 商品 123 がサイト B の商品 123 を待たせてしまう（同じ理由でマルチサイトの
+	 * テーブル prefix 違いも衝突する）。DB 名と prefix のハッシュを挟んで隔離する。
+	 *
+	 * GET_LOCK の名前は 64 バイト以内。19 + 8 + 1 + post ID の桁数なので超えない。
 	 */
 	public static function name( int $postId ): string {
-		return 'affilicard_listing_' . $postId;
+		global $wpdb;
+
+		$dbname = isset( $wpdb->dbname ) ? (string) $wpdb->dbname : '';
+		$prefix = isset( $wpdb->prefix ) ? (string) $wpdb->prefix : '';
+		$site   = substr( md5( $dbname . '|' . $prefix ), 0, 8 );
+
+		return 'affilicard_listing_' . $site . '_' . $postId;
 	}
 
 	/**
