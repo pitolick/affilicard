@@ -14,6 +14,7 @@ use Affilicard\Settings\GeneralSettings;
 use Affilicard\Stocktake\PublicationDate;
 use Affilicard\Stocktake\StocktakePolicy;
 use Affilicard\Util\JsonField;
+use Affilicard\Util\ScalarField;
 
 /**
  * CPT 一覧画面に「Fallback」カラムを追加する。
@@ -216,7 +217,7 @@ final class ProductListColumns {
 
 			$definition      = null;
 			$is_price_hidden = false;
-			$price           = isset( $offer['price'] ) ? trim( (string) $offer['price'] ) : '';
+			$price           = trim( ScalarField::string( $offer, 'price' ) );
 			if ( '' !== $price ) {
 				$definition = PlatformConfig::find( $platform_code );
 				if ( ! PriceFreshness::isPriceDisplayable( $offer, $definition, $now_ts ) ) {
@@ -233,9 +234,12 @@ final class ProductListColumns {
 			// （移行前の flat listing・外部ツールの直書き）には未知の値が入りうる。
 			// 素通しすると label() が空を返し、is_status_bad だけ真になって
 			// 「警告アイコンは出るが理由が書かれていない」状態になる。
-			$offer_status   = FetchStatus::normalise(
-				isset( $offer['fetch_status'] ) ? (string) $offer['fetch_status'] : FetchStatus::NONE
-			);
+			//
+			// **normalise() へ渡す前に形を検める（ScalarField::string）。** `(string)` の
+			// 直キャストだと配列が 'Array' になり、normalise() が未知値として TRANSIENT へ
+			// 倒すため、何も失敗していない listing に「一時的に取得できませんでした」の
+			// 警告が出る。運用に嘘を伝えるので、非スカラーは「値なし」＝NONE に倒す。
+			$offer_status   = FetchStatus::normalise( ScalarField::string( $offer, 'fetch_status' ) );
 			$is_status_bad  = FetchStatus::NONE !== $offer_status;
 			$has_bad_status = $has_bad_status || $is_status_bad;
 
@@ -373,7 +377,7 @@ final class ProductListColumns {
 				continue;
 			}
 			$offer = $selected[0];
-			$at    = isset( $offer['last_verified_at'] ) ? trim( (string) $offer['last_verified_at'] ) : '';
+			$at    = trim( ScalarField::string( $offer, 'last_verified_at' ) );
 			if ( '' === $at ) {
 				continue;
 			}

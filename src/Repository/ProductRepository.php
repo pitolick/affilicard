@@ -13,6 +13,7 @@ use Affilicard\Schema\SchemaVersion;
 use Affilicard\Settings\GeneralSettings;
 use Affilicard\Stock\StockStatus;
 use Affilicard\Util\JsonField;
+use Affilicard\Util\ScalarField;
 
 /**
  * `affilicard_product` CPT に対する CRUD ラッパ。
@@ -504,7 +505,7 @@ final class ProductRepository implements ProductRepositoryInterface {
 
 			$offers   = LegacyOffer::offersWithFallback( $listing );
 			$selected = OfferSelector::select( $offers, $fallback_enabled );
-			$price    = array() !== $selected && isset( $selected[0]['price'] ) ? trim( (string) $selected[0]['price'] ) : '';
+			$price    = array() !== $selected ? trim( ScalarField::string( $selected[0], 'price' ) ) : '';
 
 			return array(
 				'price'    => $price,
@@ -659,7 +660,7 @@ final class ProductRepository implements ProductRepositoryInterface {
 				if ( ! is_array( $offer ) ) {
 					continue;
 				}
-				$external_id = isset( $offer['external_id'] ) ? (string) $offer['external_id'] : '';
+				$external_id = ScalarField::string( $offer, 'external_id' );
 				if ( '' === $external_id ) {
 					continue;
 				}

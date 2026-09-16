@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Affilicard\Pricing;
 
+use Affilicard\Util\ScalarField;
+
 /**
  * listing の中からどの購入リンク（offer）を使うかを決める唯一の場所。
  *
@@ -37,7 +39,7 @@ final class OfferSelector {
 		}
 
 		foreach ( $sorted as $offer ) {
-			$status = isset( $offer['fetch_status'] ) ? (string) $offer['fetch_status'] : FetchStatus::NONE;
+			$status = ScalarField::string( $offer, 'fetch_status' );
 			if ( ! FetchStatus::isTerminal( $status ) ) {
 				return array( $offer );
 			}

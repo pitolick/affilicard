@@ -441,6 +441,57 @@ final class ProductListColumnsTest extends TestCase {
 		$this->assertStringContainsString( '一時的に取得できませんでした', $output );
 	}
 
+	/**
+	 * 非スカラーの取得状態・価格で、根拠の無い警告を出さない。
+	 *
+	 * `(string)` で直にキャストすると取得状態が `'Array'` になり、
+	 * FetchStatus::normalise() が未知値として TRANSIENT へ倒すため、実際には
+	 * 何も失敗していない listing に「一時的に取得できませんでした」の警告が出る。
+	 * 価格の側も `'Array'` が空判定をすり抜けて「価格が隠れています」を誘発する。
+	 * 運用に嘘を伝えるので、非スカラーは normalise へ渡す前に「値なし」へ倒す。
+	 */
+	public function test_renderColumn_非スカラーの取得状態と価格で警告を出さない(): void {
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 656, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'dmm-books',
+						'offers'   => array(
+							array(
+								'affiliate_url' => 'https://aff.example.com/abc',
+								'regular_url'   => 'https://example.com/product',
+								'price'         => array( '660' ),
+								'fetch_status'  => array( 'terminal' ),
+							),
+						),
+					),
+				)
+			);
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					array(
+						'code'     => 'dmm-books',
+						'provider' => 'dmm-ebook',
+					),
+				)
+			);
+		WP_Mock::userFunction( 'as_has_scheduled_action' )->andReturn( false );
+
+		ob_start();
+		ProductListColumns::renderColumn( ProductListColumns::COLUMN_KEY, 656 );
+		$output = (string) ob_get_clean();
+
+		$this->assertStringNotContainsString( 'dashicons-warning', $output );
+		$this->assertStringNotContainsString( 'Array', $output );
+		$this->assertStringContainsString( '—', $output );
+	}
+
 	public function test_renderColumn_echoes_price_hidden_warning_when_price_unverified(): void {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 321, ProductPostType::META_LISTINGS, true )

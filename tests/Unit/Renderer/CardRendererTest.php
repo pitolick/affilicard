@@ -301,6 +301,102 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringNotContainsString( 'affilicard-card__cta', $html );
 	}
 
+	/**
+	 * 非スカラーの書影 URL は「値なし」として飛ばし、アイキャッチへ落とす。
+	 *
+	 * `(string)` で直にキャストすると配列は `'Array'` になり、esc_url_raw() を
+	 * 素通りして `<img src="Array">` という実在しない相対 URL が出る。壊れた画像が
+	 * カードの一等地に出続けるうえ、後続の listing が持つ正しい書影も選ばれない。
+	 */
+	public function test_非スカラーの書影URLは採用せずアイキャッチへ落とす(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://x',
+							'image_url'     => array( 'https://cdn.example/cover.jpg' ),
+						)
+					),
+				),
+			)
+		);
+
+		$html = ( new CardRenderer() )->render( $product, array( $this->store() ), array( 'image_url' => 'https://cdn.example/eyecatch.jpg' ) );
+
+		$this->assertStringContainsString( 'https://cdn.example/eyecatch.jpg', $html );
+		$this->assertStringNotContainsString( 'src="Array"', $html );
+	}
+
+	/**
+	 * 非スカラーの価格は「値なし」として扱い、価格エリアごと出さない。
+	 *
+	 * `(string)` で直にキャストすると `'Array'` が空判定をすり抜け、
+	 * PriceFreshness::isPriceDisplayable() が「価格あり・鮮度内」と判定して
+	 * カードに `¥Array` が出る（esc_html は通してしまう）。金額はカードで
+	 * いちばん強い主張なので、でたらめな値を出すくらいなら出さない。
+	 */
+	public function test_非スカラーの価格は価格エリアごと出さない(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					$this->toListing(
+						array(
+							'platform'         => 'example-store',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://x',
+							'price'            => array( '660' ),
+							'last_verified_at' => gmdate( 'c', time() - 3600 ),
+						)
+					),
+				),
+			)
+		);
+
+		$html = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+
+		$this->assertStringNotContainsString( 'Array', $html );
+		$this->assertStringNotContainsString( 'affilicard-card__price', $html );
+		// CTA は残る（価格が読めないだけで購入リンク自体は生きている）。
+		$this->assertStringContainsString( 'affilicard-card__cta', $html );
+	}
+
+	/**
+	 * 価格が正しくても、非スカラーの通常価格・割引バッジは表示しない。
+	 *
+	 * 価格そのものは表示ゲート（PriceFreshness）を通るので、この 2 つは
+	 * CardRenderer が自分で読む。`(string)` の直キャストだと取り消し線の
+	 * 通常価格が `¥Array`、割引バッジが `Array` として出る。
+	 */
+	public function test_非スカラーの通常価格と割引バッジは表示しない(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					$this->toListing(
+						array(
+							'platform'         => 'example-store',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://x',
+							'price'            => '660',
+							'list_price'       => array( '880' ),
+							'badge'            => array( '25%OFF' ),
+							'last_verified_at' => gmdate( 'c', time() - 3600 ),
+						)
+					),
+				),
+			)
+		);
+
+		$html = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+
+		$this->assertStringNotContainsString( 'Array', $html );
+		$this->assertStringContainsString( 'affilicard-card__price', $html );
+		$this->assertStringNotContainsString( 'affilicard-card__list-price', $html );
+		$this->assertStringNotContainsString( 'affilicard-card__discount', $html );
+	}
+
 	public function test_hide_media_omits_image_column_entirely(): void {
 		$product = $this->product(
 			array(

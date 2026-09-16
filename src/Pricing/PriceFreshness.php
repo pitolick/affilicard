@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Pricing;
 
 use Affilicard\Platform\PlatformDefinition;
+use Affilicard\Util\ScalarField;
 
 /**
  * 価格をカードに表示してよいか（API 確認済み・鮮度内か）を判定する共有ポリシー。
@@ -29,16 +30,18 @@ final class PriceFreshness {
 		// 商品が消えたことを意味する。取得は失敗しているので last_verified_at は据え置かれ、
 		// 鮮度ゲートだけでも最長 TTL ぶんで自然に消えるが、その間は「もう買えない商品の
 		// 値段」を出し続けることになる。読者に対して誤りなので即座に隠す。
-		$status = isset( $offer['fetch_status'] ) ? (string) $offer['fetch_status'] : '';
+		$status = ScalarField::string( $offer, 'fetch_status' );
 		if ( FetchStatus::isTerminal( $status ) ) {
 			return false;
 		}
 
-		$price = isset( $offer['price'] ) ? trim( (string) $offer['price'] ) : '';
+		// 値は ScalarField::string() で読む。`(string)` の直キャストだと配列が 'Array' に
+		// なってこの空判定をすり抜け、鮮度内であればカードに `¥Array` が出る。
+		$price = trim( ScalarField::string( $offer, 'price' ) );
 		if ( '' === $price ) {
 			return false;
 		}
-		$verified = isset( $offer['last_verified_at'] ) ? trim( (string) $offer['last_verified_at'] ) : '';
+		$verified = trim( ScalarField::string( $offer, 'last_verified_at' ) );
 		if ( '' === $verified ) {
 			return false;
 		}
@@ -100,7 +103,7 @@ final class PriceFreshness {
 		if ( null === $platform ) {
 			return true;
 		}
-		$fetched = isset( $offer['last_fetched_at'] ) ? trim( (string) $offer['last_fetched_at'] ) : '';
+		$fetched = trim( ScalarField::string( $offer, 'last_fetched_at' ) );
 		if ( '' === $fetched ) {
 			return true;
 		}

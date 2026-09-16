@@ -9,6 +9,7 @@ use Affilicard\Pricing\OfferSelector;
 use Affilicard\Pricing\OfferUrl;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Stock\StockStatus;
+use Affilicard\Util\ScalarField;
 
 /**
  * 商品データ + platform 定義から商品カードの HTML 文字列を生成する純粋なレンダラ。
@@ -449,7 +450,8 @@ final class CardRenderer {
 	 */
 	private function selectCardImage( array $visibleListings, string $fallback ): string {
 		foreach ( $visibleListings as $entry ) {
-			$img = isset( $entry['offer']['image_url'] ) ? trim( (string) $entry['offer']['image_url'] ) : '';
+			$offer = isset( $entry['offer'] ) && is_array( $entry['offer'] ) ? $entry['offer'] : array();
+			$img   = trim( ScalarField::string( $offer, 'image_url' ) );
 			// esc_url_raw は javascript: 等の危険スキームを空文字にする。空になった offer は飛ばす。
 			$img = esc_url_raw( $img );
 			if ( '' !== $img ) {
@@ -502,8 +504,8 @@ final class CardRenderer {
 			// 手動入力／未確認／TTL 期限切れの listing は CTA ボタンのみを残す。
 			$pricing = '';
 			if ( PriceFreshness::isPriceDisplayable( $offer, $platform, $now_ts ) ) {
-				$price    = isset( $offer['price'] ) ? trim( (string) $offer['price'] ) : '';
-				$list_raw = isset( $offer['list_price'] ) ? trim( (string) $offer['list_price'] ) : '';
+				$price    = trim( ScalarField::string( $offer, 'price' ) );
+				$list_raw = trim( ScalarField::string( $offer, 'list_price' ) );
 
 				// 通常価格(取り消し線): list_price と price が共に正の数値で list_price > price のときのみ。
 				$list_num  = self::priceToNumber( $list_raw );
@@ -519,7 +521,7 @@ final class CardRenderer {
 					$pricing     .= '<span class="affilicard-card__price">¥' . esc_html( $price_no_yen ) . '</span>';
 					$pricing     .= '<span class="affilicard-card__tax">' . esc_html__( '（税込）', 'affilicard' ) . '</span>';
 				}
-				$badge = isset( $offer['badge'] ) ? trim( (string) $offer['badge'] ) : '';
+				$badge = trim( ScalarField::string( $offer, 'badge' ) );
 				if ( '' !== $badge ) {
 					$pricing .= '<span class="affilicard-card__discount">' . esc_html( $badge ) . '</span>';
 				}

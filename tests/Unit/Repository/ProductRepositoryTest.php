@@ -1217,6 +1217,68 @@ final class ProductRepositoryTest extends TestCase {
 		return $repo->listingSummary( 501 )['price'];
 	}
 
+	/**
+	 * 非スカラーの価格は検索結果のサマリに出さない。
+	 *
+	 * `(string)` で直にキャストすると `'Array'` が管理画面の商品検索結果へそのまま
+	 * 出る（ブロック挿入時の候補一覧＝人が見て選ぶ画面）。
+	 */
+	public function test_非スカラーの価格はサマリで空になる(): void {
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'display_order' => 100,
+						'external_id'   => 'a',
+						'regular_url'   => 'https://example.test/a',
+						'price'         => array( '660' ),
+					),
+				),
+			),
+		);
+		$this->assertSame( '', $this->summaryPriceFor( $listings ) );
+	}
+
+	/**
+	 * 非スカラーの external_id はミラー meta に書かない。
+	 *
+	 * `(string)` で直にキャストすると `affilicard_extid_<platform>` に `'Array'` が
+	 * **保存される**。findByExternalId() がそれを引き当てると、自動作成が無関係の商品を
+	 * 「既存」とみなして別商品の listing を書き換えることになる。
+	 */
+	public function test_非スカラーのexternal_idはミラーに書かない(): void {
+		$repo = new ProductRepository();
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 43, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'dmm-books',
+						'offers'   => array(
+							array(
+								'external_id' => array( 'X1' ),
+								'regular_url' => 'https://example.test/X1',
+							),
+						),
+					),
+				)
+			);
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 43 )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 43, Mockery::any(), false )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'add_post_meta' )->never();
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()->with( 43, ProductPostType::META_SCHEMA_VERSION, \Affilicard\Schema\SchemaVersion::CURRENT )->andReturn( true );
+
+		$repo->syncDerivedMeta( 43 );
+
+		$this->assertConditionsMet();
+	}
+
 	public function test_syncDerivedMeta_mirrors_external_ids_and_sets_schema_version(): void {
 		$repo = new ProductRepository();
 		WP_Mock::userFunction( 'get_post_meta' )
