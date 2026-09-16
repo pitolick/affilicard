@@ -104,6 +104,7 @@ final class ListingRefresherTest extends TestCase {
 	 * @return ProductRepositoryInterface&\Mockery\MockInterface
 	 */
 	private function repoWithOffers( array $offers, bool $saveOk = true ): ProductRepositoryInterface {
+		/** @var ProductRepositoryInterface&\Mockery\MockInterface $repo */
 		$repo = Mockery::mock( ProductRepositoryInterface::class );
 		$repo->shouldReceive( 'find' )->with( 20 )->andReturn(
 			array(
