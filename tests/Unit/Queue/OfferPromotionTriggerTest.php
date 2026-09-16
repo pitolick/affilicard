@@ -27,23 +27,26 @@ use WP_Mock\Tools\TestCase;
 final class OfferPromotionTriggerTest extends TestCase {
 
 	/**
-	 * 「同じジョブが既に pending か」の既定応答。
+	 * `as_next_scheduled_action()` の既定応答（pending なジョブは無い＝false）。
 	 *
 	 * **ここで登録するのは意図的である。** WP_Mock::userFunction() は同じ関数名を
 	 * 再登録しても最初の期待が残るため、個別テストからは差し替えられない。
-	 * pending 扱いにしたいテストはこのプロパティを true にする。
+	 * 値を変えたいテストはこのプロパティへ代入する。
 	 *
-	 * @var bool
+	 * Action Scheduler の戻り値と同じ 3 値を取る——false（該当なし）／true（実行中、
+	 * または実行時刻を持たない async）／int（次回の実行予定 unix 秒）。
+	 *
+	 * @var int|bool
 	 */
-	private bool $alreadyPending = false;
+	private $nextScheduledAction = false;
 
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
-		$this->alreadyPending = false;
-		WP_Mock::userFunction( 'as_has_scheduled_action' )
+		$this->nextScheduledAction = false;
+		WP_Mock::userFunction( 'as_next_scheduled_action' )
 			->andReturnUsing(
-				fn (): bool => $this->alreadyPending
+				fn () => $this->nextScheduledAction
 			);
 		OfferPromotionTrigger::resetForTests();
 	}
@@ -242,19 +245,13 @@ final class OfferPromotionTriggerTest extends TestCase {
 	 * 変えていないので、繰り上がりの契機ではない。
 	 */
 	/**
-	 * 同じジョブが既に pending なら投入しない。
+	 * 古い購入リンク 1 件を持つ listings meta を返すスタブ一式を積む。
 	 *
-	 * enqueueManual() は「手動更新を先頭へ繰り上げる」ため毎回 unschedule →
-	 * schedule し直す。同一リクエストで複数の listing が書かれるとそのたびに
-	 * Action Scheduler の行を作り直すことになり、無駄な churn が出る。
-	 *
-	 * 時間窓ではなく「pending の有無」で抑えるので、更新を取りこぼさない——
-	 * pending なジョブは実行時に最新の listing を読む。
+	 * 2 層目（pending 判定）の分岐だけを変えて挙動を比べたい 3 テストで共有する。
 	 */
-	public function test_同じジョブが既にpendingなら投入しない(): void {
+	private function stubStaleListing(): void {
 		$this->stubRakutenPlatform();
 		$this->stubGeneralSettings();
-		$this->alreadyPending = true;
 
 		WP_Mock::userFunction( 'get_post_meta' )
 			->once()
@@ -273,8 +270,85 @@ final class OfferPromotionTriggerTest extends TestCase {
 			);
 		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
 		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
+	}
+
+	/**
+	 * 同じジョブが既に pending で、かつ**実行時刻が来ている**なら投入しない。
+	 *
+	 * enqueueManual() は「手動更新を先頭へ繰り上げる」ため毎回 unschedule →
+	 * schedule し直す。同一リクエストで複数の listing が書かれるとそのたびに
+	 * Action Scheduler の行を作り直すことになり、無駄な churn が出る。まもなく
+	 * 走るジョブを積み直しても得るものが無いので、ここは抑止する。
+	 *
+	 * 時間窓ではなく「pending の有無」で抑えるので、更新を取りこぼさない——
+	 * pending なジョブは実行時に最新の listing を読む。
+	 */
+	public function test_実行時刻の来ているpendingジョブがあれば投入しない(): void {
+		$this->stubStaleListing();
+		// 予定時刻は過ぎている（AS のワーカーが次に回ったとき即座に走る）。
+		$this->nextScheduledAction = time() - 60;
+
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$this->trigger()->onListingsSaved( 123 );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 実行中のジョブ（`as_next_scheduled_action()` が true）でも投入しない。
+	 *
+	 * 走っている最中のアクションは繰り上げようがなく、まさに今 listing を読む。
+	 */
+	public function test_実行中のジョブがあれば投入しない(): void {
+		$this->stubStaleListing();
+		$this->nextScheduledAction = true;
+
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$this->trigger()->onListingsSaved( 123 );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * pending なジョブの実行予定が**将来**なら、抑止せず投入して今へ繰り上げる。
+	 *
+	 * 一時失敗のあと RefreshHandler は backoff を付けて積み直す（最大で 1 時間先）。
+	 * そのあいだに繰り上がりが起きて今使う購入リンクが古くなっても、pending の
+	 * 有無だけで抑止すると、即時取得がその遠い予定時刻まで待たされる。
+	 * enqueueManual() は unschedule → time() で schedule し直す＝「今へ動かす」
+	 * ことそのものなので、ここで積むのが正しい。
+	 */
+	public function test_pendingジョブの実行予定が先ならすぐ投入して繰り上げる(): void {
+		$this->stubStaleListing();
+		// backoff で 1 時間先に積み直されている状態。
+		$this->nextScheduledAction = time() + 3600;
+
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once()
+			->with(
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 123,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten'
+			);
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'  => 123,
+					'platform' => 'rakuten-kobo',
+				),
+				'affilicard-rakuten',
+				true,
+				Enqueuer::PRIORITY_MANUAL
+			)
+			->andReturn( 500 );
 
 		$this->trigger()->onListingsSaved( 123 );
 
