@@ -51,7 +51,7 @@ final class RestControllerTest extends TestCase {
 
 		// 各サブコントローラが register_rest_route を呼び出すことを確認する。
 		// products は 3 ルート（list/create, bulk, get/update/delete）
-		// settings は 1 ルート
+		// settings は 2 ルート（/settings, /editor-settings）
 		// platforms は 1 ルート
 		// credentials は 2 ルート（accounts/{code}/credentials, providers/{code}/test-connection）
 		// refresh は 1 ルート

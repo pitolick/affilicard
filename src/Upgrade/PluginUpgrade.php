@@ -237,6 +237,15 @@ final class PluginUpgrade {
 		// 上の isOffersMigrationPending() が担うので、ここを絞っても取りこぼさない。
 		if ( self::needsOffersMigrationFrom( $stored ) ) {
 			self::scheduleOffersMigration();
+
+			// **カーソルが立っていなければバージョンを進めない。** 未完の移行を
+			// 次のリクエストで拾い直せるのは isOffersMigrationPending()（＝カーソルの
+			// 存在）だけである。add_option が失敗してカーソルが無いままバージョンだけ
+			// 進めると、以降は上の早期 return で素通りし、移行が永久に始まらない。
+			// バージョンを据え置けば次の plugins_loaded でここへ再び到達する。
+			if ( ! self::isOffersMigrationPending() ) {
+				return;
+			}
 		}
 
 		update_option( self::OPTION_VERSION, $currentVersion, false );

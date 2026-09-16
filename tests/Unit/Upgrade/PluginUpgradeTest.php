@@ -207,18 +207,35 @@ final class PluginUpgradeTest extends TestCase {
 	}
 
 	/** 未完の移行が無い（カーソル option が存在しない）状態を作る。 */
+	/**
+	 * 移行カーソルの状態（未作成＝false、作成後＝'0'）。
+	 *
+	 * **add_option で作られたら「存在する」に変わる。** 固定値を返すスタブだと、
+	 * maybeUpgrade() が「カーソルを立ててから存在を確かめる」経路を検証できない。
+	 *
+	 * @var string|false
+	 */
+	private $migrationCursor = false;
+
 	private function stubNoMigrationPending(): void {
+		$this->migrationCursor = false;
 		WP_Mock::userFunction( 'get_option' )
 			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, false )
-			->andReturn( false );
+			->andReturnUsing( fn () => $this->migrationCursor );
 	}
 
 	/** scheduleOffersMigration() が立てる「未完」の印（カーソル作成）を期待する。 */
+	/** 作成に成功する add_option（以後 get_option はカーソルの存在を返す）。 */
 	private function expectMigrationMarkerCreated(): void {
 		WP_Mock::userFunction( 'add_option' )
 			->once()
 			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0, '', false )
-			->andReturn( true );
+			->andReturnUsing(
+				function (): bool {
+					$this->migrationCursor = '0';
+					return true;
+				}
+			);
 	}
 
 	public function test_初回は棚卸し基準日を作成しバージョンを記録する(): void {
@@ -474,6 +491,38 @@ final class PluginUpgradeTest extends TestCase {
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
 
 		PluginUpgrade::maybeUpgrade( '4.0.1' );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * カーソルを作れなかったらバージョンを進めない（次回また試す）。
+	 *
+	 * 未完の移行を次のリクエストで拾い直せるのは isOffersMigrationPending()
+	 * （＝カーソルの存在）だけである。add_option に失敗したままバージョンだけ
+	 * 進めると、以降は「同一バージョン」の早期 return で素通りし、移行が永久に
+	 * 始まらない。
+	 */
+	public function test_移行カーソルを作れなければバージョンを進めない(): void {
+		$this->stubNoMigrationPending();
+		// add_option が失敗する＝カーソルは作られないまま。
+		WP_Mock::userFunction( 'add_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0, '', false )
+			->andReturn( false );
+		WP_Mock::userFunction( 'get_option' )->with( PluginUpgrade::OPTION_VERSION, '' )->andReturn( '3.5.0' );
+		WP_Mock::userFunction( 'add_option' )
+			->once()
+			->with( PluginUpgrade::OPTION_STOCKTAKE_BASELINE, \Mockery::type( 'string' ), '', false )
+			->andReturn( true );
+		WP_Mock::userFunction( 'remove_filter' )->andReturn( true );
+		WP_Mock::userFunction( 'as_schedule_single_action' )->andReturn( 123 );
+
+		// バージョンは据え置き＝次の plugins_loaded でここへ再び到達する。
+		WP_Mock::userFunction( 'update_option' )
+			->with( PluginUpgrade::OPTION_VERSION, \Mockery::any(), false )
+			->never();
+
+		PluginUpgrade::maybeUpgrade( '4.0.0' );
 
 		$this->assertConditionsMet();
 	}
