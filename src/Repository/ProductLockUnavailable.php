@@ -27,7 +27,7 @@ namespace Affilicard\Repository;
  *
  * | 捕まえる側 | 伝え方 |
  * | --- | --- |
- * | {@see \Affilicard\Rest\ProductsController::create()}/`update()` | HTTP 409 + `affilicard_listing_locked` |
+ * | {@see \Affilicard\Rest\ProductsController::create()}/`update()` | HTTP 409 + `affilicard_listing_locked`（読み手は外部クライアント。WP 管理画面の編集はこの経路を通らない） |
  * | {@see \Affilicard\Rest\ProductsController::bulkCreate()} | 207 の該当 item を `status=error` にする |
  * | {@see \Affilicard\AutoCreate\ProductAutoCreator::createLocked()} | {@see \Affilicard\Queue\WorkOutcome::TRANSIENT_FAILURE}（AS が再投入する） |
  *

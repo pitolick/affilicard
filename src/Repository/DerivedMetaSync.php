@@ -17,8 +17,11 @@ namespace Affilicard\Repository;
  *
  * **黙って消えない。** 積んだ再試行は Action Scheduler の「予定されたアクション」画面に
  * 出る。再試行を使い切った場合はハンドラが {@see ProductLockUnavailable} を投げ、AS が
- * failed アクションとして記録する（AS の QueueRunner は Throwable を捕まえて
- * `handle_action_error()` へ渡す）。どちらの状態も運用者が一覧で見られる。
+ * failed アクションとして記録する。**これは単体テストでは確かめられない**（AS の
+ * ランナーはテスト環境に存在しない）ので、同梱している実装を読んで確認した——
+ * `vendor/woocommerce/action-scheduler/classes/abstracts/ActionScheduler_Abstract_QueueRunner.php`
+ * の `process_action()` が `catch ( Throwable $e )` で Exception へ包み直し、
+ * `handle_action_error()` へ渡している。どちらの状態も運用者が一覧で見られる。
  *
  * **投稿の保存そのものは止めない。** ここで扱うのは派生データ（listings の写し）の作り直し
  * だけで、listings 本体はコアが既に保存し終えている。だから REST の応答を 409 にはせず、

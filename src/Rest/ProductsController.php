@@ -124,9 +124,12 @@ final class ProductsController {
 	 * もう一度保存すれば通る**（{@see \Affilicard\Repository\ListingLock::TIMEOUT} は
 	 * 10 秒なので、衝突相手はすぐ抜ける）。
 	 *
-	 * 本文の code/message は管理画面の商品編集フォームがそのまま出す（他のエラー応答と
-	 * 同じ形）。つまり「保存しました」の代わりにこの文言が出るので、編集が入らなかった
-	 * ことが保存操作のその場で分かる。
+	 * **この経路を使うのは外部クライアントである。** WP 管理画面の商品編集はブロック
+	 * エディタのサイドバー（コアの `wp/v2` meta 経路）で、{@see ProductsController} を
+	 * 通らない——だからここの 409 を読むのは、記事投稿の自動化のように
+	 * `affilicard/v1/products` を叩く側であり、そこで失敗として記録されることが
+	 * 運用者への通知になる。code を専用にしているのはそのためで、
+	 * `affilicard_save_failed`（＝諦めてよい）と取り違えると積み直しの判断を誤る。
 	 */
 	private static function lockedResponse(): WP_REST_Response {
 		return new WP_REST_Response(
