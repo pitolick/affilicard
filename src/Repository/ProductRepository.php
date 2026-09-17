@@ -356,6 +356,19 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * （ProductSchema::sanitizeOffers）に置くと、取得が今書いた fetch_status まで
 	 * 消してしまう。
 	 *
+	 * **その判定は listings の read-modify-write である**——保存前の listings を読み、
+	 * 身元の変化を見てから書き戻す。したがって他の 3 つの書き手と同じ
+	 * {@see ListingLock} で直列化する。囲むのは listings の読み→変換→書き戻しだけで、
+	 * 他のメタ（product_type / extras 等）や extid ミラー同期はロックの外に置く
+	 * （別キーで RMW ではなく、ロックは「メモリ上の変換と meta の読み書き」だけを
+	 * 囲む前提の待ち時間で設計されているため）。
+	 *
+	 * **ロックを取れなくても書く（best-effort）。** {@see self::updateListing()} と同じ側で、
+	 * {@see self::updateListingOffer()} とは逆である。理由は呼び出し側の事情——ここへ来るのは
+	 * 運用者／API の編集で、書かずに諦めても再投入する呼び出し側が無い（saveMeta() は
+	 * void で、失敗を報告する口すら無い）。取得した価格を次の試行で保存し直せる
+	 * updateListingOffer() と違い、ここで捨てた編集は誰も拾わない。
+	 *
 	 * @param array<string, mixed> $data
 	 */
 	public function saveMeta( int $postId, array $data ): void {
@@ -375,15 +388,25 @@ final class ProductRepository implements ProductRepositoryInterface {
 		$mask_r18   = ! empty( $data['mask_r18'] );
 		$mask_label = isset( $data['mask_label'] ) ? sanitize_text_field( (string) $data['mask_label'] ) : '';
 
-		// 身元（external_id、無ければ regular_url）を訂正された購入リンクは、前の身元で
-		// 付いた fetch_status を引き継がせない（引き継ぐと give-up の cooldown が
-		// 訂正を数日のあいだ無効化する。理由は OfferStatusReset の docblock）。
-		$listings = OfferStatusReset::forIdentityChanges( self::listingsMeta( $postId ), $listings );
-
 		update_post_meta( $postId, ProductPostType::META_PRODUCT_TYPE, $product_type );
 		update_post_meta( $postId, ProductPostType::META_STOCK_STATUS, $stock_status );
 		update_post_meta( $postId, ProductPostType::META_EXTRAS, $extras );
-		update_post_meta( $postId, ProductPostType::META_LISTINGS, $listings );
+
+		/** @var array<int, mixed> $listings */
+		$listings = ListingLock::around(
+			$postId,
+			static function ( bool $locked ) use ( $postId, $listings ): array {
+				// **$locked は見ない（best-effort）。** updateListing() と同じ判断で、
+				// 理由は上の PHPDoc のとおり——この呼び出し側には再投入する仕組みが無く、
+				// saveMeta() は void なので失敗を報告する口すら無い。ここで書かずに
+				// 戻ると運用者／API の編集が無言で消える。取りこぼしても次の掃引で
+				// 取り直せる価格更新（updateListingOffer）とは失うものの重さが違う。
+				$next = OfferStatusReset::forIdentityChanges( self::listingsMeta( $postId ), $listings );
+				update_post_meta( $postId, ProductPostType::META_LISTINGS, $next );
+				return $next;
+			}
+		);
+
 		update_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
 		update_post_meta( $postId, ProductPostType::META_RELEASE_DATE, $release_date );
 		update_post_meta( $postId, ProductPostType::META_MASK_BLUR, $mask_blur );

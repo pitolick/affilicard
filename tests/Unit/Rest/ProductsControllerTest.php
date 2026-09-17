@@ -34,8 +34,24 @@ final class ProductsControllerTest extends TestCase {
 
 	public function tearDown(): void {
 		WP_Mock::tearDown();
+		if ( isset( $GLOBALS['wpdb'] ) ) {
+			unset( $GLOBALS['wpdb'] );
+		}
 		Mockery::close();
 		parent::tearDown();
+	}
+
+	/**
+	 * ProductRepository::saveMeta() が listings の read-modify-write を
+	 * {@see \Affilicard\Repository\ListingLock} で囲むため、保存を通るテストには
+	 * GET_LOCK / RELEASE_LOCK を受ける $wpdb が要る。ここでは常に取得成功を返す。
+	 */
+	private function mockListingLockWpdb(): void {
+		$wpdb = Mockery::mock();
+		$wpdb->shouldReceive( 'prepare' )->andReturnUsing( static fn( string $query ) => $query );
+		$wpdb->shouldReceive( 'get_var' )->andReturn( '1' );
+		$wpdb->shouldReceive( 'query' )->andReturn( 1 );
+		$GLOBALS['wpdb'] = $wpdb;
 	}
 
 	/**
@@ -100,6 +116,7 @@ final class ProductsControllerTest extends TestCase {
 	}
 
 	public function test_create_upserts_via_repository_and_returns_201_with_saved_data(): void {
+		$this->mockListingLockWpdb();
 		WP_Mock::userFunction( 'wp_insert_post' )
 			->once()
 			->andReturnUsing(
@@ -342,6 +359,7 @@ final class ProductsControllerTest extends TestCase {
 	}
 
 	public function test_update_saves_and_returns_200_with_saved_product(): void {
+		$this->mockListingLockWpdb();
 		$this->mockFindReturnsProduct( 7, 'new' );
 
 		WP_Mock::userFunction( 'wp_update_post' )
@@ -369,6 +387,7 @@ final class ProductsControllerTest extends TestCase {
 	}
 
 	public function test_update_preserves_existing_title_when_omitted(): void {
+		$this->mockListingLockWpdb();
 		// metabox の部分更新は title を送らない（stock_status/extras/listings のみ）。
 		// 既存タイトルが空文字で上書きされず保持されることを検証する。
 		$this->mockFindReturnsProduct( 7, 'Keep Title' );
@@ -395,6 +414,7 @@ final class ProductsControllerTest extends TestCase {
 	}
 
 	public function test_bulk_create_returns_207_with_per_item_results_partial_success(): void {
+		$this->mockListingLockWpdb();
 		WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing( static fn( $v ) => is_string( $v ) ? trim( $v ) : $v );
 		WP_Mock::userFunction( 'wp_kses_post' )->andReturnUsing( static fn( $v ) => $v );
 		WP_Mock::userFunction( 'sanitize_key' )->andReturnUsing( static fn( $v ) => strtolower( (string) $v ) );

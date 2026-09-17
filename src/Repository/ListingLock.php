@@ -14,17 +14,22 @@ namespace Affilicard\Repository;
  * ここ 1 箇所に集める。
  *
  * **ロックを取れなかったときにどうするかは、ここでは決めない。** 呼び出し側の事情で
- * 正解が逆になるためである（下の 3 つの呼び出し側を参照）。だから {@see self::around()}
+ * 正解が逆になるためである（下の 4 つの呼び出し側を参照）。だから {@see self::around()}
  * は取得の成否をコールバックへ渡すだけにして、続行するか諦めるかは呼び出し側に書かせる。
  *
  * | 呼び出し側 | 取れなかったら |
  * | --- | --- |
  * | {@see ProductRepository::updateListing()} | best-effort で続行する（取得済みの値を捨てない） |
  * | {@see ProductRepository::updateListingOffer()} | 何も書かず false（呼び出し側が再投入する） |
+ * | {@see ProductRepository::saveMeta()} | best-effort で続行する（運用者の編集を捨てない・再投入する呼び出し側が無い） |
  * | {@see \Affilicard\Upgrade\PluginUpgrade::migrateOneProduct()} | 移行の失敗として差し戻す（数回で諦める） |
  *
  * 外部 API の fetch をロックの中へ入れてはならない。ロックは「メモリ上の変換と
  * meta の読み書き」だけを囲む前提の待ち時間（{@see self::TIMEOUT}）で設計している。
+ *
+ * **ブロックエディタのサイドバー保存（コアの `wp/v2` meta 経路）はここを通らない。**
+ * 意図的に通していない——理由と残る競合は {@see \Affilicard\Rest\ListingsEditFilter} の
+ * クラス docblock に書いた。
  */
 final class ListingLock {
 

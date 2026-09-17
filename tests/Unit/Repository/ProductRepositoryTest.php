@@ -366,6 +366,8 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	public function test_save_insert_calls_wp_insert_post_and_meta(): void {
+		// saveMeta() の listings RMW は ListingLock の中で行う（GET_LOCK/RELEASE_LOCK）。
+		$this->mockLockWpdb( 1 );
 		WP_Mock::userFunction( 'wp_insert_post' )
 			->once()
 			->andReturnUsing(
@@ -395,6 +397,8 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	public function test_save_update_calls_wp_update_post(): void {
+		// saveMeta() の listings RMW は ListingLock の中で行う（GET_LOCK/RELEASE_LOCK）。
+		$this->mockLockWpdb( 1 );
 		WP_Mock::userFunction( 'wp_update_post' )
 			->once()
 			->andReturnUsing(
@@ -421,6 +425,8 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	public function test_save_writes_schema_version_meta(): void {
+		// saveMeta() の listings RMW は ListingLock の中で行う（GET_LOCK/RELEASE_LOCK）。
+		$this->mockLockWpdb( 1 );
 		WP_Mock::userFunction( 'wp_insert_post' )->andReturn( 800 );
 
 		$saw_schema_version = false;
@@ -446,6 +452,8 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	public function test_save_mirrors_external_ids_for_each_listing(): void {
+		// saveMeta() の listings RMW は ListingLock の中で行う（GET_LOCK/RELEASE_LOCK）。
+		$this->mockLockWpdb( 1 );
 		WP_Mock::userFunction( 'wp_insert_post' )->andReturn( 700 );
 
 		$mirror_calls = array();
@@ -508,6 +516,8 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	public function test_save_deletes_stale_external_id_mirror_meta(): void {
+		// saveMeta() の listings RMW は ListingLock の中で行う（GET_LOCK/RELEASE_LOCK）。
+		$this->mockLockWpdb( 1 );
 		// 既存は dmm-books の extid mirror を持つが、新 listing は amazon-kindle のみ。
 		// 旧 affilicard_extid_dmm-books の値が delete_post_meta で個別に削除され、
 		// 新 affilicard_extid_amazon-kindle が add_post_meta で書かれることを検証する。
@@ -647,6 +657,8 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	public function test_saveMeta_calls_update_post_meta_for_all_keys_and_does_not_call_insert_or_update_post(): void {
+		// saveMeta() の listings RMW は ListingLock の中で行う（GET_LOCK/RELEASE_LOCK）。
+		$this->mockLockWpdb( 1 );
 		// wp_update_post / wp_insert_post should never be called.
 		WP_Mock::userFunction( 'wp_update_post' )->never();
 		WP_Mock::userFunction( 'wp_insert_post' )->never();
@@ -709,6 +721,8 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	public function test_saveMeta_uses_generic_when_product_type_empty(): void {
+		// saveMeta() の listings RMW は ListingLock の中で行う（GET_LOCK/RELEASE_LOCK）。
+		$this->mockLockWpdb( 1 );
 		WP_Mock::userFunction( 'wp_update_post' )->never();
 		WP_Mock::userFunction( 'wp_insert_post' )->never();
 
@@ -737,6 +751,8 @@ final class ProductRepositoryTest extends TestCase {
 	 * @return array<int, mixed>
 	 */
 	private function saveMetaAndCaptureListings( array $stored, array $incoming ): array {
+		// saveMeta() の listings RMW は ListingLock の中で行う（GET_LOCK/RELEASE_LOCK）。
+		$this->mockLockWpdb( 1 );
 		$this->storedListings = $stored;
 
 		WP_Mock::userFunction( 'wp_update_post' )->never();
@@ -1568,6 +1584,132 @@ final class ProductRepositoryTest extends TestCase {
 		$wpdb->shouldReceive( 'get_var' )->andReturn( (string) $getLockReturn );
 		$wpdb->shouldReceive( 'query' )->andReturn( 1 );
 		$GLOBALS['wpdb'] = $wpdb;
+	}
+
+	/**
+	 * GET_LOCK / RELEASE_LOCK の発行を「時系列」へ記録する $wpdb モック。
+	 *
+	 * ロックを取っただけでは意味がなく、**読みと書きがロックの中に入っているか**が
+	 * 検証したいことなので、SQL とメタ操作を同じ配列へ積んで順番を見る。
+	 *
+	 * @param int                $getLockReturn GET_LOCK の戻り（1=取得成功／0=タイムアウト）。
+	 * @param array<int, string> $timeline      出来事を積む参照。
+	 */
+	private function mockLockWpdbTimeline( int $getLockReturn, array &$timeline ): void {
+		$wpdb = Mockery::mock();
+		$wpdb->shouldReceive( 'prepare' )->andReturnUsing(
+			static function ( string $query ) {
+				return $query;
+			}
+		);
+		$wpdb->shouldReceive( 'get_var' )->andReturnUsing(
+			static function ( string $query ) use ( $getLockReturn, &$timeline ) {
+				if ( false !== strpos( $query, 'GET_LOCK' ) ) {
+					$timeline[] = 'GET_LOCK';
+				}
+				return (string) $getLockReturn;
+			}
+		);
+		$wpdb->shouldReceive( 'query' )->andReturnUsing(
+			static function ( string $query ) use ( &$timeline ) {
+				if ( false !== strpos( $query, 'RELEASE_LOCK' ) ) {
+					$timeline[] = 'RELEASE_LOCK';
+				}
+				return 1;
+			}
+		);
+		$GLOBALS['wpdb'] = $wpdb;
+	}
+
+	/**
+	 * saveMeta() を走らせ、listings の読み書きとロックの発行順を返す。
+	 *
+	 * @param array<int, mixed> $stored 保存前の listings meta。
+	 * @return array<int, string> 'GET_LOCK' / 'read:listings' / 'write:listings' / 'RELEASE_LOCK' の順列。
+	 */
+	private function saveMetaLockTimeline( int $getLockReturn, array $stored = array() ): array {
+		$timeline = array();
+		$this->mockLockWpdbTimeline( $getLockReturn, $timeline );
+		$this->storedListings = $stored;
+
+		WP_Mock::userFunction( 'wp_update_post' )->never();
+		WP_Mock::userFunction( 'wp_insert_post' )->never();
+		WP_Mock::userFunction( 'add_post_meta' )->andReturn( true );
+		WP_Mock::userFunction( 'delete_post_meta' )->andReturn( true );
+		WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing( static fn( $v ) => is_string( $v ) ? trim( $v ) : $v );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key = '', $single = false ) use ( &$timeline ) {
+					if ( ProductPostType::META_LISTINGS === $key ) {
+						$timeline[] = 'read:listings';
+						return $this->storedListings;
+					}
+					return array();
+				}
+			);
+		WP_Mock::userFunction( 'update_post_meta' )
+			->andReturnUsing(
+				static function ( $post_id, $key, $value ) use ( &$timeline ) {
+					if ( ProductPostType::META_LISTINGS === $key ) {
+						$timeline[] = 'write:listings';
+					}
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$repo->saveMeta(
+			5,
+			array(
+				'listings' => array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array(
+							array(
+								'external_id' => 'rk-1',
+								'regular_url' => 'https://example.test/rk-1',
+							),
+						),
+					),
+				),
+			)
+		);
+
+		return $timeline;
+	}
+
+	/**
+	 * saveMeta() の listings 読み書きはロックの中で行う。
+	 *
+	 * saveMeta() も META_LISTINGS の read-modify-write である（保存前の listings を
+	 * 読んで OfferStatusReset を掛けてから書き戻す）。ロックの外でやると、読みと
+	 * 書きのあいだに入った価格更新（updateListingOffer）の書き込みを丸ごと消す。
+	 */
+	public function test_saveMetaはlistingsの読み書きをロックの中で行う(): void {
+		$timeline = $this->saveMetaLockTimeline( 1 );
+
+		$this->assertSame(
+			array( 'GET_LOCK', 'read:listings', 'write:listings', 'RELEASE_LOCK' ),
+			$timeline
+		);
+	}
+
+	/**
+	 * ロックを取れなくても saveMeta() は書く（best-effort）。
+	 *
+	 * updateListing() と同じ判断。運用者／API の保存には再投入する呼び出し側が無く
+	 * （saveMeta() は void で失敗を報告する口すら無い）、ここで書かずに戻ると
+	 * 運用者の編集が無言で消える。取りこぼしても次の掃引で取り直せる価格更新とは
+	 * 失うものの重さが違う。
+	 */
+	public function test_saveMetaはロックを取れなくてもlistingsを保存する(): void {
+		$timeline = $this->saveMetaLockTimeline( 0 );
+
+		// 取れていないロックを返しに行かない（GET_LOCK だけで終わる）。
+		$this->assertSame(
+			array( 'GET_LOCK', 'read:listings', 'write:listings' ),
+			$timeline
+		);
 	}
 
 	public function test_updateListing_対象platformのみ差し替え他listingを保持して保存する(): void {
