@@ -247,6 +247,21 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * 突き合わせは配列の添字ではなく身元（{@see OfferIdentity}: external_id、空なら
 	 * regular_url）で行う。offers は複数の書き込み元から届き、位置は安定しない。
 	 *
+	 * **一致した最初の 1 件へマージし、「2 件以上一致したら諦める」ガードは置かない。**
+	 * 同じ身元の offer が 2 件並ぶことが保存側で起こり得ないためである（spec §3-4
+	 * 「同一 listing 内で識別子が重複する offer は後勝ちでマージする」）。この不変条件は
+	 * {@see \Affilicard\Rest\ProductSchema::sanitizeOffers()} が強制する——external_id、
+	 * 空なら regular_url をキーに束ねて後勝ちで潰しており、これは {@see OfferIdentity::of()}
+	 * とまったく同じ規則である。そして META_LISTINGS を書く経路は例外なく
+	 * `update_post_meta()` を通り、`update_metadata()` の中の `sanitize_meta()` が
+	 * {@see \Affilicard\PostType\ProductMeta::register()} の登録した
+	 * `ProductSchema::sanitizeListings` を必ず走らせる（コアの `wp/v2` meta 経路も同じ）。
+	 * 身元を 1 つも持たない offer だけは
+	 * {@see \Affilicard\Rest\ProductSchema::withLegacyOfferPreservation()} の窓で
+	 * 温存され得るが、あの窓を使うのは移行の書き込み 1 回だけで、
+	 * {@see \Affilicard\Upgrade\PluginUpgrade::migrateListingToOffers()} が作る offer は
+	 * listing あたり高々 1 件である。ガードを足しても到達しないコードになる。
+	 *
 	 * **身元が見つからなければ何も保存せず false を返す（追加はしない）。** fetch 中に
 	 * 管理者が削除した購入リンクをここで復活させると、削除操作が無言で取り消される。
 	 * false は呼び出し側で一時失敗として扱われ、リトライ時には「そのとき現存する」
