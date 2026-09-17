@@ -168,8 +168,8 @@ final class OfferStatusReset {
 	 * 取得結果フィールドを 1 つも持たない listing（設定だけ）は畳み込みの対象にならない
 	 * ので、キーを足さずそのまま返す。
 	 *
-	 * @param array<string, mixed>     $listing
-	 * @param array<string, true>      $seen    同じ platform の保存前の身元。
+	 * @param array<string, mixed> $listing
+	 * @param array<string, true>  $seen    同じ platform の保存前の身元。
 	 * @return array<string, mixed>
 	 */
 	private static function resetFlatListing( array $listing, array $seen ): array {
