@@ -15,6 +15,7 @@ const {
 	createProductWithOffers,
 	createProduct,
 	readListings,
+	updateOffers,
 } = require( './helpers/rest-offers' );
 
 test.describe( 'offers[] の REST 保存往復', () => {
@@ -53,6 +54,59 @@ test.describe( 'offers[] の REST 保存往復', () => {
 		expect( offers[ 1 ].external_id ).toBe( 'normal' );
 		expect( offers[ 1 ].display_order ).toBe( 100 );
 		expect( offers[ 1 ].price ).toBe( '660' );
+	} );
+
+	test( '外部 ID を訂正すると恒久失敗の印が落ちる（give-up の巻き添えを解く）', async () => {
+		// ブロックエディタのサイドバーは core-data（wp/v2 の meta）で保存するため、
+		// affilicard/v1 の商品コントローラ（ProductRepository::saveMeta）を通らない。
+		// unit test では両経路の配線までは押さえられないので、実 WP の REST 往復で確認する。
+		const id = await createProductWithOffers(
+			[
+				{
+					display_order: 10,
+					external_id: 'rk-wrong',
+					regular_url: 'https://example.test/rk-wrong',
+					fetch_status: 'terminal',
+				},
+				{
+					display_order: 100,
+					external_id: 'rk-other',
+					regular_url: 'https://example.test/rk-other',
+					fetch_status: 'terminal',
+				},
+			],
+			{ title: 'E2E 身元の訂正' }
+		);
+
+		// 作成時は「訂正」ではないので、持ち込んだ取得状態はそのまま残る。
+		const created = await readListings( id );
+		expect( created[ 0 ].offers[ 0 ].fetch_status ).toBe( 'terminal' );
+
+		// 運用者が 1 件目の外部 ID だけを直す。
+		await updateOffers( id, [
+			{
+				display_order: 10,
+				external_id: 'rk-fixed',
+				regular_url: 'https://example.test/rk-wrong',
+				fetch_status: 'terminal',
+			},
+			{
+				display_order: 100,
+				external_id: 'rk-other',
+				regular_url: 'https://example.test/rk-other',
+				fetch_status: 'terminal',
+			},
+		] );
+
+		const listings = await readListings( id );
+		const offers = listings[ 0 ].offers;
+
+		// 訂正した購入リンクは取得状態が白紙に戻り、give-up の抑止から外れる。
+		expect( offers[ 0 ].external_id ).toBe( 'rk-fixed' );
+		expect( offers[ 0 ].fetch_status ).toBe( '' );
+		// 触っていない購入リンクは恒久失敗のまま（廃盤 SKU へのリトライを再開させない）。
+		expect( offers[ 1 ].external_id ).toBe( 'rk-other' );
+		expect( offers[ 1 ].fetch_status ).toBe( 'terminal' );
 	} );
 
 	test( 'flat な listing を送っても offers[0] へ正規化される（互換の保証）', async () => {

@@ -160,6 +160,16 @@ final class Plugin {
 		);
 		$rest->register();
 
+		// ブロックエディタ（core-data）からの保存は wp/v2 の meta 経由で listings を書き、
+		// ProductRepository::saveMeta() を通らない。身元を訂正された購入リンクの
+		// 取得状態を白紙に戻す判定はこの経路にも要る（詳細は ListingsEditFilter）。
+		add_filter(
+			'rest_pre_insert_' . ProductPostType::POST_TYPE,
+			array( \Affilicard\Rest\ListingsEditFilter::class, 'resetEditedOfferStatus' ),
+			10,
+			2
+		);
+
 		add_action(
 			'rest_after_insert_' . ProductPostType::POST_TYPE,
 			static function ( $post ) {

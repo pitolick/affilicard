@@ -8,6 +8,7 @@ use Affilicard\PostType\ProductPostType;
 use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferIdentity;
 use Affilicard\Pricing\OfferSelector;
+use Affilicard\Pricing\OfferStatusReset;
 use Affilicard\Pricing\OfferUrl;
 use Affilicard\Schema\SchemaVersion;
 use Affilicard\Settings\GeneralSettings;
@@ -348,6 +349,13 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 *
 	 * `save()` の内部でも呼ばれるが、`save_post` ハンドラから直接呼ぶことも想定している。
 	 *
+	 * **listings を丸ごと書き換えるのは運用者/API の編集だけである。** 価格更新は
+	 * {@see self::updateListingOffer()}（取得が変えたフィールドだけのパッチ）を通るため、
+	 * ここへは来ない。だから「身元を書き換えられた購入リンクの取得状態を白紙に戻す」
+	 * 判定（{@see OfferStatusReset}）はこの層に置く——保存の共通層
+	 * （ProductSchema::sanitizeOffers）に置くと、取得が今書いた fetch_status まで
+	 * 消してしまう。
+	 *
 	 * @param array<string, mixed> $data
 	 */
 	public function saveMeta( int $postId, array $data ): void {
@@ -367,6 +375,11 @@ final class ProductRepository implements ProductRepositoryInterface {
 		$mask_r18   = ! empty( $data['mask_r18'] );
 		$mask_label = isset( $data['mask_label'] ) ? sanitize_text_field( (string) $data['mask_label'] ) : '';
 
+		// 身元（external_id、無ければ regular_url）を訂正された購入リンクは、前の身元で
+		// 付いた fetch_status を引き継がせない（引き継ぐと give-up の cooldown が
+		// 訂正を数日のあいだ無効化する。理由は OfferStatusReset の docblock）。
+		$listings = OfferStatusReset::forIdentityChanges( self::listingsMeta( $postId ), $listings );
+
 		update_post_meta( $postId, ProductPostType::META_PRODUCT_TYPE, $product_type );
 		update_post_meta( $postId, ProductPostType::META_STOCK_STATUS, $stock_status );
 		update_post_meta( $postId, ProductPostType::META_EXTRAS, $extras );
@@ -378,6 +391,22 @@ final class ProductRepository implements ProductRepositoryInterface {
 		update_post_meta( $postId, ProductPostType::META_MASK_LABEL, $mask_label );
 
 		$this->syncExternalIdMirror( $postId, $listings );
+	}
+
+	/**
+	 * 保存されている listings meta を読む（配列・旧 JSON 文字列のどちらでも受ける）。
+	 *
+	 * 保存前の姿と突き合わせたい呼び出し元（{@see self::saveMeta()} と
+	 * {@see \Affilicard\Rest\ListingsEditFilter}）が共有する読み取り規則。
+	 *
+	 * @return array<int, mixed>
+	 */
+	public static function listingsMeta( int $postId ): array {
+		$raw = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
+		if ( is_string( $raw ) ) {
+			return JsonField::decode( $raw, array() );
+		}
+		return is_array( $raw ) ? $raw : array();
 	}
 
 	/**

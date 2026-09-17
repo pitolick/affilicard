@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Tests\Unit\Repository;
 
 use Affilicard\PostType\ProductPostType;
+use Affilicard\Pricing\FetchStatus;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Schema\SchemaVersion;
 use Affilicard\Settings\GeneralSettings;
@@ -13,6 +14,16 @@ use WP_Mock;
 use WP_Mock\Tools\TestCase;
 
 final class ProductRepositoryTest extends TestCase {
+
+	/**
+	 * get_post_meta( META_LISTINGS ) が返す「保存前の listings」。
+	 *
+	 * **テストごとに userFunction を登録し直しても切り替わらない。** WP_Mock は
+	 * 同じ関数名について最初の期待だけを保持するため、値はここから読む。
+	 *
+	 * @var array<int, mixed>
+	 */
+	private array $storedListings = array();
 
 	public function setUp(): void {
 		parent::setUp();
@@ -502,6 +513,12 @@ final class ProductRepositoryTest extends TestCase {
 		// 新 affilicard_extid_amazon-kindle が add_post_meta で書かれることを検証する。
 		WP_Mock::userFunction( 'wp_insert_post' )->andReturn( 800 );
 
+		// saveMeta() は保存前の listings を読む（身元を訂正された購入リンクの
+		// fetch_status を白紙に戻すため。OfferStatusReset 参照）。ここでは保存前は空。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 800, ProductPostType::META_LISTINGS, true )
+			->andReturn( array() );
+
 		// 全 meta 列挙: extid mirror + 無関係 meta を返す。
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 800 )
@@ -710,6 +727,155 @@ final class ProductRepositoryTest extends TestCase {
 		$repo->saveMeta( 5, array() );
 
 		$this->assertSame( 'generic', $seen_type );
+	}
+
+	/**
+	 * saveMeta() が META_LISTINGS へ書いた値を捕まえる。
+	 *
+	 * @param array<int, mixed> $stored   保存前の listings meta。
+	 * @param array<int, mixed> $incoming saveMeta() へ渡す listings。
+	 * @return array<int, mixed>
+	 */
+	private function saveMetaAndCaptureListings( array $stored, array $incoming ): array {
+		$this->storedListings = $stored;
+
+		WP_Mock::userFunction( 'wp_update_post' )->never();
+		WP_Mock::userFunction( 'wp_insert_post' )->never();
+		// extid ミラー同期（syncExternalIdMirror）が触る関数。ここでの関心事ではない。
+		WP_Mock::userFunction( 'add_post_meta' )->andReturn( true );
+		WP_Mock::userFunction( 'delete_post_meta' )->andReturn( true );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key = '', $single = false ) {
+					return ProductPostType::META_LISTINGS === $key ? $this->storedListings : array();
+				}
+			);
+
+		$saved = array();
+		WP_Mock::userFunction( 'update_post_meta' )
+			->andReturnUsing(
+				static function ( $post_id, $key, $value ) use ( &$saved ) {
+					if ( ProductPostType::META_LISTINGS === $key ) {
+						$saved = is_array( $value ) ? $value : array();
+					}
+					return true;
+				}
+			);
+
+		$repo = new ProductRepository();
+		$repo->saveMeta( 5, array( 'listings' => $incoming ) );
+
+		return $saved;
+	}
+
+	/**
+	 * 保存前の listings（購入リンク 1 件・恒久失敗）。
+	 *
+	 * @return array<int, mixed>
+	 */
+	private function storedTerminalListings(): array {
+		return array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'external_id'  => 'rk-old',
+						'regular_url'  => 'https://example.test/old',
+						'fetch_status' => FetchStatus::TERMINAL,
+					),
+				),
+			),
+		);
+	}
+
+	/**
+	 * 運用者が external_id を訂正したら、前の身元で付いた恒久失敗を引き継がない。
+	 *
+	 * 引き継ぐと RefreshHandler::isGivenUp() が give-up マーカーと offer 自身の
+	 * terminal を AND で見るため、訂正した購入リンクが cooldown のあいだ
+	 * 再取得されない（＝訂正が数日なにもしない）。
+	 */
+	public function test_saveMetaはexternal_idを訂正した購入リンクのfetch_statusを白紙に戻す(): void {
+		$saved = $this->saveMetaAndCaptureListings(
+			$this->storedTerminalListings(),
+			array(
+				array(
+					'platform' => 'rakuten-kobo',
+					'offers'   => array(
+						array(
+							'external_id'  => 'rk-fixed',
+							'regular_url'  => 'https://example.test/old',
+							'fetch_status' => FetchStatus::TERMINAL,
+						),
+					),
+				),
+			)
+		);
+
+		$this->assertSame( FetchStatus::NONE, $saved[0]['offers'][0]['fetch_status'] );
+		$this->assertSame( 'rk-fixed', $saved[0]['offers'][0]['external_id'] );
+	}
+
+	/** external_id を持たない購入リンクは regular_url が身元。訂正したら同じく白紙に戻す。 */
+	public function test_saveMetaはregular_urlを訂正した購入リンクのfetch_statusを白紙に戻す(): void {
+		$stored = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'external_id'  => '',
+						'regular_url'  => 'https://example.test/old',
+						'fetch_status' => FetchStatus::TERMINAL,
+					),
+				),
+			),
+		);
+
+		$saved = $this->saveMetaAndCaptureListings(
+			$stored,
+			array(
+				array(
+					'platform' => 'rakuten-kobo',
+					'offers'   => array(
+						array(
+							'external_id'  => '',
+							'regular_url'  => 'https://example.test/fixed',
+							'fetch_status' => FetchStatus::TERMINAL,
+						),
+					),
+				),
+			)
+		);
+
+		$this->assertSame( FetchStatus::NONE, $saved[0]['offers'][0]['fetch_status'] );
+	}
+
+	/**
+	 * 身元が変わっていない購入リンクは触らない。
+	 *
+	 * ここを触ると、恒久失敗した購入リンクが保存のたびに生き返り、廃盤 SKU への
+	 * リトライを毎回焼くことになる（give-up の cooldown が意味を失う）。
+	 */
+	public function test_saveMetaは身元が変わらない購入リンクのfetch_statusを保つ(): void {
+		$saved = $this->saveMetaAndCaptureListings(
+			$this->storedTerminalListings(),
+			array(
+				array(
+					'platform' => 'rakuten-kobo',
+					'offers'   => array(
+						array(
+							'external_id'   => 'rk-old',
+							'regular_url'   => 'https://example.test/old',
+							'fetch_status'  => FetchStatus::TERMINAL,
+							'display_order' => 20,
+						),
+					),
+				),
+			)
+		);
+
+		$this->assertSame( FetchStatus::TERMINAL, $saved[0]['offers'][0]['fetch_status'] );
+		$this->assertSame( 20, $saved[0]['offers'][0]['display_order'] );
 	}
 
 	public function test_count_fallback_products_counts_listings_with_empty_affiliate_url(): void {
