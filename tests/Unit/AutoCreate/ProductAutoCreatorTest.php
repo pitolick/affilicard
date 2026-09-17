@@ -10,6 +10,7 @@ use Affilicard\Provider\FetchResult;
 use Affilicard\Provider\ProviderInterface;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Queue\WorkOutcome;
+use Affilicard\Repository\ProductLockUnavailable;
 use Affilicard\Repository\ProductRepositoryInterface;
 use Mockery;
 use WP_Mock;
@@ -247,6 +248,37 @@ final class ProductAutoCreatorTest extends TestCase {
 		$creator = new ProductAutoCreator( $registry, $repo );
 		// 保存失敗はリトライで解決し得るため一時失敗（transient）。
 		$this->assertSame( WorkOutcome::TRANSIENT_FAILURE, $creator->create( 'dmm-books', 'ext-1' ) );
+	}
+
+	/**
+	 * 商品ロック競合で listings を書かなかった場合も一時失敗として返す。
+	 *
+	 * **ここが「捨てずに報告する」のもう一方の形である。** REST は運用者へ 409 を返して
+	 * 人にやり直させるが、自動作成には人が居ない代わりに再投入がある——
+	 * AutoCreateHandler が TRANSIENT_FAILURE を backoff して積み直す。例外をここで
+	 * 捕まえずに抜けさせると Action Scheduler の failed になり、give-up 機構が
+	 * 数える terminal/transient の区別から外れてしまう。
+	 *
+	 * なおここで取れなかったのは**商品ロック**（ListingRepository 側）であって、
+	 * このメソッドが握っている自動作成ロックとは別物である。
+	 */
+	public function test_create_returns_transient_when_product_lock_unavailable(): void {
+		$this->stubPlatformsOption();
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'dmm-ebook' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$provider->shouldReceive( 'fetch' )->andReturn( FetchResult::hit( array( 'title' => '架空作品' ) ) );
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'findByExternalId' )->andReturn( null );
+		$repo->shouldReceive( 'save' )->once()->andThrow( new ProductLockUnavailable( 77 ) );
+		$creator = new ProductAutoCreator( $registry, $repo );
+
+		$this->assertSame( WorkOutcome::TRANSIENT_FAILURE, $creator->create( 'dmm-books', 'ext-1' ) );
+
+		// 取った自動作成ロックは finally で返している（例外で抜けても残さない）。
+		$this->assertContains( 'SELECT RELEASE_LOCK(%s)', $this->capturedSql );
 	}
 
 	public function test_自動作成した商品はoffersを持つ(): void {
