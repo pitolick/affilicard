@@ -141,26 +141,54 @@ final class OfferStatusResetTest extends TestCase {
 	}
 
 	/**
-	 * 保存前が v3 以前の flat な listing でも身元を拾う。
+	 * 保存前が v3 以前の flat な listing でも身元と取得状態を拾う。
 	 *
 	 * 拾えないと「既知の身元」が空になり、移行前の商品を保存するたびに全 offer の
 	 * 取得状態を白紙にしてしまう。
+	 *
+	 * **同じ platform に未知の身元を 1 件混ぜて判定する。** 「rk-1 を触らない」だけを
+	 * 見ても、拾えているときと拾えていないとき（$known にこの platform が無く listing
+	 * ごと素通りする）の区別が付かない——どちらも状態が残るため、実装を壊しても
+	 * 落ちないテストになる。拾えていれば rk-1 だけが残り、rk-2 は未知の身元として
+	 * 白紙になる。
 	 */
-	public function test_保存前がflatな旧形式でも身元を拾う(): void {
+	public function test_保存前がflatな旧形式でも身元と取得状態を拾う(): void {
 		$stored = array(
 			array(
-				'platform'    => 'rakuten-kobo',
-				'external_id' => 'rk-1',
-				'regular_url' => 'https://example.test/a',
+				'platform'     => 'rakuten-kobo',
+				'external_id'  => 'rk-1',
+				'regular_url'  => 'https://example.test/a',
+				'fetch_status' => FetchStatus::TERMINAL,
 			),
 		);
 
 		$got = OfferStatusReset::forIdentityChanges(
 			$stored,
-			$this->listing( 'rakuten-kobo', $this->offer( 'rk-1', 'https://example.test/a' ) )
+			$this->listing(
+				'rakuten-kobo',
+				$this->offer( 'rk-1', 'https://example.test/a' ),
+				$this->offer( 'rk-2', 'https://example.test/b' )
+			)
 		);
 
 		$this->assertSame( FetchStatus::TERMINAL, $got[0]['offers'][0]['fetch_status'] );
+		$this->assertSame( FetchStatus::NONE, $got[0]['offers'][1]['fetch_status'] );
+	}
+
+	/**
+	 * 身元が集合に残っていても、保存前のその行が持っていた状態と違えば白紙に戻す。
+	 *
+	 * 取得状態は「その身元の行」が取得で得たものである。同じ身元を名乗りながら
+	 * 違う状態を載せてきたということは、その状態は別の行から運ばれてきたか、
+	 * 保存前の姿より古い写しである。どちらにせよ、その身元について何も語らない。
+	 */
+	public function test_保存前の同じ身元と違うfetch_statusは白紙に戻す(): void {
+		$got = OfferStatusReset::forIdentityChanges(
+			$this->listing( 'rakuten-kobo', $this->offer( 'rk-1', 'https://example.test/a', FetchStatus::TRANSIENT ) ),
+			$this->listing( 'rakuten-kobo', $this->offer( 'rk-1', 'https://example.test/a', FetchStatus::TERMINAL ) )
+		);
+
+		$this->assertSame( FetchStatus::NONE, $got[0]['offers'][0]['fetch_status'] );
 	}
 
 	/**
@@ -222,7 +250,32 @@ final class OfferStatusResetTest extends TestCase {
 	}
 
 	/**
-	 * flat でも身元が変わっていなければ触らない。
+	 * flat な保存でも、保存前のその行と違う取得状態は白紙に戻す。
+	 *
+	 * offers[] の経路と同じ規則を flat にも適用する（片方だけ緩いと、移行前の
+	 * listing でだけ別の行から運ばれた terminal が生き残る）。
+	 */
+	public function test_保存する側がflatでも保存前と違うfetch_statusは白紙に戻す(): void {
+		$incoming = array(
+			array(
+				'platform'     => 'rakuten-kobo',
+				'external_id'  => 'rk-1',
+				'regular_url'  => 'https://example.test/a',
+				'fetch_status' => FetchStatus::TERMINAL,
+			),
+		);
+
+		$got = OfferStatusReset::forIdentityChanges(
+			$this->listing( 'rakuten-kobo', $this->offer( 'rk-1', 'https://example.test/a', FetchStatus::TRANSIENT ) ),
+			$incoming
+		);
+
+		$this->assertSame( FetchStatus::NONE, $got[0]['fetch_status'] );
+		$this->assertSame( '', $got[0]['fetch_error'] );
+	}
+
+	/**
+	 * flat でも身元と取得状態が変わっていなければ触らない。
 	 *
 	 * 触ると廃盤 SKU の terminal が保存のたびに消え、give-up の cooldown が意味を失う。
 	 */
@@ -313,23 +366,14 @@ final class OfferStatusResetTest extends TestCase {
 	}
 
 	/**
-	 * 別の購入リンクの身元へ打ち替えて元を消しても白紙にしない（既知の限界のピン留め）。
+	 * 別の購入リンクの身元へ打ち替えて元を消したら白紙に戻す。
 	 *
-	 * 突き合わせるのは身元の**集合**であって行の対応ではない。A の external_id を B の
-	 * 値へ打ち替えて B を消すと集合は変わらないため、残った行は B の SKU を名乗りながら
-	 * A の SKU で得た fetch_status を持ち続ける。
-	 *
-	 * **これを欠陥ではなく限界として受け入れている根拠**（OfferStatusReset の docblock
-	 * 「突き合わせるのは身元の集合であって行の対応ではない」節）:
-	 * RefreshHandler::isGivenUp() は give-up マーカー（3 日の transient）と offer 自身の
-	 * terminal の AND なので、誤って引き継いだ terminal が再取得を止めるのは長くても
-	 * マーカーの残り時間まで。管理画面の「今すぐ更新／強制更新」は isGivenUp() を
-	 * 見ないため、運用者にはその場の出口もある。
-	 *
-	 * ここが将来変わる（行を追う安定 ID を入れる）なら、それは意図した変更として
-	 * このテストを書き換えることになる。
+	 * 身元の**集合**は変わらない（rk-b は保存前にも居た）。変わったのは行と身元の
+	 * 対応である。残った行が名乗る rk-b の取得状態は、保存前の rk-b の行が持っていた
+	 * もの（空）であって、打ち替え元の rk-a が得た terminal ではない。突き合わせに
+	 * 状態まで含めると、集合が同じでも対応が変わったことが分かる。
 	 */
-	public function test_別の購入リンクの身元へ打ち替えて元を消しても白紙にしない(): void {
+	public function test_別の購入リンクの身元へ打ち替えて元を消したら白紙に戻す(): void {
 		$got = OfferStatusReset::forIdentityChanges(
 			$this->listing(
 				'rakuten-kobo',
@@ -340,17 +384,36 @@ final class OfferStatusResetTest extends TestCase {
 			$this->listing( 'rakuten-kobo', $this->offer( 'rk-b', 'https://example.test/a' ) )
 		);
 
+		$this->assertSame( FetchStatus::NONE, $got[0]['offers'][0]['fetch_status'] );
+	}
+
+	/**
+	 * 打ち替え先の身元が保存前から同じ状態だったなら保つ。
+	 *
+	 * 白紙にするのは「その身元の行が持っていなかった状態」だけである。rk-b の行も
+	 * terminal だったのなら、残った行が terminal を名乗ることは rk-b の SKU について
+	 * 正しく、消すと廃盤 SKU への再取得を毎回焼くことになる。
+	 */
+	public function test_打ち替え先の身元が同じ状態を持っていたなら保つ(): void {
+		$got = OfferStatusReset::forIdentityChanges(
+			$this->listing(
+				'rakuten-kobo',
+				$this->offer( 'rk-a', 'https://example.test/a' ),
+				$this->offer( 'rk-b', 'https://example.test/b' )
+			),
+			$this->listing( 'rakuten-kobo', $this->offer( 'rk-b', 'https://example.test/a' ) )
+		);
+
 		$this->assertSame( FetchStatus::TERMINAL, $got[0]['offers'][0]['fetch_status'] );
 	}
 
 	/**
-	 * 2 つの購入リンクの external_id を入れ替えても白紙にしない（既知の限界のピン留め）。
+	 * 2 つの購入リンクの external_id を入れ替えたら白紙に戻す。
 	 *
-	 * 入れ替えでも身元の集合は変わらないため、取得状態は行に残ったままになる。
-	 * 残る害と、それを受け入れる根拠は上のテストと同じ（掃引 → マーカー失効 → 取得
-	 * 成功で白紙化、という元々の自己修復に戻るだけで悪化はしない）。
+	 * 入れ替えでも身元の集合は変わらないが、terminal を載せた行が名乗る身元は
+	 * 保存前に terminal ではなかった rk-b である。
 	 */
-	public function test_2つの購入リンクの身元を入れ替えても白紙にしない(): void {
+	public function test_2つの購入リンクの身元を入れ替えたら白紙に戻す(): void {
 		$got = OfferStatusReset::forIdentityChanges(
 			$this->listing(
 				'rakuten-kobo',
@@ -364,7 +427,7 @@ final class OfferStatusResetTest extends TestCase {
 			)
 		);
 
-		$this->assertSame( FetchStatus::TERMINAL, $got[0]['offers'][0]['fetch_status'] );
+		$this->assertSame( FetchStatus::NONE, $got[0]['offers'][0]['fetch_status'] );
 		$this->assertSame( FetchStatus::NONE, $got[0]['offers'][1]['fetch_status'] );
 	}
 }
