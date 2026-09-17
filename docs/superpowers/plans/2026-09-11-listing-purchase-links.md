@@ -593,14 +593,16 @@ git commit -m "feat: 恒久エラー時のフォールバック設定を追加�
 		$this->assertSame( 'nested', $result[0]['offers'][0]['external_id'] );
 	}
 
-	public function test_regular_urlが空のofferは弾く(): void {
+	public function test_身元を1つも持たないofferは弾く(): void {
 		// 生死を判定できない offer は棚卸しの対象外になり永久に残る。
+		// **弾く条件は external_id と regular_url が「両方」空**。regular_url だけを
+		// 必須にすると、external_id で再同定できる購入リンクまで消える。
 		$result = ProductSchema::sanitizeListings(
 			array(
 				array(
 					'platform' => 'rakuten-kobo',
 					'offers'   => array(
-						array( 'external_id' => 'nourl', 'regular_url' => '' ),
+						array( 'external_id' => '', 'regular_url' => '' ),
 						array( 'external_id' => 'ok', 'regular_url' => 'https://example.test/ok' ),
 					),
 				),
