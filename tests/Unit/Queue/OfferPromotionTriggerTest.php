@@ -607,6 +607,53 @@ final class OfferPromotionTriggerTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	/**
+	 * platform が配列でも警告を出さず、投入せずに戻る。
+	 *
+	 * listings meta は外部ツールも書く。`(string)` の直キャストだと配列は
+	 * 「Array to string conversion」の警告を出したうえで `'Array'` になり、
+	 * `__toString()` を持たないオブジェクトでは Error になって
+	 * `updated_post_meta` フックの中——つまり**保存の途中**——で処理が飛ぶ。
+	 * 保存フックを壊さないため、他の外部由来フィールドと同じく ScalarField::string()
+	 * で読む（ListingEligibility::isAutoEligible() は platform の型を見ないので、
+	 * 壊れた値でもここまで到達する）。
+	 */
+	public function test_platformが配列でも警告を出さず投入しない(): void {
+		$this->stubGeneralSettings();
+		// platform='' に対応する PlatformDefinition は無いので find() は null を返す。
+		$this->stubRakutenPlatform();
+
+		WP_Mock::userFunction( 'get_post_status' )->once()->with( 123 )->andReturn( 'publish' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->once()
+			->with( 123, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform'    => array( 'rakuten-kobo' ),
+						'enabled'     => true,
+						'auto_update' => true,
+						'update_mode' => 'auto',
+						'offers'      => array(
+							array(
+								'external_id'     => 'rk-1',
+								'regular_url'     => 'https://example.test/rk-1',
+								'last_fetched_at' => '',
+							),
+						),
+					),
+				)
+			);
+		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
+
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$this->trigger()->onListingsSaved( 123 );
+
+		$this->assertConditionsMet();
+	}
+
 	public function test_フックはpost_metaを書かない(): void {
 		// ループしない根拠がこの一点に依存する。壊れたらここが落ちる。
 		WP_Mock::userFunction( 'update_post_meta' )->never();

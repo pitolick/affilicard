@@ -12,6 +12,7 @@ use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Settings\GeneralSettings;
 use Affilicard\Util\JsonField;
+use Affilicard\Util\ScalarField;
 
 /**
  * listings meta の保存を契機に、今使う購入リンクが古ければ即時取得を 1 件積む。
@@ -221,7 +222,14 @@ final class OfferPromotionTrigger {
 			return;
 		}
 
-		$platform = (string) ( $listing['platform'] ?? '' );
+		// **値は ScalarField::string() で読む。** listings meta は外部ツールも書くため、
+		// `(string)` の直キャストだと配列が「Array to string conversion」の警告つきで
+		// `'Array'` になり、`__toString()` を持たないオブジェクトでは Error になって
+		// `updated_post_meta` フックの中——つまり保存の途中——で処理が飛ぶ。
+		// ListingEligibility::isAutoEligible() は platform の型を見ないので、
+		// 壊れた値もここまで到達する。非スカラーは空へ倒せば PlatformConfig::find() が
+		// null を返し、この listing は静かに見送られる。
+		$platform = ScalarField::string( $listing, 'platform' );
 
 		// give-up 中（RefreshHandler が恒久失敗を検知して立てた cooldown）の listing は
 		// QueueMaintenance::sweep() と同じく期間中スキップする。ここを抜けると、
