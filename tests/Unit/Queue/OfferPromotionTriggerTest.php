@@ -236,15 +236,6 @@ final class OfferPromotionTriggerTest extends TestCase {
 	}
 
 	/**
-	 * 一括書き込み（アップグレード移行など）の窓の中では、何も読まず何も投入しない。
-	 *
-	 * 移行は全商品の listings を書き直すが、移行した offer は元の（多くは古い）
-	 * last_fetched_at をそのまま引き継ぐため needsRefetch() がほぼ全件で true になる。
-	 * 抑止しないと、アップグレードした瞬間にカタログ全件ぶんの即時取得が積まれて
-	 * API のレート制限を焼き切る。移行は形状を変えるだけで購入リンクの内容は
-	 * 変えていないので、繰り上がりの契機ではない。
-	 */
-	/**
 	 * 古い購入リンク 1 件を持つ listings meta を返すスタブ一式を積む。
 	 *
 	 * 2 層目（pending 判定）の分岐だけを変えて挙動を比べたい 3 テストで共有する。
@@ -297,17 +288,17 @@ final class OfferPromotionTriggerTest extends TestCase {
 	}
 
 	/**
-	 * 実行中のジョブ（`as_next_scheduled_action()` が true）でも投入しない。
-	 *
-	 * 走っている最中のアクションは繰り上げようがなく、まさに今 listing を読む。
-	 */
-	/**
 	 * 実行中／非同期 pending（true）では抑止しない。
 	 *
 	 * as_next_scheduled_action() の true は「非同期 pending」と「実行中」の両方を意味する。
 	 * 実行中のアクションは**変更前の listing を読んで**走っているので、その最中に
 	 * 購入リンクが変わっても結果には反映されない。ここで抑止すると、その変更に対する
 	 * 即時取得が次の掃引まで失われる。
+	 *
+	 * ピン留めするのは「投入を試みること」までである。実行中のアクションは繰り上げ
+	 * ようがなく、enqueueManual() の unique=true に吸収されて結果的に積まれないことが
+	 * ある（{@see OfferPromotionTrigger::hasDuePendingJob()} の「残る限界」）。それでも
+	 * 抑止するよりは良い——非同期 pending のケースは確実に繰り上がる。
 	 */
 	public function test_実行中や非同期pendingでは抑止せず投入する(): void {
 		$this->stubStaleListing();
@@ -363,6 +354,15 @@ final class OfferPromotionTriggerTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	/**
+	 * 一括書き込み（アップグレード移行など）の窓の中では、何も読まず何も投入しない。
+	 *
+	 * 移行は全商品の listings を書き直すが、移行した offer は元の（多くは古い）
+	 * last_fetched_at をそのまま引き継ぐため needsRefetch() がほぼ全件で true になる。
+	 * 抑止しないと、アップグレードした瞬間にカタログ全件ぶんの即時取得が積まれて
+	 * API のレート制限を焼き切る。移行は形状を変えるだけで購入リンクの内容は
+	 * 変えていないので、繰り上がりの契機ではない。
+	 */
 	public function test_一括書き込みの抑止中は投入しない(): void {
 		// get_post_meta も get_post_status も呼ばれない（0層目で即 return する）。
 		WP_Mock::userFunction( 'get_post_meta' )->never();
