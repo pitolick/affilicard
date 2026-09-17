@@ -348,19 +348,27 @@ $acquire = $limiter->tryAcquire( $account, $interval * count( $targets ), $nowMs
 
 Action Scheduler の args は `{post_id, platform}` ＋ `unique=true` のままとする。offer 単位のジョブにするとキー設計を変えることになり、v2.4.0 の非同期キューと v3.5.0 の throttle 修正の中核に触れる。1 ジョブが選択係の結果を処理する形なら、キーを変えずに済む。
 
+（繰り上がりトリガーの follow-up は `{post_id, platform, follow_up}` を使うが、これは「実行中のジョブに unique で吸収されないための印」であって offer 単位の細分化ではない。ハンドラは `post_id` と `platform` しか受け取らず、`enqueueForced` の `force` と同じ扱いである。§8 参照）
+
 ---
 
 ## 8. ループ防止
 
-新トリガーは「保存 → 判定 → 投入」であり、投入先は Action Scheduler のテーブルで post meta を書かないため再帰しない。ただしこの領域では過去に `perpetual retry` と completed アクションのチャーンが発生しているため、理屈上の安全に頼らず明示的に止める。
+新トリガーは「保存 → 判定 → 投入」である。**「このフック自身が post meta を書かないから再帰しない」では説明がつかない。** 投入したジョブは別リクエストで非同期に実行され、その経路（`Enqueuer::enqueueManual` → AS ワーカー → `RefreshHandler::handle` → `ListingRefresher::refreshOne` → `ProductRepository::updateListingOffer` → `update_post_meta( META_LISTINGS, ... )`）が結局このフックを再び起動するからである。折り返してきた新しいリクエストでは同一リクエスト内のガードは当然空で、このクロスリクエストな往復は止められない。
 
-**3 層で止める。**
+**ループが実際に閉じるのは `ListingRefresher` が成功・恒久失敗・一時失敗・unsupported のどの結果でも `last_fetched_at` を無条件に刻むためである。** 折り返してきたフックが `PriceFreshness::needsRefetch()` を再評価する時点で「もう古くない」と判定されて止まる。したがってこのトリガーの安全性は `ListingRefresher` の刻印に依存しており、「一部の失敗系統だけ刻印をスキップする」変更は無限ループになる（`ListingRefresherTest` で刻印を固定）。
 
-1. **再入ガード（同一リクエスト内）** — 処理中の商品 ID を記録し、同一リクエストで同じ商品が再度来たら何もしない。1 回の保存で `listings` meta が複数回書かれる経路（sanitize → 更新 → 派生 meta の再構築）を吸収する
-2. **短期クールダウン（リクエスト跨ぎ）** — 「この商品について直近 N 秒は投入しない」を transient で持つ。外部ツールが複数の offer を連続削除する場合の連打を吸収する。`needsRefetch` の長いクールダウンとは別の短い保険である
-3. **投入の冪等性（既存）** — `enqueueManual` は `unique=true` のため、1・2 をすり抜けても pending は 1 件にまとまる
+その上で、churn（無駄なアクションの作り直し）と多重処理を次の層で抑える。
 
-**ループしない根拠は「このフックが post meta を書かない」という一点に依存する。** 将来「ついでに派生 meta も更新しよう」と書かれた瞬間に崩れるため、テストで固定する（§13）。
+0. **一括書き込みの抑止** — `withSuppression()` の窓の中では何も読まず何も投入しない。移行は全商品の listings を書き直すが、移行した offer は古い `last_fetched_at` を引き継ぐため、抑止しないと更新した瞬間にカタログ全件の即時取得が積まれて API のレート制限を焼き切る
+1. **再入ガード（実行中のみ）** — 処理中の商品 ID を記録し、その実行中に同じ商品へ同期的に再帰したら何もしない。**`finally` で必ず解放する**——リクエスト終了まで立てたままにすると、同一リクエスト内で platform A の保存に続いて platform B を保存したとき、B の新しい状態が一度も評価されない
+2. **キューの状態による判定** — 商品単位の短期 transient（時間窓）は採らない。時間窓は「窓の中で起きた最後の変更が誰にも拾われないまま次の掃引まで待つ」事故を作る。代わりに `as_next_scheduled_action()` で同一ジョブの状態を見て分岐する
+   - **実行時刻の来ている pending／非同期 pending** → 投入しない（そのジョブが実行時に最新の listing を読むので取りこぼさない）
+   - **実行時刻が将来の pending**（一時失敗の backoff は最大 1 時間先へ積み直す）→ 投入する。`enqueueManual()` の unschedule → `time()` での schedule は「そのジョブを今へ動かす」操作そのもの
+   - **実行中（in-progress）** → `Enqueuer::enqueueFollowUp()` で follow-up を残す。実行中のアクションは**変更前の** listing を読んで走っているのでこの変更は結果に載らず、かといって base args で積み直しても `as_schedule_single_action( ..., $unique = true )` が in-progress を重複とみなして何も作らない（`as_unschedule_all_actions()` も pending しか消せない）。args に `follow_up` を足して別の unique キーにすることで吸収を避ける（`enqueueForced` が `force` で取っているのと同じ手）。`as_next_scheduled_action()` は実行中と非同期 pending をどちらも `true` へ潰すため、`as_get_scheduled_actions()` の `status=in-progress` で切り分ける
+3. **投入の冪等性** — `enqueueManual`／`enqueueFollowUp` はいずれも `unique=true` のため、1・2 をすり抜けても pending は 1 件にまとまる。follow-up の unique は follow-up 同士にだけ効き、実行中のジョブに吸収されない
+
+**「フック自身は post meta を書かない」ことはテストで固定する（§13）。** ループが閉じる根拠ではなくなったが、このフックの中で meta を書き始めると 1 層目のガードだけでは足りない再帰が生まれるため、境界としては維持する。
 
 ---
 
@@ -514,7 +522,7 @@ listing の読み出し形が変わるため、REST の応答を直接解釈し�
 | `Queue/BatchRefreshHandler.php` | 0 箇所。listing の中身ではなくキュー投入の単位のみを扱う |
 | `Queue/PublishTrigger.php` | 0 箇所。`enqueueProductListings()` 経由で `ListingEligibility` のみを見る |
 | `Rest/RefreshController.php` / `Rest/ProductsController.php` | 0 箇所。listing の中身を解釈しない |
-| `Queue/Enqueuer.php` | args は `{post_id, platform}` のまま変更しない（§7-7） |
+| `Queue/Enqueuer.php` | base args は `{post_id, platform}` のまま（§7-7）。繰り上がりの follow-up 用に `enqueueFollowUp()`（args に `follow_up` を足した別の unique キー）を追加する（§8） |
 | `Stocktake/StocktakePolicy.php` | 判定は listing 単位ではなく商品単位（最終掲載日）のため影響しない |
 
 ---
@@ -523,11 +531,11 @@ listing の読み出し形が変わるため、REST の応答を直接解釈し�
 
 | 層 | 対象 |
 | --- | --- |
-| **PHPUnit**（Docker `php:8.2-cli`） | 選択係の全分岐（表示順の昇順・同値の安定性・`terminal` を飛ばす／飛ばさない・`unsupported` と `transient` は飛ばさない・全件エラー・空配列）／`fetch_status` の 4 値の書き分け／`fetch_error` → `fetch_status` の写像（**未知の文字列が `'transient'` に倒れること**）／`external_id` ミラーの複数値化（全 offer がミラーされる・stale が**値単位**で消える・**後続 offer の `external_id` でも `findByExternalId()` が引ける**）／`PriceFreshness` の両メソッドが offer を受け取って従来どおり判定すること（TTL 境界・クールダウン境界）／移行の冪等性と `SchemaVersion` の更新／レート制限の枠が件数に比例すること／ループ防止 3 層 |
+| **PHPUnit**（Docker `php:8.2-cli`） | 選択係の全分岐（表示順の昇順・同値の安定性・`terminal` を飛ばす／飛ばさない・`unsupported` と `transient` は飛ばさない・全件エラー・空配列）／`fetch_status` の 4 値の書き分け／`fetch_error` → `fetch_status` の写像（**未知の文字列が `'transient'` に倒れること**）／`external_id` ミラーの複数値化（全 offer がミラーされる・stale が**値単位**で消える・**後続 offer の `external_id` でも `findByExternalId()` が引ける**）／`PriceFreshness` の両メソッドが offer を受け取って従来どおり判定すること（TTL 境界・クールダウン境界）／移行の冪等性と `SchemaVersion` の更新／レート制限の枠が件数に比例すること／ループ防止の各層（0 抑止・1 再入ガード・2 キューの状態による分岐・3 unique） |
 | **JS テスト**（`npm run test:js`） | `ListingsEditor` の 2 階層化・↑↓ による並べ替えと採番・並べ替え後も開閉状態が保たれること・`● 使用中` が選択係と一致すること・`fetch_status` 4 値それぞれの文言表示 |
 | **E2E（実 WP / wp-env）** | **`sanitizeListings` の whitelist**。新フィールドを whitelist に追加し忘れると保存時に黙って消えるが、**モックリポジトリの unit test では検出できない**。実 WP に保存して読み戻す経路を必ず通す。**複数値 meta のミラー**も同じ理由で実 WP で確認する（`add_post_meta` の複数値挙動はモックで再現しにくい） |
 
-ループ防止は「フックが `update_post_meta` を呼ばないこと」「同一リクエストで 2 回保存しても投入が 1 件に収まること」「意図的に再帰させても深さ 1 で止まること」の 3 点をテストで固定する。理屈をコメントで残すのではなく、壊れたらテストが落ちる形にする。
+ループ防止は「フックが `update_post_meta` を呼ばないこと」「同一リクエスト内の独立した 2 回目の保存も抑止されず評価されること（1 層目は実行中だけのガードである）」「意図的に再帰させても深さ 1 で止まること」「同一ジョブが実行中のときは吸収されない別 args の follow-up が**実際に残る**こと」の 4 点をテストで固定する。理屈をコメントで残すのではなく、壊れたらテストが落ちる形にする。**最後の 1 点は「投入を試みたこと」ではなく「アクションが残ったこと」で書く**——`unique=true` が in-progress を重複とみなす以上、呼び出しの観測では黙って消えた follow-up と区別できない。
 
 ---
 
