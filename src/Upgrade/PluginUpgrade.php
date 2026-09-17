@@ -158,10 +158,6 @@ final class PluginUpgrade {
 	public const MIGRATION_GROUP = 'affilicard-migration';
 
 	/**
-	 * 1 回のバッチで走査する商品数。QueueMaintenance::sweep() の既定値（200）と揃える。
-	 * 大規模インストールでも 1 回の実行時間が伸びないよう、必ずこの単位に区切って処理する。
-	 */
-	/**
 	 * listing が offers[] を持つようになったバージョン。
 	 *
 	 * 移行バッチを積むのはここより前から上がってきたときだけである。バージョンが
@@ -170,6 +166,10 @@ final class PluginUpgrade {
 	 */
 	public const OFFERS_INTRODUCED_IN = '4.0.0';
 
+	/**
+	 * 1 回のバッチで走査する商品数。QueueMaintenance::sweep() の既定値（200）と揃える。
+	 * 大規模インストールでも 1 回の実行時間が伸びないよう、必ずこの単位に区切って処理する。
+	 */
 	public const MIGRATION_BATCH_SIZE = 200;
 
 	/** offers 移行時、listing 直下から取り除いて offers[0] へ移す v3 以前の flat フィールド。 */
