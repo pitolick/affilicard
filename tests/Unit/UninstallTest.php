@@ -97,11 +97,20 @@ final class UninstallTest extends TestCase {
 
 		Uninstall::run();
 
-		$this->assertContains(
-			array( 'user', 0, 'affilicard_offers_migration_notice_dismissed', '', true ),
-			$this->deletedMeta,
-			'移行通知の dismissed フラグを全ユーザーぶん消していない'
+		// **3 つの dismiss 記録をすべて確かめる。** 以前は温存通知の 1 つしか見て
+		// いなかったため、残り 2 つは削除をやめても誰も気づけなかった。
+		$expected = array(
+			'affilicard_offers_migration_notice_dismissed',
+			'affilicard_offers_migration_failed_notice_dismissed',
+			'affilicard_derived_meta_unsynced_notice_dismissed',
 		);
+		foreach ( $expected as $meta_key ) {
+			$this->assertContains(
+				array( 'user', 0, $meta_key, '', true ),
+				$this->deletedMeta,
+				$meta_key . ' を全ユーザーぶん消していない'
+			);
+		}
 	}
 
 	public function test_run_deletes_known_options_and_all_products(): void {
@@ -177,17 +186,52 @@ final class UninstallTest extends TestCase {
 		// （final-fix-report.md Important 1）。
 		$this->assertContains( \Affilicard\Queue\SweepCursor::OPTION_KEY, Uninstall::OPTION_KEYS );
 		$this->assertContains( \Affilicard\Queue\QueueMaintenance::OPTION_LAST_COMPLETED, Uninstall::OPTION_KEYS );
-		// offers 移行が書く 3 option。漏れるとアンインストール→再インストールで
-		// 「未完」の印・温存件数・温存 post ID 一覧が残留し、通知が出続ける
-		// （CodeRabbit Minor #4: OPTION_MIGRATION_PRESERVED_POST_IDS が抜けていた）。
-		$this->assertContains( \Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_CURSOR, Uninstall::OPTION_KEYS );
-		$this->assertContains(
-			\Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL,
-			Uninstall::OPTION_KEYS
-		);
-		$this->assertContains(
-			\Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS,
-			Uninstall::OPTION_KEYS
+	}
+
+	/**
+	 * option を書くクラスの `OPTION_*` 定数は、すべて OPTION_KEYS に載っている。
+	 *
+	 * **手書きのリストと突き合わせない。** 以前はここに「移行が書く 3 option」を
+	 * 書き写していたため、あとから増えた 3 つ（試行回数・移行失敗の件数と post ID）が
+	 * 検証の外にこぼれていた——次に足す人も同じようにこぼす。定数そのものを列挙すれば、
+	 * 新しい option を足した時点でこのテストが自動的にそれを要求する。
+	 *
+	 * 漏れるとアンインストール→再インストールで「未完」の印・温存件数・移行失敗の記録が
+	 * 残留し、通知が出続ける（CodeRabbit Minor #4: OPTION_MIGRATION_PRESERVED_POST_IDS が
+	 * 抜けていた）。
+	 *
+	 * @dataProvider optionWritingClasses
+	 */
+	public function test_option定数はすべてOPTION_KEYSに載っている( string $className ): void {
+		$constants = ( new \ReflectionClass( $className ) )->getConstants();
+
+		$found = false;
+		foreach ( $constants as $name => $value ) {
+			if ( ! str_starts_with( (string) $name, 'OPTION_' ) ) {
+				continue;
+			}
+			$found = true;
+			$this->assertContains(
+				$value,
+				Uninstall::OPTION_KEYS,
+				$className . '::' . $name . ' が Uninstall::OPTION_KEYS に無い（アンインストール後も残留する）'
+			);
+		}
+
+		// 定数の命名規約が変わって 1 件も拾えなくなった場合に、
+		// 「全部通った」と見えないようにする。
+		$this->assertTrue( $found, $className . ' から OPTION_* 定数を 1 つも拾えていない' );
+	}
+
+	/**
+	 * `OPTION_*` 定数で option キーを持つクラス。
+	 *
+	 * @return array<string, array{0:string}>
+	 */
+	public static function optionWritingClasses(): array {
+		return array(
+			'offers-migration'  => array( \Affilicard\Upgrade\PluginUpgrade::class ),
+			'derived-meta-sync' => array( \Affilicard\Repository\DerivedMetaSync::class ),
 		);
 	}
 
