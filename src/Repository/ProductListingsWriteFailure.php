@@ -19,8 +19,33 @@ namespace Affilicard\Repository;
  * `\RuntimeException` で捕まえると、単体テストの
  * `Mockery\Exception\NoMatchingExpectationException`（これも RuntimeException を継承する）
  * のような無関係な例外まで「保存の失敗」として扱われ、本当のバグが見えなくなる。
- * 形も同じものを使う——メッセージは投げる側が組み立て、この型は握り潰す範囲を
- * 区切るためだけに存在する。
+ *
+ * **post ID を運ぶのは {@see ProductLockUnavailable} と同じ理由である。**
+ * {@see ProductRepository::save()} は `wp_insert_post()` が通ってから
+ * {@see ProductRepository::saveMeta()} を呼ぶため、**新規作成の途中でこれが投げられた
+ * 時点で投稿行は既に存在する**。ID を運ばないと
+ * {@see \Affilicard\Rest\ProductsController::create()} は ID を持たない 500 を返すしか
+ * なく、呼び出し側は「商品ができたのかどうか」すら知れない——再試行のたびに POST し直し、
+ * 同じ商品が増え続ける。ID があれば、呼び出し側は増やす代わりにその商品を PATCH できる。
  */
 final class ProductListingsWriteFailure extends \RuntimeException {
+
+	/**
+	 * @param int    $postId  listings を保存できなかった商品の投稿 ID。**新規作成の
+	 *                        途中で投げた場合、この ID の投稿行は既に作成されている**
+	 *                        （呼び出し側はこれを使ってやり直しを PATCH に変えられる）。
+	 * @param string $message 省略時は postId を含む既定文（テストが型だけでなく
+	 *                        メッセージまで固定できるようにするため、必ず ID を含める）。
+	 */
+	public function __construct( private int $postId, string $message = '' ) {
+		parent::__construct(
+			'' !== $message
+				? $message
+				: sprintf( 'affilicard: 商品 %d の listings を保存できなかった（書き込んだ値が読み戻らない）。', $postId )
+		);
+	}
+
+	public function postId(): int {
+		return $this->postId;
+	}
 }

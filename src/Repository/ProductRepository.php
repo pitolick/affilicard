@@ -553,10 +553,12 @@ final class ProductRepository implements ProductRepositoryInterface {
 			return;
 		}
 
-		throw new ProductListingsWriteFailure(
-			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- HTML 出力ではなく PHP の例外メッセージ。埋め込むのは post ID（int）のみ。
-			sprintf( 'affilicard: 商品 %d の listings を保存できなかった（書き込んだ値が読み戻らない）。', $postId )
-		);
+		// **post ID を渡す。** 例外に載せておかないと、新規作成の途中でここへ来たとき
+		// （投稿行は既に作られている）に REST が ID 無しの 500 を返し、呼び出し側は
+		// できてしまった商品へ辿り着けない（理由は例外クラスの PHPDoc）。メッセージは
+		// 例外クラス側が同じ文面で組み立てる。
+		// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- HTML 出力ではなく PHP の例外メッセージ。組み立ては例外クラス側で、埋め込むのは post ID（int）のみ。
+		throw new ProductListingsWriteFailure( $postId );
 	}
 
 	/**

@@ -510,6 +510,11 @@ final class ProductsControllerTest extends TestCase {
 		$this->assertSame( 409, $response->get_status() );
 		$this->assertSame( 'affilicard_listing_locked', $data['code'] );
 		$this->assertNotSame( '', (string) $data['message'] );
+		// **作成済みの商品 ID を返す。** POST がここへ来た時点で投稿行は既にできて
+		// いる（save() は wp_insert_post() を通してから saveMeta() を呼ぶ）。ID を
+		// 返さないと、呼び出し側は積み直しのたびに POST し直して同じ商品を増やす。
+		$this->assertArrayHasKey( 'id', $data );
+		$this->assertSame( 99, $data['id'] );
 	}
 
 	/**
@@ -541,6 +546,9 @@ final class ProductsControllerTest extends TestCase {
 
 		$this->assertSame( 409, $response->get_status() );
 		$this->assertSame( 'affilicard_listing_locked', $data['code'] );
+		// **更新でも同じ形にする。** 呼び出し側は ID を既に知っているので冗長では
+		// あるが、エラー本文の形が verb で変わらない方が読み手の分岐が減る。
+		$this->assertSame( 42, $data['id'] );
 	}
 
 	/**
@@ -587,6 +595,9 @@ final class ProductsControllerTest extends TestCase {
 		$this->assertSame( 207, $response->get_status() );
 		$this->assertSame( 'error', $data['results'][0]['status'] );
 		$this->assertSame( 'affilicard_listing_locked', $data['results'][0]['code'] );
+		// 部分失敗でも「どの商品ができてしまったか」を名指しする。
+		$this->assertArrayHasKey( 'id', $data['results'][0] );
+		$this->assertSame( 11, $data['results'][0]['id'] );
 		$this->assertSame( 'created', $data['results'][1]['status'] );
 		$this->assertSame( 12, $data['results'][1]['id'] );
 		$this->assertSame( 1, $data['created'] );
@@ -607,7 +618,7 @@ final class ProductsControllerTest extends TestCase {
 		$repository = Mockery::mock( ProductRepositoryInterface::class );
 		$repository->shouldReceive( 'save' )
 			->once()
-			->andThrow( new ProductListingsWriteFailure( 'affilicard: 商品 99 の listings を保存できなかった（書き込んだ値が読み戻らない）。' ) );
+			->andThrow( new ProductListingsWriteFailure( 99 ) );
 		$repository->shouldReceive( 'find' )->never();
 
 		$controller = new ProductsController( $repository );
@@ -620,6 +631,10 @@ final class ProductsControllerTest extends TestCase {
 		$this->assertSame( 500, $response->get_status() );
 		$this->assertSame( 'affilicard_save_failed', $data['code'] );
 		$this->assertNotSame( '', (string) $data['message'] );
+		// 409 と同じ理由で ID を返す。500 は「やり直しても直らない」失敗なので
+		// なおさら——呼び出し側が積み直すたびに孤児が 1 つずつ増える。
+		$this->assertArrayHasKey( 'id', $data );
+		$this->assertSame( 99, $data['id'] );
 	}
 
 	/**
@@ -639,7 +654,7 @@ final class ProductsControllerTest extends TestCase {
 			);
 		$repository->shouldReceive( 'save' )
 			->once()
-			->andThrow( new ProductListingsWriteFailure( 'affilicard: 商品 42 の listings を保存できなかった（書き込んだ値が読み戻らない）。' ) );
+			->andThrow( new ProductListingsWriteFailure( 42 ) );
 
 		$controller = new ProductsController( $repository );
 		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products/42' );
@@ -651,6 +666,7 @@ final class ProductsControllerTest extends TestCase {
 
 		$this->assertSame( 500, $response->get_status() );
 		$this->assertSame( 'affilicard_save_failed', $data['code'] );
+		$this->assertSame( 42, $data['id'] );
 	}
 
 	/**
@@ -674,7 +690,7 @@ final class ProductsControllerTest extends TestCase {
 				static function () use ( &$call ) {
 					++$call;
 					if ( 1 === $call ) {
-						throw new ProductListingsWriteFailure( 'affilicard: 商品 11 の listings を保存できなかった（書き込んだ値が読み戻らない）。' );
+						throw new ProductListingsWriteFailure( 11 );
 					}
 					return 12;
 				}
@@ -696,9 +712,99 @@ final class ProductsControllerTest extends TestCase {
 		$this->assertSame( 207, $response->get_status() );
 		$this->assertSame( 'error', $data['results'][0]['status'] );
 		$this->assertSame( 'affilicard_save_failed', $data['results'][0]['code'] );
+		$this->assertArrayHasKey( 'id', $data['results'][0] );
+		$this->assertSame( 11, $data['results'][0]['id'] );
 		$this->assertSame( 'created', $data['results'][1]['status'] );
 		$this->assertSame( 1, $data['created'] );
 		$this->assertSame( 1, $data['failed'] );
+	}
+
+	/**
+	 * 投稿行そのものを作れなかった 500 には **id を載せない**。
+	 *
+	 * `save()` が 0 を返すのは `wp_insert_post()` が失敗したときで、**商品は 1 件も
+	 * 作られていない**。ここに id を付けると（0 でも、直前の何かでも）呼び出し側は
+	 * 「作成済みの商品がある」と読み、存在しない ID を PATCH しに行く。
+	 * **id の有無が「商品ができたか否か」の signal である**——同じ
+	 * `affilicard_save_failed` でも、id があれば PATCH、無ければ POST し直しが正解になる。
+	 */
+	public function test_createは投稿行を作れなかった500にはidを載せない(): void {
+		WP_Mock::userFunction( 'current_user_can' )->andReturn( true );
+
+		$repository = Mockery::mock( ProductRepositoryInterface::class );
+		$repository->shouldReceive( 'save' )->once()->andReturn( 0 );
+		$repository->shouldReceive( 'find' )->never();
+
+		$controller = new ProductsController( $repository );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products' );
+		$request->set_param( 'title', 'タイトル' );
+
+		$response = $controller->create( $request );
+		$data     = $response->get_data();
+
+		$this->assertSame( 500, $response->get_status() );
+		$this->assertSame( 'affilicard_save_failed', $data['code'] );
+		$this->assertArrayNotHasKey( 'id', $data );
+	}
+
+	/**
+	 * 更新の 500 は逆に id を**載せる**（商品は実在するため）。
+	 *
+	 * **規則は「サーバが実在を知っている商品の ID だけを載せる」の 1 つだけ**で、
+	 * verb ごとに変えない。更新はここへ来るまでに find() で商品を引けているので、
+	 * `wp_update_post()` が失敗しても商品そのものは在る。作成側の同じ分岐が id を
+	 * 落とすのと対照的だが、規則は同じものが適用されている。
+	 */
+	public function test_updateは更新に失敗した500にも商品idを載せる(): void {
+		WP_Mock::userFunction( 'current_user_can' )->andReturn( true );
+
+		$repository = Mockery::mock( ProductRepositoryInterface::class );
+		$repository->shouldReceive( 'find' )
+			->with( 42 )
+			->andReturn(
+				array(
+					'id'    => 42,
+					'title' => '既存',
+				)
+			);
+		$repository->shouldReceive( 'save' )->once()->andReturn( 0 );
+
+		$controller = new ProductsController( $repository );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products/42' );
+		$request->set_param( 'id', 42 );
+		$request->set_param( 'title', '書き換え' );
+
+		$response = $controller->update( $request );
+		$data     = $response->get_data();
+
+		$this->assertSame( 500, $response->get_status() );
+		$this->assertSame( 'affilicard_save_failed', $data['code'] );
+		$this->assertSame( 42, $data['id'] );
+	}
+
+	/**
+	 * 一括作成でも同じ——保存できなかった（0 が返った）item には id を載せない。
+	 */
+	public function test_bulkCreateは保存できなかったitemにidを載せない(): void {
+		WP_Mock::userFunction( 'current_user_can' )->andReturn( true );
+		WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing( static fn( $v ) => is_string( $v ) ? trim( $v ) : $v );
+		WP_Mock::userFunction( 'wp_kses_post' )->andReturnUsing( static fn( $v ) => $v );
+		WP_Mock::userFunction( 'sanitize_key' )->andReturnUsing( static fn( $v ) => strtolower( (string) $v ) );
+		WP_Mock::userFunction( 'esc_url_raw' )->andReturnUsing( static fn( $v ) => $v );
+
+		$repository = Mockery::mock( ProductRepositoryInterface::class );
+		$repository->shouldReceive( 'save' )->once()->andReturn( 0 );
+
+		$controller = new ProductsController( $repository );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products/bulk' );
+		$request->set_param( 'products', array( array( 'title' => '保存できない商品' ) ) );
+
+		$response = $controller->bulkCreate( $request );
+		$data     = $response->get_data();
+
+		$this->assertSame( 207, $response->get_status() );
+		$this->assertSame( 'error', $data['results'][0]['status'] );
+		$this->assertArrayNotHasKey( 'id', $data['results'][0] );
 	}
 
 	public function test_permission_callbacks_check_current_user_can(): void {

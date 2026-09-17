@@ -40,6 +40,26 @@ final class ProductsController {
 	 */
 	private const CODE_SAVE_FAILED = 'affilicard_save_failed';
 
+	/**
+	 * 保存を断った／保存できなかった応答に、対象商品の投稿 ID を載せるキー。
+	 *
+	 * **これが無いと作成（POST）の失敗から復帰できない。**
+	 * {@see \Affilicard\Repository\ProductRepository::save()} は `wp_insert_post()` が
+	 * 通ってから listings を書くため、409/500 で返る時点で**商品は既に作られている**。
+	 * ID を返さないと呼び出し側はその商品に辿り着けず、再試行は POST のやり直しに
+	 * なって同じ商品を増やす。ID があれば `PATCH /products/{id}` で続きをやり直せる。
+	 *
+	 * 成功応答（単体は商品オブジェクトの `id`、`/bulk` は `status=created` の item の
+	 * `id`）と**同じキー名にそろえている**。呼び出し側が「商品の ID を読む場所」を
+	 * 応答ごとに覚え直さずに済む。
+	 *
+	 * **規則は 1 つ——サーバが実在を知っている商品の ID だけを載せる。** 唯一の例外は
+	 * 作成で `wp_insert_post()` 自体が失敗したときで、商品が 1 件も作られていないため
+	 * キーごと落とす。**有無がそのまま「PATCH で直せるか／POST し直すか」を表す**ので、
+	 * 存在しない ID を 0 などで埋めてはならない。
+	 */
+	private const ERROR_PRODUCT_ID_KEY = 'id';
+
 	public function __construct( private ProductRepositoryInterface $repository ) {}
 
 	public function registerRoutes( string $namespace ): void {
@@ -139,12 +159,22 @@ final class ProductsController {
 	 * `affilicard/v1/products` を叩く側であり、そこで失敗として記録されることが
 	 * 運用者への通知になる。code を専用にしているのはそのためで、
 	 * `affilicard_save_failed`（＝諦めてよい）と取り違えると積み直しの判断を誤る。
+	 *
+	 * **`id` に商品の投稿 ID を載せる（{@see self::ERROR_PRODUCT_ID_KEY}）。** 作成
+	 * （POST）でここへ来た時点で**投稿行は既に存在する**——
+	 * {@see \Affilicard\Repository\ProductRepository::save()} は `wp_insert_post()` を
+	 * 通してから listings を書くためである。ID を返さないと、呼び出し側は「商品が
+	 * できたのかどうか」すら知れず、積み直しのたびに POST し直して**同じ商品を増やす**。
+	 * ID があれば、やり直しを `PATCH /products/{id}` に変えられる。
+	 *
+	 * @param int $productId listings を保存できなかった商品の投稿 ID（作成なら、できてしまった商品）.
 	 */
-	private static function lockedResponse(): WP_REST_Response {
+	private static function lockedResponse( int $productId ): WP_REST_Response {
 		return new WP_REST_Response(
 			array(
-				'code'    => self::CODE_LISTING_LOCKED,
-				'message' => self::lockedMessage(),
+				'code'                     => self::CODE_LISTING_LOCKED,
+				'message'                  => self::lockedMessage(),
+				self::ERROR_PRODUCT_ID_KEY => $productId,
 			),
 			409
 		);
@@ -156,12 +186,21 @@ final class ProductsController {
 	 * {@see \Affilicard\Repository\ProductListingsWriteFailure} を捕まえてここへ変える。
 	 * 捕まえないと例外が REST の外まで抜け、WordPress の一般的な 500（あるいは致命的
 	 * エラー）になって、何が起きたのかが呼び出し側にも運用者にも伝わらない。
+	 *
+	 * **409 と同じく `id` を載せる。** こちらは「やり直しても直らない」失敗なので
+	 * なおさら必要で、ID が無ければ呼び出し側は POST を繰り返し、そのたびに listings の
+	 * 無い商品が 1 つずつ増える。**同じ 500 でも `id` が無い場合がある**——
+	 * `wp_insert_post()` 自体が失敗して商品が 1 件も作られなかったときで、その区別が
+	 * そのまま「PATCH で直せるか／POST し直すか」の分かれ目になる。
+	 *
+	 * @param int $productId listings を保存できなかった商品の投稿 ID（作成なら、できてしまった商品）.
 	 */
-	private static function saveFailedResponse(): WP_REST_Response {
+	private static function saveFailedResponse( int $productId ): WP_REST_Response {
 		return new WP_REST_Response(
 			array(
-				'code'    => self::CODE_SAVE_FAILED,
-				'message' => self::saveFailedMessage(),
+				'code'                     => self::CODE_SAVE_FAILED,
+				'message'                  => self::saveFailedMessage(),
+				self::ERROR_PRODUCT_ID_KEY => $productId,
 			),
 			500
 		);
@@ -263,12 +302,16 @@ final class ProductsController {
 				// listings を書かずに見送った（同じ商品を別経路が書き換え中）。
 				// 207 の該当 item だけを error にして、他の item は通す。呼び出し側は
 				// この item だけ積み直せばよい——listings は古い値のまま無傷である。
+				// **どの商品ができてしまったかを名指しする。** 作成の途中で断られて
+				// いるため、この item の商品は既に存在する。ID を返さないと、呼び出し
+				// 側はこの item を積み直すたびに同じ商品を作り続ける。
 				++$failed;
 				$results[] = array(
-					'index'   => $index,
-					'status'  => 'error',
-					'code'    => self::CODE_LISTING_LOCKED,
-					'message' => self::lockedMessage(),
+					'index'                    => $index,
+					'status'                   => 'error',
+					'code'                     => self::CODE_LISTING_LOCKED,
+					'message'                  => self::lockedMessage(),
+					self::ERROR_PRODUCT_ID_KEY => $e->postId(),
 				);
 				continue;
 			} catch ( ProductListingsWriteFailure $e ) {
@@ -276,12 +319,15 @@ final class ProductsController {
 				// 既に作成できた item の結果ごと 500 で消える**（呼び出し側はどれが
 				// 入ったのか判別できない）。ロック競合と同じく per-item の報告に混ぜるが、
 				// コードは分ける——積み直しても直らない失敗である。
+				// ロック競合と同じく、できてしまった商品の ID を添える（積み直しを
+				// POST のやり直しではなく PATCH にできるようにするため）。
 				++$failed;
 				$results[] = array(
-					'index'   => $index,
-					'status'  => 'error',
-					'code'    => self::CODE_SAVE_FAILED,
-					'message' => self::saveFailedMessage(),
+					'index'                    => $index,
+					'status'                   => 'error',
+					'code'                     => self::CODE_SAVE_FAILED,
+					'message'                  => self::saveFailedMessage(),
+					self::ERROR_PRODUCT_ID_KEY => $e->postId(),
 				);
 				continue;
 			}
@@ -334,11 +380,16 @@ final class ProductsController {
 		try {
 			$id = $this->repository->save( $data );
 		} catch ( ProductLockUnavailable $e ) {
-			return self::lockedResponse();
+			return self::lockedResponse( $e->postId() );
 		} catch ( ProductListingsWriteFailure $e ) {
-			return self::saveFailedResponse();
+			return self::saveFailedResponse( $e->postId() );
 		}
 		if ( $id <= 0 ) {
+			// **ここだけは id を載せない。** `wp_insert_post()` そのものが失敗して
+			// いて、商品は 1 件も作られていない（listings を書く手前で戻っている）。
+			// 存在しない ID を返すと、呼び出し側はそれを PATCH しに行って 404 を踏む。
+			// id の有無がそのまま「PATCH で直せるか／POST し直すか」の signal である
+			// （{@see self::ERROR_PRODUCT_ID_KEY}）。
 			return new WP_REST_Response(
 				array(
 					'code'    => self::CODE_SAVE_FAILED,
@@ -389,15 +440,19 @@ final class ProductsController {
 		try {
 			$saved_id = $this->repository->save( $data );
 		} catch ( ProductLockUnavailable $e ) {
-			return self::lockedResponse();
+			return self::lockedResponse( $e->postId() );
 		} catch ( ProductListingsWriteFailure $e ) {
-			return self::saveFailedResponse();
+			return self::saveFailedResponse( $e->postId() );
 		}
 		if ( $saved_id <= 0 ) {
+			// 更新なので商品は実在する（直前の find() で引けている）。作成側の同じ
+			// 分岐が id を載せないのと**対照的だが矛盾しない**——規則は「サーバが
+			// 実在を知っている商品の ID だけを載せる」であり、ここは実在する。
 			return new WP_REST_Response(
 				array(
-					'code'    => self::CODE_SAVE_FAILED,
-					'message' => __( '商品の更新に失敗しました。', 'affilicard' ),
+					'code'                     => self::CODE_SAVE_FAILED,
+					'message'                  => __( '商品の更新に失敗しました。', 'affilicard' ),
+					self::ERROR_PRODUCT_ID_KEY => $id,
 				),
 				500
 			);

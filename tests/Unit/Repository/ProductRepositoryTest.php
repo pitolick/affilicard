@@ -2155,6 +2155,10 @@ final class ProductRepositoryTest extends TestCase {
 			'affilicard: 商品 5 の listings を保存できなかった（書き込んだ値が読み戻らない）。',
 			$this->lastWriteFailure->getMessage()
 		);
+		// **post ID は構造化して載せる。** 新規作成の途中でこれが投げられた時点で
+		// 投稿行は既に存在するため、REST がその ID を応答へ載せられないと呼び出し側は
+		// できてしまった商品へ辿り着けない（メッセージから数字を掘るのは契約ではない）。
+		$this->assertSame( 5, $this->lastWriteFailure->postId() );
 	}
 
 	/**
