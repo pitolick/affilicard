@@ -7,6 +7,7 @@ use Affilicard\Cron\ListingRefresher;
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\Pricing\FetchStatus;
 use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Util\ScalarField;
 
 /**
  * affilicard_refresh_listing アクションのハンドラ。ThrottledActionHandler の骨格に
@@ -53,8 +54,12 @@ final class RefreshHandler extends ThrottledActionHandler {
 		if ( ! get_transient( self::giveUpTransientKey( $postId, $platform ) ) ) {
 			return false;
 		}
-		$status = isset( $selectedOffer['fetch_status'] ) ? (string) $selectedOffer['fetch_status'] : '';
-		return FetchStatus::isTerminal( $status );
+		// **status は {@see ScalarField::string()} で読む。** `(string)` の直キャストだと、
+		// 壊れた meta や外部ツールの直書きで入った配列が「Array to string conversion」の
+		// 警告を出したうえで `'Array'` になる。判定は偽のままだが、警告はこの関数を
+		// 呼ぶ掃引・繰り上がりのたびにキューのログへ積まれる。同じ値を読む
+		// {@see \Affilicard\PostType\ProductListColumns::renderFallbackColumn()} と流儀を揃える。
+		return FetchStatus::isTerminal( ScalarField::string( $selectedOffer, 'fetch_status' ) );
 	}
 
 	public function __construct(

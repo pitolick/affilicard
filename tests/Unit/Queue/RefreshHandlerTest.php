@@ -5,6 +5,7 @@ namespace Affilicard\Tests\Unit\Queue;
 
 use Affilicard\Cron\ListingRefresher;
 use Affilicard\Platform\PlatformConfig;
+use Affilicard\Pricing\FetchStatus;
 use Affilicard\Provider\ProviderInterface;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Queue\Enqueuer;
@@ -405,5 +406,39 @@ final class RefreshHandlerTest extends TestCase {
 		$handler->handle( 12, 'rakuten-kobo', true );
 
 		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 選んだ購入リンクの `fetch_status` が非スカラー（壊れた meta・外部ツールの直書き）でも
+	 * 警告を出さず「terminal ではない」へ倒す。
+	 *
+	 * `(string)` の直キャストだと配列は「Array to string conversion」の警告を出したうえで
+	 * `'Array'` になる。判定そのものは偽のままだが、警告はキューのログに毎回積まれる。
+	 * 同じ値を読む {@see \Affilicard\PostType\ProductListColumns::renderFallbackColumn()} と
+	 * 揃えて {@see \Affilicard\Util\ScalarField::string()} で読む。
+	 */
+	public function test_isGivenUp_非スカラーのfetch_statusでも警告を出さず抑止しない(): void {
+		WP_Mock::userFunction( 'get_transient' )
+			->once()
+			->with( 'affilicard_refresh_gaveup_12_rakuten-kobo' )
+			->andReturn( 1 );
+
+		$this->assertFalse(
+			RefreshHandler::isGivenUp( 12, 'rakuten-kobo', array( 'fetch_status' => array( 'terminal' ) ) )
+		);
+	}
+
+	/** マーカーと選んだ購入リンク自身の terminal の AND で抑止する（マーカーだけでは抑止しない）。 */
+	public function test_isGivenUp_マーカーと選んだ購入リンクのterminalがそろったときだけ抑止する(): void {
+		WP_Mock::userFunction( 'get_transient' )
+			->with( 'affilicard_refresh_gaveup_12_rakuten-kobo' )
+			->andReturn( 1 );
+
+		$this->assertTrue(
+			RefreshHandler::isGivenUp( 12, 'rakuten-kobo', array( 'fetch_status' => FetchStatus::TERMINAL ) )
+		);
+		$this->assertFalse(
+			RefreshHandler::isGivenUp( 12, 'rakuten-kobo', array( 'fetch_status' => FetchStatus::NONE ) )
+		);
 	}
 }
