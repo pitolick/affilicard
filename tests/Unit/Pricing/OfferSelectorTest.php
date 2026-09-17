@@ -101,6 +101,35 @@ final class OfferSelectorTest extends TestCase {
 		$this->assertSame( 'fifty', $got[0]['external_id'] );
 	}
 
+	/**
+	 * 桁あふれする数値文字列も「読めない」に倒す。
+	 *
+	 * `'1e9999'` は is_numeric() を通るが float にすると INF になり、INF の `(int)`
+	 * キャストは未定義（実測 0）＝最優先に化ける。JS 側（ListingsEditor の
+	 * offerDisplayOrder）は Number.isFinite() で既定値へ倒しており、規則の写しを
+	 * 保つためにもここで弾く。
+	 */
+	public function test_display_orderが桁あふれする数値文字列なら既定値として扱う(): void {
+		$offers = array(
+			$this->offer( 50, 'fifty' ),
+			array(
+				'display_order' => '1e9999',
+				'external_id'   => 'huge',
+				'regular_url'   => 'https://example.test/h',
+			),
+		);
+		$got    = OfferSelector::select( $offers, false );
+		$this->assertSame( 'fifty', $got[0]['external_id'] );
+	}
+
+	/** 有限でない float（INF / NAN）も既定値へ倒す。 */
+	public function test_display_orderが有限でないfloatなら既定値として扱う(): void {
+		$this->assertSame( OfferSelector::DEFAULT_ORDER, OfferSelector::normaliseOrder( INF ) );
+		$this->assertSame( OfferSelector::DEFAULT_ORDER, OfferSelector::normaliseOrder( -INF ) );
+		$this->assertSame( OfferSelector::DEFAULT_ORDER, OfferSelector::normaliseOrder( NAN ) );
+		$this->assertSame( OfferSelector::DEFAULT_ORDER, OfferSelector::normaliseOrder( '1e9999' ) );
+	}
+
 	/** 数値文字列は従来どおり読む。 */
 	public function test_display_orderが数値文字列なら整数として読む(): void {
 		$offers = array(

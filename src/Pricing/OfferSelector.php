@@ -97,10 +97,15 @@ final class OfferSelector {
 			return $raw;
 		}
 		if ( is_float( $raw ) ) {
-			return (int) $raw;
+			return is_finite( $raw ) ? (int) $raw : self::DEFAULT_ORDER;
 		}
 		if ( is_string( $raw ) && is_numeric( trim( $raw ) ) ) {
-			return (int) trim( $raw );
+			$trimmed = trim( $raw );
+			// **桁あふれを整数化しない。** `'1e9999'` は is_numeric() を通るが float に
+			// すると INF になり、INF の `(int)` キャストは未定義（PHP の実測は 0）＝
+			// いちばん先に表示される購入リンクに化ける。有限でなければ「読めなかった」
+			// 側へ倒す（JS 側の offerDisplayOrder も Number.isFinite() で同じ判断をする）。
+			return is_finite( (float) $trimmed ) ? (int) $trimmed : self::DEFAULT_ORDER;
 		}
 		return self::DEFAULT_ORDER;
 	}
