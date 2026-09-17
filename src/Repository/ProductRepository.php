@@ -499,10 +499,22 @@ final class ProductRepository implements ProductRepositoryInterface {
 	}
 
 	/**
-	 * 先頭の有効 listing から代表価格と platform 名を返す（無ければ空文字）。
+	 * **購入リンクを持つ**先頭の有効 listing から代表価格と platform 名を返す。
 	 *
 	 * 価格は listing 自体ではなく、OfferSelector::select() が選んだ購入リンク（offer）から
-	 * 取る。listing はもはや取得結果を直接持たない。選択結果が空（0 件）なら価格は空文字。
+	 * 取る。listing はもはや取得結果を直接持たない。
+	 *
+	 * **選択結果が 0 件の listing は飛ばして探し続ける。** platform があるだけで打ち切ると、
+	 * 購入リンクを 1 件も持たない listing（設定だけを作って URL をまだ入れていない、
+	 * 棚卸しで listing の offers を空にした等）が先頭にいるだけで「価格は空・platform は
+	 * その listing」を返し、価格を持つ後続の listing が管理画面の商品検索結果へ二度と
+	 * 出てこなくなる。価格と platform は必ず同じ listing から取る（別々の listing を
+	 * 混ぜると、出ている platform では買えない価格を表示することになる）。
+	 *
+	 * **どの listing も購入リンクを持たなければ、先頭 listing の platform と空の価格を返す。**
+	 * この場合は隠してしまう価格が存在しないので、上記の不整合は起きない。platform は
+	 * 「この商品がどのストア向けに登録されているか」という情報として商品検索結果
+	 * （ブロック挿入時の候補一覧）に出す価値があるため、従来どおり返す。
 	 *
 	 * v3 以前の flat な listing（offers 無し）は LegacyOffer::offersWithFallback() 経由で
 	 * offers[0] 相当へ変換してから選択に回す。この結果は mapSearchItem() 経由で管理画面の
@@ -516,6 +528,7 @@ final class ProductRepository implements ProductRepositoryInterface {
 		$listings = is_string( $raw ) ? JsonField::decode( $raw, array() ) : ( is_array( $raw ) ? $raw : array() );
 
 		$fallback_enabled = GeneralSettings::fallbackOnTerminal();
+		$first_platform   = '';
 
 		foreach ( $listings as $listing ) {
 			if ( ! is_array( $listing ) ) {
@@ -525,19 +538,25 @@ final class ProductRepository implements ProductRepositoryInterface {
 			if ( '' === $platform ) {
 				continue;
 			}
+			if ( '' === $first_platform ) {
+				$first_platform = $platform;
+			}
 
 			$offers   = LegacyOffer::offersWithFallback( $listing );
 			$selected = OfferSelector::select( $offers, $fallback_enabled );
-			$price    = array() !== $selected ? trim( ScalarField::string( $selected[0], 'price' ) ) : '';
+			if ( array() === $selected ) {
+				// 購入リンクが 1 件も無い listing。代表にすると後続の価格を隠す。
+				continue;
+			}
 
 			return array(
-				'price'    => $price,
+				'price'    => trim( ScalarField::string( $selected[0], 'price' ) ),
 				'platform' => $platform,
 			);
 		}
 		return array(
 			'price'    => '',
-			'platform' => '',
+			'platform' => $first_platform,
 		);
 	}
 

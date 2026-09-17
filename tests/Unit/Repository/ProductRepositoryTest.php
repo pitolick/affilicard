@@ -1307,6 +1307,78 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	/**
+	 * 購入リンクを 1 件も持たない listing は代表にしない。
+	 *
+	 * 先頭の listing に platform があるだけで打ち切ると、その listing が購入リンクを
+	 * 持たない（OfferSelector::select() が 0 件）ときに「価格は空・platform はその
+	 * listing」を返し、価格を持つ後続の listing が管理画面の商品検索結果へ二度と
+	 * 出てこない。選択結果が空の listing は飛ばして探し続ける。
+	 */
+	public function test_購入リンクを持たないlistingは価格サマリの代表にしない(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 96, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'dmm-books',
+						'offers'   => array(),
+					),
+					array(
+						'platform' => 'amazon-kindle',
+						'offers'   => array(
+							array( 'price' => '¥550' ),
+						),
+					),
+				)
+			);
+
+		$repo   = new ProductRepository();
+		$result = $repo->listingSummary( 96 );
+
+		// 価格と platform は必ず同じ listing から来る（別々の listing を混ぜない）。
+		$this->assertSame( '¥550', $result['price'] );
+		$this->assertSame( 'amazon-kindle', $result['platform'] );
+	}
+
+	/**
+	 * どの listing も購入リンクを持たないときは、先頭 listing の platform と空の価格を返す。
+	 *
+	 * 打ち切る相手がいない（価格を持つ listing が 1 件も無い）ので、隠してしまう価格も
+	 * 無い。platform だけは「この商品がどのストア向けに登録されているか」という情報として
+	 * 商品検索結果に出す価値があるため、従来どおり返す。
+	 */
+	public function test_どのlistingも購入リンクを持たなければ先頭platformと空価格を返す(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 95, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'dmm-books',
+						'offers'   => array(),
+					),
+					array(
+						'platform' => 'amazon-kindle',
+						'offers'   => array(),
+					),
+				)
+			);
+
+		$repo   = new ProductRepository();
+		$result = $repo->listingSummary( 95 );
+
+		$this->assertSame( '', $result['price'] );
+		$this->assertSame( 'dmm-books', $result['platform'] );
+	}
+
+	/**
 	 * v3 以前の flat な listing（offers キー無し・取得結果フィールドが listing 直下）でも
 	 * LegacyOffer::offersWithFallback() 経由で offers[0] 相当へ変換してから価格を選ぶ。
 	 * これが抜けると、移行バッチが当該商品へ到達するまでの窓で管理画面の商品検索結果の
