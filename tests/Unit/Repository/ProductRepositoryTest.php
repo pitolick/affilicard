@@ -1594,6 +1594,8 @@ final class ProductRepositoryTest extends TestCase {
 	 * 「既存」とみなして別商品の listing を書き換えることになる。
 	 */
 	public function test_非スカラーのexternal_idはミラーに書かない(): void {
+		// syncDerivedMeta() の listings 読み＋ミラー同期は ListingLock の中で行う。
+		$this->mockLockWpdb( 1 );
 		$repo = new ProductRepository();
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 43, ProductPostType::META_LISTINGS, true )
@@ -1626,6 +1628,8 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	public function test_syncDerivedMeta_mirrors_external_ids_and_sets_schema_version(): void {
+		// syncDerivedMeta() の listings 読み＋ミラー同期は ListingLock の中で行う。
+		$this->mockLockWpdb( 1 );
 		$repo = new ProductRepository();
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 42, ProductPostType::META_LISTINGS, true )
@@ -1726,8 +1730,21 @@ final class ProductRepositoryTest extends TestCase {
 
 		WP_Mock::userFunction( 'wp_update_post' )->never();
 		WP_Mock::userFunction( 'wp_insert_post' )->never();
-		WP_Mock::userFunction( 'add_post_meta' )->andReturn( true );
-		WP_Mock::userFunction( 'delete_post_meta' )->andReturn( true );
+		// extid ミラーの書き込みも同じ時系列へ積む（ロックの中に入っているかを見る）。
+		WP_Mock::userFunction( 'add_post_meta' )
+			->andReturnUsing(
+				static function ( $post_id, $key, $value, $unique = false ) use ( &$timeline ) {
+					$timeline[] = 'mirror:add';
+					return true;
+				}
+			);
+		WP_Mock::userFunction( 'delete_post_meta' )
+			->andReturnUsing(
+				static function ( $post_id, $key, $value = '' ) use ( &$timeline ) {
+					$timeline[] = 'mirror:delete';
+					return true;
+				}
+			);
 		WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing( static fn( $v ) => is_string( $v ) ? trim( $v ) : $v );
 		WP_Mock::userFunction( 'get_post_meta' )
 			->andReturnUsing(
@@ -1780,11 +1797,130 @@ final class ProductRepositoryTest extends TestCase {
 	public function test_saveMetaはlistingsの読み書きをロックの中で行う(): void {
 		$timeline = $this->saveMetaLockTimeline( 1 );
 
-		// 末尾の read はロックの**外**にある extid ミラー同期の読み直し（ミラーは
-		// 書こうとした値ではなく実際に入っている値から作る）。ロックが囲むのは
-		// listings の読み→変換→書き戻しだけ。
+		// 2 つ目の read は extid ミラー同期の読み直し（ミラーは書こうとした値では
+		// なく実際に入っている値から作る）。**これも RELEASE_LOCK の前にある**——
+		// ミラーは META_LISTINGS の写しなので、外に出すと別の保存が挟まったとき
+		// 古い写しが後着で勝ち、findByExternalId() が実在しない商品を引く。
 		$this->assertSame(
-			array( 'GET_LOCK', 'read:listings', 'write:listings', 'RELEASE_LOCK', 'read:listings' ),
+			array( 'GET_LOCK', 'read:listings', 'write:listings', 'read:listings', 'RELEASE_LOCK' ),
+			$timeline
+		);
+	}
+
+	/**
+	 * extid ミラーの書き込み自体もロックの中で行う。
+	 *
+	 * 読み直しだけをロックへ入れても足りない。ミラーの更新は「今回の集合に無い値を
+	 * 個別に消してから、足りない値を足す」という複数クエリの操作なので、外に出すと
+	 * 2 つの保存の削除と追加が交互に並び、どちらの listings とも一致しないミラーが
+	 * 残る。ミラーは findByExternalId() の索引そのもので、狂うと自動作成が既存商品を
+	 * 見落として重複を作るか、消えた ID で既存商品を引いてしまう。
+	 */
+	public function test_saveMetaのミラー書き込みもロックの中で行う(): void {
+		$timeline = $this->saveMetaLockTimeline(
+			1,
+			array(
+				array(
+					'platform' => 'rakuten-kobo',
+					'offers'   => array( array( 'external_id' => 'rk-1' ) ),
+				),
+			)
+		);
+
+		$this->assertSame(
+			array( 'GET_LOCK', 'read:listings', 'write:listings', 'read:listings', 'mirror:add', 'RELEASE_LOCK' ),
+			$timeline
+		);
+	}
+
+	/**
+	 * syncDerivedMeta() を走らせ、listings の読みとミラー同期・ロックの発行順を返す。
+	 *
+	 * @param array<int, mixed> $stored 保存されている listings meta。
+	 * @return array<int, string> 'GET_LOCK' / 'read:listings' / 'mirror:add' / 'RELEASE_LOCK' の順列。
+	 */
+	private function syncDerivedMetaLockTimeline( int $getLockReturn, array $stored ): array {
+		$timeline = array();
+		$this->mockLockWpdbTimeline( $getLockReturn, $timeline );
+		$this->storedListings = $stored;
+
+		WP_Mock::userFunction( 'add_post_meta' )
+			->andReturnUsing(
+				static function ( $post_id, $key, $value, $unique = false ) use ( &$timeline ) {
+					$timeline[] = 'mirror:add';
+					return true;
+				}
+			);
+		WP_Mock::userFunction( 'delete_post_meta' )
+			->andReturnUsing(
+				static function ( $post_id, $key, $value = '' ) use ( &$timeline ) {
+					$timeline[] = 'mirror:delete';
+					return true;
+				}
+			);
+		WP_Mock::userFunction( 'get_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key = '', $single = false ) use ( &$timeline ) {
+					if ( ProductPostType::META_LISTINGS === $key ) {
+						$timeline[] = 'read:listings';
+						return $this->storedListings;
+					}
+					return array();
+				}
+			);
+		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
+
+		( new ProductRepository() )->syncDerivedMeta( 5 );
+
+		return $timeline;
+	}
+
+	/**
+	 * syncDerivedMeta() も listings の読みとミラー同期をロックの中で行う。
+	 *
+	 * ブロックエディタのサイドバー保存（コアの wp/v2 meta 経路）はこの派生 meta 同期で
+	 * ミラーを作り直す。saveMeta() 側だけを直列化しても、こちらが外に居ると
+	 * 「REST の保存が読んだ listings」と「別経路が書き終えた listings」が入れ替わり、
+	 * ミラーが META_LISTINGS と食い違う。
+	 */
+	public function test_syncDerivedMetaはlistingsの読みとミラー同期をロックの中で行う(): void {
+		$timeline = $this->syncDerivedMetaLockTimeline(
+			1,
+			array(
+				array(
+					'platform' => 'rakuten-kobo',
+					'offers'   => array( array( 'external_id' => 'rk-1' ) ),
+				),
+			)
+		);
+
+		$this->assertSame(
+			array( 'GET_LOCK', 'read:listings', 'mirror:add', 'RELEASE_LOCK' ),
+			$timeline
+		);
+	}
+
+	/**
+	 * ロックを取れなくても syncDerivedMeta() はミラーを作り直す（best-effort）。
+	 *
+	 * saveMeta() と同じ判断。ここで諦めると、保存された listings に対してミラーだけが
+	 * 古いまま残り、自動作成が重複商品を作る側へ倒れる。再投入する呼び出し側は無く
+	 * （void で失敗を報告する口すら無い）、次に誰かが保存するまで直らない。
+	 */
+	public function test_syncDerivedMetaはロックを取れなくてもミラーを同期する(): void {
+		$timeline = $this->syncDerivedMetaLockTimeline(
+			0,
+			array(
+				array(
+					'platform' => 'rakuten-kobo',
+					'offers'   => array( array( 'external_id' => 'rk-1' ) ),
+				),
+			)
+		);
+
+		// 取れていないロックを返しに行かない（RELEASE_LOCK が無い）。
+		$this->assertSame(
+			array( 'GET_LOCK', 'read:listings', 'mirror:add' ),
 			$timeline
 		);
 	}
@@ -1800,8 +1936,8 @@ final class ProductRepositoryTest extends TestCase {
 	public function test_saveMetaはロックを取れなくてもlistingsを保存する(): void {
 		$timeline = $this->saveMetaLockTimeline( 0 );
 
-		// 取れていないロックを返しに行かない（RELEASE_LOCK が無い）。末尾の read は
-		// ロックの外のミラー同期で、ロックの成否に関わらず行う。
+		// 取れていないロックを返しに行かない（RELEASE_LOCK が無い）。ミラー同期は
+		// ロックの成否に関わらず行う（best-effort）。
 		$this->assertSame(
 			array( 'GET_LOCK', 'read:listings', 'write:listings', 'read:listings' ),
 			$timeline

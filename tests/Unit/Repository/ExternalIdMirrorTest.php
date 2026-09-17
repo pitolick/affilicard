@@ -27,12 +27,37 @@ final class ExternalIdMirrorTest extends TestCase {
 					return $text;
 				}
 			);
+		$this->stubLockWpdb();
 	}
 
 	public function tearDown(): void {
 		WP_Mock::tearDown();
+		if ( isset( $GLOBALS['wpdb'] ) ) {
+			unset( $GLOBALS['wpdb'] );
+		}
 		Mockery::close();
 		parent::tearDown();
+	}
+
+	/**
+	 * ListingLock 用の $wpdb を差し込む（GET_LOCK は成功）。
+	 *
+	 * syncDerivedMeta() は listings の読みとミラー同期を ListingLock の中で行うため、
+	 * $wpdb が無いと GET_LOCK の発行で落ちる。ここでの関心事はミラーの中身なので、
+	 * ロックは常に取れることにして素通りさせる（ロックの発行順は
+	 * ProductRepositoryTest の時系列テストが見ている）。
+	 */
+	private function stubLockWpdb(): void {
+		$wpdb = Mockery::mock();
+		$wpdb->shouldReceive( 'prepare' )->andReturnUsing(
+			static function ( string $query ) {
+				return $query;
+			}
+		);
+		$wpdb->shouldReceive( 'get_var' )->andReturn( '1' );
+		$wpdb->shouldReceive( 'query' )->andReturn( 1 );
+
+		$GLOBALS['wpdb'] = $wpdb;
 	}
 
 	/**

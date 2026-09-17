@@ -22,6 +22,7 @@ namespace Affilicard\Repository;
  * | {@see ProductRepository::updateListing()} | best-effort で続行する（取得済みの値を捨てない） |
  * | {@see ProductRepository::updateListingOffer()} | 何も書かず false（呼び出し側が再投入する） |
  * | {@see ProductRepository::saveMeta()} | best-effort で続行する（運用者の編集を捨てない・再投入する呼び出し側が無い） |
+ * | {@see ProductRepository::syncDerivedMeta()} | best-effort で続行する（ミラーを作り直さない方が有害・void で報告する口が無い） |
  * | {@see \Affilicard\Upgrade\PluginUpgrade::migrateOneProduct()} | 移行の失敗として差し戻す（数回で諦める） |
  *
  * 外部 API の fetch をロックの中へ入れてはならない。ロックは「メモリ上の変換と
@@ -32,6 +33,18 @@ namespace Affilicard\Repository;
  * クラス docblock に書いた。
  */
 final class ListingLock {
+
+	/**
+	 * このリクエストで既に握っている商品（post ID をキーに持つだけ）。
+	 *
+	 * **入れ子で呼ばれるため要る。** {@see ProductRepository::syncDerivedMeta()} は
+	 * 単独でも呼ばれる（`rest_after_insert_affilicard_product`）が、
+	 * {@see \Affilicard\Upgrade\PluginUpgrade::migrateOneProductLocked()} の中——
+	 * つまり既にこのロックを握った状態——からも呼ばれる。
+	 *
+	 * @var array<int, true>
+	 */
+	private static array $held = array();
 
 	/**
 	 * ロック取得の待ち時間（秒）。
@@ -68,11 +81,24 @@ final class ListingLock {
 	 * 取得できなかったときは解放しない（他のセッションが握っているロックへ
 	 * RELEASE_LOCK を撃っても解放はされず、クエリを 1 本増やすだけ）。
 	 *
+	 * **同じ商品の入れ子では取り直さない（再入可能）。** 既に握っているなら
+	 * $critical をそのまま `true` で呼ぶ。MySQL の名前付きロックが同一セッションからの
+	 * 再取得をどう数えるかに依存せず、GET_LOCK と RELEASE_LOCK を 1 対 1 に保つため
+	 * である。印を立てるのは**取得できたときだけ**で、取れなかった外側の中の内側は
+	 * 自分で取りに行く（誰も握っていない区間を「守られている」と誤認させない）。
+	 * 印は最も外側の finally で必ず落ちるため、$critical が例外を投げても残らない。
+	 *
 	 * @param callable(bool): mixed $critical ロック内で実行する処理。引数は取得の成否。
 	 * @return mixed $critical の戻り値。
 	 */
 	public static function around( int $postId, callable $critical ) {
 		global $wpdb;
+
+		if ( isset( self::$held[ $postId ] ) ) {
+			// 外側のフレームが握ったまま自分の finally で解放するので、ここでは
+			// 印にも解放にも触らない。
+			return $critical( true );
+		}
 
 		$lock = self::name( $postId );
 		$got  = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $lock, self::TIMEOUT ) );
@@ -81,9 +107,11 @@ final class ListingLock {
 			return $critical( false );
 		}
 
+		self::$held[ $postId ] = true;
 		try {
 			return $critical( true );
 		} finally {
+			unset( self::$held[ $postId ] );
 			$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock ) );
 		}
 	}

@@ -373,12 +373,23 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 *
 	 * **その判定は listings の read-modify-write である**——保存前の listings を読み、
 	 * 身元の変化を見てから書き戻す。したがって他の 3 つの書き手と同じ
-	 * {@see ListingLock} で直列化する。囲むのは listings の読み→変換→書き戻しだけで、
-	 * 他のメタ（product_type / extras 等）や extid ミラー同期はロックの外に置く
-	 * （別キーで RMW ではなく、ロックは「メモリ上の変換と meta の読み書き」だけを
-	 * 囲む前提の待ち時間で設計されているため）。**そのミラー同期は meta を読み直して
-	 * から行う**——書こうとした値ではなく実際に保存されている値を映さないと、商品が
-	 * 持っていない external_id で引けるようになる（理由は同期の直前のコメント）。
+	 * {@see ListingLock} で直列化する。囲むのは listings に関わる読み→変換→書き戻しと
+	 * **extid ミラーの同期**で、他のメタ（product_type / extras 等）はロックの外に置く
+	 * （別キーで RMW ではないため）。
+	 *
+	 * **ミラー同期をロックの中へ入れるのは、それも META_LISTINGS の read-modify-write
+	 * だからである。** ミラーは listings の写しで、「保存後の listings を読み直す →
+	 * 今回の集合に無い値を消す → 足りない値を足す」という複数クエリの操作になる。
+	 * ロックの外でやると、2 つの保存が「A 書き込み → B 書き込み → B ミラー → A ミラー」
+	 * の順に交差したとき **古い方のスナップショットから作ったミラーが後着で勝つ**。
+	 * ミラーは findByExternalId() の索引そのものなので、狂うと自動作成が既存商品を
+	 * 見落として重複を作るか、消した ID で既存商品を引いて更新先を間違える。囲んでよい
+	 * 範囲も超えない——足すのは meta の読み書きだけで、`wp_update_post()` も第三者の
+	 * `save_post` も挟まない。
+	 *
+	 * **そのミラー同期は meta を読み直してから行う**——書こうとした値ではなく実際に
+	 * 保存されている値を映さないと、商品が持っていない external_id で引けるようになる
+	 * （理由は同期の直前のコメント）。
 	 *
 	 * **ロックを取れなくても書く（best-effort）。** {@see self::updateListing()} と同じ側で、
 	 * {@see self::updateListingOffer()} とは逆である。理由は呼び出し側の事情——ここへ来るのは
@@ -411,7 +422,7 @@ final class ProductRepository implements ProductRepositoryInterface {
 
 		ListingLock::around(
 			$postId,
-			static function ( bool $locked ) use ( $postId, $listings ): void {
+			function ( bool $locked ) use ( $postId, $listings ): void {
 				// **$locked は見ない（best-effort）。** updateListing() と同じ判断で、
 				// 理由は上の PHPDoc のとおり——この呼び出し側には再投入する仕組みが無く、
 				// saveMeta() は void なので失敗を報告する口すら無い。ここで書かずに
@@ -419,6 +430,20 @@ final class ProductRepository implements ProductRepositoryInterface {
 				// 取り直せる価格更新（updateListingOffer）とは失うものの重さが違う。
 				$next = OfferStatusReset::forIdentityChanges( self::listingsMeta( $postId ), $listings );
 				update_post_meta( $postId, ProductPostType::META_LISTINGS, $next );
+
+				// **ミラーは「書こうとした値」ではなく「実際に入っている値」から作る。**
+				// ここで $listings（渡された配列）や、直前に組み立てた $next を使うと、
+				// 書き込みが落ちたとき（update_post_meta の失敗）や保存の sanitize が値を
+				// 変えたときに、META_LISTINGS に無い external_id で商品が引けるようになり、
+				// 逆に本当に入っている external_id の行が消える。ミラーは
+				// findByExternalId() の索引そのもので、狂うと自動作成が既存商品を誤検出／
+				// 見落としして重複商品を作る。syncDerivedMeta() が meta を読み直してから
+				// 同期しているのと同じ流儀に揃える。
+				//
+				// **読み直しも同期もこのロックの中で行う。** 外へ出すと、読み直しから
+				// 複数クエリの同期が終わるまでのあいだに別の保存が挟まり、古い
+				// スナップショットから作ったミラーが後着で勝つ（理由は上の PHPDoc）。
+				$this->syncExternalIdMirror( $postId, self::listingsMeta( $postId ) );
 			}
 		);
 
@@ -427,16 +452,6 @@ final class ProductRepository implements ProductRepositoryInterface {
 		update_post_meta( $postId, ProductPostType::META_MASK_BLUR, $mask_blur );
 		update_post_meta( $postId, ProductPostType::META_MASK_R18, $mask_r18 );
 		update_post_meta( $postId, ProductPostType::META_MASK_LABEL, $mask_label );
-
-		// **ミラーは「書こうとした値」ではなく「実際に入っている値」から作る。**
-		// ここで $listings（渡された配列）や、ロックの中で組み立てた $next を使うと、
-		// 書き込みが落ちたとき（update_post_meta の失敗）や保存の sanitize が値を
-		// 変えたときに、META_LISTINGS に無い external_id で商品が引けるようになり、
-		// 逆に本当に入っている external_id の行が消える。ミラーは
-		// findByExternalId() の索引そのもので、狂うと自動作成が既存商品を誤検出／
-		// 見落としして重複商品を作る。syncDerivedMeta() が meta を読み直してから
-		// 同期しているのと同じ流儀に揃える。
-		$this->syncExternalIdMirror( $postId, self::listingsMeta( $postId ) );
 	}
 
 	/**
@@ -695,15 +710,42 @@ final class ProductRepository implements ProductRepositoryInterface {
 	/**
 	 * REST（core-data）保存後に呼ぶ派生 meta 同期。
 	 * listings 配列メタから external_id ミラーと schema_version を再構築する。
+	 *
+	 * **listings の読みとミラーの同期は {@see ListingLock} の中で行う。** ここも
+	 * META_LISTINGS を読んでその写し（extid ミラー）を複数クエリで書き換える
+	 * read-modify-write であり、{@see self::saveMeta()} のミラー同期とまったく同じ理由で
+	 * 直列化が要る——交差すると古いスナップショットから作ったミラーが後着で勝ち、
+	 * findByExternalId() が実在しない external_id で商品を引く／実在する商品を
+	 * 見落とす。囲む範囲は meta の読み書きだけで、`wp_update_post()` も第三者の
+	 * `save_post` も挟まない（この経路は既に `rest_after_insert` の中＝保存の後にある）。
+	 *
+	 * **ロックを取れなくても同期する（best-effort）。** saveMeta() と同じ側である。
+	 * ここで諦めると、保存された listings に対してミラーだけが古いまま残り、自動作成が
+	 * 重複商品を作る側へ倒れる。再投入する呼び出し側は無く、void なので失敗を報告する
+	 * 口すら無い。
+	 *
+	 * **同じ商品のロックを既に握った状態からも呼ばれる**
+	 * （{@see \Affilicard\Upgrade\PluginUpgrade::migrateOneProductLocked()}）。
+	 * {@see ListingLock::around()} は同じ商品の入れ子では取り直さない（再入可能）ため、
+	 * 二重に GET_LOCK を撃つことも、解放の対がずれることもない。
+	 *
+	 * schema_version の刻印はロックの外に置く（別キーで、read-modify-write ではない）。
 	 */
 	public function syncDerivedMeta( int $postId ): void {
-		$listings = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
-		if ( is_string( $listings ) ) {
-			$listings = JsonField::decode( $listings, array() );
-		} elseif ( ! is_array( $listings ) ) {
-			$listings = array();
-		}
-		$this->syncExternalIdMirror( $postId, $listings );
+		ListingLock::around(
+			$postId,
+			function ( bool $locked ) use ( $postId ): void {
+				// **$locked は見ない（best-effort）。** 理由は上の PHPDoc のとおり。
+				$listings = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
+				if ( is_string( $listings ) ) {
+					$listings = JsonField::decode( $listings, array() );
+				} elseif ( ! is_array( $listings ) ) {
+					$listings = array();
+				}
+				$this->syncExternalIdMirror( $postId, $listings );
+			}
+		);
+
 		update_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
 	}
 
