@@ -271,6 +271,7 @@ function findByExternalId( platform, externalId ) {
 }
 
 module.exports = {
+	getApiContext,
 	getAuthHeaders,
 	createProduct,
 	createProductWithOffers,
