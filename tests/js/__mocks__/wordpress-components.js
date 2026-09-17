@@ -199,9 +199,17 @@ function ComboboxControl( { label, options, onChange, onFilterValueChange, value
 
 function PanelBody( { title, children, initialOpen, opened, onToggle } ) {
 	// `opened` が渡されない（＝ initialOpen だけの非制御利用）既存呼び出しは、
-	// 折りたたみ挙動を再現せず子を常に描画する（折りたたみは WP 実装で E2E 検証）。
-	// `opened` を渡した制御利用（購入リンク行など）だけは実際に開閉を反映する
-	// ——同じラベルを持つ複数行が同時に描画されると getByLabelText が破綻するため。
+	// 折りたたみ挙動を再現せず子を常に描画する。`opened` を渡した制御利用
+	// （購入リンク行など）だけは実際に開閉を反映する——同じラベルを持つ複数行が
+	// 同時に描画されると getByLabelText が破綻するため。
+	//
+	// **非制御側で initialOpen を無視するのは意図的**。ここで再現すると、
+	// initialOpen={false} の中身を見る 33 本のテストが「開く」操作を書くだけの
+	// 差分になり、検証している内容（フィールドの描画とハンドラ）は変わらない。
+	// 折りたたみそのものは実 WordPress の @wordpress/components に対して E2E が
+	// 見ている——tests/e2e/product-metabox.spec.js の expandSection() が、
+	// 追加直後の購入リンク PanelBody が閉じていることを前提に開いてから操作する。
+	// モックで似せるより、本物で確かめる方が確かである。
 	const isControlled = typeof opened === 'boolean';
 	const isOpen = isControlled ? opened : true;
 	return React.createElement(
