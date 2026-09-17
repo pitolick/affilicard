@@ -32,18 +32,19 @@ use WP_REST_Request;
  *
  * ## 残る競合: この経路は {@see \Affilicard\Repository\ListingLock} の外にある
  *
- * META_LISTINGS を書く 3 つの入口のうち、{@see ProductRepository::updateListing()} /
- * {@see ProductRepository::updateListingOffer()} / {@see ProductRepository::saveMeta()} は
- * ロックの中で読み書きする。**サイドバー保存だけはロックの外にある。** 書き手がコアの
- * `WP_REST_Post_Meta_Fields::update_value()` で、こちらから囲めないためである。
- * 結果として「価格更新が書いた価格を、サイドバーの保存が上書きする」競合が残る。
+ * META_LISTINGS を書く入口は 4 つある。{@see ProductRepository::updateListing()} /
+ * {@see ProductRepository::updateListingOffer()} / {@see ProductRepository::saveMeta()} の
+ * 3 つはロックの中で読み書きする。**このサイドバー保存だけがロックの外にある。**
+ * 書き手がコアの `WP_REST_Post_Meta_Fields::update_value()` で、こちらから囲めない
+ * ためである。結果として「価格更新が書いた価格を、サイドバーの保存が上書きする」
+ * 競合が残る。
  *
  * **`rest_pre_insert` で取って `rest_after_insert` で返す形は採らない。** 検討した
  * うえで見送った。理由は 4 つある。
  *
  * 1. **クリティカルセクションが `wp_update_post()` をまたぐ。** そのあいだに `save_post` /
  *    `wp_after_insert_post` と他プラグインのハンドラが走る。ListingLock は「メモリ上の
- *    変換と meta の読み書き」だけを囲む前提の待ち時間（{@see ListingLock::TIMEOUT}）で
+ *    変換と meta の読み書き」だけを囲む前提の待ち時間（{@see \Affilicard\Repository\ListingLock::TIMEOUT}）で
  *    設計されており、サーバ全体で共有される MySQL 名前付きロックを第三者のフックを
  *    またいで握るのは、この前提を正面から破る。
  * 2. **失敗経路で解放が走らない。** `WP_REST_Posts_Controller::update_item()` は
