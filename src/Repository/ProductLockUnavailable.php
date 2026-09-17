@@ -31,8 +31,10 @@ namespace Affilicard\Repository;
  * | {@see \Affilicard\Rest\ProductsController::bulkCreate()} | 207 の該当 item を `status=error` にする |
  * | {@see \Affilicard\AutoCreate\ProductAutoCreator::createLocked()} | {@see \Affilicard\Queue\WorkOutcome::TRANSIENT_FAILURE}（AS が再投入する） |
  *
- * {@see DerivedMetaSync::run()} も、再試行を使い切ったときの「諦めた」印としてこれを投げる
- * （Action Scheduler が failed アクションとして記録する）。
+ * {@see DerivedMetaSync::run()} も、再試行を使い切ったとき・**次の試行を積めなかったとき**の
+ * 「諦めた」印としてこれを投げる（Action Scheduler が failed アクションとして記録する）。
+ * どちらも結末は同じ——ミラーは古いまま、もう誰も直しに来ない——なので同じ型で報告し、
+ * メッセージで区別する。
  */
 final class ProductLockUnavailable extends \RuntimeException {
 

@@ -115,6 +115,10 @@ final class Plugin {
 
 			\Affilicard\Admin\CronDisabledNotice::register();
 			\Affilicard\Admin\OffersMigrationNotice::register();
+			// extid ミラーを作り直せず再試行も積めなかった商品を出す。積めていれば
+			// Action Scheduler の一覧が記録になるが、積めなかったときはこの通知だけが
+			// 運用の知る手段になる（DerivedMetaSyncNotice のクラス PHPDoc 参照）。
+			\Affilicard\Admin\DerivedMetaSyncNotice::register();
 			add_action( 'admin_menu', array( self::class, 'registerSettingsPage' ) );
 			add_action( 'admin_menu', array( QueueJobsPage::class, 'registerMenu' ) );
 			// affilicard 独自の「更新キュー（ジョブ一覧）」を持つため、Tools > Scheduled Actions の

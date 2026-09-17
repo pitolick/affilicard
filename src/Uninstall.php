@@ -50,6 +50,12 @@ final class Uninstall {
 		// Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_FAILED_POST_IDS のリテラル値
 		// （同上の post ID 一覧）。
 		'affilicard_offers_migration_failed_post_ids',
+		// Affilicard\Repository\DerivedMetaSync::OPTION_UNSYNCED_COUNT のリテラル値
+		// （extid ミラーを作り直せず再試行も積めなかった延べ件数）。
+		'affilicard_derived_meta_unsynced_count',
+		// Affilicard\Repository\DerivedMetaSync::OPTION_UNSYNCED_POST_IDS のリテラル値
+		// （同上の post ID 一覧）。
+		'affilicard_derived_meta_unsynced_post_ids',
 	);
 
 	/**
@@ -75,6 +81,9 @@ final class Uninstall {
 		// Affilicard\Admin\OffersMigrationNotice::DISMISS_FAILED_META のリテラル値
 		// （「移行できなかった商品」通知を閉じた時点の件数）。
 		delete_metadata( 'user', 0, 'affilicard_offers_migration_failed_notice_dismissed', '', true );
+		// Affilicard\Admin\DerivedMetaSyncNotice::DISMISS_META のリテラル値
+		// （「索引を作り直せなかった商品」通知を閉じた時点の件数）。
+		delete_metadata( 'user', 0, 'affilicard_derived_meta_unsynced_notice_dismissed', '', true );
 	}
 
 	public static function run(): void {

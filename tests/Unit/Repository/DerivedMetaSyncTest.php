@@ -29,11 +29,44 @@ final class DerivedMetaSyncTest extends TestCase {
 	 */
 	private array $scheduled = array();
 
+	/**
+	 * as_schedule_single_action() に返させる action ID（0 以下＝積めなかった）。
+	 *
+	 * **テストの中で登録し直しても切り替わらない**（WP_Mock は最初の期待だけを保持する）
+	 * ため、ここから読む。
+	 *
+	 * @var int
+	 */
+	private int $scheduleResult = 4242;
+
+	/**
+	 * get_option/update_option の受け皿（option キー => 値）。
+	 *
+	 * @var array<string, mixed>
+	 */
+	private array $options = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
-		$this->lockResult = 1;
-		$this->scheduled  = array();
+		$this->lockResult     = 1;
+		$this->scheduled      = array();
+		$this->scheduleResult = 4242;
+		$this->options        = array();
+
+		WP_Mock::userFunction( 'get_option' )
+			->andReturnUsing(
+				function ( $key, $default = false ) {
+					return $this->options[ (string) $key ] ?? $default;
+				}
+			);
+		WP_Mock::userFunction( 'update_option' )
+			->andReturnUsing(
+				function ( $key, $value, $autoload = null ) {
+					$this->options[ (string) $key ] = $value;
+					return true;
+				}
+			);
 
 		$wpdb = Mockery::mock();
 		$wpdb->shouldReceive( 'prepare' )->andReturnUsing( static fn( string $query ) => $query );
@@ -52,7 +85,7 @@ final class DerivedMetaSyncTest extends TestCase {
 			->andReturnUsing(
 				function ( ...$args ) {
 					$this->scheduled[] = $args;
-					return 4242;
+					return $this->scheduleResult;
 				}
 			);
 	}
@@ -172,6 +205,82 @@ final class DerivedMetaSyncTest extends TestCase {
 		DerivedMetaSync::run( 0, 1 );
 
 		$this->assertSame( array(), $this->scheduled );
+	}
+
+	/**
+	 * 再投入できなかったら、運用が見られる記録を残す。
+	 *
+	 * **`error_log()` は記録ではない。** 本番の `WP_DEBUG_LOG` は off なので何処にも
+	 * 出ない。そのうえ afterRestSave() は戻り値を持たず、AS にもアクションが残らない
+	 * ため、積めなかった瞬間にこの失敗は完全に不可視になる。ミラーは
+	 * findByExternalId() の索引そのもので、古いまま放置されると自動作成が既存商品を
+	 * 見落として重複を作る——黙って消えてよい失敗ではない。
+	 */
+	public function test_afterRestSaveは再投入できなければ記録を残す(): void {
+		$this->lockResult     = 0;
+		$this->scheduleResult = 0;
+
+		DerivedMetaSync::afterRestSave( 7 );
+
+		$this->assertSame( 1, (int) ( $this->options[ DerivedMetaSync::OPTION_UNSYNCED_COUNT ] ?? 0 ) );
+		$this->assertSame( array( 7 ), $this->options[ DerivedMetaSync::OPTION_UNSYNCED_POST_IDS ] ?? array() );
+	}
+
+	/**
+	 * 再投入できていれば記録は残さない（AS 側に痕跡がある）。
+	 */
+	public function test_afterRestSaveは再投入できれば記録を残さない(): void {
+		$this->lockResult = 0;
+
+		DerivedMetaSync::afterRestSave( 7 );
+
+		$this->assertCount( 1, $this->scheduled );
+		$this->assertArrayNotHasKey( DerivedMetaSync::OPTION_UNSYNCED_COUNT, $this->options );
+		$this->assertArrayNotHasKey( DerivedMetaSync::OPTION_UNSYNCED_POST_IDS, $this->options );
+	}
+
+	/**
+	 * 同じ商品を二度記録しても post ID は重複させない（件数だけ増える）。
+	 */
+	public function test_afterRestSaveは同じ商品のpostIDを重複させない(): void {
+		$this->lockResult     = 0;
+		$this->scheduleResult = 0;
+
+		DerivedMetaSync::afterRestSave( 7 );
+		DerivedMetaSync::afterRestSave( 7 );
+
+		$this->assertSame( 2, (int) ( $this->options[ DerivedMetaSync::OPTION_UNSYNCED_COUNT ] ?? 0 ) );
+		$this->assertSame( array( 7 ), $this->options[ DerivedMetaSync::OPTION_UNSYNCED_POST_IDS ] ?? array() );
+	}
+
+	/**
+	 * 再試行アクションの中で積み直せなかったら例外を投げる。
+	 *
+	 * **ここで黙って戻ると、そのアクションは「成功」として完了する。** ミラーは
+	 * 古いまま、次の試行も無い、AS の一覧も緑——失敗が何処にも残らない。投げれば
+	 * Action Scheduler が failed アクションとして記録し、運用が一覧で見られる。
+	 *
+	 * **メッセージまで固定する。** 型だけだと、モック不足で出た
+	 * `Mockery\Exception\NoMatchingExpectationException`（これも RuntimeException を
+	 * 継承する）で通ってしまう。
+	 */
+	public function test_runは再投入できなければ例外を投げる(): void {
+		$this->lockResult     = 0;
+		$this->scheduleResult = 0;
+
+		$caught = null;
+		try {
+			DerivedMetaSync::run( 7, 2 );
+		} catch ( ProductLockUnavailable $e ) {
+			$caught = $e;
+		}
+
+		$this->assertInstanceOf( ProductLockUnavailable::class, $caught );
+		$this->assertSame(
+			'affilicard: 商品 7 の extid ミラー同期（3 回目）を積めず、再試行が残らなかった。',
+			$caught->getMessage()
+		);
+		$this->assertSame( 7, $caught->postId() );
 	}
 
 	/**
