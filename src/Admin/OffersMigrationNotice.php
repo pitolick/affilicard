@@ -300,6 +300,13 @@ final class OffersMigrationNotice {
 	private static function dismiss( string $action, string $meta ): void {
 		// 件数は URL から取る（表示した値）。nonce action にも同じ値が入っているので、
 		// 書き換えられていれば check_admin_referer() が弾く。
+		//
+		// **`?count[]=1` のような配列も明示のガード無しで安全に 0 になる。**
+		// wp_unslash() は map_deep() で配列をそのまま返し、sanitize_text_field() は
+		// _sanitize_text_fields() の冒頭（wp-includes/formatting.php）で配列・オブジェクトを
+		// '' にする——これは 'sanitize_text_field' フィルタより前なので差し替えられない。
+		// '' も '0' も (int) で 0 になるため、is_scalar() を足しても結果は変わらない。
+		// ここを「素通りする」ように読み替えて短絡させないこと。
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce は直後の check_admin_referer で検証する。
 		$raw_count = isset( $_GET[ self::DISMISS_COUNT_ARG ] )
 			? sanitize_text_field( wp_unslash( $_GET[ self::DISMISS_COUNT_ARG ] ) ) // phpcs:ignore WordPress.Security.NonceVerification.Recommended
