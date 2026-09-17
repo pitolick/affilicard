@@ -1075,4 +1075,138 @@ final class ListingRefresherTest extends TestCase {
 
 		$this->assertSame( 1, $count );
 	}
+
+	/**
+	 * 非スカラーを 1 つ持つだけの購入リンクを作る。
+	 *
+	 * **配列ではなく `__toString()` を持つオブジェクトを使う。** 配列を `(string)` で
+	 * 畳むと「Array to string conversion」の警告が出るが、phpunit.xml は
+	 * `convertWarningsToExceptions` なので、直す前のコードは「assertion が食い違う」
+	 * ではなく「警告が例外になる」形で落ちてしまい、テストが狙いどおり落ちたのか
+	 * 分からない。`__toString()` を持つオブジェクトは `(string)` なら黙って文字列に
+	 * なり、{@see \Affilicard\Util\ScalarField::string()}（`is_scalar()` は
+	 * オブジェクトに false）なら空文字になる——読み方の違いだけが結果に出る。
+	 */
+	private function stringableOf( string $value ): object {
+		return new class( $value ) {
+			public function __construct( private string $value ) {}
+
+			public function __toString(): string {
+				return $this->value;
+			}
+		};
+	}
+
+	/**
+	 * 非スカラーの external_id は身元として読まない＝自動取得の対象外にする。
+	 *
+	 * `(string)` で直に畳むと、でたらめな外部 ID（配列なら `'Array'`）がそのまま
+	 * Provider の fetch() へ渡り、外部 API を叩いたうえで誰の価格とも分からない結果を
+	 * 持ち帰る。ScalarField::string() で読めば「値なし」に倒れ、UNSUPPORTED として
+	 * fetch せずに終わる。
+	 */
+	public function test_非スカラーのexternal_idは自動取得の対象外にする(): void {
+		$this->stubRakutenPlatform();
+
+		// **fetch() は never() ではなく「呼ばれたら分かる」形で置く。** never() だと
+		// Mockery が既定の戻り値を作ろうとして final な FetchResult で例外になり、
+		// 「assertion が食い違った」のか「モックが足りない」のか区別できない。
+		$fetched  = false;
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$provider->shouldReceive( 'fetch' )->andReturnUsing(
+			static function () use ( &$fetched ): FetchResult {
+				$fetched = true;
+				return FetchResult::hit( array( 'price' => '550' ) );
+			}
+		);
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+
+		$repo = $this->repoWithOffers(
+			array(
+				array(
+					'external_id' => $this->stringableOf( 'rk-1' ),
+					'regular_url' => 'https://example.test/rk-1',
+				),
+			)
+		);
+
+		$outcome = ( new ListingRefresher( $registry, $repo ) )->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertFalse( $fetched, '非スカラーの external_id で外部 API を叩いてはならない' );
+		$this->assertSame( WorkOutcome::TRANSIENT_FAILURE, $outcome );
+		$this->assertNotNull( $this->savedOffer );
+		$this->assertSame( FetchStatus::UNSUPPORTED, $this->savedOffer['fetch_status'] );
+		// 身元も同じ規則で読む（external_id が「値なし」なら regular_url 側へ落ちる）。
+		$this->assertSame( 'regular_url:https://example.test/rk-1', $this->savedIdentity );
+	}
+
+	/**
+	 * 非スカラーの external_id はレート制限の枠も取らない。
+	 *
+	 * targetCount() が 1 を返すのに refreshOne() は fetch しない、という枠と実行の
+	 * ズレを作らないため、判定は willFetch() 1 箇所に集約されている。読み方だけが
+	 * ずれても同じズレが起きる。
+	 */
+	public function test_非スカラーのexternal_idはレート制限の枠を取らない(): void {
+		$this->stubRakutenPlatform();
+		$registry = $this->rakutenProvider( FetchResult::hit( array( 'price' => '100' ) ) );
+
+		$repo = $this->repoWithOffers(
+			array(
+				array(
+					'external_id' => $this->stringableOf( 'rk-1' ),
+					'regular_url' => 'https://example.test/rk-1',
+				),
+			)
+		);
+
+		$count = ( new ListingRefresher( $registry, $repo ) )->targetCount( 20, 'rakuten-kobo' );
+
+		$this->assertSame( 0, $count );
+	}
+
+	/**
+	 * 非スカラーの search_key / regular_url は Provider へ渡さない。
+	 *
+	 * search_key は「空なら商品タイトル」という既存のフォールバックへ落ち、
+	 * regular_url は空文字で渡る。`(string)` のままだと `'Array'` のような検索語で
+	 * 外部 API を叩き、当たるはずのない商品を「該当なし（恒久失敗）」として
+	 * give-up させてしまう。
+	 */
+	public function test_非スカラーのsearch_keyとregular_urlはfetchへ渡さない(): void {
+		$this->stubRakutenPlatform();
+
+		$seen     = null;
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$provider->shouldReceive( 'fetch' )->once()->andReturnUsing(
+			function ( string $externalId, array $context ) use ( &$seen ): FetchResult {
+				$seen = $context;
+				return FetchResult::hit( array( 'price' => '550' ) );
+			}
+		);
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+
+		$repo = $this->repoWithOffers(
+			array(
+				array(
+					'external_id' => 'rk-1',
+					'search_key'  => $this->stringableOf( 'おかしな検索語' ),
+					'regular_url' => $this->stringableOf( 'https://example.test/rk-1' ),
+				),
+			)
+		);
+
+		( new ListingRefresher( $registry, $repo ) )->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertIsArray( $seen );
+		// repoWithOffers() の商品タイトル。
+		$this->assertSame( '対象巻', $seen['search_key'] );
+		$this->assertSame( '', $seen['regular_url'] );
+	}
 }

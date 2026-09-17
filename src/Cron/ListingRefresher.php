@@ -13,6 +13,7 @@ use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Queue\WorkOutcome;
 use Affilicard\Repository\ProductRepositoryInterface;
 use Affilicard\Settings\GeneralSettings;
+use Affilicard\Util\ScalarField;
 
 /**
  * 商品 listing を Provider 経由で再取得し価格等を更新する。
@@ -148,15 +149,22 @@ class ListingRefresher {
 	 * refreshListing() が UNSUPPORTED で早期に返す条件と同じものを、枠取り
 	 * （{@see self::targetCount()}）からも参照できるよう 1 箇所に置く。
 	 *
+	 * **値は {@see ScalarField::string()} で読む。** listing/offer は postmeta 由来で、
+	 * ネストした配列やオブジェクトを含みうる。`(string)` で直に畳むと配列は
+	 * 「Array to string conversion」の警告のうえ `'Array'` になり、その外部 ID で
+	 * 「叩く」と判定して実際に Provider の fetch() を呼んでしまう——誰の価格とも
+	 * 分からない結果を持ち帰るか、該当なし（恒久失敗）で give-up させる。非スカラーは
+	 * 「値なし」に倒し、自動取得の対象外（UNSUPPORTED）として扱う。
+	 *
 	 * @param array<string, mixed> $listing
 	 * @param array<string, mixed> $offer
 	 */
 	private function willFetch( array $listing, array $offer ): bool {
-		$externalId = isset( $offer['external_id'] ) ? (string) $offer['external_id'] : '';
+		$externalId = ScalarField::string( $offer, 'external_id' );
 		if ( '' === $externalId ) {
 			return false;
 		}
-		$definition = PlatformConfig::find( isset( $listing['platform'] ) ? (string) $listing['platform'] : '' );
+		$definition = PlatformConfig::find( ScalarField::string( $listing, 'platform' ) );
 		if ( null === $definition ) {
 			return false;
 		}
@@ -201,8 +209,11 @@ class ListingRefresher {
 		// 変わる。取得後の値で探すと保存側が相手を見失い、価格が永久に入らなくなる。
 		$targetIdentity = OfferIdentity::of( $offer );
 
-		$platformCode = isset( $listing['platform'] ) ? (string) $listing['platform'] : '';
-		$externalId   = isset( $offer['external_id'] ) ? (string) $offer['external_id'] : '';
+		// 値は willFetch() と同じ {@see ScalarField::string()} で読む（非スカラーは
+		// 「値なし」）。ここだけ `(string)` に戻すと、叩くかどうかの判定と実際に
+		// Provider へ渡す値が食い違う。
+		$platformCode = ScalarField::string( $listing, 'platform' );
+		$externalId   = ScalarField::string( $offer, 'external_id' );
 		// last_fetched_at は PriceFreshness::needsRefetch() が time()（実 UTC epoch）と比較して
 		// 掃引の再取得クールダウンを判定する。current_time('c') はサイトのローカル時刻に '+00:00'
 		// を付与するだけで実 UTC ではない（UTC 以外の TZ だとクールダウンがずれる）ため、
@@ -226,11 +237,12 @@ class ListingRefresher {
 			return array( $patch, WorkOutcome::TRANSIENT_FAILURE, $targetIdentity );
 		}
 
-		$context = array(
-			'search_key'  => isset( $offer['search_key'] ) && '' !== trim( (string) $offer['search_key'] )
-				? (string) $offer['search_key']
-				: $productTitle,
-			'regular_url' => isset( $offer['regular_url'] ) ? (string) $offer['regular_url'] : '',
+		// **trim() は判定にだけ使い、渡すのは元の値。** 前後の空白を含む検索語を
+		// 運用者が意図して入れている場合があるため、空かどうかだけを trim で見る。
+		$searchKey = ScalarField::string( $offer, 'search_key' );
+		$context   = array(
+			'search_key'  => '' !== trim( $searchKey ) ? $searchKey : $productTitle,
+			'regular_url' => ScalarField::string( $offer, 'regular_url' ),
 			'external_id' => $externalId,
 		);
 
