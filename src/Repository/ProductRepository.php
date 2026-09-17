@@ -416,9 +416,10 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * 形式を指す刻印で、listings から独立していないためである（保存後に押す理由は
 	 * その行のコメント）。
 	 *
-	 * **書いたのに入らなかった場合も黙らない。** `update_post_meta()` は失敗しても
-	 * false を返すだけなので、握り潰すと listings が 1 件も入っていないのに REST は
-	 * 201/200 を返す。false のときは読み直して確かめ、入っていなければ
+	 * **書いたのに入らなかった場合も黙らない。** `update_post_meta()` の戻り値は
+	 * 「入ったかどうか」を表さない——失敗しても false を返すだけだが、**成功を表す
+	 * true も書かずに返り得る**（`update_post_metadata` フィルタの短絡）。だから
+	 * 戻り値は見ず、書き込みのたびに読み直して確かめ、入っていなければ
 	 * {@see ProductListingsWriteFailure} を投げる（詳細は
 	 * {@see self::assertListingsPersisted()}）。**ロック競合とは別の型にする**——
 	 * あちらは待てば通るが、こちらは原因を取り除くまで直らない。
@@ -477,23 +478,32 @@ final class ProductRepository implements ProductRepositoryInterface {
 				}
 
 				$next = OfferStatusReset::forIdentityChanges( self::listingsMeta( $postId ), $listings );
-				if ( false === update_post_meta( $postId, ProductPostType::META_LISTINGS, $next ) ) {
-					self::assertListingsPersisted( $postId, $next );
-				}
+				// **戻り値は見ない。必ず読み直して確かめる。** `update_post_meta()` の
+				// 戻り値は「入ったかどうか」を表さない——false が「値が変わらなかった」
+				// でも返るのと対称に、**true が「1 バイトも書いていない」でも返る**
+				// （`update_post_metadata` フィルタの短絡。詳細と根拠は
+				// {@see self::assertListingsPersisted()} の表）。false のときだけ
+				// 読み直す実装では、その短絡を成功として素通しする。
+				update_post_meta( $postId, ProductPostType::META_LISTINGS, $next );
+				$persisted = self::assertListingsPersisted( $postId, $next );
 
 				// **ミラーは「書こうとした値」ではなく「実際に入っている値」から作る。**
 				// ここで $listings（渡された配列）や、直前に組み立てた $next を使うと、
-				// 書き込みが落ちたとき（update_post_meta の失敗）や保存の sanitize が値を
-				// 変えたときに、META_LISTINGS に無い external_id で商品が引けるようになり、
-				// 逆に本当に入っている external_id の行が消える。ミラーは
-				// findByExternalId() の索引そのもので、狂うと自動作成が既存商品を誤検出／
-				// 見落としして重複商品を作る。syncDerivedMeta() が meta を読み直してから
-				// 同期しているのと同じ流儀に揃える。
+				// 保存の sanitize が値を変えたときに META_LISTINGS に無い external_id で
+				// 商品が引けるようになり、逆に本当に入っている external_id の行が消える。
+				// ミラーは findByExternalId() の索引そのもので、狂うと自動作成が既存商品を
+				// 誤検出／見落としして重複商品を作る。syncDerivedMeta() が meta を
+				// 読み直してから同期しているのと同じ流儀に揃える。
+				//
+				// **その「実際に入っている値」は直前の検証が読んだものを使い回す。**
+				// assertListingsPersisted() は照合のために保存後の meta を読んでいる。
+				// ここでもう一度読むと、同じロックの中で同じ行を 2 回引くだけで値は
+				// 変わらない（外からは書けない）。返り値を受け取れば 1 回で済む。
 				//
 				// **読み直しも同期もこのロックの中で行う。** 外へ出すと、読み直しから
 				// 複数クエリの同期が終わるまでのあいだに別の保存が挟まり、古い
 				// スナップショットから作ったミラーが後着で勝つ（理由は上の PHPDoc）。
-				$this->syncExternalIdMirror( $postId, self::listingsMeta( $postId ) );
+				$this->syncExternalIdMirror( $postId, $persisted );
 			}
 		);
 
@@ -513,23 +523,38 @@ final class ProductRepository implements ProductRepositoryInterface {
 	}
 
 	/**
-	 * `update_post_meta()` が false を返したとき、listings が実際に入ったかを読み直して確かめる。
+	 * listings が実際に入ったかを読み直して確かめる（**書き込みの戻り値は見ない**）。
 	 *
-	 * **false は「失敗」と「値が変わらなかった」の両方で返る。** コアの
-	 * `update_metadata()`（`wp-includes/meta.php`。以下の行番号は WordPress 6.8）を読むと、
-	 * false になる経路はこれだけある——
+	 * **`update_post_meta()` の戻り値は「入ったかどうか」を表さない。** コアの
+	 * `update_metadata()`（`wp-includes/meta.php`。以下の行番号は WordPress 6.8）を
+	 * 読むと、戻り値と実際の書き込みは**両方向に食い違う**——
 	 *
-	 * | 行 | 意味 |
-	 * | --- | --- |
-	 * | L191-203 | 引数が不正（object ID が 0 等） |
-	 * | L242-243 | `update_post_metadata` フィルタが false で短絡した（他プラグインの介入） |
-	 * | L247-253 | **既存値と同じ**ため何も書かずに戻った（＝失敗ではない） |
-	 * | L315-317 | `$wpdb->update()` が失敗した（＝本当の失敗） |
+	 * | 行 | 戻り値 | 実際に書いたか | 意味 |
+	 * | --- | --- | --- | --- |
+	 * | L191-203 | false | 書いていない | 引数が不正（object ID が 0 等） |
+	 * | L241-243 | **false でも true でも** | **書いていない** | `update_post_metadata` フィルタが短絡した（他プラグインの介入） |
+	 * | L247-253 | false | 書いていない | **既存値と同じ**ため何もせず戻った（＝失敗ではない） |
+	 * | L315-317 | false | 書けなかった | `$wpdb->update()` が失敗した（＝本当の失敗） |
 	 *
-	 * さらに meta 行がまだ無い場合は `add_metadata()` へ委ね（L257-258）、そちらも
-	 * `$wpdb->insert()` の失敗で false を返す。**戻り値だけでは切り分けられない**ので、
-	 * 保存後の値を読み直して「入っているか」で判定する
-	 * （{@see \Affilicard\Upgrade\PluginUpgrade::writeMigratedListings()} と同じ流儀）。
+	 * **短絡フィルタの行（L241-243）がこの読み直しを無条件にする理由である。** コアは
+	 * `wp_unslash()`（L214）→ `sanitize_meta()`（L215）を通した直後に
+	 * `apply_filters( "update_{$meta_type}_metadata", null, ... )` を呼び、返り値が
+	 * null でなければ `return (bool) $check;` する。**$wpdb には一度も触れていない**——
+	 * つまりフィルタが true を返せば、`update_post_meta()` は成功を報告しながら
+	 * 1 バイトも書いていない。false のときだけ読み直す実装は、この経路をそのまま
+	 * 成功として通す（listings が 1 件も入っていないのに REST は 201/200 を返し、
+	 * schema_version には「移行済み」の刻印が押される）。
+	 *
+	 * さらに meta 行がまだ無い場合は `add_metadata()` へ委ねる（L257-258）。そちらの
+	 * 短絡フィルタは `return $check;`（L86-88）で bool へ丸めないため、**偽の meta_id
+	 * のような bool ですらない truthy** が `update_post_meta()` の戻り値として返る
+	 * （新規商品の最初の listings 保存はこの経路を通る）。`add_metadata()` は
+	 * `$wpdb->insert()` の失敗でも false を返す。
+	 *
+	 * **どの向きの食い違いも戻り値では切り分けられない**ので、戻り値を捨てて保存後の値を
+	 * 読み直し、「入っているか」だけで判定する
+	 * （{@see \Affilicard\Upgrade\PluginUpgrade::writeMigratedListings()} と同じ流儀。
+	 * あちらも戻り値を受け取らずに読み直している）。
 	 *
 	 * **比較の相手は sanitize 後の形である。** コアは `wp_unslash()`（L214）→
 	 * `sanitize_meta()`（L215）を通した値を格納するため、読み直した値は渡した配列と
@@ -543,14 +568,20 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * やり直せば通る」、こちらは「書いたのに入らなかった・原因を取り除くまで直らない」で、
 	 * 運用者が取るべき行動が違う（REST は 409 と 500 で返し分ける）。
 	 *
+	 * **確かめた値をそのまま返す。** 呼び出し元は extid ミラーを「実際に入っている
+	 * listings」から作るため、同じ行をもう一度読む必要がある。ここが照合のために既に
+	 * 読んでいるので返り値で渡す（同じロックの中なので値は変わらない）。
+	 *
 	 * @param array<int, mixed> $next 書き込もうとした listings。
+	 * @return array<int, mixed> 実際に保存されている listings（＝ $next の sanitize 後の形）。
 	 * @throws ProductListingsWriteFailure 書き込んだ値が読み戻らなかったとき.
 	 */
-	private static function assertListingsPersisted( int $postId, array $next ): void {
-		$expected = ProductSchema::sanitizeListings( wp_unslash( $next ) );
-		if ( self::listingsMeta( $postId ) === $expected ) {
-			// 既に望みの形が入っている＝「値が変わらなかった」false。成功として扱う。
-			return;
+	private static function assertListingsPersisted( int $postId, array $next ): array {
+		$expected  = ProductSchema::sanitizeListings( wp_unslash( $next ) );
+		$persisted = self::listingsMeta( $postId );
+		if ( $persisted === $expected ) {
+			// 望みの形が入っている（書けた場合と、「値が変わらなかった」場合の両方）。
+			return $persisted;
 		}
 
 		// **post ID を渡す。** 例外に載せておかないと、新規作成の途中でここへ来たとき

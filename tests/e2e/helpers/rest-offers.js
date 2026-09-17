@@ -68,16 +68,29 @@ function getAuthHeaders() {
 	};
 }
 
+/**
+ * cookie を持たない REST 専用コンテキストを新しく作る（呼び出し側が dispose する）。
+ *
+ * **使い回しの `getApiContext()` が使えない場面がある。** コンテキストは接続を
+ * keep-alive で溜め込むため、REST 呼び出しのあいだに `wp-env run tests-cli`（1 回あたり
+ * 1 秒前後の docker exec）を何度も挟むと、プールに残った接続をサーバ側が先に閉じ、
+ * 次のリクエストが `socket hang up` で即座に落ちる。fixture の仕込みを挟んでから
+ * REST を叩くテストは、使い回しではなくこの関数で専用のコンテキストを作ること。
+ */
+function newApiContext() {
+	return pwRequest.newContext( {
+		baseURL: BASE_URL,
+		// 明示的な空の storageState で playwright.config.js のアンビエントな
+		// cookie 継承を打ち消す（省略すると管理者の cookie が乗ってしまう）。
+		storageState: { cookies: [], origins: [] },
+	} );
+}
+
 /** cookie を持たない REST 専用コンテキスト（プロセス内で使い回す）。 */
 let apiContextPromise = null;
 function getApiContext() {
 	if ( ! apiContextPromise ) {
-		apiContextPromise = pwRequest.newContext( {
-			baseURL: BASE_URL,
-			// 明示的な空の storageState で playwright.config.js のアンビエントな
-			// cookie 継承を打ち消す（省略すると管理者の cookie が乗ってしまう）。
-			storageState: { cookies: [], origins: [] },
-		} );
+		apiContextPromise = newApiContext();
 	}
 	return apiContextPromise;
 }
@@ -272,6 +285,7 @@ function findByExternalId( platform, externalId ) {
 
 module.exports = {
 	getApiContext,
+	newApiContext,
 	getAuthHeaders,
 	createProduct,
 	createProductWithOffers,
