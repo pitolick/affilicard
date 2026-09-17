@@ -4,7 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Rest;
 
 use Affilicard\PostType\ProductPostType;
-use Affilicard\Repository\ProductListingsWriteFailure;
+use Affilicard\Repository\ProductMetaWriteFailure;
 use Affilicard\Repository\ProductLockUnavailable;
 use Affilicard\Repository\ProductRepositoryInterface;
 use WP_REST_Request;
@@ -73,9 +73,23 @@ final class ProductsController {
 	 * 無意味に上書きし、後者は購入リンクの無い商品を放置する。
 	 *
 	 * **だから残った差分だけを名指しする。** 値は保存されなかったフィールド名の配列で、
-	 * ここに載らなかったものは保存されている、という読み方をする。文面ではなく配列に
-	 * するのは、呼び出し側が文言の一致ではなくフィールド名で分岐できるようにするため
-	 * （文言は翻訳で変わる）。
+	 * 文面ではなく配列にするのは、呼び出し側が文言の一致ではなくフィールド名で分岐
+	 * できるようにするためである（文言は翻訳で変わる）。
+	 *
+	 * **意味は「入らなかったと分かっているフィールド」であって、完全な一覧ではない。**
+	 * ここに載らないフィールドが保存された保証は無い——
+	 * {@see \Affilicard\Repository\ProductRepository::saveMeta()} が書いたあとに読み直す
+	 * のは**要求が実際に運んでくるメタ**（`product_type` / `stock_status` / `extras` /
+	 * `release_date` / `listings`）だけで、`mask_*` と `schema_version`、および投稿行の
+	 * `title` / `content` / `status` は確かめていないからである（**確かめない理由**は
+	 * あちらの PHPDoc の表——要約すると、どれも「確かめても失われた要求は見つからない」）。
+	 * **以前はここが `array( 'listings' )` を固定で返していた**が、それは読み直しの範囲を
+	 * 知らない側が保存の範囲を名乗る形で、名乗った内容が実際より広かった。いまは
+	 * 例外が運んできた値（{@see \Affilicard\Repository\ProductMetaWriteFailure::unsavedFields()}）
+	 * をそのまま返す。
+	 *
+	 * 呼び出し側の使い方は変わらない——**ここに載ったフィールドは必ず送り直す**。
+	 * 全項目を送り直すよりは狭く、何も直さないよりは確実である。
 	 *
 	 * **載せるのは部分保存のときだけである。** 投稿行そのものを作れなかった・更新
 	 * できなかった 500 は「1 つも保存されていない」ので、ここに `listings` と書くと
@@ -83,18 +97,6 @@ final class ProductsController {
 	 * 表す（`id` の有無が「商品ができたか否か」を表すのと同じ流儀）。
 	 */
 	private const ERROR_UNSAVED_FIELDS_KEY = 'unsaved_fields';
-
-	/**
-	 * 部分保存で失われた要求フィールド。
-	 *
-	 * listings の書き込みは常に最後で、そこで失敗しても他のフィールドは書き終えている
-	 * （{@see \Affilicard\Repository\ProductRepository::saveMeta()} の並び）。
-	 * ロック競合（409）でも書き込み失敗（500）でも失われるのは listings だけなので、
-	 * 2 つの応答で同じ値を使う。
-	 *
-	 * @var array<int, string>
-	 */
-	private const UNSAVED_LISTINGS = array( 'listings' );
 
 	public function __construct( private ProductRepositoryInterface $repository ) {}
 
@@ -203,21 +205,22 @@ final class ProductsController {
 	 * できたのかどうか」すら知れず、積み直しのたびに POST し直して**同じ商品を増やす**。
 	 * ID があれば、やり直しを `PATCH /products/{id}` に変えられる。
 	 *
-	 * **`unsaved_fields` で「listings だけが入らなかった」ことまで返す**
+	 * **`unsaved_fields` で「何が入らなかったか」まで返す**
 	 * （{@see self::ERROR_UNSAVED_FIELDS_KEY}）。`id` は商品へ辿り着く手段を与えるが、
-	 * その商品が**どこまで保存されているか**は伝えない。作成でここへ来たなら
-	 * タイトルも本文もメタも既に入っていて、足りないのは購入リンクだけである。
+	 * その商品が**どこまで保存されているか**は伝えない。ロック競合なら普通は購入リンク
+	 * だけが足りないが、**listings だけとは限らない**ので、値は例外が運んできたものを
+	 * そのまま返す（ここで固定値を名乗ると、リポジトリ側の検証が変わったときに黙って
+	 * 嘘になる）。
 	 *
-	 * @param int $productId listings を保存できなかった商品の投稿 ID（作成なら、できてしまった商品）.
+	 * @param int                $productId     listings を保存できなかった商品の投稿 ID（作成なら、できてしまった商品）.
+	 * @param array<int, string> $unsavedFields 入らなかったと分かっているフィールド名.
 	 */
-	private static function lockedResponse( int $productId ): WP_REST_Response {
-		return new WP_REST_Response(
-			array(
-				'code'                         => self::CODE_LISTING_LOCKED,
-				'message'                      => self::lockedMessage(),
-				self::ERROR_PRODUCT_ID_KEY     => $productId,
-				self::ERROR_UNSAVED_FIELDS_KEY => self::UNSAVED_LISTINGS,
-			),
+	private static function lockedResponse( int $productId, array $unsavedFields ): WP_REST_Response {
+		return self::partialSaveResponse(
+			self::CODE_LISTING_LOCKED,
+			self::lockedMessage(),
+			$productId,
+			$unsavedFields,
 			409
 		);
 	}
@@ -225,7 +228,7 @@ final class ProductsController {
 	/**
 	 * 書き込みが効かなかった（保存したのに入っていない）ときの応答。
 	 *
-	 * {@see \Affilicard\Repository\ProductListingsWriteFailure} を捕まえてここへ変える。
+	 * {@see \Affilicard\Repository\ProductMetaWriteFailure} を捕まえてここへ変える。
 	 * 捕まえないと例外が REST の外まで抜け、WordPress の一般的な 500（あるいは致命的
 	 * エラー）になって、何が起きたのかが呼び出し側にも運用者にも伝わらない。
 	 *
@@ -238,20 +241,69 @@ final class ProductsController {
 	 * **`unsaved_fields` も 409 と同じ形で載せる。** こちらは「やり直しても直らない」
 	 * 失敗なので、呼び出し側は原因を取り除いたあとに**足りない分だけ**を送り直すことに
 	 * なる。何が足りないのかが応答に無ければ、全項目を送り直して保存済みの編集を
-	 * 上書きするしかない。
+	 * 上書きするしかない。**listings 以外が入らなかっただけでもここへ来る**——
+	 * 運用者が送った値が黙って消えるのは listings でも `stock_status` でも同じだからで、
+	 * どれが消えたかは例外が運んでくる。
 	 *
-	 * @param int $productId listings を保存できなかった商品の投稿 ID（作成なら、できてしまった商品）.
+	 * @param int                $productId     meta を保存できなかった商品の投稿 ID（作成なら、できてしまった商品）.
+	 * @param array<int, string> $unsavedFields 入らなかったと分かっているフィールド名.
 	 */
-	private static function saveFailedResponse( int $productId ): WP_REST_Response {
-		return new WP_REST_Response(
-			array(
-				'code'                         => self::CODE_SAVE_FAILED,
-				'message'                      => self::saveFailedMessage(),
-				self::ERROR_PRODUCT_ID_KEY     => $productId,
-				self::ERROR_UNSAVED_FIELDS_KEY => self::UNSAVED_LISTINGS,
-			),
+	private static function saveFailedResponse( int $productId, array $unsavedFields ): WP_REST_Response {
+		return self::partialSaveResponse(
+			self::CODE_SAVE_FAILED,
+			self::saveFailedMessage(),
+			$productId,
+			$unsavedFields,
 			500
 		);
+	}
+
+	/**
+	 * 部分保存（商品はできている・要求の一部が入らなかった）の応答を組み立てる。
+	 *
+	 * 409 と 500 で形を変えないために 1 箇所へまとめる。**`unsaved_fields` は空なら
+	 * 落とす**——キーの有無が「部分保存かどうか」を表すので、空配列を載せると
+	 * 「部分保存だが失われたものは無い」という読めない状態を作る
+	 * （{@see self::ERROR_UNSAVED_FIELDS_KEY}）。
+	 *
+	 * @param array<int, string> $unsavedFields 入らなかったと分かっているフィールド名.
+	 */
+	private static function partialSaveResponse( string $code, string $message, int $productId, array $unsavedFields, int $status ): WP_REST_Response {
+		$body = array(
+			'code'                     => $code,
+			'message'                  => $message,
+			self::ERROR_PRODUCT_ID_KEY => $productId,
+		);
+		if ( array() !== $unsavedFields ) {
+			$body[ self::ERROR_UNSAVED_FIELDS_KEY ] = array_values( $unsavedFields );
+		}
+
+		return new WP_REST_Response( $body, $status );
+	}
+
+	/**
+	 * `/bulk` の 1 item ぶんの部分保存報告を組み立てる。
+	 *
+	 * **単体の応答と形をそろえる**（`code` / `message` / `id` / `unsaved_fields`）。
+	 * 呼び出し側が「単体か bulk か」で読み替えずに済むのが狙いで、`unsaved_fields` を
+	 * 空なら落とす規則も {@see self::partialSaveResponse()} と同じにする。
+	 *
+	 * @param array<int, string> $unsavedFields 入らなかったと分かっているフィールド名.
+	 * @return array<string, mixed>
+	 */
+	private static function partialSaveItem( int $index, string $code, string $message, int $productId, array $unsavedFields ): array {
+		$item = array(
+			'index'                    => $index,
+			'status'                   => 'error',
+			'code'                     => $code,
+			'message'                  => $message,
+			self::ERROR_PRODUCT_ID_KEY => $productId,
+		);
+		if ( array() !== $unsavedFields ) {
+			$item[ self::ERROR_UNSAVED_FIELDS_KEY ] = array_values( $unsavedFields );
+		}
+
+		return $item;
 	}
 
 	/**
@@ -354,16 +406,15 @@ final class ProductsController {
 				// いるため、この item の商品は既に存在する。ID を返さないと、呼び出し
 				// 側はこの item を積み直すたびに同じ商品を作り続ける。
 				++$failed;
-				$results[] = array(
-					'index'                        => $index,
-					'status'                       => 'error',
-					'code'                         => self::CODE_LISTING_LOCKED,
-					'message'                      => self::lockedMessage(),
-					self::ERROR_PRODUCT_ID_KEY     => $e->postId(),
-					self::ERROR_UNSAVED_FIELDS_KEY => self::UNSAVED_LISTINGS,
+				$results[] = self::partialSaveItem(
+					$index,
+					self::CODE_LISTING_LOCKED,
+					self::lockedMessage(),
+					$e->postId(),
+					$e->unsavedFields()
 				);
 				continue;
-			} catch ( ProductListingsWriteFailure $e ) {
+			} catch ( ProductMetaWriteFailure $e ) {
 				// listings を書いたのに入らなかった。**捕まえないとループの外まで抜け、
 				// 既に作成できた item の結果ごと 500 で消える**（呼び出し側はどれが
 				// 入ったのか判別できない）。ロック競合と同じく per-item の報告に混ぜるが、
@@ -371,13 +422,12 @@ final class ProductsController {
 				// ロック競合と同じく、できてしまった商品の ID を添える（積み直しを
 				// POST のやり直しではなく PATCH にできるようにするため）。
 				++$failed;
-				$results[] = array(
-					'index'                        => $index,
-					'status'                       => 'error',
-					'code'                         => self::CODE_SAVE_FAILED,
-					'message'                      => self::saveFailedMessage(),
-					self::ERROR_PRODUCT_ID_KEY     => $e->postId(),
-					self::ERROR_UNSAVED_FIELDS_KEY => self::UNSAVED_LISTINGS,
+				$results[] = self::partialSaveItem(
+					$index,
+					self::CODE_SAVE_FAILED,
+					self::saveFailedMessage(),
+					$e->postId(),
+					$e->unsavedFields()
 				);
 				continue;
 			}
@@ -430,9 +480,9 @@ final class ProductsController {
 		try {
 			$id = $this->repository->save( $data );
 		} catch ( ProductLockUnavailable $e ) {
-			return self::lockedResponse( $e->postId() );
-		} catch ( ProductListingsWriteFailure $e ) {
-			return self::saveFailedResponse( $e->postId() );
+			return self::lockedResponse( $e->postId(), $e->unsavedFields() );
+		} catch ( ProductMetaWriteFailure $e ) {
+			return self::saveFailedResponse( $e->postId(), $e->unsavedFields() );
 		}
 		if ( $id <= 0 ) {
 			// **ここだけは id を載せない。** `wp_insert_post()` そのものが失敗して
@@ -490,9 +540,9 @@ final class ProductsController {
 		try {
 			$saved_id = $this->repository->save( $data );
 		} catch ( ProductLockUnavailable $e ) {
-			return self::lockedResponse( $e->postId() );
-		} catch ( ProductListingsWriteFailure $e ) {
-			return self::saveFailedResponse( $e->postId() );
+			return self::lockedResponse( $e->postId(), $e->unsavedFields() );
+		} catch ( ProductMetaWriteFailure $e ) {
+			return self::saveFailedResponse( $e->postId(), $e->unsavedFields() );
 		}
 		if ( $saved_id <= 0 ) {
 			// 更新なので商品は実在する（直前の find() で引けている）。作成側の同じ

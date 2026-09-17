@@ -147,8 +147,12 @@ final class DerivedMetaSync {
 				$post_id,
 				self::MAX_ATTEMPTS
 			);
+			// 第 3 引数は空配列——**ここは listings を見送ったのではない**。見送ったのは
+			// extid ミラーの同期で、要求されたフィールドは 1 つも失われていない
+			// （既定値の array( 'listings' ) をそのまま使うと、この経路が REST へ
+			// 繋がったときに「購入リンクが入らなかった」と嘘をつく）。
 			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- HTML 出力ではなく Action Scheduler のログに残る例外メッセージ。埋め込むのは post ID（int）と定数のみ。
-			throw new ProductLockUnavailable( $post_id, $message );
+			throw new ProductLockUnavailable( $post_id, $message, array() );
 		}
 
 		if ( self::schedule( $post_id, $attempt + 1 ) ) {
@@ -165,8 +169,9 @@ final class DerivedMetaSync {
 			$post_id,
 			$attempt + 1
 		);
+		// 第 3 引数の空配列は上と同じ理由（失われたのは要求フィールドではない）。
 		// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- HTML 出力ではなく Action Scheduler のログに残る例外メッセージ。埋め込むのは post ID（int）と回数（int）のみ。
-		throw new ProductLockUnavailable( $post_id, $message );
+		throw new ProductLockUnavailable( $post_id, $message, array() );
 	}
 
 	/**

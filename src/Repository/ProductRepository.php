@@ -420,13 +420,36 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * 「入ったかどうか」を表さない——失敗しても false を返すだけだが、**成功を表す
 	 * true も書かずに返り得る**（`update_post_metadata` フィルタの短絡）。だから
 	 * 戻り値は見ず、書き込みのたびに読み直して確かめ、入っていなければ
-	 * {@see ProductListingsWriteFailure} を投げる（詳細は
+	 * {@see ProductMetaWriteFailure} を投げる（詳細は
 	 * {@see self::assertListingsPersisted()}）。**ロック競合とは別の型にする**——
 	 * あちらは待てば通るが、こちらは原因を取り除くまで直らない。
 	 *
+	 * **読み直すのは「要求が実際に運んでくるメタ」だけである。** その一覧が
+	 * {@see self::VERIFIED_META}——`product_type` / `stock_status` / `extras` /
+	 * `release_date`、それに listings。ここが入らなければ**運用者が送った値が黙って
+	 * 消える**ので、成功を返さず {@see ProductMetaWriteFailure} で報告する。
+	 *
+	 * **確かめないものが 2 種類ある。どちらも「確かめても失われた要求を見つけられない」
+	 * からで、手を抜いたのではない。**
+	 *
+	 * | 確かめないもの | 理由 |
+	 * | --- | --- |
+	 * | `mask_blur` / `mask_r18` / `mask_label` | **この経路の呼び出し側は 1 つも設定できない**。`ProductSchema::args()` にも `ProductSchema::sanitizeItem()` にも `ProductsController::extractProductData()` にも無く、値は `update()` が既存商品から読み直したもの（＝いま入っている値そのもの）か、作成時の既定（`false` / `''`＝登録済み default と同値）である。短絡フィルタに書き込みを潰されても**保存されている値は要求どおりのまま**なので、読み直しても失われた要求は見つからない。見つかるのは「他プラグインが介入している」という事実だけで、それを理由に保存を 500 にすると、実害の無いサイトの保存が全部止まる。編集の主経路はブロックエディタのサイドバー（コアの `wp/v2` meta）で、そちらはここを通らない |
+	 * | `schema_version` | 要求フィールドではなく、listings の形式を指す刻印である。しかも**入らない側が安全**——刻印が無い商品は「未移行」と読まれるだけで、中身は既に新形式なので移行バッチが再訪しても no-op になる。危険なのは逆向き（listings が入っていないのに刻印が押される）で、そちらは並び（listings の保存後に押す）が既に塞いでいる |
+	 *
+	 * つまり `unsavedFields()` は「入らなかったと分かっているフィールド」であって、
+	 * **「ここに無い＝保存された」ではない**（投稿行の title/content/status も
+	 * `wp_insert_post()` / `wp_update_post()` の戻り ID しか見ていない）。REST の
+	 * `unsaved_fields` もその意味で返す（{@see \Affilicard\Rest\ProductsController}）。
+	 *
+	 * **入らなかったからといって、そこで書くのをやめない。** 読み直しの結果は溜めて
+	 * おき、listings まで書き切ってから投げる。途中で抜けると、いちばん失って困る
+	 * listings を「その手前のメタが 1 つ入らなかった」という理由で書かずに終える——
+	 * 商品は購入リンクの無いまま残り、報告される未保存フィールドも実際より短くなる。
+	 *
 	 * @param array<string, mixed> $data
 	 * @throws ProductLockUnavailable ロックを取得できず listings を書かなかったとき.
-	 * @throws ProductListingsWriteFailure 書き込んだ listings が保存されていなかったとき.
+	 * @throws ProductMetaWriteFailure 書き込んだ meta が保存されていなかったとき.
 	 */
 	public function saveMeta( int $postId, array $data ): void {
 		$product_type = isset( $data['product_type'] ) && '' !== (string) $data['product_type']
@@ -445,15 +468,37 @@ final class ProductRepository implements ProductRepositoryInterface {
 		$mask_r18   = ! empty( $data['mask_r18'] );
 		$mask_label = isset( $data['mask_label'] ) ? sanitize_text_field( (string) $data['mask_label'] ) : '';
 
+		// 並びは VERIFIED_META と同じにする。書いた順がそのまま報告の順になる。
+		$verified = array(
+			'product_type' => $product_type,
+			'stock_status' => $stock_status,
+			'extras'       => $extras,
+			'release_date' => $release_date,
+		);
+
 		// **ここで書くのは listings から独立したメタだけである。** どれも別キーの冪等な
 		// 上書きで、listings を書けなくても矛盾しない（下のロックで抜けても、運用者が
 		// やり直せばそのまま通る）。**schema_version だけは独立していない**ので、
 		// この並びには入れず listings の保存後に書く（理由は下）。extras は
 		// listings の写しではなく独立した項目なので、ここでよい。
-		update_post_meta( $postId, ProductPostType::META_PRODUCT_TYPE, $product_type );
-		update_post_meta( $postId, ProductPostType::META_STOCK_STATUS, $stock_status );
-		update_post_meta( $postId, ProductPostType::META_EXTRAS, $extras );
-		update_post_meta( $postId, ProductPostType::META_RELEASE_DATE, $release_date );
+		//
+		// **要求が運んでくるメタは書いたあとに読み直す**（{@see self::VERIFIED_META}）。
+		// listings と同じ理由で、`update_post_meta()` の戻り値は「入ったかどうか」を
+		// 表さないためである（{@see self::assertListingsPersisted()} の表）。
+		// **入らなくてもここでは投げず、名前を溜めるだけにする**——途中で抜けると
+		// listings を書かずに終わり、いちばん失って困るものを失う。
+		$unsaved = array();
+		foreach ( self::VERIFIED_META as $field => $meta_key ) {
+			$value = $verified[ $field ];
+			update_post_meta( $postId, $meta_key, $value );
+			if ( ! self::metaPersisted( $postId, $field, $meta_key, $value ) ) {
+				$unsaved[] = $field;
+			}
+		}
+
+		// **mask_* は読み直さない。** この経路の呼び出し側は 1 つも設定できず、ここで
+		// 書いているのは「いま入っている値」か登録済み default と同値の既定なので、
+		// 短絡フィルタに潰されても要求は失われない（詳細は上の PHPDoc の表）。
 		update_post_meta( $postId, ProductPostType::META_MASK_BLUR, $mask_blur );
 		update_post_meta( $postId, ProductPostType::META_MASK_R18, $mask_r18 );
 		update_post_meta( $postId, ProductPostType::META_MASK_LABEL, $mask_label );
@@ -461,20 +506,24 @@ final class ProductRepository implements ProductRepositoryInterface {
 		// **listings は最後に書く。** ロックを取れなければ（あるいは書いた値が読み戻ら
 		// なければ）ここで例外を投げて抜けるため、順番がそのまま「何が保存され、何が
 		// 保存されなかったか」になる。listings から独立したメタを先に片付けておけば、
-		// 失われるのは listings だけで、しかもそれは古い値のまま無傷で残る（書きかけで
-		// 壊れた状態にはならない）。schema_version はこの並びに入れない——listings の
-		// 形式を指す刻印で、独立していないためである（around() の後で押す）。
+		// listings が入らなくても失われるのは listings だけで、しかもそれは古い値のまま
+		// 無傷で残る（書きかけで壊れた状態にはならない）。schema_version はこの並びに
+		// 入れない——listings の形式を指す刻印で、独立していないためである（around() の
+		// 後で押す）。
 		ListingLock::around(
 			$postId,
-			function ( bool $locked ) use ( $postId, $listings ): void {
+			function ( bool $locked ) use ( $postId, $listings, $unsaved ): void {
 				if ( ! $locked ) {
 					// **古い読みを書き戻さない。** ここから先は
 					// 「listings を読む → 変換する → 書き戻す」で、ロックの外でやると
 					// 先着（別リクエストの保存・価格更新）の書き込みを丸ごと消す。
 					// かといって黙って戻れば運用者の編集が無言で消える。どちらも選ばず、
 					// 書かずに**報告する**（理由と伝わり方は上の PHPDoc / 例外クラス側）。
+					// **入らなかったフィールドは listings だけとは限らない。** 手前の
+					// 読み直しで落ちたものがあれば一緒に載せる——呼び出し側は
+					// ここに載ったものだけを送り直すので、落とすと消えたままになる。
 					// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- HTML 出力ではなく PHP の例外メッセージ。組み立ては例外クラス側で、埋め込むのは post ID（int）のみ。
-					throw new ProductLockUnavailable( $postId );
+					throw new ProductLockUnavailable( $postId, '', self::withListings( $unsaved ) );
 				}
 
 				$next = OfferStatusReset::forIdentityChanges( self::listingsMeta( $postId ), $listings );
@@ -485,7 +534,7 @@ final class ProductRepository implements ProductRepositoryInterface {
 				// {@see self::assertListingsPersisted()} の表）。false のときだけ
 				// 読み直す実装では、その短絡を成功として素通しする。
 				update_post_meta( $postId, ProductPostType::META_LISTINGS, $next );
-				$persisted = self::assertListingsPersisted( $postId, $next );
+				$persisted = self::assertListingsPersisted( $postId, $next, $unsaved );
 
 				// **ミラーは「書こうとした値」ではなく「実際に入っている値」から作る。**
 				// ここで $listings（渡された配列）や、直前に組み立てた $next を使うと、
@@ -514,12 +563,137 @@ final class ProductRepository implements ProductRepositoryInterface {
 		// 通り過ぎた商品を再訪しないため、その取り残しは二度と直らない。
 		//
 		// 上の around() は、ロックを取れなければ ProductLockUnavailable、書いた値が
-		// 読み戻らなければ ProductListingsWriteFailure を投げて抜ける。ここへ来たのは
+		// 読み戻らなければ ProductMetaWriteFailure を投げて抜ける。ここへ来たのは
 		// listings が実際に入ったときだけである。
 		//
 		// ロックの外に置くのは {@see self::syncDerivedMeta()} と同じ理由——別キーで
 		// read-modify-write ではないため、直列化する必要がない。
 		update_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
+
+		self::assertVerifiedMetaPersisted( $postId, $unsaved );
+	}
+
+	/**
+	 * listings は入ったが手前のメタが入らなかった場合に報告する。
+	 *
+	 * 成功として返すと、運用者が送った値（取扱終了・商品タイプ・付加情報・配信日）が
+	 * 黙って消えたまま REST が 201/200 を返す。listings が入らなかったときと運用者の
+	 * 取るべき行動は同じ（介入している原因を取り除く）なので、同じ型・同じ 500 で
+	 * 報告する。
+	 *
+	 * @param array<int, string> $unsaved 読み直して入っていなかったフィールド名.
+	 * @throws ProductMetaWriteFailure 1 つでも入っていなかったとき.
+	 */
+	private static function assertVerifiedMetaPersisted( int $postId, array $unsaved ): void {
+		if ( array() === $unsaved ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- HTML 出力ではなく PHP の例外メッセージ。組み立ては例外クラス側で、埋め込むのは post ID（int）と自前のフィールド名のみ。
+		throw new ProductMetaWriteFailure( $postId, $unsaved );
+	}
+
+	/**
+	 * 保存後に読み直して確かめるメタ（フィールド名 => meta キー）。
+	 *
+	 * **載せる基準は「要求が実際に運んでくるか」である。** ここが入らなければ運用者が
+	 * 送った値が黙って消えるので、成功を返さずに報告する。載せていないメタ
+	 * （`mask_*` / `schema_version`）を確かめない理由は {@see self::saveMeta()} の
+	 * PHPDoc にある——どちらも「確かめても失われた要求は見つからない」ためで、
+	 * 確かめると実害の無いサイトの保存まで 500 にしてしまう。
+	 *
+	 * listings はこの表に入れない。書く場所（ロックの中）も、入らなかったときの扱い
+	 * （即座に投げる）も違うためである。
+	 *
+	 * @var array<string, string>
+	 */
+	private const VERIFIED_META = array(
+		'product_type' => ProductPostType::META_PRODUCT_TYPE,
+		'stock_status' => ProductPostType::META_STOCK_STATUS,
+		'extras'       => ProductPostType::META_EXTRAS,
+		'release_date' => ProductPostType::META_RELEASE_DATE,
+	);
+
+	/**
+	 * 未保存フィールドの一覧に listings を足す。
+	 *
+	 * 並びは「書いた順」——読み手（運用者・呼び出し側）が saveMeta() の並びと
+	 * 突き合わせられるようにするためで、listings は必ず最後に書くので最後に来る。
+	 *
+	 * @param array<int, string> $unsaved listings の手前で入らなかったフィールド名.
+	 * @return array<int, string>
+	 */
+	private static function withListings( array $unsaved ): array {
+		$unsaved[] = 'listings';
+		return $unsaved;
+	}
+
+	/**
+	 * 書いたメタが実際に入ったかを読み直して確かめる（**書き込みの戻り値は見ない**）。
+	 *
+	 * 理由は listings とまったく同じで、根拠はコアの `update_metadata()` にある
+	 * （行番号つきの表は {@see self::assertListingsPersisted()}）。要点だけ再掲すると、
+	 * `update_post_meta()` は**書かずに true を返し得る**（`update_post_metadata`
+	 * フィルタの短絡、WordPress 6.8 の `wp-includes/meta.php` L241-243）ので、
+	 * 戻り値を見る実装はその経路を成功として素通しする。
+	 *
+	 * **比較の相手は「コアが格納する形」である。** コアは `wp_unslash()`（L214）→
+	 * `sanitize_meta()`（L215）を通してから書くので、こちらも
+	 * {@see \Affilicard\PostType\ProductMeta::register()} が登録した sanitize_callback を
+	 * 同じ順で自分で適用する。**この対応は手で揃えている**ので、あちらの
+	 * sanitize_callback を変えるときはここも変えること。
+	 *
+	 * **meta 行が無いときコアは「登録済み default」を返す**（`get_metadata()` L585-592 →
+	 * `get_metadata_default()` L699-…、`register_meta()` が `default_post_metadata` へ
+	 * 挿す `filter_default_metadata` L1533-1534）。だから短絡フィルタに潰されても、
+	 * 書こうとした値が既定値と同じなら読み直しは一致する——**実際に保存されている値が
+	 * 要求どおりなのだから、それでよい**。ここが見つけたいのは「要求した値と違う値が
+	 * 入っている」ことだけである。
+	 *
+	 * @param string $field   報告に使うフィールド名（REST の `unsaved_fields` に載る名前）.
+	 * @param string $metaKey 読み直す meta キー.
+	 * @param mixed  $written 書き込もうとした値.
+	 */
+	private static function metaPersisted( int $postId, string $field, string $metaKey, $written ): bool {
+		$expected  = self::sanitizeAsCoreWould( $field, wp_unslash( $written ) );
+		$persisted = get_post_meta( $postId, $metaKey, true );
+
+		if ( is_array( $expected ) ) {
+			// 旧 JSON 文字列で入っている商品も読めるようにする（find() と同じ規則）。
+			$persisted = is_string( $persisted )
+				? JsonField::decode( $persisted, array() )
+				: ( is_array( $persisted ) ? $persisted : array() );
+			return $persisted === $expected;
+		}
+
+		return ( is_scalar( $persisted ) ? (string) $persisted : '' ) === (string) $expected;
+	}
+
+	/**
+	 * {@see \Affilicard\PostType\ProductMeta::register()} が登録した sanitize_callback を再現する。
+	 *
+	 * コアの `sanitize_meta()`（`wp-includes/meta.php` L1327-）が格納直前に呼ぶものと
+	 * 同じ写像。読み直しの比較相手を作るためだけに使う。
+	 *
+	 * @param mixed $value wp_unslash() 済みの値.
+	 * @return mixed
+	 */
+	private static function sanitizeAsCoreWould( string $field, $value ) {
+		switch ( $field ) {
+			case 'product_type':
+				return sanitize_key( (string) $value );
+			case 'stock_status':
+				return sanitize_text_field( (string) $value );
+			case 'extras':
+				return ProductSchema::sanitizeExtras( $value );
+			case 'release_date':
+				return ProductSchema::sanitizeReleaseDate( $value );
+		}
+
+		// VERIFIED_META に足したのにここへ足し忘れた場合。素通しすると「常に一致」に
+		// なって検証が無言で死ぬので、meta には入り得ない形を返して必ず不一致にする
+		// （フィールド名が unsaved_fields に載るので、取りこぼしは応答から辿れる）。
+		return array( '__affilicard_unmapped_meta__' => $field );
 	}
 
 	/**
@@ -572,11 +746,12 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * listings」から作るため、同じ行をもう一度読む必要がある。ここが照合のために既に
 	 * 読んでいるので返り値で渡す（同じロックの中なので値は変わらない）。
 	 *
-	 * @param array<int, mixed> $next 書き込もうとした listings。
+	 * @param array<int, mixed>  $next    書き込もうとした listings。
+	 * @param array<int, string> $unsaved listings の手前で入らなかったフィールド名（報告に足す）。
 	 * @return array<int, mixed> 実際に保存されている listings（＝ $next の sanitize 後の形）。
-	 * @throws ProductListingsWriteFailure 書き込んだ値が読み戻らなかったとき.
+	 * @throws ProductMetaWriteFailure 書き込んだ値が読み戻らなかったとき.
 	 */
-	private static function assertListingsPersisted( int $postId, array $next ): array {
+	private static function assertListingsPersisted( int $postId, array $next, array $unsaved = array() ): array {
 		$expected  = ProductSchema::sanitizeListings( wp_unslash( $next ) );
 		$persisted = self::listingsMeta( $postId );
 		if ( $persisted === $expected ) {
@@ -588,8 +763,8 @@ final class ProductRepository implements ProductRepositoryInterface {
 		// （投稿行は既に作られている）に REST が ID 無しの 500 を返し、呼び出し側は
 		// できてしまった商品へ辿り着けない（理由は例外クラスの PHPDoc）。メッセージは
 		// 例外クラス側が同じ文面で組み立てる。
-		// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- HTML 出力ではなく PHP の例外メッセージ。組み立ては例外クラス側で、埋め込むのは post ID（int）のみ。
-		throw new ProductListingsWriteFailure( $postId );
+		// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- HTML 出力ではなく PHP の例外メッセージ。組み立ては例外クラス側で、埋め込むのは post ID（int）と自前のフィールド名のみ。
+		throw new ProductMetaWriteFailure( $postId, self::withListings( $unsaved ) );
 	}
 
 	/**

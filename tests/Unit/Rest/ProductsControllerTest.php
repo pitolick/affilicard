@@ -5,9 +5,10 @@ namespace Affilicard\Tests\Unit\Rest;
 
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Repository\ProductLockUnavailable;
-use Affilicard\Repository\ProductListingsWriteFailure;
+use Affilicard\Repository\ProductMetaWriteFailure;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Repository\ProductRepositoryInterface;
+use Affilicard\Rest\ProductSchema;
 use Affilicard\Rest\ProductsController;
 use Affilicard\Schema\SchemaVersion;
 use Mockery;
@@ -37,11 +38,64 @@ final class ProductsControllerTest extends TestCase {
 		// ファイルが先に定義すると、定義し忘れたファイルまで全体実行では緑になる**。
 		// このファイル単体で走らせると undefined function で落ちる、という順序依存を
 		// 作らないよう、保存経路が触るものを setUp で揃えておく。
-		// - wp_unslash: listings の保存後の照合（コアと同じ wp_unslash → sanitize の 2 段）
-		// - sanitize_text_field: saveMeta() の mask_label
+		// - wp_unslash: 保存後の照合（コアと同じ wp_unslash → sanitize の 2 段）
+		// - sanitize_text_field: saveMeta() の mask_label / stock_status の照合
+		// - sanitize_key: product_type の照合（登録済み sanitize_callback の再現）
 		WP_Mock::userFunction( 'wp_unslash' )->andReturnUsing( static fn( $v ) => $v );
 		WP_Mock::userFunction( 'sanitize_text_field' )
 			->andReturnUsing( static fn( $v ) => is_string( $v ) ? trim( $v ) : $v );
+		WP_Mock::userFunction( 'sanitize_key' )
+			->andReturnUsing(
+				static function ( $v ) {
+					$v = is_string( $v ) ? strtolower( $v ) : '';
+					return (string) preg_replace( '/[^a-z0-9_\-]/', '', $v );
+				}
+			);
+	}
+
+	/**
+	 * update_post_meta が書いた meta（キー => 実 WordPress が格納する値）。
+	 *
+	 * @var array<string, mixed>
+	 */
+	private array $storedMeta = array();
+
+	/**
+	 * 実 WordPress と同じ「書いたものが読み戻る」update_post_meta を登録する。
+	 *
+	 * **ProductRepository::saveMeta() は要求が運んでくるメタ（product_type /
+	 * stock_status / extras / release_date）と listings を書いた直後に読み直し、
+	 * 読み戻らなければ ProductMetaWriteFailure を投げる。** 書き込みを捨てるスタブだと、
+	 * 実 WP なら 201/200 になる保存がテストの中だけ 500 になる。
+	 */
+	private function mockMetaWriteThrough(): void {
+		WP_Mock::userFunction( 'update_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) {
+					$key = (string) $key;
+					switch ( $key ) {
+						case ProductPostType::META_PRODUCT_TYPE:
+							$this->storedMeta[ $key ] = sanitize_key( (string) wp_unslash( $value ) );
+							break;
+						case ProductPostType::META_STOCK_STATUS:
+						case ProductPostType::META_MASK_LABEL:
+							$this->storedMeta[ $key ] = sanitize_text_field( (string) wp_unslash( $value ) );
+							break;
+						case ProductPostType::META_EXTRAS:
+							$this->storedMeta[ $key ] = ProductSchema::sanitizeExtras( wp_unslash( $value ) );
+							break;
+						case ProductPostType::META_LISTINGS:
+							$this->storedMeta[ $key ] = ProductSchema::sanitizeListings( wp_unslash( $value ) );
+							break;
+						case ProductPostType::META_RELEASE_DATE:
+							$this->storedMeta[ $key ] = ProductSchema::sanitizeReleaseDate( wp_unslash( $value ) );
+							break;
+						default:
+							$this->storedMeta[ $key ] = $value;
+					}
+					return true;
+				}
+			);
 	}
 
 	public function tearDown(): void {
@@ -94,24 +148,27 @@ final class ProductsControllerTest extends TestCase {
 		WP_Mock::userFunction( 'get_post' )
 			->with( $id )
 			->andReturn( $post );
+		// **保存で書かれたキーは書いた値を返す。** 実 WordPress と同じく、保存直後の
+		// 読み直しには入れたばかりの値が見える（固定値を返すと、書き込み検証が
+		// 「入らなかった」と誤判定して 500 になる）。
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( $id, ProductPostType::META_PRODUCT_TYPE, true )
-			->andReturn( 'generic' );
+			->andReturnUsing( fn () => $this->storedMeta[ ProductPostType::META_PRODUCT_TYPE ] ?? 'generic' );
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( $id, ProductPostType::META_STOCK_STATUS, true )
-			->andReturn( 'available' );
+			->andReturnUsing( fn () => $this->storedMeta[ ProductPostType::META_STOCK_STATUS ] ?? 'available' );
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( $id, ProductPostType::META_EXTRAS, true )
-			->andReturn( '' );
+			->andReturnUsing( fn () => $this->storedMeta[ ProductPostType::META_EXTRAS ] ?? '' );
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( $id, ProductPostType::META_LISTINGS, true )
-			->andReturn( '' );
+			->andReturnUsing( fn () => $this->storedMeta[ ProductPostType::META_LISTINGS ] ?? '' );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( $id, ProductPostType::META_RELEASE_DATE, true )
+			->andReturnUsing( fn () => $this->storedMeta[ ProductPostType::META_RELEASE_DATE ] ?? '' );
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( $id, ProductPostType::META_SCHEMA_VERSION, true )
 			->andReturn( SchemaVersion::CURRENT );
-		WP_Mock::userFunction( 'get_post_meta' )
-			->with( $id, ProductPostType::META_RELEASE_DATE, true )
-			->andReturn( '' );
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( $id, ProductPostType::META_MASK_BLUR, true )
 			->andReturn( '' );
@@ -138,7 +195,7 @@ final class ProductsControllerTest extends TestCase {
 					return 42;
 				}
 			);
-		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
+		$this->mockMetaWriteThrough();
 
 		$this->mockFindReturnsProduct( 42, 'タイトル' );
 
@@ -383,7 +440,7 @@ final class ProductsControllerTest extends TestCase {
 					return 7;
 				}
 			);
-		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
+		$this->mockMetaWriteThrough();
 
 		$controller = new ProductsController( new ProductRepository() );
 		$request    = new WP_REST_Request( 'PATCH', '/affilicard/v1/products/7' );
@@ -413,7 +470,7 @@ final class ProductsControllerTest extends TestCase {
 					return 7;
 				}
 			);
-		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
+		$this->mockMetaWriteThrough();
 
 		$controller = new ProductsController( new ProductRepository() );
 		$request    = new WP_REST_Request( 'PATCH', '/affilicard/v1/products/7' );
@@ -427,11 +484,21 @@ final class ProductsControllerTest extends TestCase {
 
 	public function test_bulk_create_returns_207_with_per_item_results_partial_success(): void {
 		$this->mockListingLockWpdb();
-		WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing( static fn( $v ) => is_string( $v ) ? trim( $v ) : $v );
 		WP_Mock::userFunction( 'wp_kses_post' )->andReturnUsing( static fn( $v ) => $v );
-		WP_Mock::userFunction( 'sanitize_key' )->andReturnUsing( static fn( $v ) => strtolower( (string) $v ) );
 		WP_Mock::userFunction( 'esc_url_raw' )->andReturnUsing( static fn( $v ) => $v );
-		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
+		$this->mockMetaWriteThrough();
+		WP_Mock::userFunction( 'get_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key = '', $single = false ) {
+					$key = (string) $key;
+					// キー無し（stale mirror 掃除の全 meta 列挙）と $single=false
+					// （extid ミラーの重複チェック）はここでの関心事ではない。
+					if ( '' === $key || ! $single ) {
+						return array();
+					}
+					return $this->storedMeta[ $key ] ?? '';
+				}
+			);
 
 		$ids  = array( 101, 0 ); // 1st save → 101, 2nd save → 0 (failure)
 		$call = 0;
@@ -578,9 +645,9 @@ final class ProductsControllerTest extends TestCase {
 	 */
 	public function test_bulkCreateはロック競合のitemだけをerrorにする(): void {
 		WP_Mock::userFunction( 'current_user_can' )->andReturn( true );
-		WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing( static fn( $v ) => is_string( $v ) ? trim( $v ) : $v );
+		// sanitize_text_field / sanitize_key は setUp が登録済み（WP_Mock は同じ関数名に
+		// ついて最初の期待だけを保持するため、ここで登録し直しても無言で効かない）。
 		WP_Mock::userFunction( 'wp_kses_post' )->andReturnUsing( static fn( $v ) => $v );
-		WP_Mock::userFunction( 'sanitize_key' )->andReturnUsing( static fn( $v ) => strtolower( (string) $v ) );
 		WP_Mock::userFunction( 'esc_url_raw' )->andReturnUsing( static fn( $v ) => $v );
 
 		$repository = Mockery::mock( ProductRepositoryInterface::class );
@@ -639,7 +706,7 @@ final class ProductsControllerTest extends TestCase {
 		$repository = Mockery::mock( ProductRepositoryInterface::class );
 		$repository->shouldReceive( 'save' )
 			->once()
-			->andThrow( new ProductListingsWriteFailure( 99 ) );
+			->andThrow( new ProductMetaWriteFailure( 99 ) );
 		$repository->shouldReceive( 'find' )->never();
 
 		$controller = new ProductsController( $repository );
@@ -679,7 +746,7 @@ final class ProductsControllerTest extends TestCase {
 			);
 		$repository->shouldReceive( 'save' )
 			->once()
-			->andThrow( new ProductListingsWriteFailure( 42 ) );
+			->andThrow( new ProductMetaWriteFailure( 42 ) );
 
 		$controller = new ProductsController( $repository );
 		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products/42' );
@@ -706,9 +773,9 @@ final class ProductsControllerTest extends TestCase {
 	 */
 	public function test_bulkCreateは書き込み失敗のitemだけをerrorにする(): void {
 		WP_Mock::userFunction( 'current_user_can' )->andReturn( true );
-		WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing( static fn( $v ) => is_string( $v ) ? trim( $v ) : $v );
+		// sanitize_text_field / sanitize_key は setUp が登録済み（WP_Mock は同じ関数名に
+		// ついて最初の期待だけを保持するため、ここで登録し直しても無言で効かない）。
 		WP_Mock::userFunction( 'wp_kses_post' )->andReturnUsing( static fn( $v ) => $v );
-		WP_Mock::userFunction( 'sanitize_key' )->andReturnUsing( static fn( $v ) => strtolower( (string) $v ) );
 		WP_Mock::userFunction( 'esc_url_raw' )->andReturnUsing( static fn( $v ) => $v );
 
 		$repository = Mockery::mock( ProductRepositoryInterface::class );
@@ -719,7 +786,7 @@ final class ProductsControllerTest extends TestCase {
 				static function () use ( &$call ) {
 					++$call;
 					if ( 1 === $call ) {
-						throw new ProductListingsWriteFailure( 11 );
+						throw new ProductMetaWriteFailure( 11 );
 					}
 					return 12;
 				}
@@ -781,6 +848,123 @@ final class ProductsControllerTest extends TestCase {
 	}
 
 	/**
+	 * `unsaved_fields` は**例外が名指ししたフィールドをそのまま返す**。
+	 *
+	 * **以前はここが `array( 'listings' )` を固定で返していた。** それは
+	 * {@see \Affilicard\Repository\ProductRepository::saveMeta()} が何を読み直したかを
+	 * 知らない側が「listings 以外は入った」と名乗る形で、実際には product_type や
+	 * stock_status が入らなかった場合でも同じ本文を返していた——**誰も確かめていない
+	 * フィールドを「保存済み」と宣言していた**。何が入らなかったかを知っているのは
+	 * 書いた側だけなので、いまは例外が運んできた値を素通しする。
+	 */
+	public function test_createは例外が名指しした未保存フィールドをそのまま返す(): void {
+		WP_Mock::userFunction( 'current_user_can' )->andReturn( true );
+
+		$repository = Mockery::mock( ProductRepositoryInterface::class );
+		$repository->shouldReceive( 'save' )
+			->once()
+			->andThrow( new ProductMetaWriteFailure( 99, array( 'stock_status' ) ) );
+		$repository->shouldReceive( 'find' )->never();
+
+		$controller = new ProductsController( $repository );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products' );
+		$request->set_param( 'title', 'タイトル' );
+
+		$response = $controller->create( $request );
+		$data     = $response->get_data();
+
+		$this->assertSame( 500, $response->get_status() );
+		$this->assertSame( 'affilicard_save_failed', $data['code'] );
+		$this->assertSame( 99, $data['id'] );
+		// listings は入っている。入らなかったのは stock_status だけ——固定値なら
+		// ここが `["listings"]` になり、呼び出し側は消えた取扱終了を送り直さない。
+		$this->assertSame( array( 'stock_status' ), $data['unsaved_fields'] );
+	}
+
+	/**
+	 * ロック競合（409）でも同じ——listings 以外が一緒に入らなかったなら、一緒に返す。
+	 */
+	public function test_updateは409でも例外が名指しした未保存フィールドをそのまま返す(): void {
+		WP_Mock::userFunction( 'current_user_can' )->andReturn( true );
+
+		$repository = Mockery::mock( ProductRepositoryInterface::class );
+		$repository->shouldReceive( 'find' )
+			->with( 42 )
+			->andReturn(
+				array(
+					'id'    => 42,
+					'title' => '既存',
+				)
+			);
+		$repository->shouldReceive( 'save' )
+			->once()
+			->andThrow( new ProductLockUnavailable( 42, '', array( 'extras', 'listings' ) ) );
+
+		$controller = new ProductsController( $repository );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products/42' );
+		$request->set_param( 'id', 42 );
+		$request->set_param( 'title', '書き換え' );
+
+		$response = $controller->update( $request );
+		$data     = $response->get_data();
+
+		$this->assertSame( 409, $response->get_status() );
+		$this->assertSame( array( 'extras', 'listings' ), $data['unsaved_fields'] );
+	}
+
+	/**
+	 * `/bulk` の item も同じ形で素通しする（単体と読み替えずに済むように）。
+	 */
+	public function test_bulkCreateは例外が名指しした未保存フィールドをitemに載せる(): void {
+		WP_Mock::userFunction( 'current_user_can' )->andReturn( true );
+		WP_Mock::userFunction( 'wp_kses_post' )->andReturnUsing( static fn( $v ) => $v );
+		WP_Mock::userFunction( 'esc_url_raw' )->andReturnUsing( static fn( $v ) => $v );
+
+		$repository = Mockery::mock( ProductRepositoryInterface::class );
+		$repository->shouldReceive( 'save' )
+			->once()
+			->andThrow( new ProductMetaWriteFailure( 11, array( 'product_type', 'listings' ) ) );
+
+		$controller = new ProductsController( $repository );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products/bulk' );
+		$request->set_param( 'products', array( array( 'title' => '書き込めない商品' ) ) );
+
+		$response = $controller->bulkCreate( $request );
+		$data     = $response->get_data();
+
+		$this->assertSame( 'error', $data['results'][0]['status'] );
+		$this->assertSame( 11, $data['results'][0]['id'] );
+		$this->assertSame( array( 'product_type', 'listings' ), $data['results'][0]['unsaved_fields'] );
+	}
+
+	/**
+	 * 名指しできるフィールドが無ければ `unsaved_fields` は**載せない**。
+	 *
+	 * キーの有無が「部分保存かどうか」を表す約束なので、空配列を載せると
+	 * 「部分保存だが失われたものは無い」という読めない状態を作る。
+	 */
+	public function test_createは未保存フィールドが無ければunsaved_fieldsを載せない(): void {
+		WP_Mock::userFunction( 'current_user_can' )->andReturn( true );
+
+		$repository = Mockery::mock( ProductRepositoryInterface::class );
+		$repository->shouldReceive( 'save' )
+			->once()
+			->andThrow( new ProductLockUnavailable( 99, '', array() ) );
+		$repository->shouldReceive( 'find' )->never();
+
+		$controller = new ProductsController( $repository );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products' );
+		$request->set_param( 'title', 'タイトル' );
+
+		$response = $controller->create( $request );
+		$data     = $response->get_data();
+
+		$this->assertSame( 409, $response->get_status() );
+		$this->assertSame( 99, $data['id'] );
+		$this->assertArrayNotHasKey( 'unsaved_fields', $data );
+	}
+
+	/**
 	 * 更新の 500 は逆に id を**載せる**（商品は実在するため）。
 	 *
 	 * **規則は「サーバが実在を知っている商品の ID だけを載せる」の 1 つだけ**で、
@@ -824,9 +1008,9 @@ final class ProductsControllerTest extends TestCase {
 	 */
 	public function test_bulkCreateは保存できなかったitemにidを載せない(): void {
 		WP_Mock::userFunction( 'current_user_can' )->andReturn( true );
-		WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing( static fn( $v ) => is_string( $v ) ? trim( $v ) : $v );
+		// sanitize_text_field / sanitize_key は setUp が登録済み（WP_Mock は同じ関数名に
+		// ついて最初の期待だけを保持するため、ここで登録し直しても無言で効かない）。
 		WP_Mock::userFunction( 'wp_kses_post' )->andReturnUsing( static fn( $v ) => $v );
-		WP_Mock::userFunction( 'sanitize_key' )->andReturnUsing( static fn( $v ) => strtolower( (string) $v ) );
 		WP_Mock::userFunction( 'esc_url_raw' )->andReturnUsing( static fn( $v ) => $v );
 
 		$repository = Mockery::mock( ProductRepositoryInterface::class );

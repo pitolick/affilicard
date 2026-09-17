@@ -39,11 +39,32 @@ namespace Affilicard\Repository;
 final class ProductLockUnavailable extends \RuntimeException {
 
 	/**
-	 * @param int    $postId  ロックを取れなかった商品の投稿 ID。
-	 * @param string $message 省略時は postId を含む既定文（テストが型だけでなく
-	 *                        メッセージまで固定できるようにするため、必ず ID を含める）。
+	 * この保存で入らなかったフィールド名。
+	 *
+	 * **{@see ProductMetaWriteFailure} と同じ理由で例外が運ぶ。** 何が入らなかったかを
+	 * 知っているのは書いた側だけで、呼び出し側（REST）が固定値を名乗ると、検証の範囲が
+	 * 変わったときに黙って嘘になる。
+	 *
+	 * ロック競合なら必ず listings が含まれるが、**listings だけとは限らない**——
+	 * {@see ProductRepository::saveMeta()} は listings の手前で書いたメタも読み直しており、
+	 * そこで入らなかったものがあれば一緒に載る。
+	 *
+	 * @var array<int, string>
 	 */
-	public function __construct( private int $postId, string $message = '' ) {
+	private array $unsavedFields;
+
+	/**
+	 * @param int                $postId        ロックを取れなかった商品の投稿 ID。
+	 * @param string             $message       省略時は postId を含む既定文（テストが型だけでなく
+	 *                                          メッセージまで固定できるようにするため、必ず ID を含める）。
+	 * @param array<int, string> $unsavedFields この保存で入らなかったフィールド名。既定が
+	 *                                          `array( 'listings' )` なのは、ロックを取れずに
+	 *                                          見送るのが listings だからである。listings と
+	 *                                          無関係な理由で投げる側（{@see DerivedMetaSync}）は
+	 *                                          空配列を渡すこと。
+	 */
+	public function __construct( private int $postId, string $message = '', array $unsavedFields = array( 'listings' ) ) {
+		$this->unsavedFields = array_values( $unsavedFields );
 		parent::__construct(
 			'' !== $message
 				? $message
@@ -53,5 +74,18 @@ final class ProductLockUnavailable extends \RuntimeException {
 
 	public function postId(): int {
 		return $this->postId;
+	}
+
+	/**
+	 * この保存で入らなかったフィールド名。
+	 *
+	 * **「ここに無い＝保存された」とは読めない**（理由は
+	 * {@see ProductMetaWriteFailure::unsavedFields()} と同じ）。意味は「入らなかったと
+	 * 分かっているフィールド」である。
+	 *
+	 * @return array<int, string>
+	 */
+	public function unsavedFields(): array {
+		return $this->unsavedFields;
 	}
 }

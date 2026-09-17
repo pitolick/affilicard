@@ -125,9 +125,12 @@ final class ProductAutoCreator {
 				// 握り潰さず一時失敗として返すのが、ここでの「黙らない」の形である。
 				return WorkOutcome::TRANSIENT_FAILURE;
 			}
-			// **{@see \Affilicard\Repository\ProductListingsWriteFailure} は捕まえない。**
+			// **{@see \Affilicard\Repository\ProductMetaWriteFailure} は捕まえない。**
 			// あれは「書いたのに入らなかった」で、積み直しても同じ結果になる（原因は
 			// 他プラグインの meta フィルタや壊れた meta 行で、時間では解消しない）。
+			// **listings が入らなかったときだけではない**——`product_type` のような
+			// 要求フィールドが入らなくても投げる。どちらも時間では解消しないので
+			// 扱いは同じでよい（何が入らなかったかは例外の unsavedFields() が運ぶ）。
 			// 一時失敗として backoff すると、直らない失敗が再試行の山に埋もれる。
 			// 投げたまま Action Scheduler へ抜けさせ、failed アクションとして残す
 			// （ジョブ一覧が運用者にとっての記録になる）。ロックは finally で返る。

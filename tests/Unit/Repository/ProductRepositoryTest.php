@@ -6,7 +6,7 @@ namespace Affilicard\Tests\Unit\Repository;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Pricing\FetchStatus;
 use Affilicard\Repository\ProductLockUnavailable;
-use Affilicard\Repository\ProductListingsWriteFailure;
+use Affilicard\Repository\ProductMetaWriteFailure;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Rest\ProductSchema;
 use Affilicard\Schema\SchemaVersion;
@@ -49,9 +49,9 @@ final class ProductRepositoryTest extends TestCase {
 	/**
 	 * 直前の runSaveMetaWriteVerification() が捕まえた保存失敗（無ければ null）。
 	 *
-	 * @var ProductListingsWriteFailure|null
+	 * @var ProductMetaWriteFailure|null
 	 */
-	private ?ProductListingsWriteFailure $lastWriteFailure = null;
+	private ?ProductMetaWriteFailure $lastWriteFailure = null;
 
 	/**
 	 * update_post_meta( META_LISTINGS ) に返させる値。
@@ -76,6 +76,28 @@ final class ProductRepositoryTest extends TestCase {
 	 * @var array<string, mixed>
 	 */
 	private array $savedMetaValues = array();
+
+	/**
+	 * update_post_meta が書いた listings 以外の meta（キー => 実 WP が格納する値）。
+	 *
+	 * **テストごとに userFunction を登録し直しても切り替わらない**（WP_Mock は最初の
+	 * 期待だけを保持する）ため、値はここから読む。
+	 *
+	 * @var array<string, mixed>
+	 */
+	private array $storedMeta = array();
+
+	/**
+	 * `update_post_metadata` フィルタに短絡させる meta キー。
+	 *
+	 * **切り替えはプロパティで行う**——WP_Mock は同じ関数名について最初の期待だけを
+	 * 保持するので、テスト本体で `update_post_meta` を登録し直しても無言で効かない。
+	 * ここに入れたキーは「`update_post_meta()` が true を返すのに 1 バイトも書かれて
+	 * いない」（コア `wp-includes/meta.php` L241-243）を再現する。
+	 *
+	 * @var array<int, string>
+	 */
+	private array $shortCircuitedMetaKeys = array();
 
 	public function setUp(): void {
 		parent::setUp();
@@ -132,6 +154,70 @@ final class ProductRepositoryTest extends TestCase {
 	 */
 	private function storeListingsAsWordPressWould( $value ): void {
 		$this->storedListings = ProductSchema::sanitizeListings( wp_unslash( is_array( $value ) ? $value : array() ) );
+	}
+
+	/**
+	 * listings 以外の meta について「実 WordPress が格納するであろう値」を控える。
+	 *
+	 * **saveMeta() は listings だけでなく、要求が運んでくるメタ（product_type /
+	 * stock_status / extras / release_date）も書いた直後に読み直す。** 読み戻らなければ
+	 * 「入らなかった」と判定して例外になるので、`update_post_meta` のスタブが書き込みを
+	 * 捨てていると、実 WordPress なら通る保存がテストの中だけ失敗する。
+	 *
+	 * コアと同じ 2 段（`wp_unslash()` →
+	 * {@see \Affilicard\PostType\ProductMeta::register()} の sanitize_callback）を通す。
+	 *
+	 * @param mixed $value update_post_meta へ渡された値。
+	 */
+	private function storeMetaAsWordPressWould( string $key, $value ): void {
+		if ( in_array( $key, $this->shortCircuitedMetaKeys, true ) ) {
+			// `update_post_metadata` フィルタの短絡。update_post_meta() は成功を
+			// 報告する（呼び出し側のスタブが true を返す）が、行は 1 つも書かれない。
+			return;
+		}
+
+		if ( ProductPostType::META_LISTINGS === $key ) {
+			$this->storeListingsAsWordPressWould( $value );
+			return;
+		}
+
+		switch ( $key ) {
+			case ProductPostType::META_PRODUCT_TYPE:
+				$this->storedMeta[ $key ] = sanitize_key( (string) wp_unslash( $value ) );
+				return;
+			case ProductPostType::META_STOCK_STATUS:
+			case ProductPostType::META_MASK_LABEL:
+				$this->storedMeta[ $key ] = sanitize_text_field( (string) wp_unslash( $value ) );
+				return;
+			case ProductPostType::META_EXTRAS:
+				$this->storedMeta[ $key ] = ProductSchema::sanitizeExtras( wp_unslash( $value ) );
+				return;
+			case ProductPostType::META_RELEASE_DATE:
+				$this->storedMeta[ $key ] = ProductSchema::sanitizeReleaseDate( wp_unslash( $value ) );
+				return;
+			default:
+				$this->storedMeta[ $key ] = $value;
+		}
+	}
+
+	/**
+	 * 控えた meta を実 WordPress と同じ意味で読み返す。
+	 *
+	 * 行が無ければ空文字（`$single = true` のコアの既定。登録済み default の再現までは
+	 * しない——**保存が読み直すのは「書いた直後」なので、行は必ず存在する**）。
+	 * キー無しの呼び出しは stale mirror 掃除の全 meta 列挙、`$single = false` は
+	 * extid ミラーの重複チェックで、どちらもここでの関心事ではないので空配列を返す。
+	 *
+	 * @return mixed
+	 */
+	private function readMetaAsWordPressWould( string $key, bool $single = true ) {
+		if ( '' === $key || ! $single ) {
+			return array();
+		}
+		if ( ProductPostType::META_LISTINGS === $key ) {
+			return $this->storedListings;
+		}
+		return $this->storedMeta[ $key ] ?? '';
 	}
 
 	public function tearDown(): void {
@@ -465,7 +551,21 @@ final class ProductRepositoryTest extends TestCase {
 				}
 			);
 
-		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
+		// **書いたものが読み戻るスタブにする。** saveMeta() は書き込みの戻り値を見ず、
+		// 要求が運んでくるメタ（product_type / stock_status / extras / release_date）と
+		// listings を書いた直後に読み直す。捨てるスタブだと実 WP なら通る保存が
+		// ここだけ ProductMetaWriteFailure になる。
+		WP_Mock::userFunction( 'update_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) {
+					$this->storeMetaAsWordPressWould( (string) $key, $value );
+					return true;
+				}
+			);
+		WP_Mock::userFunction( 'get_post_meta' )
+			->andReturnUsing(
+				fn ( $post_id, $key = '', $single = false ) => $this->readMetaAsWordPressWould( (string) $key, (bool) $single )
+			);
 
 		$repo = new ProductRepository();
 		$id   = $repo->save(
@@ -494,7 +594,21 @@ final class ProductRepositoryTest extends TestCase {
 				}
 			);
 
-		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
+		// **書いたものが読み戻るスタブにする。** saveMeta() は書き込みの戻り値を見ず、
+		// 要求が運んでくるメタ（product_type / stock_status / extras / release_date）と
+		// listings を書いた直後に読み直す。捨てるスタブだと実 WP なら通る保存が
+		// ここだけ ProductMetaWriteFailure になる。
+		WP_Mock::userFunction( 'update_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) {
+					$this->storeMetaAsWordPressWould( (string) $key, $value );
+					return true;
+				}
+			);
+		WP_Mock::userFunction( 'get_post_meta' )
+			->andReturnUsing(
+				fn ( $post_id, $key = '', $single = false ) => $this->readMetaAsWordPressWould( (string) $key, (bool) $single )
+			);
 
 		$repo = new ProductRepository();
 		$id   = $repo->save(
@@ -520,8 +634,14 @@ final class ProductRepositoryTest extends TestCase {
 					if ( ProductPostType::META_SCHEMA_VERSION === $key ) {
 						$saw_schema_version = ( SchemaVersion::CURRENT === $value && 800 === $post_id );
 					}
+					// 書いたものは読み戻る（読み直しで「入らなかった」と誤判定させない）。
+					$this->storeMetaAsWordPressWould( (string) $key, $value );
 					return true;
 				}
+			);
+		WP_Mock::userFunction( 'get_post_meta' )
+			->andReturnUsing(
+				fn ( $post_id, $key = '', $single = false ) => $this->readMetaAsWordPressWould( (string) $key, (bool) $single )
 			);
 
 		$repo = new ProductRepository();
@@ -555,17 +675,13 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'update_post_meta' )
 			->andReturnUsing(
 				function ( $post_id, $key, $value ) {
-					if ( ProductPostType::META_LISTINGS === $key ) {
-						$this->storeListingsAsWordPressWould( $value );
-					}
+					$this->storeMetaAsWordPressWould( (string) $key, $value );
 					return true;
 				}
 			);
 		WP_Mock::userFunction( 'get_post_meta' )
 			->andReturnUsing(
-				function ( $post_id, $key = '', $single = false ) {
-					return ProductPostType::META_LISTINGS === $key ? $this->storedListings : array();
-				}
+				fn ( $post_id, $key = '', $single = false ) => $this->readMetaAsWordPressWould( (string) $key, (bool) $single )
 			);
 
 		$repo = new ProductRepository();
@@ -643,6 +759,12 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 800, Mockery::any(), false )
 			->andReturn( array() );
+		// 要求が運んでくるメタは書いた直後に読み直される（書いたものが読み戻る）。
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 800, Mockery::any(), true )
+			->andReturnUsing(
+				fn ( $post_id, $key, $single ) => $this->readMetaAsWordPressWould( (string) $key, true )
+			);
 
 		WP_Mock::userFunction( 'delete_post_meta' )
 			->once()
@@ -666,9 +788,7 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'update_post_meta' )
 			->andReturnUsing(
 				function ( $post_id, $key, $value ) {
-					if ( ProductPostType::META_LISTINGS === $key ) {
-						$this->storeListingsAsWordPressWould( $value );
-					}
+					$this->storeMetaAsWordPressWould( (string) $key, $value );
 					return true;
 				}
 			);
@@ -796,17 +916,13 @@ final class ProductRepositoryTest extends TestCase {
 					if ( ProductPostType::META_EXTRAS === $key || ProductPostType::META_LISTINGS === $key ) {
 						$this->assertIsArray( $value );
 					}
-					if ( ProductPostType::META_LISTINGS === $key ) {
-						$this->storeListingsAsWordPressWould( $value );
-					}
+					$this->storeMetaAsWordPressWould( (string) $key, $value );
 					return true;
 				}
 			);
 		WP_Mock::userFunction( 'get_post_meta' )
 			->andReturnUsing(
-				function ( $post_id, $key = '', $single = false ) {
-					return ProductPostType::META_LISTINGS === $key ? $this->storedListings : array();
-				}
+				fn ( $post_id, $key = '', $single = false ) => $this->readMetaAsWordPressWould( (string) $key, (bool) $single )
 			);
 		WP_Mock::userFunction( 'add_post_meta' )->andReturn( true );
 		WP_Mock::userFunction( 'delete_post_meta' )->andReturn( true );
@@ -852,8 +968,13 @@ final class ProductRepositoryTest extends TestCase {
 					if ( ProductPostType::META_PRODUCT_TYPE === $key ) {
 						$seen_type = $value;
 					}
+					$this->storeMetaAsWordPressWould( (string) $key, $value );
 					return true;
 				}
+			);
+		WP_Mock::userFunction( 'get_post_meta' )
+			->andReturnUsing(
+				fn ( $post_id, $key = '', $single = false ) => $this->readMetaAsWordPressWould( (string) $key, (bool) $single )
 			);
 
 		$repo = new ProductRepository();
@@ -881,9 +1002,7 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'delete_post_meta' )->andReturn( true );
 		WP_Mock::userFunction( 'get_post_meta' )
 			->andReturnUsing(
-				function ( $post_id, $key = '', $single = false ) {
-					return ProductPostType::META_LISTINGS === $key ? $this->storedListings : array();
-				}
+				fn ( $post_id, $key = '', $single = false ) => $this->readMetaAsWordPressWould( (string) $key, (bool) $single )
 			);
 
 		$saved = array();
@@ -892,10 +1011,10 @@ final class ProductRepositoryTest extends TestCase {
 				function ( $post_id, $key, $value ) use ( &$saved ) {
 					if ( ProductPostType::META_LISTINGS === $key ) {
 						$saved = is_array( $value ) ? $value : array();
-						// 保存は必ず読み直して検証される。実 WP と同じ形を控えないと
-						// ここの書き込みが「入らなかった」と判定されて例外になる。
-						$this->storeListingsAsWordPressWould( $value );
 					}
+					// 保存は必ず読み直して検証される。実 WP と同じ形を控えないと
+					// ここの書き込みが「入らなかった」と判定されて例外になる。
+					$this->storeMetaAsWordPressWould( (string) $key, $value );
 					return true;
 				}
 			);
@@ -941,13 +1060,20 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'delete_post_meta' )->andReturn( true );
 		WP_Mock::userFunction( 'get_post_meta' )
 			->andReturnUsing(
-				function ( $post_id, $key = '', $single = false ) {
-					return ProductPostType::META_LISTINGS === $key ? $this->storedListings : array();
+				fn ( $post_id, $key = '', $single = false ) => $this->readMetaAsWordPressWould( (string) $key, (bool) $single )
+			);
+		// **listings の書き込みだけが効かない。** 戻り値は成功（true）だが読み直すと
+		// storedListings のままで、渡した rk-incoming はどこにも入っていない。
+		// listings 以外は実 WP と同じく読み戻るので、報告されるのは listings だけになる。
+		WP_Mock::userFunction( 'update_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) {
+					if ( ProductPostType::META_LISTINGS !== $key ) {
+						$this->storeMetaAsWordPressWould( (string) $key, $value );
+					}
+					return true;
 				}
 			);
-		// **書き込みは成功を返す。** それでも読み直すと storedListings のままで、
-		// 渡した rk-incoming はどこにも入っていない。
-		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
 
 		$added = array();
 		WP_Mock::userFunction( 'add_post_meta' )
@@ -976,16 +1102,17 @@ final class ProductRepositoryTest extends TestCase {
 					),
 				)
 			);
-		} catch ( ProductListingsWriteFailure $e ) {
+		} catch ( ProductMetaWriteFailure $e ) {
 			$failure = $e;
 		}
 
-		$this->assertInstanceOf( ProductListingsWriteFailure::class, $failure );
+		$this->assertInstanceOf( ProductMetaWriteFailure::class, $failure );
 		$this->assertSame(
-			'affilicard: 商品 5 の listings を保存できなかった（書き込んだ値が読み戻らない）。',
+			'affilicard: 商品 5 の meta を保存できなかった（書き込んだ値が読み戻らない: listings）。',
 			$failure->getMessage()
 		);
 		$this->assertSame( 5, $failure->postId() );
+		$this->assertSame( array( 'listings' ), $failure->unsavedFields() );
 		$this->assertSame( array(), $added, '保存が成立していないのでミラーは触らない' );
 	}
 
@@ -1836,7 +1963,7 @@ final class ProductRepositoryTest extends TestCase {
 	 * @param array<int, mixed> $stored 保存前の listings meta。
 	 * @return array<int, string> 'GET_LOCK' / 'read:listings' / 'write:listings' / 'RELEASE_LOCK' の順列。
 	 */
-	private function saveMetaLockTimeline( int $getLockReturn, array $stored = array(), array $staleMirror = array() ): array {
+	private function saveMetaLockTimeline( int $getLockReturn, array $stored = array(), array $staleMirror = array(), array $data = array() ): array {
 		$timeline = array();
 		$this->mockLockWpdbTimeline( $getLockReturn, $timeline );
 		$this->storedListings = $stored;
@@ -1869,7 +1996,7 @@ final class ProductRepositoryTest extends TestCase {
 					if ( '' === $key ) {
 						return $staleMirror;
 					}
-					return array();
+					return $this->readMetaAsWordPressWould( (string) $key, (bool) $single );
 				}
 			);
 		$this->savedMetaKeys = array();
@@ -1879,8 +2006,8 @@ final class ProductRepositoryTest extends TestCase {
 					$this->savedMetaKeys[] = (string) $key;
 					if ( ProductPostType::META_LISTINGS === $key ) {
 						$timeline[] = 'write:listings';
-						$this->storeListingsAsWordPressWould( $value );
 					}
+					$this->storeMetaAsWordPressWould( (string) $key, $value );
 					return true;
 				}
 			);
@@ -1890,18 +2017,21 @@ final class ProductRepositoryTest extends TestCase {
 		try {
 			$repo->saveMeta(
 				5,
-				array(
-					'listings' => array(
-						array(
-							'platform' => 'rakuten-kobo',
-							'offers'   => array(
-								array(
-									'external_id' => 'rk-1',
-									'regular_url' => 'https://example.test/rk-1',
+				array_merge(
+					$data,
+					array(
+						'listings' => array(
+							array(
+								'platform' => 'rakuten-kobo',
+								'offers'   => array(
+									array(
+										'external_id' => 'rk-1',
+										'regular_url' => 'https://example.test/rk-1',
+									),
 								),
 							),
 						),
-					),
+					)
 				)
 			);
 		} catch ( ProductLockUnavailable $e ) {
@@ -2198,7 +2328,7 @@ final class ProductRepositoryTest extends TestCase {
 	 * **メッセージまで固定する。** 型だけだと、モック不足で出た
 	 * `Mockery\Exception\NoMatchingExpectationException`（これも RuntimeException を
 	 * 継承する）で通ってしまい、テストが合否を区別できなくなる——
-	 * ProductListingsWriteFailure も RuntimeException を継承するのでなおさらである。
+	 * ProductMetaWriteFailure も RuntimeException を継承するのでなおさらである。
 	 */
 	public function test_saveMetaはlistingsの書き込みが効かなければ例外を投げる(): void {
 		$listings = array(
@@ -2217,9 +2347,9 @@ final class ProductRepositoryTest extends TestCase {
 		// 書き込みは false を返し、META_LISTINGS は古いまま（空）＝入っていない。
 		$this->runSaveMetaWriteVerification( array(), $listings, false );
 
-		$this->assertInstanceOf( ProductListingsWriteFailure::class, $this->lastWriteFailure );
+		$this->assertInstanceOf( ProductMetaWriteFailure::class, $this->lastWriteFailure );
 		$this->assertSame(
-			'affilicard: 商品 5 の listings を保存できなかった（書き込んだ値が読み戻らない）。',
+			'affilicard: 商品 5 の meta を保存できなかった（書き込んだ値が読み戻らない: listings）。',
 			$this->lastWriteFailure->getMessage()
 		);
 		// **post ID は構造化して載せる。** 新規作成の途中でこれが投げられた時点で
@@ -2252,7 +2382,7 @@ final class ProductRepositoryTest extends TestCase {
 		$this->stubSaveMetaWriteVerification();
 		$this->runSaveMetaWriteVerification( array(), $listings, false );
 
-		$this->assertInstanceOf( ProductListingsWriteFailure::class, $this->lastWriteFailure );
+		$this->assertInstanceOf( ProductMetaWriteFailure::class, $this->lastWriteFailure );
 		$this->assertSame( array(), $this->mirrorWrites );
 	}
 
@@ -2350,9 +2480,9 @@ final class ProductRepositoryTest extends TestCase {
 		// 書き込みは true を返すのに META_LISTINGS は空のまま＝1 件も入っていない。
 		$this->runSaveMetaWriteVerification( array(), $listings, true );
 
-		$this->assertInstanceOf( ProductListingsWriteFailure::class, $this->lastWriteFailure );
+		$this->assertInstanceOf( ProductMetaWriteFailure::class, $this->lastWriteFailure );
 		$this->assertSame(
-			'affilicard: 商品 5 の listings を保存できなかった（書き込んだ値が読み戻らない）。',
+			'affilicard: 商品 5 の meta を保存できなかった（書き込んだ値が読み戻らない: listings）。',
 			$this->lastWriteFailure->getMessage()
 		);
 		$this->assertSame( 5, $this->lastWriteFailure->postId() );
@@ -2385,7 +2515,7 @@ final class ProductRepositoryTest extends TestCase {
 		$this->stubSaveMetaWriteVerification();
 		$this->runSaveMetaWriteVerification( array(), $listings, 4321 );
 
-		$this->assertInstanceOf( ProductListingsWriteFailure::class, $this->lastWriteFailure );
+		$this->assertInstanceOf( ProductMetaWriteFailure::class, $this->lastWriteFailure );
 		$this->assertSame( 5, $this->lastWriteFailure->postId() );
 		$this->assertSame( array(), $this->mirrorWrites );
 		$this->assertNotContains( ProductPostType::META_SCHEMA_VERSION, $this->savedMetaKeys );
@@ -2418,7 +2548,7 @@ final class ProductRepositoryTest extends TestCase {
 		$this->stubSaveMetaWriteVerification();
 		$this->runSaveMetaWriteVerification( array(), $listings, false );
 
-		$this->assertInstanceOf( ProductListingsWriteFailure::class, $this->lastWriteFailure );
+		$this->assertInstanceOf( ProductMetaWriteFailure::class, $this->lastWriteFailure );
 		$this->assertNotContains( ProductPostType::META_SCHEMA_VERSION, $this->savedMetaKeys );
 	}
 
@@ -2457,6 +2587,273 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	/**
+	 * listings 以外の要求フィールドも、入らなかったら黙って成功にしない。
+	 *
+	 * **以前は listings だけを読み直していた。** product_type / stock_status / extras /
+	 * release_date は `update_post_meta()` を呼んだきり戻り値も見ておらず、
+	 * `update_post_metadata` フィルタに短絡されると（コア `wp-includes/meta.php`
+	 * L241-243。true を返して 1 バイトも書かない）**運用者が送った値が消えたまま
+	 * REST が 201/200 を返していた**。しかもエラー本文の `unsaved_fields` は
+	 * `["listings"]` 固定で、「listings 以外は入った」と名乗っていた——誰も確かめて
+	 * いないのに、である。
+	 *
+	 * **メッセージまで固定する。** 型だけだと、モック不足で出た
+	 * `Mockery\Exception\NoMatchingExpectationException`（これも RuntimeException を
+	 * 継承する）で通ってしまい、テストが合否を区別できなくなる。
+	 */
+	public function test_saveMetaは入らなかったproduct_typeを黙って成功にしない(): void {
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'external_id' => 'rk-1',
+						'regular_url' => 'https://example.test/rk-1',
+					),
+				),
+			),
+		);
+
+		$this->stubSaveMetaWriteVerification();
+		// product_type の書き込みだけが短絡される（listings は普通に入る）。
+		$this->shortCircuitedMetaKeys = array( ProductPostType::META_PRODUCT_TYPE );
+		$this->runSaveMetaWriteVerification(
+			ProductSchema::sanitizeListings( $listings ),
+			$listings,
+			true,
+			array( 'product_type' => 'ebook' )
+		);
+
+		$this->assertInstanceOf( ProductMetaWriteFailure::class, $this->lastWriteFailure );
+		$this->assertSame(
+			'affilicard: 商品 5 の meta を保存できなかった（書き込んだ値が読み戻らない: product_type）。',
+			$this->lastWriteFailure->getMessage()
+		);
+		$this->assertSame( array( 'product_type' ), $this->lastWriteFailure->unsavedFields() );
+		$this->assertSame( 5, $this->lastWriteFailure->postId() );
+	}
+
+	/**
+	 * 入らなかったメタがあっても、listings は書き切ってから投げる。
+	 *
+	 * **手前のメタが 1 つ入らなかったからといって、そこで抜けてはならない。** 抜けると
+	 * 購入リンクの無い商品が残る——いちばん失って困るものを、いちばん軽い失敗を理由に
+	 * 失うことになる。報告（`unsaved_fields`）も実際より短くなる。
+	 */
+	public function test_saveMetaは入らなかったメタがあってもlistingsを書いてから投げる(): void {
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'external_id' => 'rk-1',
+						'regular_url' => 'https://example.test/rk-1',
+					),
+				),
+			),
+		);
+
+		$this->stubSaveMetaWriteVerification();
+		$this->shortCircuitedMetaKeys = array( ProductPostType::META_PRODUCT_TYPE );
+		$this->runSaveMetaWriteVerification(
+			ProductSchema::sanitizeListings( $listings ),
+			$listings,
+			true,
+			array( 'product_type' => 'ebook' )
+		);
+
+		$this->assertInstanceOf( ProductMetaWriteFailure::class, $this->lastWriteFailure );
+		$this->assertContains( ProductPostType::META_LISTINGS, $this->savedMetaKeys );
+		// listings は本当に入ったので、ミラーも刻印も進んでいる（listings の形式は新しい）。
+		$this->assertSame( array( 'mirror:add' ), $this->mirrorWrites );
+		$this->assertContains( ProductPostType::META_SCHEMA_VERSION, $this->savedMetaKeys );
+	}
+
+	/**
+	 * 複数入らなかったら、書いた順にすべて名指しする。
+	 *
+	 * 呼び出し側は**名指しされたフィールドだけ**を送り直す。1 つでも落ちれば、その値は
+	 * 消えたままになる。
+	 */
+	public function test_saveMetaは入らなかったメタを書いた順にすべて名指しする(): void {
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'external_id' => 'rk-1',
+						'regular_url' => 'https://example.test/rk-1',
+					),
+				),
+			),
+		);
+
+		$this->stubSaveMetaWriteVerification();
+		$this->shortCircuitedMetaKeys = array(
+			ProductPostType::META_EXTRAS,
+			ProductPostType::META_PRODUCT_TYPE,
+		);
+		$this->runSaveMetaWriteVerification(
+			ProductSchema::sanitizeListings( $listings ),
+			$listings,
+			true,
+			array(
+				'product_type' => 'ebook',
+				'extras'       => array(
+					array(
+						'label' => '著者',
+						'value' => 'たろう',
+					),
+				),
+			)
+		);
+
+		$this->assertInstanceOf( ProductMetaWriteFailure::class, $this->lastWriteFailure );
+		// 短絡させた順ではなく、saveMeta() が書く順（product_type → extras）で並ぶ。
+		$this->assertSame(
+			array( 'product_type', 'extras' ),
+			$this->lastWriteFailure->unsavedFields()
+		);
+	}
+
+	/**
+	 * listings も入らなければ、手前の未保存メタと一緒に名指しする。
+	 */
+	public function test_saveMetaはlistingsも入らなければ手前の未保存メタと一緒に名指しする(): void {
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'external_id' => 'rk-1',
+						'regular_url' => 'https://example.test/rk-1',
+					),
+				),
+			),
+		);
+
+		$this->stubSaveMetaWriteVerification();
+		$this->shortCircuitedMetaKeys = array( ProductPostType::META_STOCK_STATUS );
+		// listings は書いても読み戻らない（stored は空のまま）。
+		$this->runSaveMetaWriteVerification(
+			array(),
+			$listings,
+			true,
+			array( 'stock_status' => 'discontinued' )
+		);
+
+		$this->assertInstanceOf( ProductMetaWriteFailure::class, $this->lastWriteFailure );
+		$this->assertSame(
+			array( 'stock_status', 'listings' ),
+			$this->lastWriteFailure->unsavedFields()
+		);
+	}
+
+	/**
+	 * ロック競合で見送ったときも、手前の未保存メタを一緒に名指しする。
+	 *
+	 * **409 の `unsaved_fields` を `["listings"]` 固定にしていたのがまさにこの嘘だった。**
+	 * ロックを取れなかった保存でも、その手前のメタが入らなかったなら失われている。
+	 */
+	public function test_saveMetaはロック競合でも手前の未保存メタを一緒に名指しする(): void {
+		$this->shortCircuitedMetaKeys = array( ProductPostType::META_STOCK_STATUS );
+		$this->saveMetaLockTimeline( 0, array(), array(), array( 'stock_status' => 'discontinued' ) );
+
+		$this->assertInstanceOf( ProductLockUnavailable::class, $this->lastRefusal );
+		$this->assertSame(
+			array( 'stock_status', 'listings' ),
+			$this->lastRefusal->unsavedFields()
+		);
+	}
+
+	/**
+	 * ロック競合でも、手前のメタが入っていれば listings だけを名指しする。
+	 */
+	public function test_saveMetaはロック競合で手前が入っていればlistingsだけを名指しする(): void {
+		$this->saveMetaLockTimeline( 0 );
+
+		$this->assertInstanceOf( ProductLockUnavailable::class, $this->lastRefusal );
+		$this->assertSame( array( 'listings' ), $this->lastRefusal->unsavedFields() );
+	}
+
+	/**
+	 * **mask_* が入らなくても保存は失敗させない。**
+	 *
+	 * この経路の呼び出し側は mask_* を 1 つも設定できない——`ProductSchema::args()` にも
+	 * `ProductSchema::sanitizeItem()` にも `ProductsController::extractProductData()` にも
+	 * 無い。ここで書いているのは「更新なら既存商品から読み直した、いま入っている値」か
+	 * 「作成なら登録済み default と同値の既定」なので、短絡フィルタに潰されても
+	 * **保存されている値は要求どおりのまま**である。それを 500 にすると、実害の無い
+	 * サイトの保存が全部止まる（編集の主経路であるブロックエディタのサイドバーは
+	 * コアの `wp/v2` meta 経由で、そもそもここを通らない）。
+	 */
+	public function test_saveMetaはmask系が入らなくても保存を失敗させない(): void {
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'external_id' => 'rk-1',
+						'regular_url' => 'https://example.test/rk-1',
+					),
+				),
+			),
+		);
+
+		$this->stubSaveMetaWriteVerification();
+		$this->shortCircuitedMetaKeys = array(
+			ProductPostType::META_MASK_BLUR,
+			ProductPostType::META_MASK_R18,
+			ProductPostType::META_MASK_LABEL,
+		);
+		$this->runSaveMetaWriteVerification(
+			ProductSchema::sanitizeListings( $listings ),
+			$listings,
+			true,
+			array(
+				'mask_blur'  => true,
+				'mask_r18'   => true,
+				'mask_label' => 'サンプル注意文言',
+			)
+		);
+
+		$this->assertNull( $this->lastWriteFailure );
+		$this->assertContains( ProductPostType::META_SCHEMA_VERSION, $this->savedMetaKeys );
+	}
+
+	/**
+	 * **schema_version が入らなくても保存は失敗させない。**
+	 *
+	 * 刻印は要求フィールドではなく、listings の形式を指す印である。しかも**入らない側が
+	 * 安全**——刻印の無い商品は「未移行」と読まれるだけで、中身は既に新形式なので移行
+	 * バッチが再訪しても no-op になる。危険なのは逆向き（listings が入っていないのに
+	 * 刻印が押される）で、そちらは並び（listings の保存後に押す）が塞いでいる。
+	 */
+	public function test_saveMetaはschema_versionが入らなくても保存を失敗させない(): void {
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'external_id' => 'rk-1',
+						'regular_url' => 'https://example.test/rk-1',
+					),
+				),
+			),
+		);
+
+		$this->stubSaveMetaWriteVerification();
+		$this->shortCircuitedMetaKeys = array( ProductPostType::META_SCHEMA_VERSION );
+		$this->runSaveMetaWriteVerification(
+			ProductSchema::sanitizeListings( $listings ),
+			$listings,
+			true
+		);
+
+		$this->assertNull( $this->lastWriteFailure );
+	}
+
+	/**
 	 * 書き込み検証テスト用の WP 関数スタブ。
 	 *
 	 * **値の切り替えはプロパティで行う。** WP_Mock は同じ関数名について最初の期待だけを
@@ -2464,12 +2861,13 @@ final class ProductRepositoryTest extends TestCase {
 	 */
 	private function stubSaveMetaWriteVerification(): void {
 		$this->mockLockWpdb( 1 );
-		$this->storedListings      = array();
-		$this->listingsWriteResult = true;
-		$this->lastWriteFailure    = null;
-		$this->mirrorWrites        = array();
-		$this->savedMetaKeys       = array();
-		$this->savedMetaValues     = array();
+		$this->shortCircuitedMetaKeys = array();
+		$this->storedListings         = array();
+		$this->listingsWriteResult    = true;
+		$this->lastWriteFailure       = null;
+		$this->mirrorWrites           = array();
+		$this->savedMetaKeys          = array();
+		$this->savedMetaValues        = array();
 
 		WP_Mock::userFunction( 'add_post_meta' )
 			->andReturnUsing(
@@ -2487,16 +2885,21 @@ final class ProductRepositoryTest extends TestCase {
 			);
 		WP_Mock::userFunction( 'get_post_meta' )
 			->andReturnUsing(
-				function ( $post_id, $key = '', $single = false ) {
-					return ProductPostType::META_LISTINGS === $key ? $this->storedListings : array();
-				}
+				fn ( $post_id, $key = '', $single = false ) => $this->readMetaAsWordPressWould( (string) $key, (bool) $single )
 			);
 		WP_Mock::userFunction( 'update_post_meta' )
 			->andReturnUsing(
 				function ( $post_id, $key, $value ) {
 					$this->savedMetaKeys[]                  = (string) $key;
 					$this->savedMetaValues[ (string) $key ] = $value;
-					return ProductPostType::META_LISTINGS === $key ? $this->listingsWriteResult : true;
+					// **listings だけは storedListings（テストが決める）に従う。**
+					// それ以外は実 WP と同じく書いたものが読み戻る——ここを捨てると、
+					// listings 以外まで「入らなかった」ことになって検証の的がぼやける。
+					if ( ProductPostType::META_LISTINGS !== $key ) {
+						$this->storeMetaAsWordPressWould( (string) $key, $value );
+						return true;
+					}
+					return $this->listingsWriteResult;
 				}
 			);
 	}
@@ -2504,11 +2907,12 @@ final class ProductRepositoryTest extends TestCase {
 	/**
 	 * 保存前の listings と update_post_meta の戻り値を決めて saveMeta() を走らせる。
 	 *
-	 * @param array<int, mixed> $stored      保存前の META_LISTINGS（＝書き込み後に読み直される値）。
-	 * @param array<int, mixed> $listings    保存しようとする listings。
-	 * @param mixed             $writeResult update_post_meta( META_LISTINGS ) の戻り値。
+	 * @param array<int, mixed>    $stored      保存前の META_LISTINGS（＝書き込み後に読み直される値）。
+	 * @param array<int, mixed>    $listings    保存しようとする listings。
+	 * @param mixed                $writeResult update_post_meta( META_LISTINGS ) の戻り値。
+	 * @param array<string, mixed> $data        listings 以外に saveMeta() へ渡す要求フィールド。
 	 */
-	private function runSaveMetaWriteVerification( array $stored, array $listings, $writeResult ): void {
+	private function runSaveMetaWriteVerification( array $stored, array $listings, $writeResult, array $data = array() ): void {
 		$this->storedListings      = $stored;
 		$this->listingsWriteResult = $writeResult;
 		$this->lastWriteFailure    = null;
@@ -2517,8 +2921,8 @@ final class ProductRepositoryTest extends TestCase {
 		$this->savedMetaValues     = array();
 
 		try {
-			( new ProductRepository() )->saveMeta( 5, array( 'listings' => $listings ) );
-		} catch ( ProductListingsWriteFailure $e ) {
+			( new ProductRepository() )->saveMeta( 5, array_merge( $data, array( 'listings' => $listings ) ) );
+		} catch ( ProductMetaWriteFailure $e ) {
 			$this->lastWriteFailure = $e;
 		}
 	}
