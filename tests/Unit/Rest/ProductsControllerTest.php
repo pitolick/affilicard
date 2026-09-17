@@ -5,6 +5,7 @@ namespace Affilicard\Tests\Unit\Rest;
 
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Repository\ProductLockUnavailable;
+use Affilicard\Repository\ProductListingsWriteFailure;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Repository\ProductRepositoryInterface;
 use Affilicard\Rest\ProductsController;
@@ -588,6 +589,114 @@ final class ProductsControllerTest extends TestCase {
 		$this->assertSame( 'affilicard_listing_locked', $data['results'][0]['code'] );
 		$this->assertSame( 'created', $data['results'][1]['status'] );
 		$this->assertSame( 12, $data['results'][1]['id'] );
+		$this->assertSame( 1, $data['created'] );
+		$this->assertSame( 1, $data['failed'] );
+	}
+
+	/**
+	 * 書き込みが効かなかったら 500 を返す（409 ではない）。
+	 *
+	 * **409 と 500 は運用者にとって意味が違う。** 409（ロック競合）は「そのまま
+	 * もう一度保存すれば通る」で、待てば解消する。こちらは「書いたのに入らなかった」で、
+	 * 原因（他プラグインの meta フィルタ・壊れた meta 行）を取り除くまで何度やり直しても
+	 * 同じ結果になる。同じ 409 に混ぜると、直らない失敗を運用者が延々とリトライする。
+	 */
+	public function test_createは書き込みが効かなければ500と保存失敗コードを返す(): void {
+		WP_Mock::userFunction( 'current_user_can' )->andReturn( true );
+
+		$repository = Mockery::mock( ProductRepositoryInterface::class );
+		$repository->shouldReceive( 'save' )
+			->once()
+			->andThrow( new ProductListingsWriteFailure( 'affilicard: 商品 99 の listings を保存できなかった（書き込んだ値が読み戻らない）。' ) );
+		$repository->shouldReceive( 'find' )->never();
+
+		$controller = new ProductsController( $repository );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products' );
+		$request->set_param( 'title', 'タイトル' );
+
+		$response = $controller->create( $request );
+		$data     = $response->get_data();
+
+		$this->assertSame( 500, $response->get_status() );
+		$this->assertSame( 'affilicard_save_failed', $data['code'] );
+		$this->assertNotSame( '', (string) $data['message'] );
+	}
+
+	/**
+	 * 更新も同じ（購入リンクの編集はこちらを通る）。
+	 */
+	public function test_updateは書き込みが効かなければ500と保存失敗コードを返す(): void {
+		WP_Mock::userFunction( 'current_user_can' )->andReturn( true );
+
+		$repository = Mockery::mock( ProductRepositoryInterface::class );
+		$repository->shouldReceive( 'find' )
+			->with( 42 )
+			->andReturn(
+				array(
+					'id'    => 42,
+					'title' => '既存',
+				)
+			);
+		$repository->shouldReceive( 'save' )
+			->once()
+			->andThrow( new ProductListingsWriteFailure( 'affilicard: 商品 42 の listings を保存できなかった（書き込んだ値が読み戻らない）。' ) );
+
+		$controller = new ProductsController( $repository );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products/42' );
+		$request->set_param( 'id', 42 );
+		$request->set_param( 'title', '書き換え' );
+
+		$response = $controller->update( $request );
+		$data     = $response->get_data();
+
+		$this->assertSame( 500, $response->get_status() );
+		$this->assertSame( 'affilicard_save_failed', $data['code'] );
+	}
+
+	/**
+	 * 一括作成では、書き込みが効かなかった item だけを error にして他は通す。
+	 *
+	 * 捕まえないと例外がループの外まで抜け、既に作成できた item の結果ごと 500 で
+	 * 消える（呼び出し側はどれが入ったか判別できない）。
+	 */
+	public function test_bulkCreateは書き込み失敗のitemだけをerrorにする(): void {
+		WP_Mock::userFunction( 'current_user_can' )->andReturn( true );
+		WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing( static fn( $v ) => is_string( $v ) ? trim( $v ) : $v );
+		WP_Mock::userFunction( 'wp_kses_post' )->andReturnUsing( static fn( $v ) => $v );
+		WP_Mock::userFunction( 'sanitize_key' )->andReturnUsing( static fn( $v ) => strtolower( (string) $v ) );
+		WP_Mock::userFunction( 'esc_url_raw' )->andReturnUsing( static fn( $v ) => $v );
+
+		$repository = Mockery::mock( ProductRepositoryInterface::class );
+		$call       = 0;
+		$repository->shouldReceive( 'save' )
+			->twice()
+			->andReturnUsing(
+				static function () use ( &$call ) {
+					++$call;
+					if ( 1 === $call ) {
+						throw new ProductListingsWriteFailure( 'affilicard: 商品 11 の listings を保存できなかった（書き込んだ値が読み戻らない）。' );
+					}
+					return 12;
+				}
+			);
+
+		$controller = new ProductsController( $repository );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products/bulk' );
+		$request->set_param(
+			'products',
+			array(
+				array( 'title' => '書き込めない商品' ),
+				array( 'title' => '通る商品' ),
+			)
+		);
+
+		$response = $controller->bulkCreate( $request );
+		$data     = $response->get_data();
+
+		$this->assertSame( 207, $response->get_status() );
+		$this->assertSame( 'error', $data['results'][0]['status'] );
+		$this->assertSame( 'affilicard_save_failed', $data['results'][0]['code'] );
+		$this->assertSame( 'created', $data['results'][1]['status'] );
 		$this->assertSame( 1, $data['created'] );
 		$this->assertSame( 1, $data['failed'] );
 	}

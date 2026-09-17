@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Rest;
 
 use Affilicard\PostType\ProductPostType;
+use Affilicard\Repository\ProductListingsWriteFailure;
 use Affilicard\Repository\ProductLockUnavailable;
 use Affilicard\Repository\ProductRepositoryInterface;
 use WP_REST_Request;
@@ -30,6 +31,14 @@ final class ProductsController {
 	 * よいかどうかが逆になるので、同じコードに潰してはならない。
 	 */
 	private const CODE_LISTING_LOCKED = 'affilicard_listing_locked';
+
+	/**
+	 * 保存そのものが効かなかったときのコード（HTTP 500）。
+	 *
+	 * **ロック競合（409）と混ぜない。** 409 は「待てば通る」、こちらは「原因を取り除く
+	 * まで直らない」で、運用者が取るべき行動が逆である。
+	 */
+	private const CODE_SAVE_FAILED = 'affilicard_save_failed';
 
 	public function __construct( private ProductRepositoryInterface $repository ) {}
 
@@ -142,6 +151,33 @@ final class ProductsController {
 	}
 
 	/**
+	 * 書き込みが効かなかった（保存したのに入っていない）ときの応答。
+	 *
+	 * {@see \Affilicard\Repository\ProductListingsWriteFailure} を捕まえてここへ変える。
+	 * 捕まえないと例外が REST の外まで抜け、WordPress の一般的な 500（あるいは致命的
+	 * エラー）になって、何が起きたのかが呼び出し側にも運用者にも伝わらない。
+	 */
+	private static function saveFailedResponse(): WP_REST_Response {
+		return new WP_REST_Response(
+			array(
+				'code'    => self::CODE_SAVE_FAILED,
+				'message' => self::saveFailedMessage(),
+			),
+			500
+		);
+	}
+
+	/**
+	 * 「やり直しても直らない」ことまで書いた文言（409 の文言と対になる）。
+	 */
+	private static function saveFailedMessage(): string {
+		return __(
+			'購入リンクを保存できませんでした（書き込んだ内容がデータベースに入っていません）。時間を置いても解消しません。別のプラグインが meta の保存に介入していないか確認してください。',
+			'affilicard'
+		);
+	}
+
+	/**
 	 * 「やり直せば通る」ところまで書いた文言。何が保存されなかったかを明示する。
 	 */
 	private static function lockedMessage(): string {
@@ -235,6 +271,19 @@ final class ProductsController {
 					'message' => self::lockedMessage(),
 				);
 				continue;
+			} catch ( ProductListingsWriteFailure $e ) {
+				// listings を書いたのに入らなかった。**捕まえないとループの外まで抜け、
+				// 既に作成できた item の結果ごと 500 で消える**（呼び出し側はどれが
+				// 入ったのか判別できない）。ロック競合と同じく per-item の報告に混ぜるが、
+				// コードは分ける——積み直しても直らない失敗である。
+				++$failed;
+				$results[] = array(
+					'index'   => $index,
+					'status'  => 'error',
+					'code'    => self::CODE_SAVE_FAILED,
+					'message' => self::saveFailedMessage(),
+				);
+				continue;
 			}
 			if ( $id <= 0 ) {
 				++$failed;
@@ -286,11 +335,13 @@ final class ProductsController {
 			$id = $this->repository->save( $data );
 		} catch ( ProductLockUnavailable $e ) {
 			return self::lockedResponse();
+		} catch ( ProductListingsWriteFailure $e ) {
+			return self::saveFailedResponse();
 		}
 		if ( $id <= 0 ) {
 			return new WP_REST_Response(
 				array(
-					'code'    => 'affilicard_save_failed',
+					'code'    => self::CODE_SAVE_FAILED,
 					'message' => __( '商品の保存に失敗しました。', 'affilicard' ),
 				),
 				500
@@ -339,11 +390,13 @@ final class ProductsController {
 			$saved_id = $this->repository->save( $data );
 		} catch ( ProductLockUnavailable $e ) {
 			return self::lockedResponse();
+		} catch ( ProductListingsWriteFailure $e ) {
+			return self::saveFailedResponse();
 		}
 		if ( $saved_id <= 0 ) {
 			return new WP_REST_Response(
 				array(
-					'code'    => 'affilicard_save_failed',
+					'code'    => self::CODE_SAVE_FAILED,
 					'message' => __( '商品の更新に失敗しました。', 'affilicard' ),
 				),
 				500

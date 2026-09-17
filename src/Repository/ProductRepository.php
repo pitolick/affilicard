@@ -10,6 +10,7 @@ use Affilicard\Pricing\OfferIdentity;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Pricing\OfferStatusReset;
 use Affilicard\Pricing\OfferUrl;
+use Affilicard\Rest\ProductSchema;
 use Affilicard\Schema\SchemaVersion;
 use Affilicard\Settings\GeneralSettings;
 use Affilicard\Stock\StockStatus;
@@ -412,8 +413,16 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * 運用者が同じ内容でやり直せばそのまま通る。逆に listings は**一切触っていない**——
 	 * 古い値が無傷で残る、というのがこの例外の意味である。
 	 *
+	 * **書いたのに入らなかった場合も黙らない。** `update_post_meta()` は失敗しても
+	 * false を返すだけなので、握り潰すと listings が 1 件も入っていないのに REST は
+	 * 201/200 を返す。false のときは読み直して確かめ、入っていなければ
+	 * {@see ProductListingsWriteFailure} を投げる（詳細は
+	 * {@see self::assertListingsPersisted()}）。**ロック競合とは別の型にする**——
+	 * あちらは待てば通るが、こちらは原因を取り除くまで直らない。
+	 *
 	 * @param array<string, mixed> $data
 	 * @throws ProductLockUnavailable ロックを取得できず listings を書かなかったとき.
+	 * @throws ProductListingsWriteFailure 書き込んだ listings が保存されていなかったとき.
 	 */
 	public function saveMeta( int $postId, array $data ): void {
 		$product_type = isset( $data['product_type'] ) && '' !== (string) $data['product_type']
@@ -459,7 +468,9 @@ final class ProductRepository implements ProductRepositoryInterface {
 				}
 
 				$next = OfferStatusReset::forIdentityChanges( self::listingsMeta( $postId ), $listings );
-				update_post_meta( $postId, ProductPostType::META_LISTINGS, $next );
+				if ( false === update_post_meta( $postId, ProductPostType::META_LISTINGS, $next ) ) {
+					self::assertListingsPersisted( $postId, $next );
+				}
 
 				// **ミラーは「書こうとした値」ではなく「実際に入っている値」から作る。**
 				// ここで $listings（渡された配列）や、直前に組み立てた $next を使うと、
@@ -475,6 +486,53 @@ final class ProductRepository implements ProductRepositoryInterface {
 				// スナップショットから作ったミラーが後着で勝つ（理由は上の PHPDoc）。
 				$this->syncExternalIdMirror( $postId, self::listingsMeta( $postId ) );
 			}
+		);
+	}
+
+	/**
+	 * `update_post_meta()` が false を返したとき、listings が実際に入ったかを読み直して確かめる。
+	 *
+	 * **false は「失敗」と「値が変わらなかった」の両方で返る。** コアの
+	 * `update_metadata()`（`wp-includes/meta.php`。以下の行番号は WordPress 6.8）を読むと、
+	 * false になる経路はこれだけある——
+	 *
+	 * | 行 | 意味 |
+	 * | --- | --- |
+	 * | L191-203 | 引数が不正（object ID が 0 等） |
+	 * | L242-243 | `update_post_metadata` フィルタが false で短絡した（他プラグインの介入） |
+	 * | L247-253 | **既存値と同じ**ため何も書かずに戻った（＝失敗ではない） |
+	 * | L315-317 | `$wpdb->update()` が失敗した（＝本当の失敗） |
+	 *
+	 * さらに meta 行がまだ無い場合は `add_metadata()` へ委ね（L257-258）、そちらも
+	 * `$wpdb->insert()` の失敗で false を返す。**戻り値だけでは切り分けられない**ので、
+	 * 保存後の値を読み直して「入っているか」で判定する
+	 * （{@see \Affilicard\Upgrade\PluginUpgrade::writeMigratedListings()} と同じ流儀）。
+	 *
+	 * **比較の相手は sanitize 後の形である。** コアは `wp_unslash()`（L214）→
+	 * `sanitize_meta()`（L215）を通した値を格納するため、読み直した値は渡した配列と
+	 * 一致するとは限らない。META_LISTINGS の sanitize_callback は
+	 * {@see \Affilicard\PostType\ProductMeta::register()} が登録した
+	 * {@see ProductSchema::sanitizeListings()} なので、同じ 2 段を自分で適用した値と
+	 * 突き合わせる。これで「値が変わらなかった」false は読み直しが一致して素通りし
+	 * （listings を変えない PATCH は毎回ここを通る）、本当に入らなかったときだけ落ちる。
+	 *
+	 * **{@see ProductLockUnavailable} とは別の型で投げる。** あちらは「書かなかった・
+	 * やり直せば通る」、こちらは「書いたのに入らなかった・原因を取り除くまで直らない」で、
+	 * 運用者が取るべき行動が違う（REST は 409 と 500 で返し分ける）。
+	 *
+	 * @param array<int, mixed> $next 書き込もうとした listings。
+	 * @throws ProductListingsWriteFailure 書き込んだ値が読み戻らなかったとき.
+	 */
+	private static function assertListingsPersisted( int $postId, array $next ): void {
+		$expected = ProductSchema::sanitizeListings( wp_unslash( $next ) );
+		if ( self::listingsMeta( $postId ) === $expected ) {
+			// 既に望みの形が入っている＝「値が変わらなかった」false。成功として扱う。
+			return;
+		}
+
+		throw new ProductListingsWriteFailure(
+			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- HTML 出力ではなく PHP の例外メッセージ。埋め込むのは post ID（int）のみ。
+			sprintf( 'affilicard: 商品 %d の listings を保存できなかった（書き込んだ値が読み戻らない）。', $postId )
 		);
 	}
 

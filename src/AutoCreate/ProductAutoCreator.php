@@ -125,6 +125,12 @@ final class ProductAutoCreator {
 				// 握り潰さず一時失敗として返すのが、ここでの「黙らない」の形である。
 				return WorkOutcome::TRANSIENT_FAILURE;
 			}
+			// **{@see \Affilicard\Repository\ProductListingsWriteFailure} は捕まえない。**
+			// あれは「書いたのに入らなかった」で、積み直しても同じ結果になる（原因は
+			// 他プラグインの meta フィルタや壊れた meta 行で、時間では解消しない）。
+			// 一時失敗として backoff すると、直らない失敗が再試行の山に埋もれる。
+			// 投げたまま Action Scheduler へ抜けさせ、failed アクションとして残す
+			// （ジョブ一覧が運用者にとっての記録になる）。ロックは finally で返る。
 			// save 失敗（0）はリトライで解決し得るため一時失敗。
 			return $post_id > 0 ? WorkOutcome::SUCCESS : WorkOutcome::TRANSIENT_FAILURE;
 		} finally {

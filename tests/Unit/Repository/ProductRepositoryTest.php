@@ -6,7 +6,9 @@ namespace Affilicard\Tests\Unit\Repository;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Pricing\FetchStatus;
 use Affilicard\Repository\ProductLockUnavailable;
+use Affilicard\Repository\ProductListingsWriteFailure;
 use Affilicard\Repository\ProductRepository;
+use Affilicard\Rest\ProductSchema;
 use Affilicard\Schema\SchemaVersion;
 use Affilicard\Settings\GeneralSettings;
 use Mockery;
@@ -43,6 +45,30 @@ final class ProductRepositoryTest extends TestCase {
 	 * @var array<int, string>
 	 */
 	private array $savedMetaKeys = array();
+
+	/**
+	 * 直前の runSaveMetaWriteVerification() が捕まえた保存失敗（無ければ null）。
+	 *
+	 * @var ProductListingsWriteFailure|null
+	 */
+	private ?ProductListingsWriteFailure $lastWriteFailure = null;
+
+	/**
+	 * update_post_meta( META_LISTINGS ) に返させる値。
+	 *
+	 * **テストごとに userFunction を登録し直しても切り替わらない**（WP_Mock は最初の
+	 * 期待だけを保持する）ため、ここから読む。
+	 *
+	 * @var mixed
+	 */
+	private $listingsWriteResult = true;
+
+	/**
+	 * extid ミラーへの書き込み（'mirror:add' / 'mirror:delete'）。
+	 *
+	 * @var array<int, string>
+	 */
+	private array $mirrorWrites = array();
 
 	public function setUp(): void {
 		parent::setUp();
@@ -837,8 +863,14 @@ final class ProductRepositoryTest extends TestCase {
 	 * ようになり（自動作成が既存商品を誤検出して更新先を間違える）、同時に本当に
 	 * 保存されている external_id の行が消える（重複商品を作る）。
 	 *
-	 * ここでは listings の update_post_meta だけを失敗させ（WordPress は書けなかったとき
-	 * false を返す）、保存前の値が残った状態を作る。
+	 * ここでは書き込みは成功させたうえで、**読み直した値が渡した配列と違う**状態を作る。
+	 * 実環境でもこの差は出る——コアは `wp_unslash()` → `sanitize_meta()`（＝
+	 * ProductSchema::sanitizeListings）を通した値を格納するし、ロックの外側にいる
+	 * ブロックエディタの保存が同じ meta を書き換えることもある。ミラーは索引なので、
+	 * 渡した値ではなく**入っている値**に従わなければならない。
+	 *
+	 * 書き込み自体が効かなかった場合はミラーを作り直さずに例外で報告する（別テスト
+	 * `test_saveMetaは書き込みが効かなければミラーを作り直さない`）。
 	 */
 	public function test_saveMetaのミラーは保存後のlistingsから作る(): void {
 		// saveMeta() の listings RMW は ListingLock の中で行う（GET_LOCK/RELEASE_LOCK）。
@@ -859,13 +891,9 @@ final class ProductRepositoryTest extends TestCase {
 					return ProductPostType::META_LISTINGS === $key ? $this->storedListings : array();
 				}
 			);
-		// listings の書き込みだけ失敗させる（＝保存後も storedListings のまま）。
-		WP_Mock::userFunction( 'update_post_meta' )
-			->andReturnUsing(
-				static function ( $post_id, $key, $value ) {
-					return ProductPostType::META_LISTINGS !== $key;
-				}
-			);
+		// 書き込みは成功する。ただし読み直すと storedListings のまま＝渡した配列とは
+		// 違う値が入っている（sanitize や第三者の書き込みで実際に起こる差）。
+		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
 
 		$added = array();
 		WP_Mock::userFunction( 'add_post_meta' )
@@ -2080,6 +2108,198 @@ final class ProductRepositoryTest extends TestCase {
 		$this->saveMetaLockTimeline( 1 );
 
 		$this->assertNull( $this->lastRefusal );
+	}
+
+	/**
+	 * 書き込みが効かなかったら saveMeta() は例外で報告する。
+	 *
+	 * `update_post_meta()` は**失敗したときも false を返す**（コア
+	 * `wp-includes/meta.php` の `update_metadata()`: フィルタの短絡 L242-243、
+	 * `$wpdb->update()` の失敗 L315-317）。握り潰すと、正規化した listings が 1 件も
+	 * 入っていないのに REST は 201/200 を返し、ミラーだけが古い値から作り直される。
+	 *
+	 * **メッセージまで固定する。** 型だけだと、モック不足で出た
+	 * `Mockery\Exception\NoMatchingExpectationException`（これも RuntimeException を
+	 * 継承する）で通ってしまい、テストが合否を区別できなくなる——
+	 * ProductListingsWriteFailure も RuntimeException を継承するのでなおさらである。
+	 */
+	public function test_saveMetaはlistingsの書き込みが効かなければ例外を投げる(): void {
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'external_id' => 'rk-1',
+						'regular_url' => 'https://example.test/rk-1',
+					),
+				),
+			),
+		);
+
+		$this->stubSaveMetaWriteVerification();
+		// 書き込みは false を返し、META_LISTINGS は古いまま（空）＝入っていない。
+		$this->runSaveMetaWriteVerification( array(), $listings, false );
+
+		$this->assertInstanceOf( ProductListingsWriteFailure::class, $this->lastWriteFailure );
+		$this->assertSame(
+			'affilicard: 商品 5 の listings を保存できなかった（書き込んだ値が読み戻らない）。',
+			$this->lastWriteFailure->getMessage()
+		);
+	}
+
+	/**
+	 * 書き込みが効かなかったら extid ミラーは作り直さない。
+	 *
+	 * ミラーは実際に入っている値から作るため、古い listings から作り直しても
+	 * 整合は取れている。だが保存が失敗した事実を伝えないまま副作用だけ進めると、
+	 * 「例外で抜けた＝listings は触っていない」という約束が曖昧になる。
+	 * 書けなかったときは何もせず報告だけする、を時系列で固定する。
+	 */
+	public function test_saveMetaは書き込みが効かなければミラーを作り直さない(): void {
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'external_id' => 'rk-1',
+						'regular_url' => 'https://example.test/rk-1',
+					),
+				),
+			),
+		);
+
+		$this->stubSaveMetaWriteVerification();
+		$this->runSaveMetaWriteVerification( array(), $listings, false );
+
+		$this->assertInstanceOf( ProductListingsWriteFailure::class, $this->lastWriteFailure );
+		$this->assertSame( array(), $this->mirrorWrites );
+	}
+
+	/**
+	 * 「値が変わらなかった」false は成功として扱う（例外にしない）。
+	 *
+	 * WordPress は、既に入っている値と同じものを書こうとすると**何も書かずに false を
+	 * 返す**（コア `wp-includes/meta.php` L247-253。比較対象は `sanitize_meta()` を
+	 * 通した後の値）。listings を変えない PATCH では毎回この false が返るため、
+	 * false をそのまま失敗とみなすと通常の更新が軒並み 500 になる。
+	 */
+	public function test_saveMetaは値が変わらなかった偽を成功として扱う(): void {
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'external_id' => 'rk-1',
+						'regular_url' => 'https://example.test/rk-1',
+					),
+				),
+			),
+		);
+
+		$this->stubSaveMetaWriteVerification();
+		// 実際に格納される形（登録済み sanitize_callback = ProductSchema::sanitizeListings の
+		// 出力）が既に入っている状態。この状態で書くと WordPress は false を返す。
+		$stored = ProductSchema::sanitizeListings( $listings );
+		$this->runSaveMetaWriteVerification( $stored, $listings, false );
+
+		$this->assertNull( $this->lastWriteFailure );
+		// 見送っていないので extid ミラーは作り直される（external_id が 1 件足される）。
+		$this->assertSame( array( 'mirror:add' ), $this->mirrorWrites );
+	}
+
+	/**
+	 * 書き込みが効いたら（true）読み直しにも行かず素通りする。
+	 */
+	public function test_saveMetaは書き込みが効けば例外を投げない(): void {
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'external_id' => 'rk-1',
+						'regular_url' => 'https://example.test/rk-1',
+					),
+				),
+			),
+		);
+
+		$this->stubSaveMetaWriteVerification();
+		$this->runSaveMetaWriteVerification( array(), $listings, true );
+
+		$this->assertNull( $this->lastWriteFailure );
+	}
+
+	/**
+	 * 書き込み検証テスト用の WP 関数スタブ。
+	 *
+	 * **値の切り替えはプロパティで行う。** WP_Mock は同じ関数名について最初の期待だけを
+	 * 保持するため、テスト本体で登録し直しても無言で効かない。
+	 */
+	private function stubSaveMetaWriteVerification(): void {
+		$this->mockLockWpdb( 1 );
+		$this->storedListings      = array();
+		$this->listingsWriteResult = true;
+		$this->lastWriteFailure    = null;
+		$this->mirrorWrites        = array();
+
+		WP_Mock::userFunction( 'sanitize_text_field' )
+			->andReturnUsing( static fn( $v ) => is_string( $v ) ? trim( $v ) : $v );
+		WP_Mock::userFunction( 'sanitize_key' )
+			->andReturnUsing(
+				static function ( $v ) {
+					$v = is_string( $v ) ? strtolower( $v ) : '';
+					return (string) preg_replace( '/[^a-z0-9_\-]/', '', $v );
+				}
+			);
+		// コアは wp_unslash() してから sanitize_meta() する（meta.php L214-215）。
+		// 実環境と同じ順序を再現できるよう、素通しのスタブを置く。
+		WP_Mock::userFunction( 'wp_unslash' )->andReturnUsing( static fn( $v ) => $v );
+		WP_Mock::userFunction( 'add_post_meta' )
+			->andReturnUsing(
+				function () {
+					$this->mirrorWrites[] = 'mirror:add';
+					return true;
+				}
+			);
+		WP_Mock::userFunction( 'delete_post_meta' )
+			->andReturnUsing(
+				function () {
+					$this->mirrorWrites[] = 'mirror:delete';
+					return true;
+				}
+			);
+		WP_Mock::userFunction( 'get_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key = '', $single = false ) {
+					return ProductPostType::META_LISTINGS === $key ? $this->storedListings : array();
+				}
+			);
+		WP_Mock::userFunction( 'update_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) {
+					return ProductPostType::META_LISTINGS === $key ? $this->listingsWriteResult : true;
+				}
+			);
+	}
+
+	/**
+	 * 保存前の listings と update_post_meta の戻り値を決めて saveMeta() を走らせる。
+	 *
+	 * @param array<int, mixed> $stored      保存前の META_LISTINGS（＝書き込み後に読み直される値）。
+	 * @param array<int, mixed> $listings    保存しようとする listings。
+	 * @param mixed             $writeResult update_post_meta( META_LISTINGS ) の戻り値。
+	 */
+	private function runSaveMetaWriteVerification( array $stored, array $listings, $writeResult ): void {
+		$this->storedListings      = $stored;
+		$this->listingsWriteResult = $writeResult;
+		$this->lastWriteFailure    = null;
+		$this->mirrorWrites        = array();
+
+		try {
+			( new ProductRepository() )->saveMeta( 5, array( 'listings' => $listings ) );
+		} catch ( ProductListingsWriteFailure $e ) {
+			$this->lastWriteFailure = $e;
+		}
 	}
 
 	public function test_updateListing_対象platformのみ差し替え他listingを保持して保存する(): void {
