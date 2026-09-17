@@ -60,6 +60,42 @@ final class ProductsController {
 	 */
 	private const ERROR_PRODUCT_ID_KEY = 'id';
 
+	/**
+	 * 「要求のうち、この項目だけが保存されなかった」を機械可読で名指しするキー。
+	 *
+	 * **`id` だけでは部分保存から復帰できない。**
+	 * {@see \Affilicard\Repository\ProductRepository::save()} は投稿行
+	 * （title / content / status）→ listings 以外のメタ → listings の順に書き、
+	 * listings で失敗したときだけ例外を投げる。つまり 409 / 500 が返る時点で
+	 * **要求の大半は既に保存されている**。`id` はその商品に辿り着く手段を与えるが、
+	 * 「何が入って何が入らなかったのか」は伝えない。分からなければ呼び出し側は
+	 * 「全部送り直す」か「何も直さない」の二択になり、前者は保存済みの編集を
+	 * 無意味に上書きし、後者は購入リンクの無い商品を放置する。
+	 *
+	 * **だから残った差分だけを名指しする。** 値は保存されなかったフィールド名の配列で、
+	 * ここに載らなかったものは保存されている、という読み方をする。文面ではなく配列に
+	 * するのは、呼び出し側が文言の一致ではなくフィールド名で分岐できるようにするため
+	 * （文言は翻訳で変わる）。
+	 *
+	 * **載せるのは部分保存のときだけである。** 投稿行そのものを作れなかった・更新
+	 * できなかった 500 は「1 つも保存されていない」ので、ここに `listings` と書くと
+	 * 「listings 以外は入った」という嘘になる。載らないことが「部分保存ではない」を
+	 * 表す（`id` の有無が「商品ができたか否か」を表すのと同じ流儀）。
+	 */
+	private const ERROR_UNSAVED_FIELDS_KEY = 'unsaved_fields';
+
+	/**
+	 * 部分保存で失われた要求フィールド。
+	 *
+	 * listings の書き込みは常に最後で、そこで失敗しても他のフィールドは書き終えている
+	 * （{@see \Affilicard\Repository\ProductRepository::saveMeta()} の並び）。
+	 * ロック競合（409）でも書き込み失敗（500）でも失われるのは listings だけなので、
+	 * 2 つの応答で同じ値を使う。
+	 *
+	 * @var array<int, string>
+	 */
+	private const UNSAVED_LISTINGS = array( 'listings' );
+
 	public function __construct( private ProductRepositoryInterface $repository ) {}
 
 	public function registerRoutes( string $namespace ): void {
@@ -167,14 +203,20 @@ final class ProductsController {
 	 * できたのかどうか」すら知れず、積み直しのたびに POST し直して**同じ商品を増やす**。
 	 * ID があれば、やり直しを `PATCH /products/{id}` に変えられる。
 	 *
+	 * **`unsaved_fields` で「listings だけが入らなかった」ことまで返す**
+	 * （{@see self::ERROR_UNSAVED_FIELDS_KEY}）。`id` は商品へ辿り着く手段を与えるが、
+	 * その商品が**どこまで保存されているか**は伝えない。作成でここへ来たなら
+	 * タイトルも本文もメタも既に入っていて、足りないのは購入リンクだけである。
+	 *
 	 * @param int $productId listings を保存できなかった商品の投稿 ID（作成なら、できてしまった商品）.
 	 */
 	private static function lockedResponse( int $productId ): WP_REST_Response {
 		return new WP_REST_Response(
 			array(
-				'code'                     => self::CODE_LISTING_LOCKED,
-				'message'                  => self::lockedMessage(),
-				self::ERROR_PRODUCT_ID_KEY => $productId,
+				'code'                         => self::CODE_LISTING_LOCKED,
+				'message'                      => self::lockedMessage(),
+				self::ERROR_PRODUCT_ID_KEY     => $productId,
+				self::ERROR_UNSAVED_FIELDS_KEY => self::UNSAVED_LISTINGS,
 			),
 			409
 		);
@@ -193,14 +235,20 @@ final class ProductsController {
 	 * `wp_insert_post()` 自体が失敗して商品が 1 件も作られなかったときで、その区別が
 	 * そのまま「PATCH で直せるか／POST し直すか」の分かれ目になる。
 	 *
+	 * **`unsaved_fields` も 409 と同じ形で載せる。** こちらは「やり直しても直らない」
+	 * 失敗なので、呼び出し側は原因を取り除いたあとに**足りない分だけ**を送り直すことに
+	 * なる。何が足りないのかが応答に無ければ、全項目を送り直して保存済みの編集を
+	 * 上書きするしかない。
+	 *
 	 * @param int $productId listings を保存できなかった商品の投稿 ID（作成なら、できてしまった商品）.
 	 */
 	private static function saveFailedResponse( int $productId ): WP_REST_Response {
 		return new WP_REST_Response(
 			array(
-				'code'                     => self::CODE_SAVE_FAILED,
-				'message'                  => self::saveFailedMessage(),
-				self::ERROR_PRODUCT_ID_KEY => $productId,
+				'code'                         => self::CODE_SAVE_FAILED,
+				'message'                      => self::saveFailedMessage(),
+				self::ERROR_PRODUCT_ID_KEY     => $productId,
+				self::ERROR_UNSAVED_FIELDS_KEY => self::UNSAVED_LISTINGS,
 			),
 			500
 		);
@@ -307,11 +355,12 @@ final class ProductsController {
 				// 側はこの item を積み直すたびに同じ商品を作り続ける。
 				++$failed;
 				$results[] = array(
-					'index'                    => $index,
-					'status'                   => 'error',
-					'code'                     => self::CODE_LISTING_LOCKED,
-					'message'                  => self::lockedMessage(),
-					self::ERROR_PRODUCT_ID_KEY => $e->postId(),
+					'index'                        => $index,
+					'status'                       => 'error',
+					'code'                         => self::CODE_LISTING_LOCKED,
+					'message'                      => self::lockedMessage(),
+					self::ERROR_PRODUCT_ID_KEY     => $e->postId(),
+					self::ERROR_UNSAVED_FIELDS_KEY => self::UNSAVED_LISTINGS,
 				);
 				continue;
 			} catch ( ProductListingsWriteFailure $e ) {
@@ -323,11 +372,12 @@ final class ProductsController {
 				// POST のやり直しではなく PATCH にできるようにするため）。
 				++$failed;
 				$results[] = array(
-					'index'                    => $index,
-					'status'                   => 'error',
-					'code'                     => self::CODE_SAVE_FAILED,
-					'message'                  => self::saveFailedMessage(),
-					self::ERROR_PRODUCT_ID_KEY => $e->postId(),
+					'index'                        => $index,
+					'status'                       => 'error',
+					'code'                         => self::CODE_SAVE_FAILED,
+					'message'                      => self::saveFailedMessage(),
+					self::ERROR_PRODUCT_ID_KEY     => $e->postId(),
+					self::ERROR_UNSAVED_FIELDS_KEY => self::UNSAVED_LISTINGS,
 				);
 				continue;
 			}

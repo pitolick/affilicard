@@ -152,9 +152,22 @@ curl -u 'username:xxxx xxxx xxxx xxxx xxxx xxxx' \
 {
 	"code": "affilicard_listing_locked",
 	"message": "ほかの処理がこの商品の購入リンクを更新中のため、…",
-	"id": 123
+	"id": 123,
+	"unsaved_fields": [ "listings" ]
 }
 ```
+
+**`unsaved_fields` は「要求のうち保存されなかったフィールド」である。** 本プラグインは
+投稿行（`title` / `content` / `status`）→ 購入リンク以外のメタ → `listings` の順に書き、
+`listings` で失敗したときだけこれらのエラーを返す。つまり **409 / 500 が返る時点で、
+要求の大半は既に保存されている**——`unsaved_fields` に載らなかったフィールドは入っている、
+と読んでよい。**この配列が「部分保存」の範囲を表す**ので、やり直しは全項目の送り直しでは
+なく、ここに載ったフィールドだけを送れば足りる（全項目を送り直すと、同時に入った別経路の
+編集を巻き戻す）。分岐はフィールド名で行うこと——`message` の文言は翻訳で変わる。
+
+**`unsaved_fields` が無い 500 は「1 つも保存されていない」**。投稿行そのものを作れなかった
+（作成）／更新できなかった（更新）ときで、商品は元のままである。`id` の有無が「商品ができたか
+否か」を表すのと同じように、`unsaved_fields` の有無が「部分保存かどうか」を表す。
 
 **`id` は「サーバが実在を知っている商品」の投稿 ID である。** 作成（`POST /products`）でこれらが返るとき、**商品そのものは既に作られている**——本プラグインは投稿行を作ってから購入リンクを書くため——ので、`id` を無視して `POST` をやり直すと**同じ商品が増える**。やり直しは `PATCH /products/{id}` で行うこと。
 
@@ -193,7 +206,7 @@ curl -u 'username:xxxx xxxx xxxx xxxx xxxx xxxx' \
 }
 ```
 
-失敗したアイテムは `{ "index": N, "status": "error", "message": "..." }` を返す。購入リンクの保存に失敗した場合は `code`（`affilicard_listing_locked` / `affilicard_save_failed`）と、**作成されてしまった商品の `id`** が加わる（上の「エラー応答（商品の作成・更新）」を参照）。
+失敗したアイテムは `{ "index": N, "status": "error", "message": "..." }` を返す。購入リンクの保存に失敗した場合は `code`（`affilicard_listing_locked` / `affilicard_save_failed`）と、**作成されてしまった商品の `id`**、**保存されなかったフィールドの `unsaved_fields`** が加わる（意味は上の「エラー応答（商品の作成・更新）」と同じ——item ごとの報告でも形は変えない）。
 
 ```json
 {
@@ -201,11 +214,12 @@ curl -u 'username:xxxx xxxx xxxx xxxx xxxx xxxx' \
 	"status": "error",
 	"code": "affilicard_listing_locked",
 	"message": "ほかの処理がこの商品の購入リンクを更新中のため、…",
-	"id": 123
+	"id": 123,
+	"unsaved_fields": [ "listings" ]
 }
 ```
 
-この `id` を無視してアイテムを積み直すと、同じ商品が 1 回ごとに増える。積み直しではなく `PATCH /products/{id}` で続きをやり直すこと。
+この `id` を無視してアイテムを積み直すと、同じ商品が 1 回ごとに増える。積み直しではなく `PATCH /products/{id}` に、`unsaved_fields` が名指ししたフィールドだけを載せて続きをやり直すこと。
 
 ### Hybrid extras 形式
 

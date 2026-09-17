@@ -32,6 +32,16 @@ final class ProductsControllerTest extends TestCase {
 					return json_encode( $value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
 				}
 			);
+		// **実 ProductRepository を通すテストが要る WP 関数はここへ集約する。**
+		// WP_Mock の userFunction は PHP の関数そのものを定義するため、**別のテスト
+		// ファイルが先に定義すると、定義し忘れたファイルまで全体実行では緑になる**。
+		// このファイル単体で走らせると undefined function で落ちる、という順序依存を
+		// 作らないよう、保存経路が触るものを setUp で揃えておく。
+		// - wp_unslash: listings の保存後の照合（コアと同じ wp_unslash → sanitize の 2 段）
+		// - sanitize_text_field: saveMeta() の mask_label
+		WP_Mock::userFunction( 'wp_unslash' )->andReturnUsing( static fn( $v ) => $v );
+		WP_Mock::userFunction( 'sanitize_text_field' )
+			->andReturnUsing( static fn( $v ) => is_string( $v ) ? trim( $v ) : $v );
 	}
 
 	public function tearDown(): void {
@@ -515,6 +525,10 @@ final class ProductsControllerTest extends TestCase {
 		// 返さないと、呼び出し側は積み直しのたびに POST し直して同じ商品を増やす。
 		$this->assertArrayHasKey( 'id', $data );
 		$this->assertSame( 99, $data['id'] );
+		// **何が保存されなかったかを機械可読で名指しする。** 投稿行も listings 以外の
+		// メタも保存済みで、入らなかったのは listings だけ——それが伝わらないと、
+		// 呼び出し側は「全部やり直す」か「何も直さない」の二択になる。
+		$this->assertSame( array( 'listings' ), $data['unsaved_fields'] );
 	}
 
 	/**
@@ -549,6 +563,10 @@ final class ProductsControllerTest extends TestCase {
 		// **更新でも同じ形にする。** 呼び出し側は ID を既に知っているので冗長では
 		// あるが、エラー本文の形が verb で変わらない方が読み手の分岐が減る。
 		$this->assertSame( 42, $data['id'] );
+		// **何が保存されなかったかを機械可読で名指しする。** 投稿行も listings 以外の
+		// メタも保存済みで、入らなかったのは listings だけ——それが伝わらないと、
+		// 呼び出し側は「全部やり直す」か「何も直さない」の二択になる。
+		$this->assertSame( array( 'listings' ), $data['unsaved_fields'] );
 	}
 
 	/**
@@ -598,6 +616,9 @@ final class ProductsControllerTest extends TestCase {
 		// 部分失敗でも「どの商品ができてしまったか」を名指しする。
 		$this->assertArrayHasKey( 'id', $data['results'][0] );
 		$this->assertSame( 11, $data['results'][0]['id'] );
+		// item ごとの報告でも形をそろえる（単体の応答と読み替えずに済む）。
+		$this->assertSame( array( 'listings' ), $data['results'][0]['unsaved_fields'] );
+		$this->assertArrayNotHasKey( 'unsaved_fields', $data['results'][1] );
 		$this->assertSame( 'created', $data['results'][1]['status'] );
 		$this->assertSame( 12, $data['results'][1]['id'] );
 		$this->assertSame( 1, $data['created'] );
@@ -635,6 +656,10 @@ final class ProductsControllerTest extends TestCase {
 		// なおさら——呼び出し側が積み直すたびに孤児が 1 つずつ増える。
 		$this->assertArrayHasKey( 'id', $data );
 		$this->assertSame( 99, $data['id'] );
+		// **何が保存されなかったかを機械可読で名指しする。** 投稿行も listings 以外の
+		// メタも保存済みで、入らなかったのは listings だけ——それが伝わらないと、
+		// 呼び出し側は「全部やり直す」か「何も直さない」の二択になる。
+		$this->assertSame( array( 'listings' ), $data['unsaved_fields'] );
 	}
 
 	/**
@@ -667,6 +692,10 @@ final class ProductsControllerTest extends TestCase {
 		$this->assertSame( 500, $response->get_status() );
 		$this->assertSame( 'affilicard_save_failed', $data['code'] );
 		$this->assertSame( 42, $data['id'] );
+		// **何が保存されなかったかを機械可読で名指しする。** 投稿行も listings 以外の
+		// メタも保存済みで、入らなかったのは listings だけ——それが伝わらないと、
+		// 呼び出し側は「全部やり直す」か「何も直さない」の二択になる。
+		$this->assertSame( array( 'listings' ), $data['unsaved_fields'] );
 	}
 
 	/**
@@ -714,6 +743,8 @@ final class ProductsControllerTest extends TestCase {
 		$this->assertSame( 'affilicard_save_failed', $data['results'][0]['code'] );
 		$this->assertArrayHasKey( 'id', $data['results'][0] );
 		$this->assertSame( 11, $data['results'][0]['id'] );
+		$this->assertSame( array( 'listings' ), $data['results'][0]['unsaved_fields'] );
+		$this->assertArrayNotHasKey( 'unsaved_fields', $data['results'][1] );
 		$this->assertSame( 'created', $data['results'][1]['status'] );
 		$this->assertSame( 1, $data['created'] );
 		$this->assertSame( 1, $data['failed'] );
@@ -745,6 +776,8 @@ final class ProductsControllerTest extends TestCase {
 		$this->assertSame( 500, $response->get_status() );
 		$this->assertSame( 'affilicard_save_failed', $data['code'] );
 		$this->assertArrayNotHasKey( 'id', $data );
+		// 商品が 1 件も無いので「listings だけ入らなかった」でもない。
+		$this->assertArrayNotHasKey( 'unsaved_fields', $data );
 	}
 
 	/**
@@ -780,6 +813,10 @@ final class ProductsControllerTest extends TestCase {
 		$this->assertSame( 500, $response->get_status() );
 		$this->assertSame( 'affilicard_save_failed', $data['code'] );
 		$this->assertSame( 42, $data['id'] );
+		// **部分保存ではない。** listings を書く手前で落ちているため、保存できな
+		// かったフィールドの名指しは載せない（載せると「listings 以外は入った」と
+		// いう嘘になる）。
+		$this->assertArrayNotHasKey( 'unsaved_fields', $data );
 	}
 
 	/**
@@ -805,6 +842,7 @@ final class ProductsControllerTest extends TestCase {
 		$this->assertSame( 207, $response->get_status() );
 		$this->assertSame( 'error', $data['results'][0]['status'] );
 		$this->assertArrayNotHasKey( 'id', $data['results'][0] );
+		$this->assertArrayNotHasKey( 'unsaved_fields', $data['results'][0] );
 	}
 
 	public function test_permission_callbacks_check_current_user_can(): void {

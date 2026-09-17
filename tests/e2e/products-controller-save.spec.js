@@ -203,6 +203,10 @@ test.describe( '書き込みを握り潰すフィルタがあるとき', () => {
 		expect( blockedBody.code ).toBe( 'affilicard_save_failed' );
 		// 作成済みの商品を名指しする（やり直しを POST ではなく PATCH にするため）。
 		expect( blockedBody.id ).toBe( id );
+		// **入らなかったのは listings だけ**——それを機械可読で返す。下の 2 つの
+		// assertion（listings は元のまま／改題は残る）が、この申告どおりであることを
+		// 実 DB 側から裏付ける。
+		expect( blockedBody.unsaved_fields ).toEqual( [ 'listings' ] );
 
 		// **listings は 1 文字も変わっていない。** フィルタは書き込みを握り潰しただけで、
 		// 古い値はそのまま残る（書きかけで壊れた状態にはならない）。
