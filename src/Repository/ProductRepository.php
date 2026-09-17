@@ -376,7 +376,9 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * {@see ListingLock} で直列化する。囲むのは listings の読み→変換→書き戻しだけで、
 	 * 他のメタ（product_type / extras 等）や extid ミラー同期はロックの外に置く
 	 * （別キーで RMW ではなく、ロックは「メモリ上の変換と meta の読み書き」だけを
-	 * 囲む前提の待ち時間で設計されているため）。
+	 * 囲む前提の待ち時間で設計されているため）。**そのミラー同期は meta を読み直して
+	 * から行う**——書こうとした値ではなく実際に保存されている値を映さないと、商品が
+	 * 持っていない external_id で引けるようになる（理由は同期の直前のコメント）。
 	 *
 	 * **ロックを取れなくても書く（best-effort）。** {@see self::updateListing()} と同じ側で、
 	 * {@see self::updateListingOffer()} とは逆である。理由は呼び出し側の事情——ここへ来るのは
@@ -407,10 +409,9 @@ final class ProductRepository implements ProductRepositoryInterface {
 		update_post_meta( $postId, ProductPostType::META_STOCK_STATUS, $stock_status );
 		update_post_meta( $postId, ProductPostType::META_EXTRAS, $extras );
 
-		/** @var array<int, mixed> $listings */
-		$listings = ListingLock::around(
+		ListingLock::around(
 			$postId,
-			static function ( bool $locked ) use ( $postId, $listings ): array {
+			static function ( bool $locked ) use ( $postId, $listings ): void {
 				// **$locked は見ない（best-effort）。** updateListing() と同じ判断で、
 				// 理由は上の PHPDoc のとおり——この呼び出し側には再投入する仕組みが無く、
 				// saveMeta() は void なので失敗を報告する口すら無い。ここで書かずに
@@ -418,7 +419,6 @@ final class ProductRepository implements ProductRepositoryInterface {
 				// 取り直せる価格更新（updateListingOffer）とは失うものの重さが違う。
 				$next = OfferStatusReset::forIdentityChanges( self::listingsMeta( $postId ), $listings );
 				update_post_meta( $postId, ProductPostType::META_LISTINGS, $next );
-				return $next;
 			}
 		);
 
@@ -428,7 +428,15 @@ final class ProductRepository implements ProductRepositoryInterface {
 		update_post_meta( $postId, ProductPostType::META_MASK_R18, $mask_r18 );
 		update_post_meta( $postId, ProductPostType::META_MASK_LABEL, $mask_label );
 
-		$this->syncExternalIdMirror( $postId, $listings );
+		// **ミラーは「書こうとした値」ではなく「実際に入っている値」から作る。**
+		// ここで $listings（渡された配列）や、ロックの中で組み立てた $next を使うと、
+		// 書き込みが落ちたとき（update_post_meta の失敗）や保存の sanitize が値を
+		// 変えたときに、META_LISTINGS に無い external_id で商品が引けるようになり、
+		// 逆に本当に入っている external_id の行が消える。ミラーは
+		// findByExternalId() の索引そのもので、狂うと自動作成が既存商品を誤検出／
+		// 見落としして重複商品を作る。syncDerivedMeta() が meta を読み直してから
+		// 同期しているのと同じ流儀に揃える。
+		$this->syncExternalIdMirror( $postId, self::listingsMeta( $postId ) );
 	}
 
 	/**

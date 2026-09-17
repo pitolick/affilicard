@@ -466,7 +466,23 @@ final class ProductRepositoryTest extends TestCase {
 					return true;
 				}
 			);
-		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
+		// ミラーは保存後の META_LISTINGS を読み直して作るため、書いた値が読み戻る
+		// スタブにする（実 WordPress と同じく「書いたものが入っている」状態）。
+		WP_Mock::userFunction( 'update_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) {
+					if ( ProductPostType::META_LISTINGS === $key ) {
+						$this->storedListings = is_array( $value ) ? $value : array();
+					}
+					return true;
+				}
+			);
+		WP_Mock::userFunction( 'get_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key = '', $single = false ) {
+					return ProductPostType::META_LISTINGS === $key ? $this->storedListings : array();
+				}
+			);
 
 		$repo = new ProductRepository();
 		$repo->save(
@@ -523,11 +539,12 @@ final class ProductRepositoryTest extends TestCase {
 		// 新 affilicard_extid_amazon-kindle が add_post_meta で書かれることを検証する。
 		WP_Mock::userFunction( 'wp_insert_post' )->andReturn( 800 );
 
-		// saveMeta() は保存前の listings を読む（身元を訂正された購入リンクの
-		// fetch_status を白紙に戻すため。OfferStatusReset 参照）。ここでは保存前は空。
+		// saveMeta() は保存前の listings を読み（身元を訂正された購入リンクの
+		// fetch_status を白紙に戻すため。OfferStatusReset 参照）、保存後にもう一度
+		// 読んでミラーを作る。保存前は空で、書いた値がそのまま読み戻る。
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 800, ProductPostType::META_LISTINGS, true )
-			->andReturn( array() );
+			->andReturnUsing( fn () => $this->storedListings );
 
 		// 全 meta 列挙: extid mirror + 無関係 meta を返す。
 		WP_Mock::userFunction( 'get_post_meta' )
@@ -562,7 +579,15 @@ final class ProductRepositoryTest extends TestCase {
 					return true;
 				}
 			);
-		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
+		WP_Mock::userFunction( 'update_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key, $value ) {
+					if ( ProductPostType::META_LISTINGS === $key ) {
+						$this->storedListings = is_array( $value ) ? $value : array();
+					}
+					return true;
+				}
+			);
 
 		$repo = new ProductRepository();
 		$repo->save(
@@ -782,6 +807,73 @@ final class ProductRepositoryTest extends TestCase {
 		$repo->saveMeta( 5, array( 'listings' => $incoming ) );
 
 		return $saved;
+	}
+
+	/**
+	 * extid ミラーは「書こうとした値」ではなく「実際に META_LISTINGS に入っている値」から作る。
+	 *
+	 * ミラー（`affilicard_extid_<platform>`）は findByExternalId() の索引であり、
+	 * 自動作成が既存商品を見つけられるかどうかがこれで決まる。書き込みが落ちたのに
+	 * 渡された配列からミラーを作ると、**商品が持っていない external_id で引ける**
+	 * ようになり（自動作成が既存商品を誤検出して更新先を間違える）、同時に本当に
+	 * 保存されている external_id の行が消える（重複商品を作る）。
+	 *
+	 * ここでは listings の update_post_meta だけを失敗させ（WordPress は書けなかったとき
+	 * false を返す）、保存前の値が残った状態を作る。
+	 */
+	public function test_saveMetaのミラーは保存後のlistingsから作る(): void {
+		// saveMeta() の listings RMW は ListingLock の中で行う（GET_LOCK/RELEASE_LOCK）。
+		$this->mockLockWpdb( 1 );
+		$this->storedListings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array( array( 'external_id' => 'rk-stored' ) ),
+			),
+		);
+
+		WP_Mock::userFunction( 'wp_update_post' )->never();
+		WP_Mock::userFunction( 'wp_insert_post' )->never();
+		WP_Mock::userFunction( 'delete_post_meta' )->andReturn( true );
+		WP_Mock::userFunction( 'get_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key = '', $single = false ) {
+					return ProductPostType::META_LISTINGS === $key ? $this->storedListings : array();
+				}
+			);
+		// listings の書き込みだけ失敗させる（＝保存後も storedListings のまま）。
+		WP_Mock::userFunction( 'update_post_meta' )
+			->andReturnUsing(
+				static function ( $post_id, $key, $value ) {
+					return ProductPostType::META_LISTINGS !== $key;
+				}
+			);
+
+		$added = array();
+		WP_Mock::userFunction( 'add_post_meta' )
+			->andReturnUsing(
+				static function ( $post_id, $key, $value, $unique = false ) use ( &$added ) {
+					$added[] = array( (string) $key, (string) $value );
+					return true;
+				}
+			);
+
+		( new ProductRepository() )->saveMeta(
+			5,
+			array(
+				'listings' => array(
+					array(
+						'platform' => 'rakuten-kobo',
+						'offers'   => array( array( 'external_id' => 'rk-incoming' ) ),
+					),
+				),
+			)
+		);
+
+		$this->assertSame(
+			array( array( ProductPostType::externalIdMetaKey( 'rakuten-kobo' ), 'rk-stored' ) ),
+			$added,
+			'ミラーは実際に保存されている external_id から作る'
+		);
 	}
 
 	/**
@@ -1688,8 +1780,11 @@ final class ProductRepositoryTest extends TestCase {
 	public function test_saveMetaはlistingsの読み書きをロックの中で行う(): void {
 		$timeline = $this->saveMetaLockTimeline( 1 );
 
+		// 末尾の read はロックの**外**にある extid ミラー同期の読み直し（ミラーは
+		// 書こうとした値ではなく実際に入っている値から作る）。ロックが囲むのは
+		// listings の読み→変換→書き戻しだけ。
 		$this->assertSame(
-			array( 'GET_LOCK', 'read:listings', 'write:listings', 'RELEASE_LOCK' ),
+			array( 'GET_LOCK', 'read:listings', 'write:listings', 'RELEASE_LOCK', 'read:listings' ),
 			$timeline
 		);
 	}
@@ -1705,9 +1800,10 @@ final class ProductRepositoryTest extends TestCase {
 	public function test_saveMetaはロックを取れなくてもlistingsを保存する(): void {
 		$timeline = $this->saveMetaLockTimeline( 0 );
 
-		// 取れていないロックを返しに行かない（GET_LOCK だけで終わる）。
+		// 取れていないロックを返しに行かない（RELEASE_LOCK が無い）。末尾の read は
+		// ロックの外のミラー同期で、ロックの成否に関わらず行う。
 		$this->assertSame(
-			array( 'GET_LOCK', 'read:listings', 'write:listings' ),
+			array( 'GET_LOCK', 'read:listings', 'write:listings', 'read:listings' ),
 			$timeline
 		);
 	}
