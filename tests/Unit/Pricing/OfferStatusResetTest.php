@@ -206,4 +206,60 @@ final class OfferStatusResetTest extends TestCase {
 			)
 		);
 	}
+
+	/**
+	 * 別の購入リンクの身元へ打ち替えて元を消しても白紙にしない（既知の限界のピン留め）。
+	 *
+	 * 突き合わせるのは身元の**集合**であって行の対応ではない。A の external_id を B の
+	 * 値へ打ち替えて B を消すと集合は変わらないため、残った行は B の SKU を名乗りながら
+	 * A の SKU で得た fetch_status を持ち続ける。
+	 *
+	 * **これを欠陥ではなく限界として受け入れている根拠**（OfferStatusReset の docblock
+	 * 「突き合わせるのは身元の集合であって行の対応ではない」節）:
+	 * RefreshHandler::isGivenUp() は give-up マーカー（3 日の transient）と offer 自身の
+	 * terminal の AND なので、誤って引き継いだ terminal が再取得を止めるのは長くても
+	 * マーカーの残り時間まで。管理画面の「今すぐ更新／強制更新」は isGivenUp() を
+	 * 見ないため、運用者にはその場の出口もある。
+	 *
+	 * ここが将来変わる（行を追う安定 ID を入れる）なら、それは意図した変更として
+	 * このテストを書き換えることになる。
+	 */
+	public function test_別の購入リンクの身元へ打ち替えて元を消しても白紙にしない(): void {
+		$got = OfferStatusReset::forIdentityChanges(
+			$this->listing(
+				'rakuten-kobo',
+				$this->offer( 'rk-a', 'https://example.test/a' ),
+				$this->offer( 'rk-b', 'https://example.test/b', FetchStatus::NONE )
+			),
+			// A を rk-b へ打ち替え、元の rk-b は削除済み（ProductSchema が重複を後勝ちで畳んだ後の姿）。
+			$this->listing( 'rakuten-kobo', $this->offer( 'rk-b', 'https://example.test/a' ) )
+		);
+
+		$this->assertSame( FetchStatus::TERMINAL, $got[0]['offers'][0]['fetch_status'] );
+	}
+
+	/**
+	 * 2 つの購入リンクの external_id を入れ替えても白紙にしない（既知の限界のピン留め）。
+	 *
+	 * 入れ替えでも身元の集合は変わらないため、取得状態は行に残ったままになる。
+	 * 残る害と、それを受け入れる根拠は上のテストと同じ（掃引 → マーカー失効 → 取得
+	 * 成功で白紙化、という元々の自己修復に戻るだけで悪化はしない）。
+	 */
+	public function test_2つの購入リンクの身元を入れ替えても白紙にしない(): void {
+		$got = OfferStatusReset::forIdentityChanges(
+			$this->listing(
+				'rakuten-kobo',
+				$this->offer( 'rk-a', 'https://example.test/a' ),
+				$this->offer( 'rk-b', 'https://example.test/b', FetchStatus::NONE )
+			),
+			$this->listing(
+				'rakuten-kobo',
+				$this->offer( 'rk-b', 'https://example.test/a' ),
+				$this->offer( 'rk-a', 'https://example.test/b', FetchStatus::NONE )
+			)
+		);
+
+		$this->assertSame( FetchStatus::TERMINAL, $got[0]['offers'][0]['fetch_status'] );
+		$this->assertSame( FetchStatus::NONE, $got[0]['offers'][1]['fetch_status'] );
+	}
 }

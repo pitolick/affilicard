@@ -30,6 +30,48 @@ use Affilicard\Util\ScalarField;
  * 決めた `fetch_status` を一緒に書くため、あちらで白紙化すると取得が今書いた
  * 状態を消してしまう。だから判定は「保存前の offers と突き合わせて、実際に身元が
  * 変わった offer だけ」に限定し、触っていない offer はそのまま通す。
+ *
+ * ## 突き合わせるのは身元の「集合」であって行の対応ではない（既知の限界）
+ *
+ * 判定は「保存後の身元が、保存前の身元の集合に居るか」しか見ない。身元が集合に
+ * 残っていても、それが**同じ行に載っている**とは限らない。次の 2 つの編集は集合を
+ * 変えないため、ここは何もしない。
+ *
+ * 1. 購入リンク A の `external_id` を B の値へ打ち替え、元の B を消す
+ *    （{@see \Affilicard\Rest\ProductSchema::sanitizeOffers()} は重複した身元を後勝ちで
+ *    畳むので、保存後に残るのは 1 行である）
+ * 2. A と B の `external_id` を入れ替える
+ *
+ * どちらも、残った offer が**別の SKU で得た** `fetch_status` を持ち続ける。
+ *
+ * **それでも offer ごとの安定 ID は導入しない。残る害が有界で、自己修復するためである。**
+ *
+ * - **抑止は AND である。** {@see \Affilicard\Queue\RefreshHandler::isGivenUp()} は
+ *   give-up マーカー（(post_id, platform) 単位の transient・
+ *   {@see \Affilicard\Queue\RefreshHandler}::GIVEUP_COOLDOWN＝3 日）と offer 自身の
+ *   terminal が揃ったときだけ真を返す。マーカーは恒久失敗が起きたときにしか立たず、
+ *   再取得が成功すれば onSuccess() が消す。誤って引き継いだ terminal が再取得を
+ *   止められるのは、長くてもマーカーの残り時間（最大 3 日）までである。その後は掃引が
+ *   取得し、成功が `fetch_status` を白紙に戻す。
+ * - **運用者にはその場の出口がある。** 管理画面の「今すぐ更新／強制更新」
+ *   （{@see \Affilicard\Rest\RefreshController} →
+ *   {@see \Affilicard\Queue\Enqueuer::enqueueProductListings()}）は isGivenUp() を見ない。
+ *   見るのは掃引（{@see \Affilicard\Queue\QueueMaintenance::sweep()}）と繰り上がり
+ *   （{@see \Affilicard\Queue\OfferPromotionTrigger}）の 2 経路だけである。
+ * - **誤った terminal が他所で壊すものも無い。** `fetch_status` を読むのは
+ *   {@see OfferSelector::select()}（fallback_on_terminal は既定 off）・
+ *   {@see PriceFreshness::isPriceDisplayable()}（価格を隠す＝安全側）・
+ *   {@see \Affilicard\PostType\ProductListColumns}（警告アイコン）で、これを根拠に listing や
+ *   offer を消す判断はどこにも無い（棚卸し {@see \Affilicard\Stocktake\StocktakePolicy} は
+ *   日付で判定し、手動経路には適用しない）。
+ *
+ * つまり入れ替えの側は、この層が無かった頃の自己修復（マーカー失効 → 取得 → 成功で
+ * 白紙化）へ戻るだけで、悪化はしない。行の対応まで追うには offer ごとの安定 ID が要り、
+ * それは新しい保存フィールドの追加（{@see \Affilicard\Rest\ProductSchema} の sanitize
+ * 許可リストに足さないと保存時に無言で消える）と、全書き込み経路での採番・既存データの
+ * 移行を伴う。配列位置で代用する道は sanitizeOffers() が明示的に退けている（並べ替えや
+ * 途中の削除で別の offer を指すため）。有界で自己修復する取りこぼしに対して釣り合わない
+ * ので、この層は「単独の訂正を cooldown のあいだ待たせない最適化」に留める。
  */
 final class OfferStatusReset {
 
