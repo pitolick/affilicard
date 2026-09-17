@@ -40,13 +40,32 @@ final class OfferPromotionTriggerTest extends TestCase {
 	 */
 	private $nextScheduledAction = false;
 
+	/**
+	 * `as_get_scheduled_actions()` が返す **実行中（in-progress）** アクションの ID 配列。
+	 *
+	 * `as_next_scheduled_action()` の true は「実行中」と「非同期 pending」を区別しない
+	 * ため、繰り上がりトリガーは status=in-progress の問い合わせで切り分ける。
+	 * 既定は空配列＝実行中のアクションは無い。
+	 *
+	 * setUp() で登録する理由は $nextScheduledAction と同じ（WP_Mock::userFunction() は
+	 * 最初の期待を保持するため、個別テストからは差し替えられない）。
+	 *
+	 * @var list<int>
+	 */
+	private array $runningActionIds = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
 		$this->nextScheduledAction = false;
+		$this->runningActionIds    = array();
 		WP_Mock::userFunction( 'as_next_scheduled_action' )
 			->andReturnUsing(
 				fn () => $this->nextScheduledAction
+			);
+		WP_Mock::userFunction( 'as_get_scheduled_actions' )
+			->andReturnUsing(
+				fn () => $this->runningActionIds
 			);
 		OfferPromotionTrigger::resetForTests();
 	}
@@ -288,24 +307,81 @@ final class OfferPromotionTriggerTest extends TestCase {
 	}
 
 	/**
-	 * 実行中／非同期 pending（true）では抑止しない。
+	 * 実行中のジョブがあるあいだに起きた変更は、**unique 判定に吸収されない**
+	 * follow-up として残る。
 	 *
-	 * as_next_scheduled_action() の true は「非同期 pending」と「実行中」の両方を意味する。
 	 * 実行中のアクションは**変更前の listing を読んで**走っているので、その最中に
-	 * 購入リンクが変わっても結果には反映されない。ここで抑止すると、その変更に対する
-	 * 即時取得が次の掃引まで失われる。
+	 * 購入リンクが変わっても結果には反映されない。かといって base args
+	 * （{post_id, platform}）で積み直しても、`as_schedule_single_action( ..., $unique = true )`
+	 * は in-progress のアクションを重複とみなして新しいアクションを作らない
+	 * （ActionScheduler_DBStore::isActionUnique）——投入を「試みた」だけで、follow-up は
+	 * 黙って消える。
 	 *
-	 * ピン留めするのは「投入を試みること」までである。実行中のアクションは繰り上げ
-	 * ようがなく、enqueueManual() の unique=true に吸収されて結果的に積まれないことが
-	 * ある（{@see OfferPromotionTrigger::hasDuePendingJob()} の「残る限界」）。それでも
-	 * 抑止するよりは良い——非同期 pending のケースは確実に繰り上がる。
+	 * **だからこのテストは「呼ばれたこと」ではなく「アクションが残ったこと」を見る。**
+	 * AS の unique 判定（in-progress の base args を重複とみなす）をスタブで再現し、
+	 * その上で 1 件のアクションが実際に作られることと、その args が base args と
+	 * **別物**であることを確かめる。「投入を試みた」だけを見ていた以前のテストは、
+	 * follow-up が吸収されて消えていても緑のままだった。
 	 */
-	public function test_実行中や非同期pendingでは抑止せず投入する(): void {
+	public function test_実行中のジョブがあるときは吸収されないfollow_upが残る(): void {
+		$this->stubStaleListing();
+		// 実行中（in-progress）のアクションがある状態。
+		$this->nextScheduledAction = true;
+		$this->runningActionIds    = array( 777 );
+
+		$base_args = array(
+			'post_id'  => 123,
+			'platform' => 'rakuten-kobo',
+		);
+
+		// as_unschedule_all_actions() は **pending しか**取り消さない。実行中の
+		// base args アクションは残り続ける（Enqueuer の docblock と同じ前提）。
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->andReturn( 0 );
+
+		$created = array();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->andReturnUsing(
+			static function ( $when, $hook, $args, $group, $unique = false, $priority = 10 ) use ( &$created, $base_args ): int {
+				if ( $unique && $args === $base_args ) {
+					// 実行中の base args アクションと重複＝アクションは作られず 0 が返る。
+					return 0;
+				}
+				$created[] = array(
+					'hook'     => $hook,
+					'args'     => $args,
+					'group'    => $group,
+					'priority' => $priority,
+				);
+				return count( $created );
+			}
+		);
+
+		$this->trigger()->onListingsSaved( 123 );
+
+		$this->assertCount( 1, $created, '実行中のジョブがあっても follow-up のアクションが 1 件残る' );
+		$this->assertSame( Enqueuer::HOOK_REFRESH, $created[0]['hook'] );
+		$this->assertNotSame( $base_args, $created[0]['args'], 'unique 判定に吸収されない別 args で積む' );
+		$this->assertSame( 123, $created[0]['args']['post_id'] );
+		$this->assertSame( 'rakuten-kobo', $created[0]['args']['platform'] );
+		$this->assertSame( 'affilicard-rakuten', $created[0]['group'] );
+		$this->assertSame( Enqueuer::PRIORITY_MANUAL, $created[0]['priority'] );
+	}
+
+	/**
+	 * 非同期 pending（実行中のアクションは無い）なら抑止する。
+	 *
+	 * `as_next_scheduled_action()` は実行中と非同期 pending をどちらも true で返すが、
+	 * 意味はまるで違う。非同期 pending は「予定時刻を持たない＝次にワーカーが回った
+	 * ときに走る」ジョブで、走るときには最新の listing を読む——実行時刻の来ている
+	 * pending と同じく、抑止しても取りこぼしは無い。
+	 */
+	public function test_非同期pendingで実行中のジョブが無ければ抑止する(): void {
 		$this->stubStaleListing();
 		$this->nextScheduledAction = true;
+		// 実行中のアクションは無い＝true の正体は非同期 pending。
+		$this->runningActionIds = array();
 
-		WP_Mock::userFunction( 'as_unschedule_all_actions' )->once();
-		WP_Mock::userFunction( 'as_schedule_single_action' )->once()->andReturn( 500 );
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
 
 		$this->trigger()->onListingsSaved( 123 );
 

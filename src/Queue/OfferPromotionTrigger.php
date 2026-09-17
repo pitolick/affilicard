@@ -56,8 +56,8 @@ use Affilicard\Util\JsonField;
  * onListingsSaved() は $inFlight を `finally` で必ず解放し、実行が完全に終わった後の
  * 独立した呼び出しは毎回きちんと評価する。
  *
- * 2 層目は **時間窓ではなく「同じジョブが既にキューにあり、その実行時刻が来ているか」**
- * で判定する（{@see self::hasDuePendingJob()}）。設計当初は商品単位の 60 秒 transient
+ * 2 層目は **時間窓ではなく「同じジョブが既にキューにあり、それがどういう状態か」**
+ * で判定する（{@see self::pendingJobState()}）。設計当初は商品単位の 60 秒 transient
  * だったが、時間窓は「窓の中で起きた最後の変更が誰にも拾われないまま次の掃引まで待つ」
  * 事故を作る。実行時刻の来ている pending ジョブなら、抑止してもそのジョブが実行時に
  * 最新の listing を読むので取りこぼしが無い。
@@ -67,14 +67,37 @@ use Affilicard\Util\JsonField;
  * listing が書かれるとそのたびに Action Scheduler の行を作り直すことになる
  * （unique=true により pending は 1 件へ収束するので壊れはしない）。
  *
- * **ただし「pending である」だけで抑止してはならない。** 一時失敗のあと
- * `RefreshHandler` は backoff を付けて積み直すため、pending なジョブの実行予定が
- * 1 時間先ということがある。そのあいだに繰り上がりが起きても pending の有無だけで
- * 抑止すると、即時取得がその遠い予定時刻まで待たされ、本フックの存在意義が消える。
- * 予定が将来なら投入する——enqueueManual() の unschedule → `time()` での schedule は
- * 「そのジョブを今へ動かす」操作そのものである。
+ * **ただし「キューにある」だけで抑止してはならない。** 状態ごとに結論が違う。
+ *
+ * - **実行時刻が将来の pending**（一時失敗の backoff は最大 1 時間先へ積み直す）:
+ *   抑止すると即時取得がその遠い予定時刻まで待たされ、本フックの存在意義が消える。
+ *   投入する——enqueueManual() の unschedule → `time()` での schedule は「そのジョブを
+ *   今へ動かす」操作そのものである。
+ * - **実行中（in-progress）**: そのアクションは**変更前の** listing を読んで走っている
+ *   ので、この変更は結果に載らない。しかも base args で積み直しても
+ *   `as_schedule_single_action( ..., $unique = true )` が in-progress を重複とみなして
+ *   何も作らず、`as_unschedule_all_actions()` も pending しか消せない——「投入を試みた」
+ *   だけで follow-up が黙って消える。そこで args を分けた
+ *   {@see Enqueuer::enqueueFollowUp()} で後追いを残す。
+ * - **実行時刻の来ている pending／非同期 pending**: どちらも実行時に最新の listing を
+ *   読むので抑止してよい（churn だけが省ける）。
  */
 final class OfferPromotionTrigger {
+
+	/**
+	 * 2層目の判定結果: 抑止する理由が無い（そのまま enqueueManual で積む）。
+	 */
+	private const PENDING_NONE = 'none';
+
+	/**
+	 * 2層目の判定結果: まもなく走る同一ジョブが既にある（抑止する）。
+	 */
+	private const PENDING_DUE = 'due';
+
+	/**
+	 * 2層目の判定結果: 同一ジョブが**実行中**（follow-up を残す）。
+	 */
+	private const PENDING_RUNNING = 'running';
 
 	/**
 	 * 実行中の商品 ID（1層目: 再入ガード）。
@@ -229,7 +252,7 @@ final class OfferPromotionTrigger {
 			return;
 		}
 
-		// 2層目: 同じジョブが既に pending で、かつ**実行時刻が来ている**なら投入しない。
+		// 2層目: 同じジョブがキューにあるなら、その状態に応じて抑止／follow-up を選ぶ。
 		//
 		// enqueueManual() は「手動更新を先頭へ繰り上げる」ため毎回 unschedule →
 		// schedule し直す。同一リクエストで複数の listing が書かれると、そのたびに
@@ -237,15 +260,24 @@ final class OfferPromotionTrigger {
 		// 壊れはしないが、無駄なキューの churn が出る）。まもなく走るジョブを積み直しても
 		// 得るものが無いので、そこは抑止する。
 		//
-		// 時間窓（transient）ではなく「pending か」で抑えるのは、更新を取りこぼさない
-		// ためである。実行時刻の来ている pending ジョブは最新の listing を読むので、
+		// 時間窓（transient）ではなく「キューの状態」で抑えるのは、更新を取りこぼさない
+		// ためである。実行を待っている pending ジョブは最新の listing を読むので、
 		// 抑止しても内容は反映される。時間窓だと、窓の中で起きた最後の変更が誰にも
 		// 拾われないまま次の掃引まで待つことになる。
 		$pending_args = array(
 			'post_id'  => $postId,
 			'platform' => $platform,
 		);
-		if ( self::hasDuePendingJob( $pending_args, $this->enqueuer->group( $account ), $now ) ) {
+		$state        = self::pendingJobState( $pending_args, $this->enqueuer->group( $account ), $now );
+		if ( self::PENDING_DUE === $state ) {
+			return;
+		}
+		if ( self::PENDING_RUNNING === $state ) {
+			// 実行中のジョブは**変更前の** listing を読んで走っているので、この変更は
+			// その結果に載らない。かといって base args で積み直しても unique 判定が
+			// in-progress を重複とみなして何も作らない。args を分けた follow-up で残す
+			// （{@see Enqueuer::enqueueFollowUp()}）。
+			$this->enqueuer->enqueueFollowUp( $postId, $platform, $account );
 			return;
 		}
 
@@ -255,7 +287,7 @@ final class OfferPromotionTrigger {
 	}
 
 	/**
-	 * 同じジョブが既にキューにあり、かつ**その実行時刻が来ている**か（2層目の判定）。
+	 * 同じジョブがキューにあるか、あるならどういう状態かを 3 値で返す（2層目の判定）。
 	 *
 	 * **「pending かどうか」だけでは足りない。** 一時失敗のあと {@see RefreshHandler} は
 	 * backoff を付けて積み直す（最大で 1 時間先）。そのあいだに繰り上がりが起きて
@@ -268,41 +300,79 @@ final class OfferPromotionTrigger {
 	 * 前者は予定時刻を返さず、まさにこの区別ができない。後者は同梱している Action
 	 * Scheduler（vendor/woocommerce/action-scheduler, v4.1.0）で
 	 * false（該当なし）／true（実行中、または予定時刻を持たない async）／
-	 * int（次回の実行予定 unix 秒）の 3 値を返す。`as_get_scheduled_actions()` でも
-	 * 予定時刻は取れるが、アクションを 1 件取得して schedule オブジェクトから
-	 * 日時を取り出す手間がかかるうえ、必要なのは「次の 1 件」だけである。
+	 * int（次回の実行予定 unix 秒）の 3 値を返す。
 	 *
-	 * **true は抑止しない。** as_next_scheduled_action() の true は「非同期 pending」と
-	 * 「実行中」の両方を意味する。実行中のアクションは**変更前の listing を読んで**
-	 * 走っているので、その最中に購入リンクが変わっても結果には反映されない。ここで
-	 * 抑止すると、その変更に対する即時取得が次の掃引まで失われる。
+	 * **true は「実行中」と「非同期 pending」の両方を意味するので、そこで切り分ける。**
+	 * 意味がまるで違うためである。
 	 *
-	 * **残る限界**: 実行中のアクションがある場合、enqueueManual() の unique=true は
-	 * 実行中のものも重複とみなすため、投入が吸収されて結果的に積まれないことがある。
-	 * それでも抑止するよりは良い（非同期 pending のケースは確実に繰り上がる）。
-	 * 完全に塞ぐには「完了後に follow-up を残す」機構が要るが、取りこぼしの帰結は
-	 * 「次の掃引まで待つ」であって取得結果の欠落ではないため、現状は受容する。
+	 * - **非同期 pending**（予定時刻を持たない＝次にワーカーが回ったら走る）は、
+	 *   実行時刻の来ている pending と同じ扱いでよい。走るときに最新の listing を読むので、
+	 *   抑止しても取りこぼしが無く、積み直しの churn だけが省ける。
+	 * - **実行中**は逆で、そのアクションは**変更前の** listing を読んで走っている。
+	 *   ここで抑止すると、この変更に対する取得が次の掃引まで失われる。かといって
+	 *   base args で積み直しても `as_schedule_single_action( ..., $unique = true )` は
+	 *   in-progress を重複とみなして何も作らない（{@see Enqueuer::enqueueFollowUp()}）。
+	 *   だから args を分けた follow-up を残す。
 	 *
 	 * @param array<string, mixed> $args  照合するアクション引数。
 	 * @param string               $group 照合する group。
 	 * @param int                  $now   判定の基準時刻（onListingsSaved() が 1 度だけ取る time()）。
+	 * @return self::PENDING_*
 	 */
-	private static function hasDuePendingJob( array $args, string $group, int $now ): bool {
+	private static function pendingJobState( array $args, string $group, int $now ): string {
 		// 同梱 AS を読み込めていない環境では判定できない。**抑止しない側へ倒す**——
 		// 抑止して取りこぼすより、churn を許して取得を積む方が害が小さい。
 		if ( ! function_exists( 'as_next_scheduled_action' ) ) {
-			return false;
+			return self::PENDING_NONE;
 		}
 
 		$next = as_next_scheduled_action( Enqueuer::HOOK_REFRESH, $args, $group );
 		if ( false === $next ) {
-			return false;
+			return self::PENDING_NONE;
 		}
 		if ( true === $next ) {
-			return false;
+			return self::hasRunningJob( $args, $group ) ? self::PENDING_RUNNING : self::PENDING_DUE;
 		}
 
-		return (int) $next <= $now;
+		return (int) $next <= $now ? self::PENDING_DUE : self::PENDING_NONE;
+	}
+
+	/**
+	 * 同一ジョブが in-progress（実行中）か。
+	 *
+	 * `as_next_scheduled_action()` は実行中と非同期 pending をどちらも true へ潰すため、
+	 * status を絞った問い合わせで切り分ける。AS 側の実装は同じ照合
+	 * （hook + args の完全一致 + group）なので、判定の基準はずれない。
+	 *
+	 * status には `ActionScheduler_Store::STATUS_RUNNING` の値をリテラルで渡す。
+	 * {@see \Affilicard\Queue\QueueStats::countByStatus()} や
+	 * {@see Enqueuer::queueDepth()} と同じ流儀で、AS のクラスを読み込めていない環境でも
+	 * 落ちないようにするため。
+	 *
+	 * @param array<string, mixed> $args
+	 */
+	private static function hasRunningJob( array $args, string $group ): bool {
+		if ( ! function_exists( 'as_get_scheduled_actions' ) ) {
+			// **判定できないときは「実行中」として扱う。** ここだけは
+			// pendingJobState() の「抑止しない側へ倒す」と同じ結論になる——follow-up は
+			// 別 args なので、実際には非同期 pending だった場合でも余分なジョブが
+			// 1 件増えるだけで済む。逆に「実行中ではない」と倒すと enqueueManual() が
+			// unique 判定に吸収され、変更に対する取得が丸ごと落ちる。
+			return true;
+		}
+
+		$ids = as_get_scheduled_actions(
+			array(
+				'hook'     => Enqueuer::HOOK_REFRESH,
+				'args'     => $args,
+				'group'    => $group,
+				'status'   => 'in-progress',
+				'per_page' => 1,
+			),
+			'ids'
+		);
+
+		return is_array( $ids ) && array() !== $ids;
 	}
 
 	/** 一括書き込みによる抑止（0層目）が有効か。 */
