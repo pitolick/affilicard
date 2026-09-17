@@ -181,11 +181,20 @@ final class Plugin {
 				if ( wp_is_post_autosave( $post_id ) || wp_is_post_revision( $post_id ) ) {
 					return;
 				}
-				( new \Affilicard\Repository\ProductRepository() )->syncDerivedMeta( $post_id );
+				// **同期できなかったら黙って戻らない。** ロックを取れなければ
+				// syncDerivedMeta() はミラーを作り直さず false を返す（古い写しで先着の
+				// ミラーを巻き戻さないため）。放置するとミラーが listings と食い違い、
+				// 自動作成が既存商品を見落として重複を作るので、再試行を積んで
+				// 「今はできなかった」を登録済みの仕事に変える（DerivedMetaSync）。
+				\Affilicard\Repository\DerivedMetaSync::afterRestSave( $post_id );
 			},
 			10,
 			1
 		);
+
+		// 上の再試行アクション本体の配線。これが無いと積んだアクションは AS 上に
+		// 滞留したまま一切実行されない。
+		\Affilicard\Repository\DerivedMetaSync::register();
 
 		// 価格更新 Cron: 全体単一イベントのハンドラ登録 + 設定との差分調整。
 		// v3.5.0（Task 12・Ruling 3）で掃引自体を AS アクション化した。WP-Cron

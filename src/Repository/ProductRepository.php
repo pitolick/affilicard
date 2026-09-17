@@ -391,13 +391,29 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * 保存されている値を映さないと、商品が持っていない external_id で引けるようになる
 	 * （理由は同期の直前のコメント）。
 	 *
-	 * **ロックを取れなくても書く（best-effort）。** {@see self::updateListing()} と同じ側で、
-	 * {@see self::updateListingOffer()} とは逆である。理由は呼び出し側の事情——ここへ来るのは
-	 * 運用者／API の編集で、書かずに諦めても再投入する呼び出し側が無い（saveMeta() は
-	 * void で、失敗を報告する口すら無い）。取得した価格を次の試行で保存し直せる
-	 * updateListingOffer() と違い、ここで捨てた編集は誰も拾わない。
+	 * **ロックを取れなければ listings を書かず {@see ProductLockUnavailable} を投げる。**
+	 * 以前はここで best-effort に書いていた（{@see self::updateListing()} と同じ側）。
+	 * 理由は「再投入する呼び出し側が無く、saveMeta() は void なので失敗を報告する口すら
+	 * 無い。書かずに戻ると運用者の編集が無言で消える」——**沈黙の代償についてはそのとおり
+	 * だが、代わりに古い読みを書き戻して先着の書き込みを丸ごと消していた**。lost update は
+	 * 無言で消える編集より広く、しかも消えたことが誰にも分からない。
+	 *
+	 * 第三の道を採る——**黙るのをやめる**。書かない、かつ捨てない。報告する口が無いなら
+	 * 作ればよい、というのが例外にした理由である（{@see ProductLockUnavailable} の
+	 * クラス PHPDoc に、なぜ bool ではなく例外かを書いた）。捕まえた側は運用者へ 409 を
+	 * 返すか（REST）、一時失敗として再投入する（自動作成）。
+	 *
+	 * これが起きるのは稀である——{@see ListingLock::TIMEOUT} は 10 秒なので、取得失敗は
+	 * 「同じ 1 商品を 10 秒間ふさぎ続ける競合が実在した」ことを意味する。その頻度なら
+	 * 大きな声で失敗してよい。
+	 *
+	 * **投げる時点で listings 以外のメタは書き終えている。** 投稿行（title/content/status）も
+	 * 呼び出し元 {@see self::save()} が先に書いている。どれも別キーの冪等な上書きなので、
+	 * 運用者が同じ内容でやり直せばそのまま通る。逆に listings は**一切触っていない**——
+	 * 古い値が無傷で残る、というのがこの例外の意味である。
 	 *
 	 * @param array<string, mixed> $data
+	 * @throws ProductLockUnavailable ロックを取得できず listings を書かなかったとき.
 	 */
 	public function saveMeta( int $postId, array $data ): void {
 		$product_type = isset( $data['product_type'] ) && '' !== (string) $data['product_type']
@@ -419,15 +435,29 @@ final class ProductRepository implements ProductRepositoryInterface {
 		update_post_meta( $postId, ProductPostType::META_PRODUCT_TYPE, $product_type );
 		update_post_meta( $postId, ProductPostType::META_STOCK_STATUS, $stock_status );
 		update_post_meta( $postId, ProductPostType::META_EXTRAS, $extras );
+		update_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
+		update_post_meta( $postId, ProductPostType::META_RELEASE_DATE, $release_date );
+		update_post_meta( $postId, ProductPostType::META_MASK_BLUR, $mask_blur );
+		update_post_meta( $postId, ProductPostType::META_MASK_R18, $mask_r18 );
+		update_post_meta( $postId, ProductPostType::META_MASK_LABEL, $mask_label );
 
+		// **listings は最後に書く。** ロックを取れなければここで例外を投げて抜けるため、
+		// 順番がそのまま「何が保存され、何が保存されなかったか」になる。listings 以外を
+		// 先に片付けておけば、失われるのは listings だけで、しかもそれは古い値のまま
+		// 無傷で残る（書きかけで壊れた状態にはならない）。
 		ListingLock::around(
 			$postId,
 			function ( bool $locked ) use ( $postId, $listings ): void {
-				// **$locked は見ない（best-effort）。** updateListing() と同じ判断で、
-				// 理由は上の PHPDoc のとおり——この呼び出し側には再投入する仕組みが無く、
-				// saveMeta() は void なので失敗を報告する口すら無い。ここで書かずに
-				// 戻ると運用者／API の編集が無言で消える。取りこぼしても次の掃引で
-				// 取り直せる価格更新（updateListingOffer）とは失うものの重さが違う。
+				if ( ! $locked ) {
+					// **古い読みを書き戻さない。** ここから先は
+					// 「listings を読む → 変換する → 書き戻す」で、ロックの外でやると
+					// 先着（別リクエストの保存・価格更新）の書き込みを丸ごと消す。
+					// かといって黙って戻れば運用者の編集が無言で消える。どちらも選ばず、
+					// 書かずに**報告する**（理由と伝わり方は上の PHPDoc / 例外クラス側）。
+					// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- HTML 出力ではなく PHP の例外メッセージ。組み立ては例外クラス側で、埋め込むのは post ID（int）のみ。
+					throw new ProductLockUnavailable( $postId );
+				}
+
 				$next = OfferStatusReset::forIdentityChanges( self::listingsMeta( $postId ), $listings );
 				update_post_meta( $postId, ProductPostType::META_LISTINGS, $next );
 
@@ -446,12 +476,6 @@ final class ProductRepository implements ProductRepositoryInterface {
 				$this->syncExternalIdMirror( $postId, self::listingsMeta( $postId ) );
 			}
 		);
-
-		update_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
-		update_post_meta( $postId, ProductPostType::META_RELEASE_DATE, $release_date );
-		update_post_meta( $postId, ProductPostType::META_MASK_BLUR, $mask_blur );
-		update_post_meta( $postId, ProductPostType::META_MASK_R18, $mask_r18 );
-		update_post_meta( $postId, ProductPostType::META_MASK_LABEL, $mask_label );
 	}
 
 	/**
@@ -719,23 +743,42 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * 見落とす。囲む範囲は meta の読み書きだけで、`wp_update_post()` も第三者の
 	 * `save_post` も挟まない（この経路は既に `rest_after_insert` の中＝保存の後にある）。
 	 *
-	 * **ロックを取れなくても同期する（best-effort）。** saveMeta() と同じ側である。
-	 * ここで諦めると、保存された listings に対してミラーだけが古いまま残り、自動作成が
-	 * 重複商品を作る側へ倒れる。再投入する呼び出し側は無く、void なので失敗を報告する
-	 * 口すら無い。
+	 * **ロックを取れなければミラーを作り直さず false を返す。** 以前は best-effort で
+	 * 同期していた。理由は「諦めるとミラーだけが古いまま残り、自動作成が重複商品を作る
+	 * 側へ倒れる。再投入する呼び出し側は無く、void なので失敗を報告する口すら無い」
+	 * ——**その心配はそのとおりだが、押し通した場合に作られるのは「古いスナップショットから
+	 * 組み直したミラー」であって、狂い方は同じである**。しかも先着が正しく作ったミラーを
+	 * 巻き戻す（lost update）ぶん、放置より悪い。
+	 *
+	 * そこで書かずに false を返し、**再投入する呼び出し側を作った**——
+	 * {@see DerivedMetaSync}。唯一の本番呼び出し元である `rest_after_insert` の配線が
+	 * false を受けて Action Scheduler へ再試行を積む。「void で報告する口が無い」という
+	 * 旧理由は、口を作ったことで失効している。
 	 *
 	 * **同じ商品のロックを既に握った状態からも呼ばれる**
 	 * （{@see \Affilicard\Upgrade\PluginUpgrade::migrateOneProductLocked()}）。
 	 * {@see ListingLock::around()} は同じ商品の入れ子では取り直さない（再入可能）ため、
-	 * 二重に GET_LOCK を撃つことも、解放の対がずれることもない。
+	 * 二重に GET_LOCK を撃つことも、解放の対がずれることもない。**その経路では $locked が
+	 * 常に true になる**ので、ここで足した分岐は移行の挙動を一切変えない（外側で
+	 * 取れなかった場合は移行そのものが先に差し戻される）。
 	 *
 	 * schema_version の刻印はロックの外に置く（別キーで、read-modify-write ではない）。
+	 * **ミラーを見送っても刻印はする**——刻印が指すのは listings の形式であり、それを
+	 * 書いたのはコアの保存（この関数の手前）で、既に完了しているからである。
+	 *
+	 * @return bool ミラーを同期したら true。ロックを取れず見送ったら false
+	 *              （呼び出し側は再投入すること）。
 	 */
-	public function syncDerivedMeta( int $postId ): void {
-		ListingLock::around(
+	public function syncDerivedMeta( int $postId ): bool {
+		$synced = (bool) ListingLock::around(
 			$postId,
-			function ( bool $locked ) use ( $postId ): void {
-				// **$locked は見ない（best-effort）。** 理由は上の PHPDoc のとおり。
+			function ( bool $locked ) use ( $postId ): bool {
+				if ( ! $locked ) {
+					// 古い listings から組み直したミラーで、先着が作った正しいミラーを
+					// 巻き戻さない。呼び出し側へ返して再投入させる（理由は上の PHPDoc）。
+					return false;
+				}
+
 				$listings = get_post_meta( $postId, ProductPostType::META_LISTINGS, true );
 				if ( is_string( $listings ) ) {
 					$listings = JsonField::decode( $listings, array() );
@@ -743,10 +786,13 @@ final class ProductRepository implements ProductRepositoryInterface {
 					$listings = array();
 				}
 				$this->syncExternalIdMirror( $postId, $listings );
+				return true;
 			}
 		);
 
 		update_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
+
+		return $synced;
 	}
 
 	/**

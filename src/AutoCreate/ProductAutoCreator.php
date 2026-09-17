@@ -9,6 +9,7 @@ use Affilicard\Pricing\OfferSelector;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Queue\WorkOutcome;
 use Affilicard\Repository\LockName;
+use Affilicard\Repository\ProductLockUnavailable;
 use Affilicard\Repository\ProductRepositoryInterface;
 
 /**
@@ -112,9 +113,18 @@ final class ProductAutoCreator {
 				return WorkOutcome::SUCCESS;
 			}
 
-			$post_id = $this->repository->save(
-				$this->buildProductData( $platformCode, $platformName, $externalId, $fetched )
-			);
+			try {
+				$post_id = $this->repository->save(
+					$this->buildProductData( $platformCode, $platformName, $externalId, $fetched )
+				);
+			} catch ( ProductLockUnavailable $e ) {
+				// 商品ロック（自動作成ロックとは別物）を取れず listings を書かなかった。
+				// **この呼び出し側は再投入を持っている**——AutoCreateHandler が
+				// TRANSIENT_FAILURE を backoff して積み直す。次の試行では衝突相手が
+				// 抜けているか、先着が作り終えた商品を事前チェックが引いて no-op になる。
+				// 握り潰さず一時失敗として返すのが、ここでの「黙らない」の形である。
+				return WorkOutcome::TRANSIENT_FAILURE;
+			}
 			// save 失敗（0）はリトライで解決し得るため一時失敗。
 			return $post_id > 0 ? WorkOutcome::SUCCESS : WorkOutcome::TRANSIENT_FAILURE;
 		} finally {

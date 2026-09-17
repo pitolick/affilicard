@@ -14,15 +14,19 @@ namespace Affilicard\Repository;
  * ここ 1 箇所に集める。
  *
  * **ロックを取れなかったときにどうするかは、ここでは決めない。** 呼び出し側の事情で
- * 正解が逆になるためである（下の 4 つの呼び出し側を参照）。だから {@see self::around()}
+ * 正解が逆になるためである（下の 5 つの呼び出し側を参照）。だから {@see self::around()}
  * は取得の成否をコールバックへ渡すだけにして、続行するか諦めるかは呼び出し側に書かせる。
+ *
+ * **ただし「黙って古い読みを書き戻す」だけは、どの呼び出し側にも許さない。** それは
+ * lost update そのもので、失われたことが誰にも分からない。選べるのは「書かずに報告する」
+ * か「書いてよい理由がある」かの二択である。
  *
  * | 呼び出し側 | 取れなかったら |
  * | --- | --- |
- * | {@see ProductRepository::updateListing()} | best-effort で続行する（取得済みの値を捨てない） |
+ * | {@see ProductRepository::updateListing()} | best-effort で続行する（取得済みの値を捨てない。production からの呼び出しは無い） |
  * | {@see ProductRepository::updateListingOffer()} | 何も書かず false（呼び出し側が再投入する） |
- * | {@see ProductRepository::saveMeta()} | best-effort で続行する（運用者の編集を捨てない・再投入する呼び出し側が無い） |
- * | {@see ProductRepository::syncDerivedMeta()} | best-effort で続行する（ミラーを作り直さない方が有害・void で報告する口が無い） |
+ * | {@see ProductRepository::saveMeta()} | 何も書かず {@see ProductLockUnavailable} を投げる（REST は 409・自動作成は再投入） |
+ * | {@see ProductRepository::syncDerivedMeta()} | ミラーを作り直さず false（{@see DerivedMetaSync} が再投入する） |
  * | {@see \Affilicard\Upgrade\PluginUpgrade::migrateOneProduct()} | 移行の失敗として差し戻す（数回で諦める） |
  *
  * 外部 API の fetch をロックの中へ入れてはならない。ロックは「メモリ上の変換と

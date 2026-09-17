@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Rest;
 
 use Affilicard\PostType\ProductPostType;
+use Affilicard\Repository\ProductLockUnavailable;
 use Affilicard\Repository\ProductRepositoryInterface;
 use WP_REST_Request;
 use WP_REST_Response;
@@ -19,6 +20,16 @@ final class ProductsController {
 	 * bulk endpoint の 1 リクエストあたり最大商品件数。
 	 */
 	private const MAX_BULK_ITEMS = 100;
+
+	/**
+	 * listings の書き込みを見送ったことを表す応答コード。
+	 *
+	 * `affilicard_save_failed`（500）とは分ける。あちらは「保存できなかった」、こちらは
+	 * 「保存しなかった（listings は古い値のまま無傷）」であり、前者はやり直しても
+	 * たいてい同じ結果になるが、後者はやり直せば通る。呼び出し側が自動で積み直して
+	 * よいかどうかが逆になるので、同じコードに潰してはならない。
+	 */
+	private const CODE_LISTING_LOCKED = 'affilicard_listing_locked';
 
 	public function __construct( private ProductRepositoryInterface $repository ) {}
 
@@ -104,6 +115,39 @@ final class ProductsController {
 		);
 	}
 
+	/**
+	 * 「listings を書かずに見送った」ことを運用者へ返す応答。
+	 *
+	 * **409 Conflict を使う。** 500 ではない——サーバは壊れていないし、要求も正しい。
+	 * 起きたのは「同じ商品をいま別の誰か／別の処理が書き換えている」という衝突であり、
+	 * 409 はまさにそれを表す。運用者にとっての違いは実務的で、409 なら**そのまま
+	 * もう一度保存すれば通る**（{@see \Affilicard\Repository\ListingLock::TIMEOUT} は
+	 * 10 秒なので、衝突相手はすぐ抜ける）。
+	 *
+	 * 本文の code/message は管理画面の商品編集フォームがそのまま出す（他のエラー応答と
+	 * 同じ形）。つまり「保存しました」の代わりにこの文言が出るので、編集が入らなかった
+	 * ことが保存操作のその場で分かる。
+	 */
+	private static function lockedResponse(): WP_REST_Response {
+		return new WP_REST_Response(
+			array(
+				'code'    => self::CODE_LISTING_LOCKED,
+				'message' => self::lockedMessage(),
+			),
+			409
+		);
+	}
+
+	/**
+	 * 「やり直せば通る」ところまで書いた文言。何が保存されなかったかを明示する。
+	 */
+	private static function lockedMessage(): string {
+		return __(
+			'ほかの処理がこの商品の購入リンクを更新中のため、購入リンクは保存しませんでした（既存の内容はそのまま残っています）。少し待ってからもう一度保存してください。',
+			'affilicard'
+		);
+	}
+
 	public function canEditPosts(): bool {
 		return (bool) current_user_can( 'edit_posts' );
 	}
@@ -174,7 +218,21 @@ final class ProductsController {
 				continue;
 			}
 
-			$id = $this->repository->save( $data );
+			try {
+				$id = $this->repository->save( $data );
+			} catch ( ProductLockUnavailable $e ) {
+				// listings を書かずに見送った（同じ商品を別経路が書き換え中）。
+				// 207 の該当 item だけを error にして、他の item は通す。呼び出し側は
+				// この item だけ積み直せばよい——listings は古い値のまま無傷である。
+				++$failed;
+				$results[] = array(
+					'index'   => $index,
+					'status'  => 'error',
+					'code'    => self::CODE_LISTING_LOCKED,
+					'message' => self::lockedMessage(),
+				);
+				continue;
+			}
 			if ( $id <= 0 ) {
 				++$failed;
 				$results[] = array(
@@ -221,7 +279,11 @@ final class ProductsController {
 	public function create( WP_REST_Request $request ): WP_REST_Response {
 		$data = $this->enforcePublishCapability( $this->extractProductData( $request ) );
 
-		$id = $this->repository->save( $data );
+		try {
+			$id = $this->repository->save( $data );
+		} catch ( ProductLockUnavailable $e ) {
+			return self::lockedResponse();
+		}
 		if ( $id <= 0 ) {
 			return new WP_REST_Response(
 				array(
@@ -270,7 +332,11 @@ final class ProductsController {
 		$data       = array_merge( $existing, $this->enforcePublishCapability( $this->extractProductData( $request ) ) );
 		$data['id'] = $id;
 
-		$saved_id = $this->repository->save( $data );
+		try {
+			$saved_id = $this->repository->save( $data );
+		} catch ( ProductLockUnavailable $e ) {
+			return self::lockedResponse();
+		}
 		if ( $saved_id <= 0 ) {
 			return new WP_REST_Response(
 				array(

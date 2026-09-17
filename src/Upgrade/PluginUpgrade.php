@@ -617,6 +617,10 @@ final class PluginUpgrade {
 			self::countPreservedWithoutRegularUrl( $postId, $stored );
 		}
 
+		// **戻り値は見ない。** この関数は既に同じ商品の ListingLock を握っており
+		// （migrateOneProductLocked の名のとおり）、ListingLock::around() は同じ商品の
+		// 入れ子では取り直さず true を渡す。つまりここで false は返り得ない。取れて
+		// いなければ、そもそも外側が先に移行の失敗として差し戻している。
 		( new ProductRepository() )->syncDerivedMeta( $postId );
 	}
 

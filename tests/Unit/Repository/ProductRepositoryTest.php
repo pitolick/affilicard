@@ -5,6 +5,7 @@ namespace Affilicard\Tests\Unit\Repository;
 
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Pricing\FetchStatus;
+use Affilicard\Repository\ProductLockUnavailable;
 use Affilicard\Repository\ProductRepository;
 use Affilicard\Schema\SchemaVersion;
 use Affilicard\Settings\GeneralSettings;
@@ -24,6 +25,24 @@ final class ProductRepositoryTest extends TestCase {
 	 * @var array<int, mixed>
 	 */
 	private array $storedListings = array();
+
+	/**
+	 * 直前の saveMetaLockTimeline() が捕まえた「書かずに見送った」例外（無ければ null）。
+	 *
+	 * helper の中で catch するのは、投げた**あと**の時系列（＝何を書かずに抜けたか）を
+	 * 呼び出し側で検証したいためである。expectException() を使うと helper から先が
+	 * 走らず、時系列を受け取れない。
+	 *
+	 * @var ProductLockUnavailable|null
+	 */
+	private ?ProductLockUnavailable $lastRefusal = null;
+
+	/**
+	 * 直前の saveMetaLockTimeline() が update_post_meta へ渡した meta キー一覧。
+	 *
+	 * @var array<int, string>
+	 */
+	private array $savedMetaKeys = array();
 
 	public function setUp(): void {
 		parent::setUp();
@@ -1756,9 +1775,11 @@ final class ProductRepositoryTest extends TestCase {
 					return array();
 				}
 			);
+		$this->savedMetaKeys = array();
 		WP_Mock::userFunction( 'update_post_meta' )
 			->andReturnUsing(
-				static function ( $post_id, $key, $value ) use ( &$timeline ) {
+				function ( $post_id, $key, $value ) use ( &$timeline ) {
+					$this->savedMetaKeys[] = (string) $key;
 					if ( ProductPostType::META_LISTINGS === $key ) {
 						$timeline[] = 'write:listings';
 					}
@@ -1766,23 +1787,28 @@ final class ProductRepositoryTest extends TestCase {
 				}
 			);
 
-		$repo = new ProductRepository();
-		$repo->saveMeta(
-			5,
-			array(
-				'listings' => array(
-					array(
-						'platform' => 'rakuten-kobo',
-						'offers'   => array(
-							array(
-								'external_id' => 'rk-1',
-								'regular_url' => 'https://example.test/rk-1',
+		$this->lastRefusal = null;
+		$repo              = new ProductRepository();
+		try {
+			$repo->saveMeta(
+				5,
+				array(
+					'listings' => array(
+						array(
+							'platform' => 'rakuten-kobo',
+							'offers'   => array(
+								array(
+									'external_id' => 'rk-1',
+									'regular_url' => 'https://example.test/rk-1',
+								),
 							),
 						),
 					),
-				),
-			)
-		);
+				)
+			);
+		} catch ( ProductLockUnavailable $e ) {
+			$this->lastRefusal = $e;
+		}
 
 		return $timeline;
 	}
@@ -1901,13 +1927,13 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	/**
-	 * ロックを取れなくても syncDerivedMeta() はミラーを作り直す（best-effort）。
+	 * ロックを取れなければ syncDerivedMeta() はミラーを作り直さない。
 	 *
-	 * saveMeta() と同じ判断。ここで諦めると、保存された listings に対してミラーだけが
-	 * 古いまま残り、自動作成が重複商品を作る側へ倒れる。再投入する呼び出し側は無く
-	 * （void で失敗を報告する口すら無い）、次に誰かが保存するまで直らない。
+	 * 押し通しても作られるのは「古い listings から組み直したミラー」で、狂い方は放置と
+	 * 同じうえに、先着が正しく作ったミラーを巻き戻す（lost update）。読みにすら行かず
+	 * 抜けることを、時系列で固定する。
 	 */
-	public function test_syncDerivedMetaはロックを取れなくてもミラーを同期する(): void {
+	public function test_syncDerivedMetaはロックを取れなければミラーを作り直さない(): void {
 		$timeline = $this->syncDerivedMetaLockTimeline(
 			0,
 			array(
@@ -1918,30 +1944,142 @@ final class ProductRepositoryTest extends TestCase {
 			)
 		);
 
-		// 取れていないロックを返しに行かない（RELEASE_LOCK が無い）。
+		// 取れていないロックを返しに行かない（RELEASE_LOCK が無い）。listings の読みも
+		// ミラーの書き込みも起きない。
+		$this->assertSame( array( 'GET_LOCK' ), $timeline );
+	}
+
+	/**
+	 * ロックを取れなければ syncDerivedMeta() は false を返す（呼び出し側が再投入する）。
+	 *
+	 * 「やらなかった」が呼び出し側へ届かなければ、{@see \Affilicard\Repository\DerivedMetaSync}
+	 * は再試行を積めず、ミラーが古いまま放置される。戻り値そのものが契約なので、
+	 * 時系列とは別に固定する。
+	 */
+	public function test_syncDerivedMetaはロックを取れなければfalseを返す(): void {
+		$this->mockLockWpdb( 0 );
+		$this->mockSyncDerivedMetaWpFunctions();
+
+		$this->assertFalse( ( new ProductRepository() )->syncDerivedMeta( 5 ) );
+	}
+
+	/**
+	 * ロックを取れたら syncDerivedMeta() は true を返す（再投入は要らない）。
+	 */
+	public function test_syncDerivedMetaはロックを取れればtrueを返す(): void {
+		$this->mockLockWpdb( 1 );
+		$this->mockSyncDerivedMetaWpFunctions();
+
+		$this->assertTrue( ( new ProductRepository() )->syncDerivedMeta( 5 ) );
+	}
+
+	/**
+	 * ミラーを見送っても schema_version は刻む。
+	 *
+	 * 刻印が指すのは listings の形式であり、それを書いたのはコアの保存（この関数の手前）
+	 * で既に終わっている。見送ったのは写しの作り直しだけなので、刻印まで巻き添えに
+	 * すると「移行済みの商品が未移行に見える」側へ倒れる。
+	 */
+	public function test_syncDerivedMetaはミラーを見送ってもschema_versionを刻む(): void {
+		$this->mockLockWpdb( 0 );
+
+		$stamped = array();
+		WP_Mock::userFunction( 'get_post_meta' )->andReturn( array() );
+		WP_Mock::userFunction( 'add_post_meta' )->andReturn( true );
+		WP_Mock::userFunction( 'delete_post_meta' )->andReturn( true );
+		WP_Mock::userFunction( 'update_post_meta' )
+			->andReturnUsing(
+				static function ( $post_id, $key, $value ) use ( &$stamped ) {
+					$stamped[ (string) $key ] = $value;
+					return true;
+				}
+			);
+
+		( new ProductRepository() )->syncDerivedMeta( 5 );
+
 		$this->assertSame(
-			array( 'GET_LOCK', 'read:listings', 'mirror:add' ),
-			$timeline
+			SchemaVersion::CURRENT,
+			$stamped[ ProductPostType::META_SCHEMA_VERSION ] ?? null
 		);
 	}
 
 	/**
-	 * ロックを取れなくても saveMeta() は書く（best-effort）。
-	 *
-	 * updateListing() と同じ判断。運用者／API の保存には再投入する呼び出し側が無く
-	 * （saveMeta() は void で失敗を報告する口すら無い）、ここで書かずに戻ると
-	 * 運用者の編集が無言で消える。取りこぼしても次の掃引で取り直せる価格更新とは
-	 * 失うものの重さが違う。
+	 * syncDerivedMeta() の戻り値だけを見るテスト用に、周辺の WP 関数を最小限モックする。
 	 */
-	public function test_saveMetaはロックを取れなくてもlistingsを保存する(): void {
+	private function mockSyncDerivedMetaWpFunctions(): void {
+		$this->storedListings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array( array( 'external_id' => 'rk-1' ) ),
+			),
+		);
+		WP_Mock::userFunction( 'get_post_meta' )
+			->andReturnUsing(
+				function ( $post_id, $key = '', $single = false ) {
+					return ProductPostType::META_LISTINGS === $key ? $this->storedListings : array();
+				}
+			);
+		WP_Mock::userFunction( 'add_post_meta' )->andReturn( true );
+		WP_Mock::userFunction( 'delete_post_meta' )->andReturn( true );
+		WP_Mock::userFunction( 'update_post_meta' )->andReturn( true );
+	}
+
+	/**
+	 * ロックを取れなければ saveMeta() は listings を書かず、例外で報告する。
+	 *
+	 * 以前は best-effort で書いていた（「運用者の編集を無言で消さない」ため）。だが
+	 * 押し通すと、古い読みを書き戻して先着の書き込みを丸ごと消す（lost update）——
+	 * 無言で消える編集より広く、しかも消えたことが誰にも分からない。書かない・かつ
+	 * 捨てない、という第三の道を取る。
+	 *
+	 * **例外のメッセージまで固定する。** 素の型だけだと、モック不足で出た
+	 * `Mockery\Exception\NoMatchingExpectationException`（これも RuntimeException を
+	 * 継承する）で通ってしまい、テストが合否を区別できなくなる。
+	 */
+	public function test_saveMetaはロックを取れなければlistingsを書かず例外を投げる(): void {
 		$timeline = $this->saveMetaLockTimeline( 0 );
 
-		// 取れていないロックを返しに行かない（RELEASE_LOCK が無い）。ミラー同期は
-		// ロックの成否に関わらず行う（best-effort）。
+		$this->assertInstanceOf( ProductLockUnavailable::class, $this->lastRefusal );
 		$this->assertSame(
-			array( 'GET_LOCK', 'read:listings', 'write:listings', 'read:listings' ),
-			$timeline
+			'affilicard: 商品 5 の listing ロックを取得できず、listings を書き込まなかった。',
+			$this->lastRefusal->getMessage()
 		);
+		$this->assertSame( 5, $this->lastRefusal->postId() );
+
+		// listings は読みにも行かず、書きもせず、ミラーも触らない。取れていないロックを
+		// 返しにも行かない（RELEASE_LOCK が無い）。
+		$this->assertSame( array( 'GET_LOCK' ), $timeline );
+	}
+
+	/**
+	 * ロックを取れなくても listings 以外のメタは保存される。
+	 *
+	 * 見送るのは listings だけである。他は別キーの冪等な上書きで、書いておけば運用者の
+	 * やり直しが素直に通る。「listings を最後に書く」という順序がこの性質を作っているので、
+	 * 順序ごと固定する。
+	 */
+	public function test_saveMetaはロックを取れなくてもlistings以外のメタは保存する(): void {
+		$this->saveMetaLockTimeline( 0 );
+
+		$this->assertInstanceOf( ProductLockUnavailable::class, $this->lastRefusal );
+		$this->assertContains( ProductPostType::META_PRODUCT_TYPE, $this->savedMetaKeys );
+		$this->assertContains( ProductPostType::META_STOCK_STATUS, $this->savedMetaKeys );
+		$this->assertContains( ProductPostType::META_EXTRAS, $this->savedMetaKeys );
+		$this->assertContains( ProductPostType::META_SCHEMA_VERSION, $this->savedMetaKeys );
+		$this->assertContains( ProductPostType::META_RELEASE_DATE, $this->savedMetaKeys );
+		$this->assertContains( ProductPostType::META_MASK_BLUR, $this->savedMetaKeys );
+		$this->assertContains( ProductPostType::META_MASK_R18, $this->savedMetaKeys );
+		$this->assertContains( ProductPostType::META_MASK_LABEL, $this->savedMetaKeys );
+		$this->assertNotContains( ProductPostType::META_LISTINGS, $this->savedMetaKeys );
+	}
+
+	/**
+	 * ロックを取れていれば saveMeta() は例外を投げない（正常系を巻き添えにしない）。
+	 */
+	public function test_saveMetaはロックを取れれば例外を投げない(): void {
+		$this->saveMetaLockTimeline( 1 );
+
+		$this->assertNull( $this->lastRefusal );
 	}
 
 	public function test_updateListing_対象platformのみ差し替え他listingを保持して保存する(): void {
