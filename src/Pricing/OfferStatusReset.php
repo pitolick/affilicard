@@ -31,6 +31,14 @@ use Affilicard\Util\ScalarField;
  * 状態を消してしまう。だから判定は「保存前の offers と突き合わせて、実際に身元が
  * 変わった offer だけ」に限定し、触っていない offer はそのまま通す。
  *
+ * **その取得を除外できているのは、置き場所そのものによる。** この層を呼ぶのは
+ * {@see \Affilicard\Repository\ProductRepository::saveMeta()} だけで、そこへ来るのは
+ * 商品を丸ごと保存する 2 経路——REST（運用者/API の編集）と自動作成（新規作成のみ）——に
+ * 限られる。取得の書き戻しは updateListing()／updateListingOffer() から
+ * `update_post_meta()` を直接叩き、saveMeta() を通らない。したがって「取得が
+ * regular_url と fetch_status を同時に書く」保存はここへ届かず、flat な形で届くことも
+ * ない（下の flat 対応を足しても、取得の書き戻しを白紙にする経路は生まれない）。
+ *
  * ## 突き合わせるのは身元の「集合」であって行の対応ではない（既知の限界）
  *
  * 判定は「保存後の身元が、保存前の身元の集合に居るか」しか見ない。身元が集合に
@@ -88,6 +96,11 @@ final class OfferStatusReset {
 	 * 取得結果を持ち込んで商品を作る外部ツール（投稿パイプライン・自動作成）の
 	 * fetch_status を作成のたびに落とすことになる。
 	 *
+	 * **保存しようとしている listing が flat（移行前）でも判定する。** 保存時に
+	 * {@see \Affilicard\Rest\ProductSchema::sanitizeOffers()} が offers[] へ畳むが、
+	 * 畳み込みは古い `fetch_status`／`fetch_error` をそのまま新しい offer へ運ぶため、
+	 * 素通りさせると移行前の listing だけ訂正が効かない（{@see self::resetFlatListing()}）。
+	 *
 	 * @param array<int, mixed> $stored   保存前の listings meta。
 	 * @param array<int, mixed> $incoming これから保存する listings。
 	 * @return array<int, mixed> $incoming と同じ並び・同じキーで、該当 offer だけ差し替えたもの。
@@ -96,9 +109,7 @@ final class OfferStatusReset {
 		$known = self::knownIdentities( $stored );
 
 		foreach ( $incoming as $index => $listing ) {
-			if ( ! is_array( $listing ) || ! isset( $listing['offers'] ) || ! is_array( $listing['offers'] ) ) {
-				// offers を持たない listing（設定だけ・v3 以前の flat な形）はそのまま通す。
-				// flat な形の取得状態は保存時に ProductSchema が offers[] へ畳む。
+			if ( ! is_array( $listing ) ) {
 				continue;
 			}
 
@@ -108,6 +119,19 @@ final class OfferStatusReset {
 				continue;
 			}
 			$seen = $known[ $platform ];
+
+			if ( ! isset( $listing['offers'] ) || ! is_array( $listing['offers'] ) ) {
+				// v3 以前の flat な listing。**素通りさせてはならない。**
+				// 保存時に ProductSchema::sanitizeOffers() が offers[] へ畳むが、
+				// その畳み込み（LegacyOffer::toOffer()）は古い fetch_status／fetch_error を
+				// そのまま新しい offer へ運ぶ。運ばれた terminal は give-up マーカーと
+				// AND で効くので、移行前の listing の身元を訂正しても cooldown のあいだ
+				// 再取得が止まったままになる。保存前の listing を
+				// LegacyOffer::offersWithFallback() で見ている {@see self::knownIdentities()}
+				// と同じ写像を通し、こちらも身元で判定する。
+				$incoming[ $index ] = self::resetFlatListing( $listing, $seen );
+				continue;
+			}
 
 			foreach ( $listing['offers'] as $offerIndex => $offer ) {
 				if ( ! is_array( $offer ) ) {
@@ -131,6 +155,42 @@ final class OfferStatusReset {
 		}
 
 		return $incoming;
+	}
+
+	/**
+	 * flat な（offers を持たない）listing の取得状態を、身元が変わっていれば白紙に戻す。
+	 *
+	 * **`fetch_status` と `fetch_error` の両方を空にする。** 畳み込みは fetch_status が
+	 * 空なら旧 `fetch_error`（v3 以前が保存していた文言）から status を復元するため
+	 * （{@see LegacyOffer::toOffer()} → {@see FetchStatus::fromLegacyMessage()}）、
+	 * 片方だけ消しても畳まれた offer に terminal が蘇る。
+	 *
+	 * 取得結果フィールドを 1 つも持たない listing（設定だけ）は畳み込みの対象にならない
+	 * ので、キーを足さずそのまま返す。
+	 *
+	 * @param array<string, mixed>     $listing
+	 * @param array<string, true>      $seen    同じ platform の保存前の身元。
+	 * @return array<string, mixed>
+	 */
+	private static function resetFlatListing( array $listing, array $seen ): array {
+		$folded = LegacyOffer::offersWithFallback( $listing );
+		if ( array() === $folded ) {
+			return $listing;
+		}
+
+		$offer = $folded[0];
+		if ( FetchStatus::NONE === ScalarField::string( $offer, 'fetch_status' ) ) {
+			return $listing;
+		}
+		if ( isset( $seen[ OfferIdentity::of( $offer ) ] ) ) {
+			// 身元は変わっていない。取得状態は取得だけのものなので触らない。
+			return $listing;
+		}
+
+		$listing['fetch_status'] = FetchStatus::NONE;
+		$listing['fetch_error']  = '';
+
+		return $listing;
 	}
 
 	/**

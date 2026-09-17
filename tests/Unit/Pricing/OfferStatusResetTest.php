@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Tests\Unit\Pricing;
 
 use Affilicard\Pricing\FetchStatus;
+use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferStatusReset;
 use PHPUnit\Framework\TestCase;
 
@@ -160,6 +161,110 @@ final class OfferStatusResetTest extends TestCase {
 		);
 
 		$this->assertSame( FetchStatus::TERMINAL, $got[0]['offers'][0]['fetch_status'] );
+	}
+
+	/**
+	 * 保存しようとしている listing が flat（移行前）でも、身元が変われば白紙に戻す。
+	 *
+	 * 「ProductSchema が保存時に offers[] へ畳むから素通りでよい」は成り立たない——
+	 * 畳み込み（{@see LegacyOffer::toOffer()}）は古い fetch_status／fetch_error を
+	 * そのまま新しい offer へ運ぶ。運ばれた terminal は give-up マーカーと AND で
+	 * 効くため、移行前の商品の external_id を訂正しても cooldown のあいだ再取得が
+	 * 止まったままになる（まさにこのクラスが解こうとしている事故）。
+	 */
+	public function test_保存する側がflatでも身元が変わればfetch_statusを空にする(): void {
+		$incoming = array(
+			array(
+				'platform'     => 'rakuten-kobo',
+				'external_id'  => 'rk-fixed',
+				'regular_url'  => 'https://example.test/a',
+				'fetch_status' => FetchStatus::TERMINAL,
+			),
+		);
+
+		$got = OfferStatusReset::forIdentityChanges(
+			$this->listing( 'rakuten-kobo', $this->offer( 'rk-old', 'https://example.test/a' ) ),
+			$incoming
+		);
+
+		$this->assertSame( FetchStatus::NONE, $got[0]['fetch_status'] );
+	}
+
+	/**
+	 * flat な listing の旧 `fetch_error`（文言）も一緒に消す。
+	 *
+	 * 畳み込みは fetch_status が空なら fetch_error の文言から status を復元する
+	 * （{@see LegacyOffer::toOffer()}）。fetch_status だけ空にしても、畳まれた offer に
+	 * terminal が蘇って抑止が続く。
+	 */
+	public function test_保存する側がflatなら旧fetch_errorも消す(): void {
+		$incoming = array(
+			array(
+				'platform'    => 'rakuten-kobo',
+				'external_id' => 'rk-fixed',
+				'regular_url' => 'https://example.test/a',
+				// v3 以前の ListingRefresher が保存していた恒久失敗の文言。
+				'fetch_error' => '該当する商品が見つかりませんでした',
+			),
+		);
+
+		$got = OfferStatusReset::forIdentityChanges(
+			$this->listing( 'rakuten-kobo', $this->offer( 'rk-old', 'https://example.test/a' ) ),
+			$incoming
+		);
+
+		$this->assertSame( '', $got[0]['fetch_error'] );
+		// 保存時に畳まれた姿（ProductSchema::sanitizeOffers と同じ写像）でも terminal が復活しない。
+		$this->assertSame(
+			FetchStatus::NONE,
+			LegacyOffer::offersWithFallback( $got[0] )[0]['fetch_status']
+		);
+	}
+
+	/**
+	 * flat でも身元が変わっていなければ触らない。
+	 *
+	 * 触ると廃盤 SKU の terminal が保存のたびに消え、give-up の cooldown が意味を失う。
+	 */
+	public function test_保存する側がflatでも身元が同じならfetch_statusを保つ(): void {
+		$incoming = array(
+			array(
+				'platform'     => 'rakuten-kobo',
+				'external_id'  => 'rk-1',
+				'regular_url'  => 'https://example.test/b',
+				'fetch_status' => FetchStatus::TERMINAL,
+			),
+		);
+
+		$got = OfferStatusReset::forIdentityChanges(
+			$this->listing( 'rakuten-kobo', $this->offer( 'rk-1', 'https://example.test/a' ) ),
+			$incoming
+		);
+
+		$this->assertSame( FetchStatus::TERMINAL, $got[0]['fetch_status'] );
+	}
+
+	/**
+	 * 取得結果フィールドを 1 つも持たない flat な listing（設定だけ）は素通りさせる。
+	 *
+	 * 畳み込みの対象にならない＝offer が生まれないので、白紙にするものが無い。
+	 * ここでキーを足すと、設定だけの listing に空の取得状態が生える。
+	 */
+	public function test_設定だけのlistingにはキーを足さない(): void {
+		$incoming = array(
+			array(
+				'platform'    => 'rakuten-kobo',
+				'enabled'     => true,
+				'update_mode' => 'auto',
+			),
+		);
+
+		$got = OfferStatusReset::forIdentityChanges(
+			$this->listing( 'rakuten-kobo', $this->offer( 'rk-old', 'https://example.test/a' ) ),
+			$incoming
+		);
+
+		$this->assertSame( $incoming, $got );
 	}
 
 	/** offers を持たない listing（設定だけ・旧形式）はそのまま通す。 */
