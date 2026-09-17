@@ -12,13 +12,18 @@
  * 併せて、listings を保存できたときにだけ押される `schema_version` の刻印も読み戻す
  * （刻印は listings の形式を指すため、保存より先に押してはならない）。
  *
+ * **確かめているのは listings だけではない**——要求が実際に運んでくるメタ
+ * （`product_type` / `stock_status` / `extras` / `release_date`）も、書いた直後に
+ * 読み直している。`unsaved_fields` が「入らなかったと分かっているフィールド」を
+ * 名乗る以上、listings 以外が消えたときに黙って 200 を返してはならない。
+ *
  * **false ではない落とし穴もここで見る**——`update_post_metadata` フィルタの短絡である。
  * コアはこのフィルタが null 以外を返すと `return (bool) $check;` で即座に戻り
  * （`wp-includes/meta.php` L241-243）、$wpdb には触れない。つまり**フィルタが true を
  * 返すと `update_post_meta()` は成功を報告しながら 1 バイトも書いていない**。戻り値が
  * false のときだけ読み直す実装は、この経路を黙って成功として通す。WP_Mock はコア関数ごと
  * 差し替えるためフィルタも短絡も存在せず、**この分岐は実 WP でしか踏めない**——
- * block-listings-write.php が仕込む mu-plugin で本物のフィルタを立てて確かめる。
+ * block-meta-write.php が仕込む mu-plugin で本物のフィルタを立てて確かめる。
  */
 
 'use strict';
@@ -34,10 +39,11 @@ const {
 
 const TITLE = 'E2E 保存検証';
 const BLOCKED_TITLE = 'E2E 保存握り潰し';
+const BLOCKED_META_TITLE = 'E2E メタ保存握り潰し';
 
-/** block-listings-write.php（mu-plugin の設置・解除と、対象商品の切り替え）を叩く。 */
+/** block-meta-write.php（mu-plugin の設置・解除と、対象商品／meta キーの切り替え）を叩く。 */
 function blockFixture( ...args ) {
-	return runEvalFileJson( 'tests/e2e/block-listings-write.php', args, 'RESULT_JSON:' );
+	return runEvalFileJson( 'tests/e2e/block-meta-write.php', args, 'RESULT_JSON:' );
 }
 
 const LISTINGS = [
@@ -219,6 +225,84 @@ test.describe( '書き込みを握り潰すフィルタがあるとき', () => {
 		// **ただし listings 以外は保存されている。** 投稿行は listings より先に書かれる
 		// ため、500 で返っても改題は残る——これが「部分保存」である。
 		expect( afterBody.title ).toBe( `${ BLOCKED_TITLE }（改題）` );
+
+		await ctx.dispose();
+	} );
+} );
+
+test.describe( 'listings 以外の書き込みを握り潰すフィルタがあるとき', () => {
+	test.beforeAll( () => {
+		cleanupStaleFixtures( BLOCKED_META_TITLE );
+		blockFixture( 'install' );
+	} );
+
+	test.afterAll( () => {
+		blockFixture( 'uninstall' );
+		cleanupStaleFixtures( BLOCKED_META_TITLE );
+	} );
+
+	test( 'stock_status が入らなければ 500 で名指しし、listings は保存し切る', async () => {
+		// 使い回しコンテキストを避ける理由は上の describe と同じ（wp-env run を
+		// 挟むあいだに keep-alive 接続が閉じられ、socket hang up で落ちる）。
+		const ctx = await newApiContext();
+		const headers = getAuthHeaders();
+
+		const created = await ctx.post( '/wp-json/affilicard/v1/products', {
+			headers,
+			data: {
+				title: BLOCKED_META_TITLE,
+				status: 'draft',
+				listings: LISTINGS,
+			},
+		} );
+		expect( created.status() ).toBe( 201 );
+		const id = ( await created.json() ).id;
+
+		// ここからこの商品の stock_status だけが「true を返して書かない」になる。
+		blockFixture( 'block', id, 'affilicard_stock_status' );
+		let blockedBody;
+		try {
+			const blocked = await ctx.patch( `/wp-json/affilicard/v1/products/${ id }`, {
+				headers,
+				data: {
+					stock_status: 'discontinued',
+					listings: [
+						{
+							platform: 'rakuten-kobo',
+							enabled: true,
+							offers: [
+								{
+									display_order: 10,
+									external_id: 'e2e-meta-blocked',
+									regular_url: 'https://example.test/e2e-meta-blocked',
+									price: '990',
+								},
+							],
+						},
+					],
+				},
+			} );
+			// **listings は入ったのに 500 にする。** 取扱終了の印が消えたまま 200 を
+			// 返すと、売っていない商品の購入リンクが出続ける。
+			expect( blocked.status() ).toBe( 500 );
+			blockedBody = await blocked.json();
+		} finally {
+			blockFixture( 'unblock' );
+		}
+
+		expect( blockedBody.code ).toBe( 'affilicard_save_failed' );
+		expect( blockedBody.id ).toBe( id );
+		// **listings は名指ししない**——実際に入っているからである（下で裏付ける）。
+		expect( blockedBody.unsaved_fields ).toEqual( [ 'stock_status' ] );
+
+		const after = await ctx.get( `/wp-json/affilicard/v1/products/${ id }`, { headers } );
+		expect( after.status() ).toBe( 200 );
+		const afterBody = await after.json();
+		// **listings は書き切ってある。** 手前のメタが入らなかったからといって
+		// 途中で抜けると、いちばん失って困るものを軽い失敗を理由に失う。
+		expect( afterBody.listings[ 0 ].offers[ 0 ].external_id ).toBe( 'e2e-meta-blocked' );
+		// stock_status だけが握り潰されて元のまま（＝申告どおり）。
+		expect( afterBody.stock_status ).toBe( 'available' );
 
 		await ctx.dispose();
 	} );
