@@ -408,10 +408,13 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * 「同じ 1 商品を 10 秒間ふさぎ続ける競合が実在した」ことを意味する。その頻度なら
 	 * 大きな声で失敗してよい。
 	 *
-	 * **投げる時点で listings 以外のメタは書き終えている。** 投稿行（title/content/status）も
-	 * 呼び出し元 {@see self::save()} が先に書いている。どれも別キーの冪等な上書きなので、
-	 * 運用者が同じ内容でやり直せばそのまま通る。逆に listings は**一切触っていない**——
-	 * 古い値が無傷で残る、というのがこの例外の意味である。
+	 * **投げる時点で listings 以外のメタは書き終えている（schema_version を除く）。**
+	 * 投稿行（title/content/status）も呼び出し元 {@see self::save()} が先に書いている。
+	 * どれも別キーの冪等な上書きなので、運用者が同じ内容でやり直せばそのまま通る。
+	 * 逆に listings は**一切触っていない**——古い値が無傷で残る、というのがこの例外の
+	 * 意味である。**schema_version だけは listings と一緒に見送る**——あれは listings の
+	 * 形式を指す刻印で、listings から独立していないためである（保存後に押す理由は
+	 * その行のコメント）。
 	 *
 	 * **書いたのに入らなかった場合も黙らない。** `update_post_meta()` は失敗しても
 	 * false を返すだけなので、握り潰すと listings が 1 件も入っていないのに REST は
@@ -441,19 +444,25 @@ final class ProductRepository implements ProductRepositoryInterface {
 		$mask_r18   = ! empty( $data['mask_r18'] );
 		$mask_label = isset( $data['mask_label'] ) ? sanitize_text_field( (string) $data['mask_label'] ) : '';
 
+		// **ここで書くのは listings から独立したメタだけである。** どれも別キーの冪等な
+		// 上書きで、listings を書けなくても矛盾しない（下のロックで抜けても、運用者が
+		// やり直せばそのまま通る）。**schema_version だけは独立していない**ので、
+		// この並びには入れず listings の保存後に書く（理由は下）。extras は
+		// listings の写しではなく独立した項目なので、ここでよい。
 		update_post_meta( $postId, ProductPostType::META_PRODUCT_TYPE, $product_type );
 		update_post_meta( $postId, ProductPostType::META_STOCK_STATUS, $stock_status );
 		update_post_meta( $postId, ProductPostType::META_EXTRAS, $extras );
-		update_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
 		update_post_meta( $postId, ProductPostType::META_RELEASE_DATE, $release_date );
 		update_post_meta( $postId, ProductPostType::META_MASK_BLUR, $mask_blur );
 		update_post_meta( $postId, ProductPostType::META_MASK_R18, $mask_r18 );
 		update_post_meta( $postId, ProductPostType::META_MASK_LABEL, $mask_label );
 
-		// **listings は最後に書く。** ロックを取れなければここで例外を投げて抜けるため、
-		// 順番がそのまま「何が保存され、何が保存されなかったか」になる。listings 以外を
-		// 先に片付けておけば、失われるのは listings だけで、しかもそれは古い値のまま
-		// 無傷で残る（書きかけで壊れた状態にはならない）。
+		// **listings は最後に書く。** ロックを取れなければ（あるいは書いた値が読み戻ら
+		// なければ）ここで例外を投げて抜けるため、順番がそのまま「何が保存され、何が
+		// 保存されなかったか」になる。listings から独立したメタを先に片付けておけば、
+		// 失われるのは listings だけで、しかもそれは古い値のまま無傷で残る（書きかけで
+		// 壊れた状態にはならない）。schema_version はこの並びに入れない——listings の
+		// 形式を指す刻印で、独立していないためである（around() の後で押す）。
 		ListingLock::around(
 			$postId,
 			function ( bool $locked ) use ( $postId, $listings ): void {
@@ -487,6 +496,20 @@ final class ProductRepository implements ProductRepositoryInterface {
 				$this->syncExternalIdMirror( $postId, self::listingsMeta( $postId ) );
 			}
 		);
+
+		// **刻印は listings を保存できたあとに押す。** schema_version が指すのは
+		// listings の形式であり、listings から独立していない。先に押すと、ロック競合や
+		// 書き込み失敗で listings が古い形のまま残った商品まで「移行済み」として記録して
+		// しまう。移行バッチ（{@see \Affilicard\Upgrade\PluginUpgrade}）はカーソルが
+		// 通り過ぎた商品を再訪しないため、その取り残しは二度と直らない。
+		//
+		// 上の around() は、ロックを取れなければ ProductLockUnavailable、書いた値が
+		// 読み戻らなければ ProductListingsWriteFailure を投げて抜ける。ここへ来たのは
+		// listings が実際に入ったときだけである。
+		//
+		// ロックの外に置くのは {@see self::syncDerivedMeta()} と同じ理由——別キーで
+		// read-modify-write ではないため、直列化する必要がない。
+		update_post_meta( $postId, ProductPostType::META_SCHEMA_VERSION, SchemaVersion::CURRENT );
 	}
 
 	/**

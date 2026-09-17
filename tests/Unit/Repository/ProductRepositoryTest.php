@@ -70,6 +70,13 @@ final class ProductRepositoryTest extends TestCase {
 	 */
 	private array $mirrorWrites = array();
 
+	/**
+	 * update_post_meta へ渡された meta キーと値（キー => 最後に渡された値）。
+	 *
+	 * @var array<string, mixed>
+	 */
+	private array $savedMetaValues = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
@@ -2085,6 +2092,10 @@ final class ProductRepositoryTest extends TestCase {
 	 * 見送るのは listings だけである。他は別キーの冪等な上書きで、書いておけば運用者の
 	 * やり直しが素直に通る。「listings を最後に書く」という順序がこの性質を作っているので、
 	 * 順序ごと固定する。
+	 *
+	 * **schema_version だけは例外で、listings と一緒に見送る。** あれは listings の
+	 * 形式を指す刻印であり、listings から独立していない
+	 * （`test_saveMetaはlistingsを書けなければschema_versionを刻まない` 参照）。
 	 */
 	public function test_saveMetaはロックを取れなくてもlistings以外のメタは保存する(): void {
 		$this->saveMetaLockTimeline( 0 );
@@ -2093,7 +2104,6 @@ final class ProductRepositoryTest extends TestCase {
 		$this->assertContains( ProductPostType::META_PRODUCT_TYPE, $this->savedMetaKeys );
 		$this->assertContains( ProductPostType::META_STOCK_STATUS, $this->savedMetaKeys );
 		$this->assertContains( ProductPostType::META_EXTRAS, $this->savedMetaKeys );
-		$this->assertContains( ProductPostType::META_SCHEMA_VERSION, $this->savedMetaKeys );
 		$this->assertContains( ProductPostType::META_RELEASE_DATE, $this->savedMetaKeys );
 		$this->assertContains( ProductPostType::META_MASK_BLUR, $this->savedMetaKeys );
 		$this->assertContains( ProductPostType::META_MASK_R18, $this->savedMetaKeys );
@@ -2230,6 +2240,71 @@ final class ProductRepositoryTest extends TestCase {
 	}
 
 	/**
+	 * listings を書けなかったら schema_version は刻まない。
+	 *
+	 * **schema_version は listings の「形式」を指す刻印である。** 先に
+	 * SchemaVersion::CURRENT を書いてしまうと、listings が古い形のまま残った商品が
+	 * 「移行済み」として記録される。移行バッチ（PluginUpgrade）はカーソルが通り過ぎた
+	 * 商品を再訪しないため、その取り残しは二度と直らない。
+	 *
+	 * ロック競合（何も書かずに見送る）と書き込み失敗（書いたのに入らない）の両方で
+	 * 同じことが起きるので、両方を固定する。
+	 */
+	public function test_saveMetaはlistingsを書けなければschema_versionを刻まない(): void {
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'external_id' => 'rk-1',
+						'regular_url' => 'https://example.test/rk-1',
+					),
+				),
+			),
+		);
+
+		$this->stubSaveMetaWriteVerification();
+		$this->runSaveMetaWriteVerification( array(), $listings, false );
+
+		$this->assertInstanceOf( ProductListingsWriteFailure::class, $this->lastWriteFailure );
+		$this->assertNotContains( ProductPostType::META_SCHEMA_VERSION, $this->savedMetaKeys );
+	}
+
+	/**
+	 * ロック競合で listings を見送ったときも schema_version は刻まない。
+	 */
+	public function test_saveMetaはロックを取れなければschema_versionを刻まない(): void {
+		$this->saveMetaLockTimeline( 0 );
+
+		$this->assertInstanceOf( ProductLockUnavailable::class, $this->lastRefusal );
+		$this->assertNotContains( ProductPostType::META_SCHEMA_VERSION, $this->savedMetaKeys );
+	}
+
+	/**
+	 * listings を書けたら schema_version を刻む（刻印そのものを落とさない）。
+	 */
+	public function test_saveMetaはlistingsを書けたらschema_versionを刻む(): void {
+		$listings = array(
+			array(
+				'platform' => 'rakuten-kobo',
+				'offers'   => array(
+					array(
+						'external_id' => 'rk-1',
+						'regular_url' => 'https://example.test/rk-1',
+					),
+				),
+			),
+		);
+
+		$this->stubSaveMetaWriteVerification();
+		$this->runSaveMetaWriteVerification( array(), $listings, true );
+
+		$this->assertNull( $this->lastWriteFailure );
+		$this->assertContains( ProductPostType::META_SCHEMA_VERSION, $this->savedMetaKeys );
+		$this->assertSame( SchemaVersion::CURRENT, $this->savedMetaValues[ ProductPostType::META_SCHEMA_VERSION ] ?? null );
+	}
+
+	/**
 	 * 書き込み検証テスト用の WP 関数スタブ。
 	 *
 	 * **値の切り替えはプロパティで行う。** WP_Mock は同じ関数名について最初の期待だけを
@@ -2241,6 +2316,8 @@ final class ProductRepositoryTest extends TestCase {
 		$this->listingsWriteResult = true;
 		$this->lastWriteFailure    = null;
 		$this->mirrorWrites        = array();
+		$this->savedMetaKeys       = array();
+		$this->savedMetaValues     = array();
 
 		WP_Mock::userFunction( 'sanitize_text_field' )
 			->andReturnUsing( static fn( $v ) => is_string( $v ) ? trim( $v ) : $v );
@@ -2277,6 +2354,8 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'update_post_meta' )
 			->andReturnUsing(
 				function ( $post_id, $key, $value ) {
+					$this->savedMetaKeys[]                  = (string) $key;
+					$this->savedMetaValues[ (string) $key ] = $value;
 					return ProductPostType::META_LISTINGS === $key ? $this->listingsWriteResult : true;
 				}
 			);
@@ -2294,6 +2373,8 @@ final class ProductRepositoryTest extends TestCase {
 		$this->listingsWriteResult = $writeResult;
 		$this->lastWriteFailure    = null;
 		$this->mirrorWrites        = array();
+		$this->savedMetaKeys       = array();
+		$this->savedMetaValues     = array();
 
 		try {
 			( new ProductRepository() )->saveMeta( 5, array( 'listings' => $listings ) );
