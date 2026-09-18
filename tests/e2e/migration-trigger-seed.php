@@ -174,9 +174,25 @@ file_put_contents( WPMU_PLUGIN_DIR . '/affilicard-e2e-doing-it-wrong.php', $reco
 delete_option( PluginUpgrade::OPTION_MIGRATION_CURSOR );
 update_option( PluginUpgrade::OPTION_VERSION, '3.5.1', false );
 
+// **前提のスナップショットはこのプロセスの中で取る。**
+// 別プロセス（`wp eval-file` の点検）で取ると、その起動までのあいだに外から来た
+// リクエスト——Action Scheduler の非同期ランナーが投げるループバック要求など——が
+// `plugins_loaded` で `maybeUpgrade()` を走らせ、**バージョンを 3.5.1 に戻した直後の
+// この状態を見て移行を積み直してしまう**（カーソルが復活し、バージョンが 4.0.0 へ
+// 進む）。真っさらな DB では移行がインストール直後から未完で非同期ランナーが活発なため、
+// これが実際に起きる。プロセス内で取れば隙が無い。
+$actions_after_seed = $wpdb->get_results(
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Action Scheduler のテーブルを検査するための E2E 専用スクリプト。
+	$wpdb->prepare( "SELECT action_id, hook, status FROM {$actions_table} WHERE hook = %s", PluginUpgrade::HOOK_MIGRATE_OFFERS ),
+	ARRAY_A
+);
+
 echo 'TRIGGER_SEED_JSON:' . wp_json_encode(
 	array(
-		'ids'     => $ids,
-		'version' => (string) get_option( PluginUpgrade::OPTION_VERSION, '' ),
+		'ids'          => $ids,
+		'version'      => (string) get_option( PluginUpgrade::OPTION_VERSION, '' ),
+		'actionRows'   => is_array( $actions_after_seed ) ? $actions_after_seed : array(),
+		'cursor'       => get_option( PluginUpgrade::OPTION_MIGRATION_CURSOR, false ),
+		'doingItWrong' => get_option( $doing_it_wrong_option, array() ),
 	)
 ) . "\n";

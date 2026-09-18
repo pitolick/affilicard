@@ -146,8 +146,13 @@ test.describe( 'offers 移行の開始トリガー（通常のリクエスト経
 	let adminRendered;
 
 	test.beforeAll( async ( { browser } ) => {
-		seed();
-		before = inspect();
+		// **前提のスナップショットは seed 自身が返したものを使う。**
+		// 別プロセスで `inspect()` を挟むと、その起動までのあいだに外から来た
+		// リクエスト（Action Scheduler の非同期ランナーが投げるループバック要求など）が
+		// `maybeUpgrade()` を走らせ、バージョンを戻した直後のこの状態を見て移行を
+		// 積み直してしまう。真っさらな DB では移行がインストール直後から未完で
+		// 非同期ランナーが活発なため、これが実際に起きる（CI で観測）。
+		before = seed();
 
 		// **ここが本題。** `runOffersMigrationBatch()` も `maybeUpgrade()` も直接呼ばない。
 		// 本物の（ログイン済みの）HTTP リクエストを 1 本流し、`plugins_loaded` の
@@ -189,8 +194,17 @@ test.describe( 'offers 移行の開始トリガー（通常のリクエスト経
 		// 0 が返り、1 件も積まれていなかった。
 		expect( afterRequest.actionRows.length ).toBeGreaterThan( 0 );
 		expect( afterRequest.actionRows[ 0 ].hook ).toBe( HOOK );
-		// 未完の印も立っている（AS のジョブが飛んでも次のリクエストが拾い直せる）。
-		expect( afterRequest.cursor ).not.toBe( false );
+
+		// **カーソル（未完の印）の有無はここでは主張しない。**
+		// 真っさらな DB では、この管理画面リクエスト自身が Action Scheduler の
+		// 非同期ランナーを起こし（`maybe_dispatch_async_request()` は `is_admin()` で
+		// 発火する）、積まれた移行がそのまま完走してカーソルが消えていることがある——
+		// 正常な結末であって失敗ではない。実測では DB をリセットした直後、この spec を
+		// 単体で回しただけでカーソルが消えていた。
+		// 「投入より先にカーソルを立てる」不変条件は PluginUpgradeTest が
+		// （add_option の呼び出しと、カーソルが無ければバージョンを進めないことの
+		// 両方で）押さえており、完走後にカーソルが消えることは下の完走テストが見る。
+		// ここで見るべきなのは「行ができたか」だけで、行は完走しても残る。
 	} );
 
 	test( '管理画面が _doing_it_wrong を鳴らさない', async () => {

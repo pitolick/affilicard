@@ -11,7 +11,7 @@
  * ところが v3 の flat な形のまま残っている商品へ通常の価格更新が先に届くと、
  * その保存が flat → `offers[]` の変換を兼ねてしまう:
  *
- *   AS ランナー → `RefreshHandler` → `ListingRefresher::refreshOne()`
+ *   `RefreshHandler` → `ListingRefresher::refreshOne()`
  *   → `ProductRepository::updateListingOffer()`（`LegacyOffer::offersWithFallback()` で
  *      offers[] へ揃えて書き戻す）→ `update_post_meta()` → `sanitize_meta()`
  *   → `ProductSchema::sanitizeListings()` → `sanitizeOffers()`
@@ -32,13 +32,15 @@
  * 通って実際に失われたデータは無い。それでも塞ぐのは、失われたときに**気づく手段が無い**
  * （通知も件数も出ない）種類の損失だからである。
  *
- * ## 見送った更新が失われないこと
+ * ## シナリオを 1 プロセスで回す理由
  *
- * 見送り＝書き込まない＝`last_fetched_at` が据え置かれる、なので
- * `PriceFreshness::needsRefetch()` は true のままになり、掃引
- * （`QueueMaintenance::sweep()`）が次の周回で同じ listing をまた積む。移行が完走すれば
- * listing は `offers[]` を持つので見送りは効かなくなり、そのまま通常どおり取得される。
- * 本 spec はその 3 点（見送る／掃引が積み直す／移行後は書き込む）を順に確かめる。
+ * 真っさらな DB では offers 移行がインストール直後から未完で、管理画面リクエストのたびに
+ * Action Scheduler の非同期ランナーが起きうる。ランナーは毎リクエスト積み直される
+ * `affilicard_migrate_offers_batch` を拾い、**観測の途中で移行を走らせてしまう**
+ * （CI と、ローカルで DB をリセットした再現で実際に起きた）。そのためシードから
+ * 見送り・移行・再開までをフィクスチャの 1 プロセスで順に行い、プロセス間の隙を無くす。
+ * 詳細と、AS のランナーを介さず同じフックを直接発火させる理由は
+ * tests/e2e/migration-race-fixture.php の冒頭を参照。
  */
 
 'use strict';
@@ -46,28 +48,22 @@
 const { test, expect } = require( '@playwright/test' );
 const { execFileSync } = require( 'child_process' );
 
-const PLUGIN_PATH = 'wp-content/plugins/affilicard';
-const FIXTURE = `${ PLUGIN_PATH }/tests/e2e/migration-race-fixture.php`;
+const FIXTURE =
+	'wp-content/plugins/affilicard/tests/e2e/migration-race-fixture.php';
 
 /**
+ * シナリオを 1 プロセスで走らせ、各段階のスナップショットを受け取る。
+ *
  * `wp-env run tests-cli <args...>` をシェルを介さずに実行する（global-setup.js と同じ流儀）。
  *
- * @param {string[]} args wp-cli 側の argv。
- * @return {string} 標準出力。
+ * @return {Object} フィクスチャの出力。
  */
-function wpEnvRun( args ) {
-	return execFileSync( 'npx', [ 'wp-env', 'run', 'tests-cli', ...args ], {
-		encoding: 'utf8',
-	} );
-}
-
-/**
- * 出力から `RACE_JSON:{...}` を取り出す。
- *
- * @param {string} raw 標準出力。
- * @return {Object} パースした JSON。
- */
-function parseRaceJson( raw ) {
+function runScenario() {
+	const raw = execFileSync(
+		'npx',
+		[ 'wp-env', 'run', 'tests-cli', 'wp', 'eval-file', '--use-include', FIXTURE ],
+		{ encoding: 'utf8' }
+	);
 	const marker = 'RACE_JSON:';
 	const idx = raw.indexOf( marker );
 	if ( -1 === idx ) {
@@ -81,89 +77,63 @@ function parseRaceJson( raw ) {
 	);
 }
 
-/**
- * @param {string} mode `seed` / `read` / `migrate` / `requeue`。
- * @return {Object} フィクスチャの出力。
- */
-function runFixture( mode ) {
-	return parseRaceJson(
-		wpEnvRun( [ 'wp', 'eval-file', '--use-include', FIXTURE, mode ] )
-	);
-}
-
-/** 積んだ価格更新を本物の Action Scheduler ランナーで実行する。 */
-function runRefreshQueue() {
-	// group を絞って、この spec が用意した 2 件以外のキューを巻き込まない。
-	wpEnvRun( [
-		'wp',
-		'action-scheduler',
-		'run',
-		'--hooks=affilicard_refresh_listing',
-		'--group=affilicard-rakuten-kobo',
-		'--force',
-	] );
-}
-
 test.describe( '移行より先に価格更新が届いた flat listing（実 WP）', () => {
-	/** @type {Object} 価格更新が走る前（移行は未完・listing は flat）。 */
-	let before;
-	/** @type {Object} 移行が未完のまま価格更新を走らせたあと。 */
-	let afterHold;
-	/** @type {Object} 移行を完走させたあと。 */
-	let afterMigration;
-	/** @type {Object} 移行後にもう一度価格更新を走らせたあと。 */
-	let afterResume;
+	/** @type {Object} */
+	let result;
 
 	test.beforeAll( () => {
-		runFixture( 'seed' );
-		before = runFixture( 'read' );
-
-		runRefreshQueue();
-		afterHold = runFixture( 'read' );
-
-		runFixture( 'migrate' );
-		afterMigration = runFixture( 'read' );
-
-		runFixture( 'requeue' );
-		runRefreshQueue();
-		afterResume = runFixture( 'read' );
+		result = runScenario();
 	} );
 
 	test( '前提: 移行は未完で、2 商品とも v3 の flat な形で購入リンクを 1 件ずつ持つ', async () => {
 		// これが崩れていると以降の assertion は何も証明しない。
-		expect( before.migrationPending ).toBe( true );
-		expect( before.products.no_identity.links ).toBe( 1 );
-		expect( before.products.with_id.links ).toBe( 1 );
-		expect( before.products.no_identity.listings[ 0 ].offers ).toBeUndefined();
-		expect( before.products.with_id.listings[ 0 ].offers ).toBeUndefined();
+		expect( result.before.migrationPending ).toBe( true );
+		expect( result.before.products.no_identity.links ).toBe( 1 );
+		expect( result.before.products.with_id.links ).toBe( 1 );
+		expect(
+			result.before.products.no_identity.listings[ 0 ].offers
+		).toBeUndefined();
+		expect( result.before.products.with_id.listings[ 0 ].offers ).toBeUndefined();
+		// 価格更新のハンドラが配線されていること。配線が無ければ「書き込みが無い」は
+		// 見送りの証拠にならない。
+		expect( result.refreshHookRegistered ).toBe( true );
 	} );
 
 	test( '移行が未完のあいだ、価格更新は未変換の listing へ書き込まない', async () => {
+		// 観測のあいだ移行が横から走っていないこと（走っていれば見送りとは無関係に
+		// listing が変換されるため、この主張は成立しない）。
+		expect( result.afterHold.migrationPending ).toBe( true );
 		// listing は flat のまま＝保存が 1 度も起きていない。ここが `offers[]` に
 		// なっていたら、価格更新が変換を兼ねてしまったということ。
-		expect( afterHold.products.no_identity.listings[ 0 ].offers ).toBeUndefined();
-		expect( afterHold.products.with_id.listings[ 0 ].offers ).toBeUndefined();
+		expect(
+			result.afterHold.products.no_identity.listings[ 0 ].offers
+		).toBeUndefined();
+		expect(
+			result.afterHold.products.with_id.listings[ 0 ].offers
+		).toBeUndefined();
 		// **購入リンクが生き残っている。** 修正前はここが 0 になっていた。
-		expect( afterHold.products.no_identity.links ).toBe( 1 );
-		expect( afterHold.products.with_id.links ).toBe( 1 );
+		expect( result.afterHold.products.no_identity.links ).toBe( 1 );
+		expect( result.afterHold.products.with_id.links ).toBe( 1 );
 	} );
 
 	test( '見送った更新は失われない（掃引が次の周回でまた積む）', async () => {
 		// 見送り＝書き込まない＝last_fetched_at が据え置かれる。
-		expect( afterHold.products.no_identity.lastFetchedAt ).toBe( '' );
-		expect( afterHold.products.with_id.lastFetchedAt ).toBe( '' );
+		expect( result.afterHold.products.no_identity.lastFetchedAt ).toBe( '' );
+		expect( result.afterHold.products.with_id.lastFetchedAt ).toBe( '' );
 		// したがって QueueMaintenance::sweep() の再取得判定は true のままで、
 		// 次の周回で同じ listing がまた積まれる（判定はフィクスチャが sweep() と
 		// 同じ PriceFreshness::needsRefetch() で再現している）。
-		expect( afterHold.products.no_identity.sweepWouldEnqueue ).toBe( true );
-		expect( afterHold.products.with_id.sweepWouldEnqueue ).toBe( true );
+		expect( result.afterHold.products.no_identity.sweepWouldEnqueue ).toBe(
+			true
+		);
+		expect( result.afterHold.products.with_id.sweepWouldEnqueue ).toBe( true );
 	} );
 
 	test( '移行が到達すれば、身元なしの購入リンクは温存され件数にも計上される', async () => {
 		// 見送りが守っていたのはこれ——移行が温存し、運用へ通知するための件数を数える。
-		expect( afterMigration.migrationPending ).toBe( false );
+		expect( result.afterMigration.migrationPending ).toBe( false );
 
-		const listing = afterMigration.products.no_identity.listings[ 0 ];
+		const listing = result.afterMigration.products.no_identity.listings[ 0 ];
 		expect( listing.offers ).toHaveLength( 1 );
 		expect( listing.offers[ 0 ].affiliate_url ).toBe(
 			'https://example.test/race-no-identity'
@@ -172,10 +142,12 @@ test.describe( '移行より先に価格更新が届いた flat listing（実 WP
 		expect( listing.offers[ 0 ].external_id ).toBe( '' );
 		// 管理画面の通知が読む件数（OffersMigrationNotice）。0 のままだと
 		// 「消えるかもしれない」という警告すら出ない。
-		expect( afterMigration.preserved ).toBeGreaterThan( before.preserved );
+		expect( result.afterMigration.preserved ).toBeGreaterThan(
+			result.before.preserved
+		);
 
 		// 対照群も変換され、身元があるので当然残る。
-		const withId = afterMigration.products.with_id.listings[ 0 ];
+		const withId = result.afterMigration.products.with_id.listings[ 0 ];
 		expect( withId.offers ).toHaveLength( 1 );
 		expect( withId.offers[ 0 ].external_id ).toBe( 'race-with-id' );
 	} );
@@ -183,10 +155,13 @@ test.describe( '移行より先に価格更新が届いた flat listing（実 WP
 	test( '移行が完走すれば価格更新は再開する', async () => {
 		// 見送りは「移行が未完」かつ「未変換」の積集合でしか効かない。移行後は
 		// listing が offers[] を持つので、同じ価格更新が今度は実際に書き込む。
-		const withId = afterResume.products.with_id.listings[ 0 ];
+		//
+		// **このテストは上の 2 つの守り手でもある。** 見送りが「実は配線ミスで
+		// ハンドラが何もしていなかった」「レート制限で枠を取れなかった」だけなら、
+		// ここも書き込めずに落ちる。
+		const withId = result.afterResume.products.with_id.listings[ 0 ];
 		expect( withId.offers ).toHaveLength( 1 );
 		expect( withId.offers[ 0 ].last_fetched_at ).not.toBe( '' );
-		// 書き込めた＝掃引の再取得判定も落ち着く（＝見送りループから抜けた）。
-		expect( afterResume.products.with_id.lastFetchedAt ).not.toBe( '' );
+		expect( result.afterResume.products.with_id.lastFetchedAt ).not.toBe( '' );
 	} );
 } );
