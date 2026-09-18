@@ -55,6 +55,47 @@ if ( ! function_exists( 'rest_sanitize_boolean' ) ) {
 	}
 }
 
+// Action Scheduler の初期化済みフラグを問い合わせるための最小スタブ。
+//
+// **本物は vendor に居るが、composer の autoload には載っていない**（AS は自前の
+// `action-scheduler.php` から読まれる想定で、`class_exists( 'ActionScheduler' )` は
+// 単体テスト環境では常に false になる）。それだと
+// `PluginUpgrade::isActionSchedulerReady()` の「初期化済みなら即座に積む」分岐へ
+// 一度も入れず、実装の片側がテストから見えなくなる。
+//
+// シグネチャと戻り値の意味は同梱の本物
+// （`vendor/woocommerce/action-scheduler/classes/abstracts/ActionScheduler.php` の
+// `is_initialized( $function_name = null )`）に合わせる。本物は引数を渡されたときだけ
+// `_doing_it_wrong()` を鳴らすので、こちらも「引数なしでは何も鳴らさない」を守る。
+// 既定は false（＝plugins_loaded 相当の未初期化状態）。テストが明示的に true へ
+// 倒したときだけ初期化済みとして振る舞う。
+//
+// **AS の実挙動（積んだ行が本当に DB に入るか、`action_scheduler_init` が実際に
+// 発火するか）はここでは確かめられない。** それは tests/e2e/offers-migration-trigger.spec.js
+// が実 WordPress 上で見る。
+if ( ! class_exists( 'ActionScheduler' ) ) {
+	/**
+	 * Minimal ActionScheduler stub for unit tests.
+	 *
+	 * @phpstan-ignore-next-line
+	 */
+	class ActionScheduler { // phpcs:ignore
+
+		/**
+		 * @var bool
+		 */
+		public static $data_store_initialized = false;
+
+		/**
+		 * @param string|null $function_name Function name (unused in the stub).
+		 * @return bool
+		 */
+		public static function is_initialized( $function_name = null ) { // phpcs:ignore
+			return self::$data_store_initialized;
+		}
+	}
+}
+
 if ( ! class_exists( 'WP_Error' ) ) {
 	class WP_Error {} // @phpstan-ignore-line
 }

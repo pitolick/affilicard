@@ -330,23 +330,98 @@ final class PluginUpgrade {
 	 * v3.5.0 で導入されたバッチ基盤（QueueMaintenance::sweep()。カーソルで分割走査し
 	 * 続きは自分自身を積み直す設計）に乗せる。
 	 *
+	 * **投入そのものは `action_scheduler_init` まで待つ。** ここを呼ぶ
+	 * {@see self::maybeUpgrade()} は `plugins_loaded`（{@see \Affilicard\Plugin::bootInstance()}）
+	 * で走るが、Action Scheduler のデータストアが初期化されるのは **`init` の優先度 1**
+	 * である（同梱している
+	 * `vendor/woocommerce/action-scheduler/classes/abstracts/ActionScheduler.php` の
+	 * `init()` が `add_action( 'init', array( $store, 'init' ), 1 )` と
+	 * `self::$data_store_initialized = true` を同じ `init`@1 に積む）。それより前に
+	 * `as_schedule_single_action()` を呼ぶと、同梱の `functions.php` の入口
+	 * （`if ( ! ActionScheduler::is_initialized( __FUNCTION__ ) ) { return 0; }`）で
+	 * **何も積まずに 0 が返る**。しかも `is_initialized()` は関数名を渡されると
+	 * `_doing_it_wrong()` を鳴らすため、`WP_DEBUG` のサイトでは `plugins_loaded` の
+	 * 時点で出力が始まり「headers already sent」で管理画面が壊れる。
+	 *
+	 * つまり従来の実装は **実インストールのアップグレードで移行を一度も積めず**、
+	 * カーソルが残るので毎リクエスト同じ空振りを繰り返していた。
+	 * {@see \Affilicard\Plugin::bootInstance()} が `init` に掛けている
+	 * {@see \Affilicard\Cron\RefreshScheduler::reconcile()} は同じ手続き API を
+	 * 使って正常に積めており、`plugins_loaded` から積んでいたのはここだけだった。
+	 *
+	 * `action_scheduler_init` は AS 自身が「この後は手続き API を使ってよい」と
+	 * 定義しているフックで、AS が `init` より前にロードされた場合（`init`@1）と
+	 * 後だった場合（その場で同期実行）の**両方の分岐から発火する**ため、ロード順に
+	 * 関わらず 1 度は必ず通る。既に初期化済みのときは `add_action()` しても
+	 * 二度と発火しないので、その場合だけ即座に積む（{@see self::isActionSchedulerReady()}）。
+	 *
 	 * Action Scheduler は Plugin::bootInstance() が plugins_loaded より前に bundle 版を
 	 * 同期ロードするため本番では必ず存在するが、単体テスト環境には存在しないため
-	 * function_exists で防御する（存在しなければ何もしない。実運用では起こらない）。
+	 * {@see self::enqueueOffersMigration()} が function_exists で防御する。
 	 */
 	private static function scheduleOffersMigration(): void {
 		// 「未完」の印を先に立てる。add_option なので、既に走っている移行のカーソルを
 		// 0 へ巻き戻すことはない（既存キーがあれば false を返して何もしない）。
+		//
+		// **投入を延期しても、カーソルはこの場で同期的に作る。** maybeUpgrade() が
+		// 直後に isOffersMigrationPending() を見て「バージョンを進めてよいか」を
+		// 決める判断も、投入に失敗したとき（あるいは action_scheduler_init が
+		// 発火しないまま終わったとき）に次のリクエストが拾い直す痕跡も、どちらも
+		// この 1 行が同期的に効くことに依存している。
 		add_option( self::OPTION_MIGRATION_CURSOR, 0, '', false );
 
+		if ( self::isActionSchedulerReady() ) {
+			self::enqueueOffersMigration();
+			return;
+		}
+
+		// まだデータストアが初期化されていない（plugins_loaded から来たときは必ずこちら）。
+		// 同じ静的コールバックを何度 add_action() しても WordPress は同一の idx
+		// （_wp_filter_build_unique_id）で上書きするため、1 リクエスト中に
+		// scheduleOffersMigration() が複数回呼ばれても二重には登録されない。
+		add_action( 'action_scheduler_init', array( self::class, 'enqueueOffersMigration' ) );
+	}
+
+	/**
+	 * 開始トリガーを実際に Action Scheduler へ積む。
+	 *
+	 * `action_scheduler_init` のコールバックとして登録するため public にしてある
+	 * （クロージャにすると add_action() の重複登録を防げない）。
+	 */
+	public static function enqueueOffersMigration(): void {
 		if ( ! function_exists( 'as_schedule_single_action' ) ) {
 			return;
 		}
-		// **戻り値は意図的に見ない。** 投入に失敗しても（Action Scheduler が未初期化・
-		// DB エラー等）カーソルは既に立っているので、maybeUpgrade() が次のリクエストで
-		// isOffersMigrationPending() を見て積み直す。カーソルを先に立てるのはこのため
-		// であり、投入成功後に立てる順序だと失敗が痕跡を残さず永久に止まる。
+
+		// **戻り値は意図的に見ない。** 投入に失敗しても（DB エラー等）カーソルは既に
+		// 立っているので、maybeUpgrade() が次のリクエストで isOffersMigrationPending()
+		// を見て積み直す。カーソルを先に立てるのはこのためであり、投入成功後に立てる
+		// 順序だと失敗が痕跡を残さず永久に止まる。
+		//
+		// unique=true なので、既に pending / in-progress な移行があれば二重に積まない。
 		as_schedule_single_action( time(), self::HOOK_MIGRATE_OFFERS, array(), self::MIGRATION_GROUP, true );
+	}
+
+	/**
+	 * Action Scheduler のデータストアが初期化済みか（＝手続き API を使ってよいか）。
+	 *
+	 * **`is_initialized()` は引数を渡さずに呼ぶ。** 同梱の
+	 * `vendor/woocommerce/action-scheduler/classes/abstracts/ActionScheduler.php` の
+	 * 実装は `if ( ! self::$data_store_initialized && ! empty( $function_name ) )` で
+	 * `_doing_it_wrong()` を鳴らす。関数名を渡すと「まだ初期化されていない」を
+	 * 問い合わせただけで PHP notice が出力され、`WP_DEBUG` のサイトでは
+	 * `plugins_loaded` の時点で出力が始まって管理画面が壊れる。引数なしなら
+	 * bool を返すだけで何も鳴らさない。
+	 *
+	 * クラスが無い環境（単体テスト）では false を返す。そこでは
+	 * `action_scheduler_init` も発火しないが、AS 自体が無いのだから積む先も無い。
+	 */
+	private static function isActionSchedulerReady(): bool {
+		if ( ! class_exists( 'ActionScheduler' ) || ! method_exists( 'ActionScheduler', 'is_initialized' ) ) {
+			return false;
+		}
+
+		return (bool) \ActionScheduler::is_initialized();
 	}
 
 	/**

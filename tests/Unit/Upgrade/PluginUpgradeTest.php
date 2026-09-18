@@ -96,6 +96,12 @@ final class PluginUpgradeTest extends TestCase {
 		$this->lockEvents             = array();
 		$this->mockLockWpdb();
 
+		// 既定は「まだ Action Scheduler のデータストアが初期化されていない」——
+		// maybeUpgrade() が走る plugins_loaded と同じ状態（AS がフラグを立てるのは
+		// init@1）。初期化済みの分岐を見たいテストだけ
+		// markActionSchedulerInitialized() で倒す。
+		\ActionScheduler::$data_store_initialized = false;
+
 		// 移行の失敗記録（試行回数・諦めた件数／post ID）。移行が成功する経路でも
 		// 「持ち越した失敗が無いか」を見るため読まれる。
 		WP_Mock::userFunction( 'get_option' )
@@ -144,6 +150,7 @@ final class PluginUpgradeTest extends TestCase {
 	}
 
 	public function tearDown(): void {
+		\ActionScheduler::$data_store_initialized = false;
 		OfferPromotionTrigger::resetForTests();
 		WP_Mock::tearDown();
 		\Mockery::close();
@@ -305,6 +312,19 @@ final class PluginUpgradeTest extends TestCase {
 					return true;
 				}
 			);
+	}
+
+	/**
+	 * Action Scheduler のデータストアが初期化済みの状態を作る。
+	 *
+	 * 実 WP では `init` の優先度 1 でこうなる（同梱の
+	 * `vendor/woocommerce/action-scheduler/classes/abstracts/ActionScheduler.php`）。
+	 * `plugins_loaded` はそれより前なので、maybeUpgrade() 経由で初期化済みに
+	 * なっているのは「AS がロードされたときには既に init が終わっていた」場合
+	 * （AS 側の else 分岐）に限られる。
+	 */
+	private function markActionSchedulerInitialized(): void {
+		\ActionScheduler::$data_store_initialized = true;
 	}
 
 	public function test_初回は棚卸し基準日を作成しバージョンを記録する(): void {
@@ -596,8 +616,51 @@ final class PluginUpgradeTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
-	/** offers 導入前（4.0.0 未満）から上がってきたときは移行を積む。 */
-	public function test_offers導入前からの更新なら移行の開始トリガーを積む(): void {
+	/**
+	 * offers 導入前（4.0.0 未満）から上がってきたときは移行を積む。
+	 *
+	 * **ただし plugins_loaded では積まない。** maybeUpgrade() が走る plugins_loaded の
+	 * 時点では Action Scheduler のデータストアが未初期化（AS がフラグを立てるのは
+	 * init@1）で、そこで `as_schedule_single_action()` を呼んでも
+	 * 同梱の `functions.php` が入口で 0 を返すだけで **1 件も積まれない**。
+	 * ここで見るのは「カーソルは同期的に立て、投入は action_scheduler_init へ回す」
+	 * という配線であって、行が本当に作られることではない
+	 * （それは tests/e2e/offers-migration-trigger.spec.js が実 WP で見る）。
+	 */
+	public function test_offers導入前からの更新でASが未初期化なら投入をaction_scheduler_initへ回す(): void {
+		$this->stubNoMigrationPending();
+		$this->expectMigrationMarkerCreated();
+		WP_Mock::userFunction( 'get_option' )->with( PluginUpgrade::OPTION_VERSION, '' )->andReturn( '3.5.0' );
+		WP_Mock::userFunction( 'add_option' )
+			->once()
+			->with( PluginUpgrade::OPTION_STOCKTAKE_BASELINE, \Mockery::type( 'string' ), '', false )
+			->andReturn( true );
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->with( PluginUpgrade::OPTION_VERSION, '3.6.0', false );
+		// **ここで呼んではならない。** 呼べば 0 が返るだけで積まれず、しかも
+		// is_initialized( __FUNCTION__ ) が _doing_it_wrong() を鳴らして
+		// WP_DEBUG のサイトでは管理画面が壊れる。
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+		WP_Mock::expectActionAdded(
+			'action_scheduler_init',
+			array( PluginUpgrade::class, 'enqueueOffersMigration' )
+		);
+
+		PluginUpgrade::maybeUpgrade( '3.6.0' );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 既に初期化済みなら延期しない。
+	 *
+	 * `action_scheduler_init` は既に発火し終わっており、後から add_action() しても
+	 * 二度と呼ばれない——延期したままだと、この経路から来た呼び出しだけが
+	 * 永久に積まれないまま取り残される。
+	 */
+	public function test_AS初期化済みならその場で移行の開始トリガーを積む(): void {
+		$this->markActionSchedulerInitialized();
 		$this->stubNoMigrationPending();
 		$this->expectMigrationMarkerCreated();
 		WP_Mock::userFunction( 'get_option' )->with( PluginUpgrade::OPTION_VERSION, '' )->andReturn( '3.5.0' );
@@ -610,10 +673,31 @@ final class PluginUpgradeTest extends TestCase {
 			->with( PluginUpgrade::OPTION_VERSION, '3.6.0', false );
 		WP_Mock::userFunction( 'as_schedule_single_action' )
 			->once()
-			->with( \Mockery::type( 'int' ), PluginUpgrade::HOOK_MIGRATE_OFFERS, array(), \Mockery::type( 'string' ), true )
+			->with( \Mockery::type( 'int' ), PluginUpgrade::HOOK_MIGRATE_OFFERS, array(), PluginUpgrade::MIGRATION_GROUP, true )
 			->andReturn( 123 );
+		WP_Mock::expectActionNotAdded(
+			'action_scheduler_init',
+			array( PluginUpgrade::class, 'enqueueOffersMigration' )
+		);
 
 		PluginUpgrade::maybeUpgrade( '3.6.0' );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 延期した投入（action_scheduler_init のコールバック）は unique=true で積む。
+	 *
+	 * 延期そのものは上の 2 テストが見るが、延期先が何もしないのでは意味がない。
+	 * 登録するコールバックが実際に開始トリガーを積むことをここで固定する。
+	 */
+	public function test_延期した投入はunique付きで開始トリガーを積む(): void {
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with( \Mockery::type( 'int' ), PluginUpgrade::HOOK_MIGRATE_OFFERS, array(), PluginUpgrade::MIGRATION_GROUP, true )
+			->andReturn( 777 );
+
+		PluginUpgrade::enqueueOffersMigration();
 
 		$this->assertConditionsMet();
 	}
@@ -1485,6 +1569,7 @@ final class PluginUpgradeTest extends TestCase {
 	 * バージョンが同じでも積み直すことでそれを塞ぐ。
 	 */
 	public function test_カーソルが残っていればバージョンが同じでも移行を積み直す(): void {
+		$this->markActionSchedulerInitialized();
 		WP_Mock::userFunction( 'get_option' )
 			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, false )
 			// DB からは文字列で返る（int を返すスタブは本番より緩い）。
@@ -1498,6 +1583,35 @@ final class PluginUpgradeTest extends TestCase {
 			->once()
 			->with( \Mockery::type( 'int' ), PluginUpgrade::HOOK_MIGRATE_OFFERS, array(), PluginUpgrade::MIGRATION_GROUP, true )
 			->andReturn( 321 );
+		WP_Mock::userFunction( 'get_option' )->with( PluginUpgrade::OPTION_VERSION, '' )->andReturn( '3.6.0' );
+		WP_Mock::userFunction( 'update_option' )->never();
+
+		PluginUpgrade::maybeUpgrade( '3.6.0' );
+
+		$this->assertConditionsMet();
+	}
+
+	/**
+	 * 再武装も plugins_loaded では投入まで進まず、action_scheduler_init へ回す。
+	 *
+	 * 再武装は毎リクエスト通る経路である。ここが AS 未初期化のまま
+	 * `as_schedule_single_action()` を呼んでいたのが今回の不具合の本体で、
+	 * 「積んだつもりで 1 件も積まれず、カーソルが消えないので翌リクエストも同じ空振り」
+	 * を無限に繰り返していた。
+	 */
+	public function test_再武装もASが未初期化なら投入をaction_scheduler_initへ回す(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, false )
+			->andReturn( '480' );
+		WP_Mock::userFunction( 'add_option' )
+			->once()
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0, '', false )
+			->andReturn( false );
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+		WP_Mock::expectActionAdded(
+			'action_scheduler_init',
+			array( PluginUpgrade::class, 'enqueueOffersMigration' )
+		);
 		WP_Mock::userFunction( 'get_option' )->with( PluginUpgrade::OPTION_VERSION, '' )->andReturn( '3.6.0' );
 		WP_Mock::userFunction( 'update_option' )->never();
 
