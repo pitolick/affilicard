@@ -13,6 +13,7 @@ use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Queue\WorkOutcome;
 use Affilicard\Repository\ProductRepositoryInterface;
 use Affilicard\Settings\GeneralSettings;
+use Affilicard\Upgrade\PluginUpgrade;
 use Affilicard\Util\ScalarField;
 
 /**
@@ -73,6 +74,13 @@ class ListingRefresher {
 				// 実行時に無効化・手動化された listing は対象外（no-op）＝SUCCESS。failed 化させない。
 				return WorkOutcome::SUCCESS;
 			}
+			if ( self::isHeldForMigration( $listing ) ) {
+				// 移行がまだ到達していない listing には書き込まない（理由は
+				// {@see self::isHeldForMigration()}）。削除済み商品・無効化された listing と
+				// 同じ「対象なし（no-op）＝SUCCESS」で返す——一時失敗にすると backoff の
+				// 試行回数を焼き、移行が長引くインストールで failed が積み上がる。
+				return WorkOutcome::SUCCESS;
+			}
 			list( $patch, $outcome, $targetIdentity ) = $this->refreshListing( $listing, (string) $product['title'] );
 			if ( null === $patch ) {
 				// 更新すべき購入リンクが無い＝保存するものも無い。ここで listing を書き戻すと、
@@ -122,6 +130,12 @@ class ListingRefresher {
 			if ( ! ListingEligibility::isEnabledAuto( $listing ) ) {
 				return 0;
 			}
+			if ( self::isHeldForMigration( $listing ) ) {
+				// refreshOne() が no-op で返す＝外部 API を 1 度も叩かない。枠を取ると
+				// account の最終リクエスト時刻だけが進み、実際に fetch したい後続の
+				// ジョブを無駄に待たせる（isEnabledAuto ゲートを写しているのと同じ理由）。
+				return 0;
+			}
 			// refreshListing() と同じフォールバックを通す。ここだけ offers を直接読むと、
 			// 移行前の flat な listing で「refreshOne は fetch するのに枠は 0 件ぶんしか
 			// 確保しない」というズレが生まれる。
@@ -141,6 +155,54 @@ class ListingRefresher {
 			return $count;
 		}
 		return 0;
+	}
+
+	/**
+	 * この listing は「移行がまだ到達していない」ため、今は書き込まずに見送るか。
+	 *
+	 * **なぜ見送るのか。** 価格更新の保存
+	 * （{@see \Affilicard\Repository\ProductRepository::updateListingOffer()}）は
+	 * {@see LegacyOffer::offersWithFallback()} で listing を `offers[]` へ揃えてから
+	 * 書き戻す。つまり **v3 の flat な listing へ届いた価格更新は、そのついでに
+	 * flat → `offers[]` の変換も済ませてしまう**。その変換は
+	 * `update_post_meta()` → `sanitize_meta()` →
+	 * {@see \Affilicard\Rest\ProductSchema::sanitizeOffers()} を通り、身元
+	 * （`regular_url` / `external_id`）を 1 つも持たない購入リンクをそこで落とす。
+	 *
+	 * 移行だけが {@see \Affilicard\Rest\ProductSchema::withLegacyOfferPreservation()}
+	 * でその規則を外して購入リンクを温存し、件数と post ID を控えて管理画面に
+	 * 名指しで通知する（運用者が通常 URL を足すための猶予を作る）。価格更新が先に
+	 * 届くと、**データが消えるうえに温存カウンタも増えず通知も出ない**。しかも移行が
+	 * あとから到達しても、その listing は既に `offers[]` を持つため
+	 * {@see \Affilicard\Upgrade\PluginUpgrade::migrateListingToOffers()} は冪等に
+	 * 素通りし、数える機会そのものが失われる。
+	 *
+	 * **これは予防的な措置である。** 本番カタログ（商品 1,500 件）を実測した時点では
+	 * `affiliate_url` だけを持つ listing は 0 件で、運用者もそのようなデータを手入力
+	 * した覚えはないとのことだった。つまり今この窓を通っても失われるデータは無い。
+	 * それでも塞ぐのは、失われたときに**気づく手段が無い**（通知も件数も出ない）
+	 * 種類の損失だからである。
+	 *
+	 * **見送った更新は失われない。** ここで書き込みを行わない＝`last_fetched_at` が
+	 * 据え置かれるため、{@see \Affilicard\Pricing\PriceFreshness::needsRefetch()} は
+	 * 引き続き true を返し、次の掃引（{@see \Affilicard\Queue\QueueMaintenance::sweep()}）
+	 * が同じ listing をまた積む。移行が完走すれば listing は `offers[]` を持つので
+	 * この見送りは効かなくなり、そのまま通常どおり取得される。掃引が flat な listing を
+	 * 拾えること自体は sweep() 側のフォールバックが保証している（同関数のコメント参照）。
+	 *
+	 * **窓は「移行が未完」かつ「この listing が未変換」の積集合に限る。** 移行中でも
+	 * 既に `offers[]` を持つ listing は普通に更新する——そちらは価格更新が変換を
+	 * 兼ねることが無く、止める理由が無い。判定の順序も安いほうを先に置き、
+	 * 移行済みの listing では option を読まない。
+	 *
+	 * **未変換の判定は移行自身と同じものを使う**（{@see LegacyOffer::isUnmigrated()}）。
+	 * 「移行がこれから変換するつもりの listing には書かない」が守りたい規則なので、
+	 * 判定が 2 つに割れてはならない。
+	 *
+	 * @param array<string, mixed> $listing
+	 */
+	private static function isHeldForMigration( array $listing ): bool {
+		return LegacyOffer::isUnmigrated( $listing ) && PluginUpgrade::isOffersMigrationPending();
 	}
 
 	/**
@@ -187,15 +249,26 @@ class ListingRefresher {
 	 *   フィールドだけの差分、outcome、取得前に確定させたマージ先 identity のタプル
 	 */
 	private function refreshListing( array $listing, string $productTitle ): array {
-		// 移行前の flat な listing（offers を持たず取得結果フィールドが listing 直下に並ぶ
-		// v3 以前の形）も取得対象にする。offers を直接読むと、移行バッチが当該商品へ到達
-		// する前に管理画面の「強制更新」が走ったとき、一度も fetch せず TRANSIENT_FAILURE
-		// を返してリトライ枠だけを焼く。読み取り側（CardRenderer 等）と同じ写像を通す。
+		// flat な listing（offers を持たず取得結果フィールドが listing 直下に並ぶ v3 以前の
+		// 形）も取得対象にする。offers を直接読むと、そういう listing は一度も fetch されず
+		// TRANSIENT_FAILURE を返してリトライ枠だけを焼く。読み取り側（CardRenderer 等）と
+		// 同じ写像を通す。
+		//
+		// **ここへ flat な listing が届くのは「移行がもう来ない」ときだけである。** 移行が
+		// 未完のあいだは refreshOne() が isHeldForMigration() で先に見送るため、この関数は
+		// 呼ばれない。残るのは移行が完走したあとも flat のままの listing——
+		// PluginUpgrade::MIGRATION_MAX_ATTEMPTS ぶん保存に失敗して移行が諦めた商品
+		// （PluginUpgrade::giveUpOnProduct()。旧形式のまま残り、読み取り側の
+		// フォールバックが描く契約）である。**このフォールバックはそれらのための
+		// ものなので外せない**——外すと、諦められた商品は自動更新からも恒久的に外れる。
 		//
 		// このフォールバックで得た offer を保存経路（Repository::updateListingOffer()）へ
 		// 渡すと、保存側も同じ写像で listing を offers[] へ揃えて書き戻す。その形は移行
 		// バッチにとって「変換済み」と同じで、PluginUpgrade::migrateListingToOffers() は
 		// offers を持つ listing をそのまま返す（冪等）ため二重に offer を作ることはない。
+		// **その「保存が変換を兼ねる」性質こそ、移行中に見送る理由そのものである**
+		// （isHeldForMigration() の PHPDoc 参照）。移行が諦めた商品では、温存も通知も
+		// もう起こらないことが確定しているため、見送る意味が無い。
 		$offers  = LegacyOffer::offersWithFallback( $listing );
 		$targets = OfferSelector::select( $offers, GeneralSettings::fallbackOnTerminal() );
 		if ( array() === $targets ) {

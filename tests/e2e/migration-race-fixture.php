@@ -16,15 +16,27 @@ declare(strict_types=1);
  * `withLegacyOfferPreservation()` の窓が無いため、身元を持たない購入リンクは
  * **その場で消える**。しかも温存カウンタは 1 つも増えないので、通知も出ない。
  *
+ * v4.0.0 ではこれを塞いだ（`ListingRefresher::isHeldForMigration()`）。移行が未完で、かつ
+ * その listing がまだ変換されていないあいだは、価格更新は**書き込まずに見送る**。
+ * 見送った更新は失われない——`last_fetched_at` を据え置くので
+ * `PriceFreshness::needsRefetch()` は true のままになり、掃引が次の周回でまた積む。
+ *
  * 引数（`$args[0]`）:
- *   - `seed`   … フィクスチャを作り、価格更新を 2 件積む
- *   - `read`   … 結果を読む
+ *   - `seed`    … フィクスチャを作り（移行は未完のまま）、価格更新を 2 件積む
+ *   - `read`    … 結果を読む
+ *   - `migrate` … 移行バッチを完走させる
+ *   - `requeue` … 価格更新をもう一度積む（移行後の再開を見るため）
  *
  * 出力: 1 行 `RACE_JSON:{...}`
  */
 
+use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductPostType;
+use Affilicard\Pricing\LegacyOffer;
+use Affilicard\Pricing\OfferSelector;
+use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Queue\Enqueuer;
+use Affilicard\Settings\GeneralSettings;
 use Affilicard\Upgrade\PluginUpgrade;
 
 global $wpdb;
@@ -106,12 +118,13 @@ if ( 'seed' === $mode ) {
 	delete_option( PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL );
 	delete_option( PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS );
 
-	// **移行は積まない（カーソルも立てない）。** この spec が見たいのは
-	// 「移行がまだ到達していない商品に通常の価格更新が届いたらどうなるか」で、
-	// 移行を pending にすると AS の非同期ランナーが先に変換してしまい、
-	// 結果が実行タイミング次第で揺れる。実インストールでは、移行の走査が
-	// この商品へ届くまでのあいだ、まさにこの状態が続く。
+	// **移行を「未完」にする（カーソルを 0 で立てる）。** 実インストールでこの状況が
+	// 起きるのは「移行は走っているが、この商品へまだ到達していない」ときであり、
+	// 見送り（ListingRefresher::isHeldForMigration()）もその条件でしか効かない。
+	// この spec は Web リクエストを 1 本も出さないため、AS の非同期ランナーが横から
+	// 移行を走らせることはない。移行を進めるのは下の `migrate` モードだけである。
 	delete_option( PluginUpgrade::OPTION_MIGRATION_CURSOR );
+	add_option( PluginUpgrade::OPTION_MIGRATION_CURSOR, 0, '', false );
 
 	// 通常の価格更新（手動トリガー）を 2 件積む。ここから先は本物の経路——
 	// AS のランナー → RefreshHandler → ListingRefresher::refreshOne() →
@@ -125,8 +138,44 @@ if ( 'seed' === $mode ) {
 	return;
 }
 
-$ids      = get_option( $ids_option, array() );
-$ids      = is_array( $ids ) ? $ids : array();
+$ids_for_mode = get_option( $ids_option, array() );
+$ids_for_mode = is_array( $ids_for_mode ) ? $ids_for_mode : array();
+
+if ( 'requeue' === $mode ) {
+	// 移行後に価格更新が「今度は実際に書き込む」ことを見るための積み直し。
+	$enqueuer = new Enqueuer();
+	foreach ( $ids_for_mode as $id ) {
+		$enqueuer->enqueueManual( (int) $id, 'rakuten-kobo', 'rakuten-kobo' );
+	}
+	echo 'RACE_JSON:' . wp_json_encode( array( 'requeued' => count( $ids_for_mode ) ) ) . "\n";
+	return;
+}
+
+if ( 'migrate' === $mode ) {
+	// 移行を完走させる（migration-fixture.php と同じループ。バッチサイズ 200 なので
+	// この環境の商品数次第で複数回に分かれる）。
+	$guard = 0;
+	do {
+		PluginUpgrade::runOffersMigrationBatch();
+		++$guard;
+	} while ( PluginUpgrade::isOffersMigrationPending() && $guard < 100 );
+
+	if ( PluginUpgrade::isOffersMigrationPending() ) {
+		throw new RuntimeException(
+			sprintf( 'offers 移行が %d 回のバッチで完了しませんでした（未完のまま E2E を続けない）。', $guard )
+		);
+	}
+
+	// ループが自分で回した継続アクションの残骸を片付ける（migration-fixture.php と同じ理由）。
+	if ( function_exists( 'as_unschedule_all_actions' ) ) {
+		as_unschedule_all_actions( PluginUpgrade::HOOK_MIGRATE_OFFERS );
+	}
+
+	echo 'RACE_JSON:' . wp_json_encode( array( 'batches' => $guard ) ) . "\n";
+	return;
+}
+
+$ids      = $ids_for_mode;
 $products = array();
 foreach ( $ids as $key => $post_id ) {
 	$post_id  = (int) $post_id;
@@ -148,16 +197,49 @@ foreach ( $ids as $key => $post_id ) {
 		}
 	}
 
+	// **掃引が次の周回でこの listing をまた積むか。** 見送った更新が失われないことは
+	// 「価格更新を書き込まない＝last_fetched_at が据え置かれる」→
+	// 「PriceFreshness::needsRefetch() が true のまま」→「掃引が積み直す」で成り立つ。
+	// ここでは QueueMaintenance::sweep() が実際に使っているのと同じ判定
+	// （同ファイルの `! PriceFreshness::needsRefetch( $targets[0], $def, $now, ... )` で
+	// continue する行）を、この 1 商品について再現する。掃引そのものを回すと
+	// カタログ全件のカーソル走査と depth cap が絡んで結果が環境依存になる。
+	$sweep_would_enqueue = false;
+	$last_fetched_at     = null;
+	foreach ( $listings as $listing ) {
+		if ( ! is_array( $listing ) || 'rakuten-kobo' !== ( $listing['platform'] ?? '' ) ) {
+			continue;
+		}
+		$targets = OfferSelector::select(
+			LegacyOffer::offersWithFallback( $listing ),
+			GeneralSettings::fallbackOnTerminal()
+		);
+		if ( array() === $targets ) {
+			break;
+		}
+		$last_fetched_at     = (string) ( $targets[0]['last_fetched_at'] ?? '' );
+		$sweep_would_enqueue = PriceFreshness::needsRefetch(
+			$targets[0],
+			PlatformConfig::find( 'rakuten-kobo' ),
+			time(),
+			0
+		);
+		break;
+	}
+
 	$products[ $key ] = array(
-		'postId'   => $post_id,
-		'links'    => $links,
-		'listings' => $listings,
+		'postId'             => $post_id,
+		'links'              => $links,
+		'listings'           => $listings,
+		'lastFetchedAt'      => $last_fetched_at,
+		'sweepWouldEnqueue'  => $sweep_would_enqueue,
 	);
 }
 
 echo 'RACE_JSON:' . wp_json_encode(
 	array(
-		'products'  => $products,
-		'preserved' => PluginUpgrade::preservedWithoutRegularUrlCount(),
+		'products'         => $products,
+		'preserved'        => PluginUpgrade::preservedWithoutRegularUrlCount(),
+		'migrationPending' => PluginUpgrade::isOffersMigrationPending(),
 	)
 ) . "\n";

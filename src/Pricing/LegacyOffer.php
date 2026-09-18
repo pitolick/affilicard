@@ -113,6 +113,26 @@ final class LegacyOffer {
 	}
 
 	/**
+	 * この listing にまだ offers 移行が到達していない（v3 以前の形のまま）か。
+	 *
+	 * **判定は {@see \Affilicard\Upgrade\PluginUpgrade::migrateListingToOffers()} と
+	 * 同一にする。** あちらは `offers` が配列なら「変換済み」としてそのまま返す
+	 * （冪等性）。つまり「この listing を移行がこれから変換するつもりかどうか」は
+	 * この 1 条件で決まる。片方だけ条件を足すと、移行が変換する気でいる listing を
+	 * 「移行済み」と誤判定する（またはその逆）。
+	 *
+	 * **{@see self::hasFlatFetchFields()} は足さない。** 取得結果フィールドを 1 つも
+	 * 持たない listing（設定だけを持つもの）も移行の変換対象で、移行は `offers => []`
+	 * を書き足す。ここで「失うものが無いから移行済み扱い」にすると、移行が変換する
+	 * つもりの listing を別経路が先に書き換えてよいことになり、判定が 2 つに割れる。
+	 *
+	 * @param array<string, mixed> $listing
+	 */
+	public static function isUnmigrated( array $listing ): bool {
+		return ! isset( $listing['offers'] ) || ! is_array( $listing['offers'] );
+	}
+
+	/**
 	 * 既に `fetch_status` を持っていればそれを使い、無ければ旧 `fetch_error` の
 	 * 文言から写す。
 	 *

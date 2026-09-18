@@ -119,4 +119,61 @@ final class LegacyOfferTest extends TestCase {
 		);
 		$this->assertSame( 12, $offer['display_order'] );
 	}
+
+	/**
+	 * 未変換の判定は `offers` が配列かどうかだけで決まる
+	 * （PluginUpgrade::migrateListingToOffers() が「変換済み」とみなす条件と同一）。
+	 */
+	public function test_offersキーが無いlistingは未変換とみなす(): void {
+		$this->assertTrue(
+			LegacyOffer::isUnmigrated(
+				array(
+					'platform'      => 'rakuten-kobo',
+					'affiliate_url' => 'https://example.test/aff',
+				)
+			)
+		);
+	}
+
+	/**
+	 * 取得結果フィールドを 1 つも持たない listing も未変換である。
+	 *
+	 * 移行はこの形にも `offers => []` を書き足す（＝変換対象）。「失うものが無いから
+	 * 移行済み扱い」にすると、移行が変換するつもりの listing を別経路が先に書き換えて
+	 * よいことになり、判定が 2 つに割れる。
+	 */
+	public function test_設定だけのlistingも未変換とみなす(): void {
+		$this->assertTrue(
+			LegacyOffer::isUnmigrated(
+				array(
+					'platform' => 'rakuten-kobo',
+					'enabled'  => true,
+				)
+			)
+		);
+	}
+
+	/** 空配列でも `offers` が配列なら変換済み（購入リンクを 1 件も持たない状態）。 */
+	public function test_offersが空配列なら変換済みとみなす(): void {
+		$this->assertFalse(
+			LegacyOffer::isUnmigrated(
+				array(
+					'platform' => 'rakuten-kobo',
+					'offers'   => array(),
+				)
+			)
+		);
+	}
+
+	/** `offers` が配列でなければ（壊れた meta 等）未変換として扱う。 */
+	public function test_offersが配列でなければ未変換とみなす(): void {
+		$this->assertTrue(
+			LegacyOffer::isUnmigrated(
+				array(
+					'platform' => 'rakuten-kobo',
+					'offers'   => 'broken',
+				)
+			)
+		);
+	}
 }

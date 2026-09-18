@@ -259,6 +259,14 @@ final class QueueMaintenance {
 				// LegacyOffer::offersWithFallback() で拾う。offers を直接読むと、
 				// 移行バッチが止まっているインストールでその商品が掃引から恒久的に
 				// 外れ、自動更新が二度と走らない。
+				//
+				// **移行中に見送られた listing が取り戻されるのもこの経路である。**
+				// ListingRefresher::isHeldForMigration() は未変換の listing への
+				// 書き込みを見送る＝last_fetched_at を据え置くため、下の
+				// PriceFreshness::needsRefetch() は true のままになり、移行が
+				// 完走するまで毎周回ここで積み直される（その間ハンドラは no-op で
+				// 返すだけで外部 API も叩かない）。ここで flat を拾わなくすると、
+				// 見送られた更新がそのまま失われる。
 				$targets = OfferSelector::select(
 					LegacyOffer::offersWithFallback( $listing ),
 					GeneralSettings::fallbackOnTerminal()

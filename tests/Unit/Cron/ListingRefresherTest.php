@@ -11,16 +11,46 @@ use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Queue\WorkOutcome;
 use Affilicard\Repository\ProductRepositoryInterface;
 use Affilicard\Settings\GeneralSettings;
+use Affilicard\Upgrade\PluginUpgrade;
 use Mockery;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
 
 final class ListingRefresherTest extends TestCase {
+
+	/**
+	 * offers 移行カーソルの状態（false＝移行は未完ではない／'0' 等＝未完）。
+	 *
+	 * **プロパティで持つのは意図的である。** WP_Mock::userFunction() は同じ名前に対して
+	 * 先に登録された期待を優先するため、setUp で登録したあとテスト本体で差し替えても
+	 * 黙って無視される（PluginUpgradeTest と同じ理由）。切り替えたい値はここを書き換える。
+	 *
+	 * **既定は false（＝移行は未完ではない）にする。** stubDmmPlatform()/
+	 * stubRakutenPlatform() が `with()` を持たない catch-all の `get_option` を登録して
+	 * おり、カーソルの読み取りまで platform 定義の配列を返してしまう
+	 * （`false !== array(...)` なので「未完」と誤判定される）。setUp で先に
+	 * `with( OPTION_MIGRATION_CURSOR, false )` を登録して、その 1 キーだけを横取りする。
+	 *
+	 * @var string|false
+	 */
+	private $offersMigrationCursor = false;
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		$this->offersMigrationCursor = false;
+		// **catch-all の get_option より前に登録すること**（Mockery は宣言順に最初に
+		// 引数が一致した期待を使う）。
+		WP_Mock::userFunction( 'get_option' )
+			->with( PluginUpgrade::OPTION_MIGRATION_CURSOR, false )
+			->andReturnUsing( fn () => $this->offersMigrationCursor );
 		WP_Mock::userFunction( '__' )->andReturnUsing( static fn( $t ) => $t );
 		WP_Mock::userFunction( 'current_time' )->andReturn( '2026-06-03T00:00:00+00:00' );
+	}
+
+	/** offers 移行が未完（カーソルが存在する）状態にする。 */
+	private function markOffersMigrationPending(): void {
+		$this->offersMigrationCursor = '0';
 	}
 	public function tearDown(): void {
 		WP_Mock::tearDown();
@@ -980,15 +1010,22 @@ final class ListingRefresherTest extends TestCase {
 	}
 
 	/**
-	 * A: 移行前の flat な listing（offers キーを持たず、取得結果フィールドが listing 直下に
-	 * 並ぶ v3 以前の形）でも fetch する。
+	 * A: 移行がもう来ない flat な listing（offers キーを持たず、取得結果フィールドが
+	 * listing 直下に並ぶ v3 以前の形）でも fetch する。
 	 *
-	 * refreshListing() が $listing['offers'] を直接読むと、移行バッチが当該商品に到達する
-	 * 前に管理画面の「強制更新」が走ったとき、OfferSelector::select() が空を返して
-	 * 一度も fetch せずに TRANSIENT_FAILURE を返す（リトライ枠だけを焼く）。読み取り側と
-	 * 同じ LegacyOffer::offersWithFallback() を通し、flat な listing も取得対象にする。
+	 * refreshListing() が $listing['offers'] を直接読むと、そういう listing は
+	 * OfferSelector::select() が空を返して一度も fetch されず TRANSIENT_FAILURE になる
+	 * （リトライ枠だけを焼く）。読み取り側と同じ LegacyOffer::offersWithFallback() を
+	 * 通し、flat な listing も取得対象にする。
+	 *
+	 * **移行が未完のあいだはここへ来ない**（refreshOne() が isHeldForMigration() で
+	 * 先に見送る。下の test_refreshOne_移行が未完なら... を参照）。このフォールバックが
+	 * 効くのは移行が完走したあとも flat のまま残った listing——
+	 * PluginUpgrade が保存に失敗し続けて諦めた商品——であり、外すとそれらが自動更新から
+	 * 恒久的に外れる。このテストの既定状態（カーソル無し＝移行は未完ではない）が
+	 * まさにその状況を表している。
 	 */
-	public function test_refreshOne_移行前のflat_listingでもフォールバックでfetchして保存する(): void {
+	public function test_refreshOne_移行がもう来ないflat_listingはフォールバックでfetchして保存する(): void {
 		$this->stubRakutenPlatform();
 
 		$provider = Mockery::mock( ProviderInterface::class );
@@ -1045,8 +1082,10 @@ final class ListingRefresherTest extends TestCase {
 	/**
 	 * A: targetCount() も同じフォールバックを通す。refreshOne() が fetch するのに
 	 * ここが 0 を返すと、レート制限の枠を確保しないまま外部 API を叩くことになる。
+	 *
+	 * 上と同じく、移行が未完でない（＝もう来ない）状態での話である。
 	 */
-	public function test_targetCount_移行前のflat_listingでも1を返す(): void {
+	public function test_targetCount_移行がもう来ないflat_listingでは1を返す(): void {
 		// targetCount() は「実際に外部 API を叩くか」を refreshListing() と同じ
 		// willFetch() で判定するため、platform 定義の解決を通る。
 		$this->stubRakutenPlatform();
@@ -1074,6 +1113,207 @@ final class ListingRefresherTest extends TestCase {
 		$count    = ( new ListingRefresher( $registry, $repo ) )->targetCount( 32, 'rakuten-kobo' );
 
 		$this->assertSame( 1, $count );
+	}
+
+	/**
+	 * 移行が未完のあいだ、まだ変換されていない flat な listing には書き込まない。
+	 *
+	 * **なぜ。** 保存（ProductRepository::updateListingOffer()）は listing を offers[] へ
+	 * 揃えてから書き戻すため、flat な listing への価格更新は flat → offers[] の変換を
+	 * 兼ねてしまう。その変換は sanitize を通り、身元（regular_url / external_id）を
+	 * 1 つも持たない購入リンクをそこで落とす。移行だけがその規則を外して温存し、
+	 * 件数と post ID を控えて管理画面が名指しで通知する——価格更新が先に届くと、
+	 * データが消えるうえに通知も出ない。
+	 *
+	 * **主張は「書き込みが起きなかったこと」である。** updateListingOffer() に never() を
+	 * 置くだけだと、違反は Mockery の close 時にしか現れず、しかも never() には戻り値
+	 * ハンドラが無いので $this->savedOffer は null のまま——「書き込まれたのに
+	 * assertNull が通る」状態になる（＝試行を見て効果を見ていない）。記録する
+	 * ハンドラを付けたうえで savedOffer が null であることを主張する。
+	 */
+	public function test_refreshOne_移行が未完なら未変換のflat_listingへは書き込まない(): void {
+		$this->markOffersMigrationPending();
+		$this->stubRakutenPlatform();
+
+		$registry = $this->rakutenProvider( FetchResult::hit( array( 'price' => '550' ) ) );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 41 )->andReturn(
+			$this->product(
+				41,
+				array(
+					// offers キーが無い＝移行がまだ到達していない listing。
+					// 身元（regular_url / external_id）を 1 つも持たない＝保存が起きた
+					// 瞬間に sanitize が落とす、まさに守りたいデータ。
+					array(
+						'platform'      => 'rakuten-kobo',
+						'enabled'       => true,
+						'update_mode'   => 'auto',
+						'auto_update'   => true,
+						'affiliate_url' => 'https://example.test/aff-only',
+						'price'         => '400',
+					),
+				)
+			)
+		);
+		$repo->shouldReceive( 'updateListingOffer' )->andReturnUsing(
+			function ( int $postId, string $platform, array $patch, string $identity ): bool {
+				$this->savedOffer    = $patch;
+				$this->savedIdentity = $identity;
+				return true;
+			}
+		);
+
+		$outcome = ( new ListingRefresher( $registry, $repo ) )->refreshOne( 41, 'rakuten-kobo' );
+
+		$this->assertNull(
+			$this->savedOffer,
+			'移行がまだ到達していない listing へ価格更新が書き込んだ（身元なしの購入リンクが sanitize で消える）'
+		);
+		// 一時失敗ではなく no-op（SUCCESS）で返す。TRANSIENT_FAILURE にすると backoff の
+		// 試行回数を焼き、移行が長引くインストールで failed が積み上がる。
+		$this->assertSame( WorkOutcome::SUCCESS, $outcome );
+	}
+
+	/**
+	 * 見送りは fetch より前に効く。外部 ID を持つ flat listing でも、移行が未完なら
+	 * 外部 API を 1 度も叩かない。
+	 *
+	 * 身元を持つ購入リンクは保存されても消えないが、**保存が flat → offers[] の変換を
+	 * 兼ねてしまう点は同じ**である。同じ商品の別 listing が身元なしだった場合、
+	 * updateListing 系はその商品の listings をまとめて sanitize し直すため巻き添えになる。
+	 * 判定を「listing に身元があるか」ではなく「移行が変換するつもりか」に置いているのは
+	 * そのためで、ここではその範囲（fetch すらしない）を固定する。
+	 */
+	public function test_refreshOne_移行が未完なら未変換のlistingでは外部APIも叩かない(): void {
+		$this->markOffersMigrationPending();
+		$this->stubRakutenPlatform();
+
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$provider->shouldReceive( 'fetch' )->never();
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 44 )->andReturn(
+			$this->product(
+				44,
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'external_id' => 'flat-held',
+						'regular_url' => 'https://example.test/flat-held',
+					),
+				)
+			)
+		);
+		$repo->shouldReceive( 'updateListingOffer' )->andReturnUsing(
+			function ( int $postId, string $platform, array $patch, string $identity ): bool {
+				$this->savedOffer = $patch;
+				return true;
+			}
+		);
+
+		$outcome = ( new ListingRefresher( $registry, $repo ) )->refreshOne( 44, 'rakuten-kobo' );
+
+		$this->assertNull( $this->savedOffer, '見送ったはずの listing へ書き込んだ' );
+		$this->assertSame( WorkOutcome::SUCCESS, $outcome );
+	}
+
+	/**
+	 * 見送りは「未変換の listing」に限る。移行が未完でも、既に offers[] を持つ listing は
+	 * 普通に更新する。
+	 *
+	 * ここを止めると、移行が走っているあいだカタログ全体の価格更新が止まる。止める理由が
+	 * あるのは「価格更新が変換を兼ねてしまう」listing だけである。
+	 */
+	public function test_refreshOne_移行が未完でも変換済みのlistingは普通に更新する(): void {
+		$this->markOffersMigrationPending();
+		$this->stubRakutenPlatform();
+
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$provider->shouldReceive( 'fetch' )->once()->andReturn(
+			FetchResult::hit( array( 'price' => '880' ) )
+		);
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 42 )->andReturn(
+			$this->product(
+				42,
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							array(
+								'display_order' => 10,
+								'external_id'   => 'migrated-1',
+								'regular_url'   => 'https://example.test/migrated',
+							),
+						),
+					),
+				)
+			)
+		);
+		$repo->shouldReceive( 'updateListingOffer' )->once()->andReturnUsing(
+			function ( int $postId, string $platform, array $patch, string $identity ): bool {
+				$this->savedOffer    = $patch;
+				$this->savedIdentity = $identity;
+				return true;
+			}
+		);
+
+		$outcome = ( new ListingRefresher( $registry, $repo ) )->refreshOne( 42, 'rakuten-kobo' );
+
+		$this->assertSame( WorkOutcome::SUCCESS, $outcome );
+		$this->assertNotNull( $this->savedOffer );
+		$this->assertSame( '880', $this->savedOffer['price'] );
+	}
+
+	/**
+	 * targetCount() も同じゲートを通す。refreshOne() が外部 API を 1 度も叩かないのに
+	 * 枠を確保すると、account の最終リクエスト時刻だけが進み、実際に fetch したい
+	 * 後続のジョブを無駄に待たせる（isEnabledAuto ゲートを写しているのと同じ理由）。
+	 */
+	public function test_targetCount_移行が未完なら未変換のflat_listingでは0を返す(): void {
+		$this->markOffersMigrationPending();
+		$this->stubRakutenPlatform();
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 43 )->andReturn(
+			$this->product(
+				43,
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'external_id' => 'flat-3',
+						'regular_url' => 'https://example.test/flat3',
+					),
+				)
+			)
+		);
+
+		$registry = $this->rakutenProvider( FetchResult::hit( array( 'price' => '100' ) ) );
+		$count    = ( new ListingRefresher( $registry, $repo ) )->targetCount( 43, 'rakuten-kobo' );
+
+		$this->assertSame( 0, $count );
 	}
 
 	/**

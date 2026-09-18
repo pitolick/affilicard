@@ -89,9 +89,17 @@ final class Enqueuer {
 	 * ドロップ→force が失われるため。as_unschedule_all_actions は pending のみ取り消し
 	 * in-progress は残すので、base args の掃除だけでは in-progress との衝突を避けられない。
 	 *
-	 * run 時に鮮度スキップは存在しない（鮮度判定は QueueMaintenance::sweep() の enqueue 時点のみ・
-	 * refreshOne は必ず fetch する）ため、force の実行時挙動は sweep と同一＝「必ず fetch」で、
-	 * force が確実に積まれることだけ保証すればよい（ハンドラ側は force を見ない）。
+	 * **鮮度による run 時スキップは存在しない**（鮮度判定は QueueMaintenance::sweep() の
+	 * enqueue 時点のみ）。したがって force の実行時挙動は sweep と同一で、force が確実に
+	 * 積まれることだけ保証すればよい（ハンドラ側は force を見ない）。
+	 *
+	 * **run 時に取得を見送る条件は「鮮度以外の、その listing が今は対象外である」もの
+	 * だけである。** ListingRefresher::refreshOne() は削除済み商品・実行時に無効化／
+	 * 手動化された listing・**offers 移行がまだ到達していない listing**
+	 * （{@see \Affilicard\Cron\ListingRefresher::isHeldForMigration()}）を no-op
+	 * （WorkOutcome::SUCCESS）で返す。いずれも force でも同じ——force は「鮮度を無視して
+	 * 積む」ためのものであって、対象外の listing を無理に書き込ませるためのものではない。
+	 * 見送られた listing は last_fetched_at が据え置かれるので、掃引が次の周回でまた積む。
 	 */
 	public function enqueueForced( int $postId, string $platform, string $account ): void {
 		$baseArgs  = array(
