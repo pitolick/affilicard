@@ -1282,11 +1282,20 @@ final class ListingRefresherTest extends TestCase {
 	}
 
 	/**
-	 * targetCount() も同じゲートを通す。refreshOne() が外部 API を 1 度も叩かないのに
-	 * 枠を確保すると、account の最終リクエスト時刻だけが進み、実際に fetch したい
-	 * 後続のジョブを無駄に待たせる（isEnabledAuto ゲートを写しているのと同じ理由）。
+	 * 移行の見送り（isHeldForMigration）を枠取りの 0 にはしない——**見送り中でも
+	 * レート制限の枠は確保する**。
+	 *
+	 * **なぜ。** 枠取り（targetCount）と本処理（refreshOne）は、同じ run() の中でも
+	 * それぞれ独立に見送りを判定する。移行バッチは別リクエストで走るため、この 2 つの
+	 * 判定の隙間で完走し得る。そのとき refreshOne() 側の再判定では見送りが既に解けており、
+	 * **枠を 1 つも確保しないまま外部 API を叩く**——レート制限をすり抜けた 1 リクエストが
+	 * 出てしまう。
+	 *
+	 * よって「解けるかもしれない」ほうへ倒し、refreshOne() が **叩き得る** 件数で枠を取る。
+	 * 見送りがそのまま続いた場合のコストは枠 1 つの空振り（account の次の要求が 1 間隔ぶん
+	 * 遅れる）だけで、しかも移行が完走するまでの一時的なものに収まる。
 	 */
-	public function test_targetCount_移行が未完なら未変換のflat_listingでは0を返す(): void {
+	public function test_targetCount_移行が未完でも未変換のflat_listingは枠を確保する(): void {
 		$this->markOffersMigrationPending();
 		$this->stubRakutenPlatform();
 		WP_Mock::userFunction( 'get_option' )
@@ -1313,7 +1322,51 @@ final class ListingRefresherTest extends TestCase {
 		$registry = $this->rakutenProvider( FetchResult::hit( array( 'price' => '100' ) ) );
 		$count    = ( new ListingRefresher( $registry, $repo ) )->targetCount( 43, 'rakuten-kobo' );
 
-		$this->assertSame( 0, $count );
+		$this->assertSame(
+			1,
+			$count,
+			'見送り中に枠を 0 件にすると、判定の隙間で移行が完走したときレート制限をすり抜けて fetch できてしまう'
+		);
+	}
+
+	/**
+	 * 枠を取りに倒すのは「見送り」のときだけ。削除済み・無効・fetch 不要で 0 になる
+	 * ケースは、移行が未完のあいだも従来どおり枠を取らない。
+	 *
+	 * この最適化まで一緒に諦めると、実際には fetch しないジョブが account の最終
+	 * リクエスト時刻だけを進め、本当に fetch したい後続のジョブを無駄に待たせる。
+	 * 無効化・手動化された listing は移行が完走しても refreshOne() が fetch しない
+	 * （isEnabledAuto ゲートは移行と無関係に効き続ける）＝すり抜けようが無いため、
+	 * 倒す理由が無い。
+	 */
+	public function test_targetCount_移行が未完でも無効なlistingは枠を取らない(): void {
+		$this->markOffersMigrationPending();
+		$this->stubRakutenPlatform();
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 45 )->andReturn(
+			$this->product(
+				45,
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => false,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'external_id' => 'flat-disabled',
+						'regular_url' => 'https://example.test/flat-disabled',
+					),
+				)
+			)
+		);
+
+		$registry = $this->rakutenProvider( FetchResult::hit( array( 'price' => '100' ) ) );
+		$count    = ( new ListingRefresher( $registry, $repo ) )->targetCount( 45, 'rakuten-kobo' );
+
+		$this->assertSame( 0, $count, '無効な listing にまで枠を取ると、fetch したい後続のジョブを無駄に待たせる' );
 	}
 
 	/**
