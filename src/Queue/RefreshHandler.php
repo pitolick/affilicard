@@ -110,6 +110,11 @@ final class RefreshHandler extends ThrottledActionHandler {
 	 * 選択結果を performWork() へ引き渡す形は ThrottledActionHandler の契約
 	 * （全ハンドラ共通）を変えることになる。窓はこの 2 呼び出しの間だけで外部 I/O を
 	 * 挟まず、影響も上記のとおり有界なので、現状は受容する。
+	 *
+	 * **受容するのは管理画面の編集によるズレだけである。** 移行バッチ（別リクエストで走り、
+	 * 多数の listing を一斉に変換する）でこの隙間が開くケースは受容しない——
+	 * {@see ListingRefresher::targetCount()} が「見送りが解けたら叩き得る件数」を返して
+	 * 枠を取りに倒すことで塞いでいる（同 docblock 参照）。
 	 */
 	protected function refreshTargetCount( array $args ): int {
 		return $this->refresher->targetCount( (int) $args['post_id'], (string) $args['platform'] );

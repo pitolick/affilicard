@@ -106,17 +106,36 @@ class ListingRefresher {
 	}
 
 	/**
-	 * 指定 listing に対して refreshOne() が実際に fetch する件数（OfferSelector::select() の
-	 * 選択結果件数）。fetch を伴わず件数だけを求める——ThrottledActionHandler::run() が
-	 * performWork()（＝refreshOne()）を呼ぶ**前**に、レート制限の枠をこの件数に比例させて
-	 * 確保するために使う（RefreshHandler::refreshTargetCount() から呼ばれる）。
+	 * 指定 listing に対して refreshOne() が **叩き得る** fetch の件数
+	 * （OfferSelector::select() の選択結果件数）。fetch を伴わず件数だけを求める——
+	 * ThrottledActionHandler::run() が performWork()（＝refreshOne()）を呼ぶ**前**に、
+	 * レート制限の枠をこの件数に比例させて確保するために使う
+	 * （RefreshHandler::refreshTargetCount() から呼ばれる）。
 	 *
 	 * 該当 listing・platform が無ければ 0（refreshOne() 自身も fetch を行わない）。
 	 *
-	 * refreshOne() と同じ ListingEligibility::isEnabledAuto() ゲートを先に掛ける。
-	 * これを飛ばすと、実行時に無効化・手動化された listing（refreshOne() が SUCCESS_noop で
-	 * 即 return し fetch しない）にも OfferSelector::select() の件数ぶんレート制限の枠を
-	 * 予約してしまい、実際には使われない枠を無駄に確保することになる（CodeRabbit Minor #3）。
+	 * **数えるのは「必ず叩く件数」ではなく「叩き得る件数」である。** 枠取りと本処理は
+	 * 別々に条件を判定するため、その隙間で条件が変わった場合に枠を取り損ねてはならない
+	 * （枠なしの fetch＝レート制限のすり抜け）。したがって 0 を返してよいのは
+	 * 「refreshOne() がこの実行で fetch することが**あり得ない**」ケースに限る:
+	 *
+	 * - 商品・該当 platform の listing が無い（削除済み）
+	 * - {@see ListingEligibility::isEnabledAuto()} が false（無効化・手動化）——
+	 *   refreshOne() も同じゲートで no-op を返す。移行の完走とも無関係に効き続ける
+	 * - 選ばれた購入リンクが {@see self::willFetch()} で false（自動 Provider 未対応・
+	 *   external_id 無し）
+	 *
+	 * これを飛ばして一律に枠を取ると、実際には fetch しないジョブが account の最終
+	 * リクエスト時刻だけを進め、本当に fetch したい後続のジョブを無駄に待たせる
+	 * （CodeRabbit Minor #3）。
+	 *
+	 * **移行の見送り（{@see self::isHeldForMigration()}）はここでは 0 にしない。**
+	 * 見送りは上の 3 つと違い「今この瞬間は fetch しない」だけで、移行バッチは別
+	 * リクエストで走るため、この判定と refreshOne() の再判定の隙間で完走し得る。
+	 * そのとき refreshOne() 側では見送りが既に解けており、枠を 1 つも確保しないまま
+	 * 外部 API を叩く。見送りが続いた場合のコストは枠 1 つの空振り（account の次の
+	 * 要求が 1 間隔ぶん遅れる）で、しかも移行が完走するまでの一時的なものに収まる——
+	 * すり抜けた 1 リクエストのほうが高くつくため、取りに倒す。
 	 */
 	public function targetCount( int $postId, string $platform ): int {
 		$product = $this->repository->find( $postId );
@@ -130,15 +149,10 @@ class ListingRefresher {
 			if ( ! ListingEligibility::isEnabledAuto( $listing ) ) {
 				return 0;
 			}
-			if ( self::isHeldForMigration( $listing ) ) {
-				// refreshOne() が no-op で返す＝外部 API を 1 度も叩かない。枠を取ると
-				// account の最終リクエスト時刻だけが進み、実際に fetch したい後続の
-				// ジョブを無駄に待たせる（isEnabledAuto ゲートを写しているのと同じ理由）。
-				return 0;
-			}
 			// refreshListing() と同じフォールバックを通す。ここだけ offers を直接読むと、
 			// 移行前の flat な listing で「refreshOne は fetch するのに枠は 0 件ぶんしか
-			// 確保しない」というズレが生まれる。
+			// 確保しない」というズレが生まれる（移行の見送り中も同じ理由で数える——
+			// 見送りが解けたあとに叩く件数は、この flat な listing を変換した 1 件）。
 			$offers   = LegacyOffer::offersWithFallback( $listing );
 			$selected = OfferSelector::select( $offers, GeneralSettings::fallbackOnTerminal() );
 

@@ -86,6 +86,13 @@ abstract class ThrottledActionHandler {
 	 * ハンドラ（AutoCreateHandler 等）にまで無意味な実装を要求してしまうため、base に既定
 	 * 実装を置く。
 	 *
+	 * **数えるのは「必ず fetch する件数」ではなく「fetch し得る件数」である。** ここと
+	 * performWork() は別々に条件を判定するため、その隙間で条件が変わり得る（例: 別
+	 * リクエストで走る移行バッチが完走し、performWork() 側の再判定では見送りが解けている）。
+	 * 「今は fetch しない」だけの理由で 0 を返すと、条件が変わったとき**枠を 1 つも
+	 * 確保しないまま外部 API を叩く**＝レート制限をすり抜ける。0 を返してよいのは、
+	 * performWork() がこの実行で fetch することが**あり得ない**ときに限る。
+	 *
 	 * @param array<string, mixed> $args
 	 */
 	protected function refreshTargetCount( array $args ): int {

@@ -238,14 +238,16 @@ $snapshot = static function () use ( $ids, $snapshot_one ): array {
 /**
  * 通常の価格更新を、Action Scheduler が使うのと同じフックで発火する。
  *
- * レート制限の option を先に落とす——**枠を取れなかったせいで書き込みが起きなかった**のを
- * 「見送りが効いた」と読み違えないため（`ThrottledActionHandler::run()` は枠を取れないと
- * `performWork()` を呼ばずに戻る）。見送り中は `refreshTargetCount()` が 0 を返すので
- * そもそも枠を取らないが、移行後の再開では 1 件ぶん取りに行くため、ここを揃えておく。
+ * レート制限の option を **1 商品ごとに** 落とす——**枠を取れなかったせいで書き込みが
+ * 起きなかった**のを「見送りが効いた」と読み違えないため（`ThrottledActionHandler::run()`
+ * は枠を取れないと `performWork()` を呼ばずに戻る）。見送り中も
+ * `refreshTargetCount()` は「見送りが解けたら叩き得る件数」を返して枠を取りに行く
+ * （`ListingRefresher::targetCount()` の docblock 参照）ため、ループの外で 1 度落とすだけ
+ * だと後続の商品が先頭の商品に枠を奪われた状態で走る。
  */
 $drive_refresh = static function () use ( $ids, $platform, $account ): void {
-	delete_option( 'affilicard_ratelimit_' . $account );
 	foreach ( $ids as $post_id ) {
+		delete_option( 'affilicard_ratelimit_' . $account );
 		do_action( Enqueuer::HOOK_REFRESH, (int) $post_id, $platform );
 	}
 };
