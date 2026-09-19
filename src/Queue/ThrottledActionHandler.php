@@ -77,6 +77,29 @@ abstract class ThrottledActionHandler {
 	}
 
 	/**
+	 * performWork() が実際に fetch する対象（listing の購入リンク）の件数。レート制限の
+	 * 枠確保（run() の tryAcquire）をこの件数に比例させる。
+	 *
+	 * 既定は 1（大半のハンドラは 1 回の performWork() で 1 件しか fetch しない）。listing の
+	 * 購入リンクを選択して更新する RefreshHandler だけが override し、OfferSelector の
+	 * 選択結果件数を返す——abstract にして全サブクラスに実装を強制すると、選択係と無関係な
+	 * ハンドラ（AutoCreateHandler 等）にまで無意味な実装を要求してしまうため、base に既定
+	 * 実装を置く。
+	 *
+	 * **数えるのは「必ず fetch する件数」ではなく「fetch し得る件数」である。** ここと
+	 * performWork() は別々に条件を判定するため、その隙間で条件が変わり得る（例: 別
+	 * リクエストで走る移行バッチが完走し、performWork() 側の再判定では見送りが解けている）。
+	 * 「今は fetch しない」だけの理由で 0 を返すと、条件が変わったとき**枠を 1 つも
+	 * 確保しないまま外部 API を叩く**＝レート制限をすり抜ける。0 を返してよいのは、
+	 * performWork() がこの実行で fetch することが**あり得ない**ときに限る。
+	 *
+	 * @param array<string, mixed> $args
+	 */
+	protected function refreshTargetCount( array $args ): int {
+		return 1;
+	}
+
+	/**
 	 * @param array<string, mixed> $args
 	 */
 	protected function run( array $args ): void {
@@ -104,11 +127,24 @@ abstract class ThrottledActionHandler {
 			$provider->minRequestIntervalMs(),
 			GeneralSettings::throttleOverrideMs( $account )
 		);
-		$nowMs    = (int) round( microtime( true ) * 1000 );
-		$acquire  = $this->limiter->tryAcquire( $account, $interval, $nowMs );
-		if ( ! $acquire['ok'] ) {
-			$this->throttleWait( $args, (int) ceil( $acquire['next_ms'] / 1000 ) );
-			return;
+		// v4.0.0: performWork() が実際に fetch する対象（購入リンク）の件数ぶん、レート制限の
+		// 枠を確保する。今日は refreshTargetCount() の既定 1 で従来と同じ挙動だが、選択係
+		// （OfferSelector）が複数件を返すようになったとき、ここを直さなくても枠が自動的に
+		// 広がる（表示を増やした瞬間に 429 を起こす事故を防ぐ）。
+		//
+		// **0 件なら枠を取らない。** refreshTargetCount() が 0 を返すのは「listing が
+		// 削除済み・無効・fetch 不要」のときで、performWork() は API を一度も呼ばない。
+		// ここで枠を取ると account の最終リクエスト時刻だけが進み、実際に fetch したい
+		// 後続のジョブを無駄に待たせる。既定実装（1）はそのまま——上書きしていない
+		// ハンドラは件数を知らないので、従来どおり 1 件ぶん確保する。
+		$slots = $this->refreshTargetCount( $args );
+		if ( $slots > 0 ) {
+			$nowMs   = (int) round( microtime( true ) * 1000 );
+			$acquire = $this->limiter->tryAcquire( $account, $interval * $slots, $nowMs );
+			if ( ! $acquire['ok'] ) {
+				$this->throttleWait( $args, (int) ceil( $acquire['next_ms'] / 1000 ) );
+				return;
+			}
 		}
 
 		// account を獲得できた＝競合待ちから抜けて進捗した。待機カウンタをリセットする。
@@ -177,7 +213,7 @@ abstract class ThrottledActionHandler {
 			// 失敗が可視化されない・パネルの failed 件数/「失敗を再試行」が機能しなくなる。
 			// AS のランナーはアクションコールバックを try/catch しており、投げられた例外を
 			// failed アクションとして記録する（catch した Throwable のメッセージ付きで記録）
-			// ため、例外を投げて意図的に failed 化する。fetch_error は listing 側に
+			// ため、例外を投げて意図的に failed 化する。fetch_status は offer 側に
 			// refreshOne が既に記録済み（Fallback 列で可視化）で、こちらは AS 側の記録。
 			throw new \RuntimeException(
 				// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- HTML 出力ではなく AS の内部ログ（action_scheduler_logs.message）に保存される例外メッセージ。$args は post_id（int）/platform（既知 platform コード）のみで外部入力を含まない。

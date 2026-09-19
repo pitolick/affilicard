@@ -169,6 +169,36 @@ final class EnqueuerTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	/**
+	 * follow-up は base args に `follow_up` を足した**別の unique キー**で積む。
+	 *
+	 * 実行中（in-progress）の base args アクションがあるとき、base args のまま
+	 * unique=true で積んでも AS は重複とみなして何も作らない。args を分けることが
+	 * 「吸収されない」ことそのものなので、ここをピン留めする。unschedule は呼ばない
+	 * （常に即時で積むため「今へ動かす」必要が無く、pending しか消せない
+	 * as_unschedule_all_actions() を撃っても churn が増えるだけ）。
+	 */
+	public function test_enqueueFollowUp_base_argsと別のargsで即時priority10uniqueに投入する(): void {
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )->never();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
+			->with(
+				\Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH,
+				array(
+					'post_id'   => 34,
+					'platform'  => 'amazon-kindle',
+					'follow_up' => true,
+				),
+				'affilicard-amazon',
+				true,
+				Enqueuer::PRIORITY_MANUAL
+			)
+			->andReturn( 103 );
+
+		( new Enqueuer() )->enqueueFollowUp( 34, 'amazon-kindle', 'amazon' );
+		$this->assertConditionsMet();
+	}
+
 	public function test_enqueueAutoCreate_即時priority0uniqueでplatformとexternal_idを投入する(): void {
 		WP_Mock::userFunction( 'as_schedule_single_action' )->once()
 			->with(

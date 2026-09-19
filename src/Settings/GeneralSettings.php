@@ -30,6 +30,7 @@ final class GeneralSettings {
 		'hide_product_images'    => false,
 		'stocktake_enabled'      => true,
 		'stocktake_days'         => 180,
+		'fallback_on_terminal'   => false,
 	);
 
 	private const MIN_TTL = 60;
@@ -97,6 +98,16 @@ final class GeneralSettings {
 
 	public static function stocktakeDays(): int {
 		return max( 1, (int) self::get()['stocktake_days'] );
+	}
+
+	/**
+	 * 恒久エラー（商品が見つからない）の購入リンクを飛ばして次を表示するか。
+	 *
+	 * 既定 OFF。ON にしない限り、v3 以前と同じく常に先頭の購入リンクを使う。
+	 */
+	public static function fallbackOnTerminal(): bool {
+		$settings = self::get();
+		return ! empty( $settings['fallback_on_terminal'] );
 	}
 
 	/**
@@ -175,6 +186,14 @@ final class GeneralSettings {
 		// 価格が一斉に消える。無効化は stocktake_enabled が担うため 0 に意味を持たせない。
 		$stocktake_days = isset( $values['stocktake_days'] ) ? max( 1, (int) $values['stocktake_days'] ) : (int) self::DEFAULTS['stocktake_days'];
 
+		// PUT /affilicard/v1/settings は args/sanitize_callback を持たないため、REST body の
+		// 文字列 "false" がそのまま届く。`! empty()` は非空文字列を truthy とみなすため
+		// "false" が ON として保存されてしまう。rest_sanitize_boolean() で正規化する
+		// ことで、REST 経由・GeneralSettings::update() 直接呼び出しの両方を一箇所で正しくする。
+		$fallback_on_terminal = isset( $values['fallback_on_terminal'] )
+			? rest_sanitize_boolean( $values['fallback_on_terminal'] )
+			: (bool) self::DEFAULTS['fallback_on_terminal'];
+
 		return array(
 			'cache_ttl_seconds'      => $ttl,
 			'default_product_type'   => $type,
@@ -189,6 +208,7 @@ final class GeneralSettings {
 			'hide_product_images'    => $hide_product_images,
 			'stocktake_enabled'      => $stocktake_enabled,
 			'stocktake_days'         => $stocktake_days,
+			'fallback_on_terminal'   => $fallback_on_terminal,
 		);
 	}
 }

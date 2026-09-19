@@ -43,7 +43,7 @@
 | `Affilicard\Block\Block` | Gutenberg block `affilicard/product-card` の登録 + サーバサイド render（商品解決 → 色 CSS 変数注入 → CardRenderer 委譲） |
 | `Affilicard\Renderer\CardRenderer` | 商品データ + PlatformDefinition から商品カード HTML を生成する純粋レンダラ（type 非依存・色は sanitize_hex_color 経由） |
 | `Affilicard\Stock\StockStatus` | `available` / `out_of_stock` / `discontinued` |
-| `Affilicard\Schema\SchemaVersion` | schema migration トリガ用バージョン番号 (現在 `'1'`) |
+| `Affilicard\Schema\SchemaVersion` | schema migration トリガ用バージョン番号 (現在 `'2'` — v4.0.0 の offers 移行で '1' から更新) |
 | `Affilicard\Util\Crypto` | AES-256-CBC ラッパ |
 | `Affilicard\Util\JsonField` | 防御的 JSON encode/decode |
 | `Affilicard\Uninstall` | 全 `affilicard_*` option + CPT 削除 (uninstall.php から呼出) |

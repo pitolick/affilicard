@@ -32,6 +32,32 @@ jobs:
             exit 1
           fi
           echo "コミット済み Version (${COMMITTED}) = タグ (${VERSION}) を確認しました。"
+          # AFFILICARD_VERSION は PluginUpgrade::maybeUpgrade() が「保存済みバージョンとの差分」を
+          # 見る唯一の値で、移行バッチの起動条件そのものである。下の注入 sed が（行の書式変更などで）
+          # 空振りしても sed は成功扱いで黙るため、コミット済みの時点で一致を必須にする。
+          # git checkout で運用するインストール（zip を経由しない）でも、この値がコミット側で
+          # 古いままだと移行が永久に走らない。
+          COMMITTED_CONST="$(grep -E "define\( 'AFFILICARD_VERSION'," affilicard.php | head -1 | sed -E "s/.*'AFFILICARD_VERSION',[[:space:]]*'([^']*)'.*/\1/")"
+          if [ "${COMMITTED_CONST}" != "${VERSION}" ]; then
+            echo "::error::affilicard.php のコミット済み AFFILICARD_VERSION (${COMMITTED_CONST}) がタグ (${VERSION}) と一致しません。この定数は移行バッチの起動条件（PluginUpgrade::maybeUpgrade）なので、リリース前にタグと同じ値へ揃えてコミットしてください。"
+            exit 1
+          fi
+          echo "コミット済み AFFILICARD_VERSION (${COMMITTED_CONST}) = タグ (${VERSION}) を確認しました。"
+          # package.json / package-lock.json（lock はリリース zip に含めないが、次回の npm ci の
+          # 入力であり、ずれたまま残ると誰も直さない）。
+          # JSON は jq で読む（ubuntu-latest にプリインストール済み。このステップは
+          # checkout しか済んでいないので、後段の setup-node に依存しない手段を使う）。
+          # 行位置や並び順に依存する読み方（head -5 して grep 等）にすると、説明文の追加や
+          # キーの並べ替えだけで値が空になり、バージョンが正しいのにリリースが落ちる。
+          # `// empty` は version キー不在時に "null" ではなく空文字を返させるため。
+          for f in package.json package-lock.json; do
+            PKG="$(jq -r '.version // empty' "${f}")"
+            if [ "${PKG}" != "${VERSION}" ]; then
+              echo "::error::${f} の version (${PKG}) がタグ (${VERSION}) と一致しません。"
+              exit 1
+            fi
+          done
+          echo "package.json / package-lock.json のバージョンもタグと一致しています。"
       - name: タグからバージョンを affilicard.php / package.json に注入
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -41,6 +67,13 @@ jobs:
           sed -i -E "s/(\"version\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")/\1${VERSION}\2/" package.json
           grep -nE "Version:|AFFILICARD_VERSION" affilicard.php
           grep -nE "\"version\"" package.json | head -1
+          # 注入後の実測値で二重に確認する（sed が空振りしても sed 自体は成功する）。
+          INJECTED_HEADER="$(grep -E '^ \* Version:' affilicard.php | head -1 | sed -E 's/^ \* Version:[[:space:]]*//')"
+          INJECTED_CONST="$(grep -E "define\( 'AFFILICARD_VERSION'," affilicard.php | head -1 | sed -E "s/.*'AFFILICARD_VERSION',[[:space:]]*'([^']*)'.*/\1/")"
+          if [ "${INJECTED_HEADER}" != "${VERSION}" ] || [ "${INJECTED_CONST}" != "${VERSION}" ]; then
+            echo "::error::注入後の affilicard.php が Version=${INJECTED_HEADER} / AFFILICARD_VERSION=${INJECTED_CONST} でタグ (${VERSION}) と一致しません。注入 sed のパターンが実ファイルと合っていない可能性があります。"
+            exit 1
+          fi
       - name: PHP セットアップ
         uses: shivammathur/setup-php@v2
         with:

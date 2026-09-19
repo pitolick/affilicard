@@ -51,7 +51,7 @@ final class RestControllerTest extends TestCase {
 
 		// 各サブコントローラが register_rest_route を呼び出すことを確認する。
 		// products は 3 ルート（list/create, bulk, get/update/delete）
-		// settings は 1 ルート
+		// settings は 2 ルート（/settings, /editor-settings）
 		// platforms は 1 ルート
 		// credentials は 2 ルート（accounts/{code}/credentials, providers/{code}/test-connection）
 		// refresh は 1 ルート
@@ -59,7 +59,7 @@ final class RestControllerTest extends TestCase {
 		// queue は 5 ルート（refresh-queue[GET+DELETE], pause, failed, retry-failed, cancel-pending）
 		$call_count = 0;
 		WP_Mock::userFunction( 'register_rest_route' )
-			->times( 14 )
+			->times( 15 )
 			->andReturnUsing(
 				function ( $namespace, $route ) use ( &$call_count ) {
 					$call_count++;
@@ -71,7 +71,8 @@ final class RestControllerTest extends TestCase {
 
 		$controller->registerRoutes();
 
-		$this->assertSame( 14, $call_count );
+		// /settings（管理者向け）と /editor-settings（編集画面向け）を分けたぶん 1 本増えている。
+		$this->assertSame( 15, $call_count );
 		$this->assertConditionsMet();
 	}
 }

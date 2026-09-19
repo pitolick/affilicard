@@ -26,6 +26,7 @@ use Affilicard\Queue\AutoCreateHandler;
 use Affilicard\Queue\BatchRefreshHandler;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Queue\Enqueuer;
+use Affilicard\Queue\OfferPromotionTrigger;
 use Affilicard\Queue\PublishTrigger;
 use Affilicard\Queue\QueueJobsPage;
 use Affilicard\Queue\QueueMaintenance;
@@ -113,6 +114,11 @@ final class Plugin {
 			$dashboard->register();
 
 			\Affilicard\Admin\CronDisabledNotice::register();
+			\Affilicard\Admin\OffersMigrationNotice::register();
+			// extid ミラーを作り直せず再試行も積めなかった商品を出す。積めていれば
+			// Action Scheduler の一覧が記録になるが、積めなかったときはこの通知だけが
+			// 運用の知る手段になる（DerivedMetaSyncNotice のクラス PHPDoc 参照）。
+			\Affilicard\Admin\DerivedMetaSyncNotice::register();
 			add_action( 'admin_menu', array( self::class, 'registerSettingsPage' ) );
 			add_action( 'admin_menu', array( QueueJobsPage::class, 'registerMenu' ) );
 			// affilicard 独自の「更新キュー（ジョブ一覧）」を持つため、Tools > Scheduled Actions の
@@ -158,6 +164,16 @@ final class Plugin {
 		);
 		$rest->register();
 
+		// ブロックエディタ（core-data）からの保存は wp/v2 の meta 経由で listings を書き、
+		// ProductRepository::saveMeta() を通らない。身元を訂正された購入リンクの
+		// 取得状態を白紙に戻す判定はこの経路にも要る（詳細は ListingsEditFilter）。
+		add_filter(
+			'rest_pre_insert_' . ProductPostType::POST_TYPE,
+			array( \Affilicard\Rest\ListingsEditFilter::class, 'resetEditedOfferStatus' ),
+			10,
+			2
+		);
+
 		add_action(
 			'rest_after_insert_' . ProductPostType::POST_TYPE,
 			static function ( $post ) {
@@ -169,11 +185,20 @@ final class Plugin {
 				if ( wp_is_post_autosave( $post_id ) || wp_is_post_revision( $post_id ) ) {
 					return;
 				}
-				( new \Affilicard\Repository\ProductRepository() )->syncDerivedMeta( $post_id );
+				// **同期できなかったら黙って戻らない。** ロックを取れなければ
+				// syncDerivedMeta() はミラーを作り直さず false を返す（古い写しで先着の
+				// ミラーを巻き戻さないため）。放置するとミラーが listings と食い違い、
+				// 自動作成が既存商品を見落として重複を作るので、再試行を積んで
+				// 「今はできなかった」を登録済みの仕事に変える（DerivedMetaSync）。
+				\Affilicard\Repository\DerivedMetaSync::afterRestSave( $post_id );
 			},
 			10,
 			1
 		);
+
+		// 上の再試行アクション本体の配線。これが無いと積んだアクションは AS 上に
+		// 滞留したまま一切実行されない。
+		\Affilicard\Repository\DerivedMetaSync::register();
 
 		// 価格更新 Cron: 全体単一イベントのハンドラ登録 + 設定との差分調整。
 		// v3.5.0（Task 12・Ruling 3）で掃引自体を AS アクション化した。WP-Cron
@@ -264,6 +289,28 @@ final class Plugin {
 		// onUpdated も配線すると二重発火するため配線しない）。
 		$publishTrigger = new PublishTrigger( $repository, $enqueuer, $providers, new PublicationDate() );
 		add_action( 'transition_post_status', array( $publishTrigger, 'onTransition' ), 10, 3 );
+
+		// キュー: 購入リンク（offer）の繰り上がり検知トリガー（Task 13）。繰り上がりの経路は
+		// 「本プラグイン自身が恒久エラーを検知した」「外部ツールが購入リンクを削除した」
+		// 「管理画面で並べ替えた」の3つあるが、検知するのは「切り替わった」というイベントでは
+		// なく「今使う購入リンクの価格が古い」という状態であり、3経路すべてが
+		// update_post_meta( META_LISTINGS, ... ) を通るため 1 つのフックで拾える。
+		// updated_post_meta/added_post_meta の両方に配線する（既存 listings の更新は
+		// updated_post_meta、初回作成は added_post_meta を通る）。
+		$offerPromotionTrigger = new OfferPromotionTrigger( $enqueuer, $providers );
+		foreach ( array( 'updated_post_meta', 'added_post_meta' ) as $meta_hook ) {
+			add_action(
+				$meta_hook,
+				static function ( $meta_id, $post_id, $meta_key ) use ( $offerPromotionTrigger ): void {
+					if ( ProductPostType::META_LISTINGS !== $meta_key ) {
+						return;
+					}
+					$offerPromotionTrigger->onListingsSaved( (int) $post_id );
+				},
+				10,
+				3
+			);
+		}
 
 		// 予約投稿（product CPT・future）→ publish 昇格時に、対象商品の ELIGIBLE な auto listing を
 		// force enqueue する（PublishTrigger とは別系統・商品 CPT 自身の遷移を扱う）。

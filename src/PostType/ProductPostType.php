@@ -35,6 +35,16 @@ final class ProductPostType {
 		return self::META_EXTID_PREFIX . $platform_code;
 	}
 
+	/**
+	 * meta キーが externalIdMetaKey() が生成する extid mirror キーかどうかを判定する。
+	 *
+	 * ProductRepository::purgeStaleExternalIdMirror() が「自分が書いた mirror meta かどうか」を
+	 * 判定するために使う。
+	 */
+	public static function isExternalIdMetaKey( string $meta_key ): bool {
+		return 0 === strpos( $meta_key, self::META_EXTID_PREFIX );
+	}
+
 	public static function register(): void {
 		register_post_type(
 			self::POST_TYPE,
