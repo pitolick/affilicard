@@ -53,6 +53,7 @@ declare(strict_types=1);
  */
 
 use Affilicard\Platform\PlatformConfig;
+use Affilicard\Plugin;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferSelector;
@@ -64,7 +65,16 @@ use Affilicard\Upgrade\PluginUpgrade;
 global $wpdb;
 
 $platform = 'rakuten-kobo';
-$account  = 'rakuten-kobo';
+
+// **account コードは `ThrottledActionHandler::run()` と同じ導出で求める（決め打ちにしない）。**
+// レート制限のキーは platform でも provider でもなく account（認証情報の共有単位。楽天なら
+// `rakuten`）であり、`'rakuten-kobo'` と書くと下の `delete_option()` が存在しないキーを消す
+// ——**リセットが一度も効かないまま、効いているつもりで観測する**ことになる。
+$definition = PlatformConfig::find( $platform );
+if ( null === $definition ) {
+	throw new RuntimeException( sprintf( 'platform "%s" の定義が見つかりません（E2E の前提が崩れている）。', $platform ) );
+}
+$account = Plugin::buildProviderRegistry()->get( $definition->provider )?->accountCode() ?? $definition->provider;
 
 // 前回分のフィクスチャを掃除する（status は移行本体と同じ列挙。'any' だとゴミ箱が漏れる）。
 foreach (
