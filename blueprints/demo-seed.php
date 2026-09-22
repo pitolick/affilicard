@@ -14,12 +14,17 @@ if ( get_option( 'affilicard_demo_seeded' ) ) {
 
 $repo = new \Affilicard\Repository\ProductRepository();
 
+// **通常 URL（regular_url）は空にしない。** v4.0.0 から、保存時に購入リンクの身元
+// （external_id か regular_url）を 1 つも持たないものは捨てられる（ProductSchema::sanitizeOffers()。
+// アフィリエイト URL はリダイレクタが転送先の生死に関係なく 302 を返すため身元にならない）。
+// ここを空のままにすると、デモ商品はすべて購入リンク 0 件になり、プレビューのカードから
+// 価格も購入ボタンも消える。通常 URL はアフィリエイト URL から機械的に作る。
 $listing = static function ( string $platform, string $aff, string $price, string $badge = '', string $list_price = '', string $fetched = '2026-04-20T10:30:00+09:00' ): array {
 	return array(
 		'platform'        => $platform,
 		'enabled'         => true,
 		'affiliate_url'   => $aff,
-		'regular_url'     => '',
+		'regular_url'     => (string) preg_replace( '#^https://example\.com/(?:aff-)?#', 'https://example.com/product/', $aff ),
 		'price'           => $price,
 		'list_price'      => $list_price,
 		'badge'           => $badge,
