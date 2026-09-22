@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Affilicard\Pricing;
 
+use Affilicard\Util\ScalarField;
+
 /**
  * listing の自動更新対象判定（update_mode/enabled/auto_update）を一元化する共有ヘルパー。
  *
@@ -51,7 +53,7 @@ final class ListingEligibility {
 	 * @param array<string, mixed> $listing
 	 */
 	public static function isEnabledAuto( array $listing ): bool {
-		$mode = isset( $listing['update_mode'] ) ? (string) $listing['update_mode'] : 'auto';
+		$mode = isset( $listing['update_mode'] ) ? ScalarField::string( $listing, 'update_mode' ) : 'auto';
 		if ( ! in_array( $mode, self::AUTO_MODES, true ) ) {
 			return false;
 		}

@@ -31,6 +31,31 @@ final class Uninstall {
 		'affilicard_sweep_cursor',
 		// Affilicard\Queue\QueueMaintenance::OPTION_LAST_COMPLETED のリテラル値（spec §4-4/§6-2）。
 		'affilicard_last_sweep_completed_at',
+		// Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_CURSOR のリテラル値
+		// （offers 移行の走査カーソル兼「未完」の印）。
+		'affilicard_offers_migration_cursor',
+		// Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_PRESERVED_WITHOUT_REGULAR_URL の
+		// リテラル値（offers 移行で温存した listing の件数）。
+		'affilicard_offers_migration_preserved_without_regular_url',
+		// Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_PRESERVED_POST_IDS のリテラル値
+		// （温存が起きた商品の post ID 一覧）。
+		'affilicard_offers_migration_preserved_post_ids',
+		// Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_ATTEMPTS のリテラル値
+		// （保存に失敗した商品ごとの試行回数。完走時にも削除するが、未完のまま
+		// アンインストールされた場合はここでしか消えない）。
+		'affilicard_offers_migration_attempts',
+		// Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_FAILED_COUNT のリテラル値
+		// （新形式へ保存できず移行を諦めた商品の延べ件数）。
+		'affilicard_offers_migration_failed_count',
+		// Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_FAILED_POST_IDS のリテラル値
+		// （同上の post ID 一覧）。
+		'affilicard_offers_migration_failed_post_ids',
+		// Affilicard\Repository\DerivedMetaSync::OPTION_UNSYNCED_COUNT のリテラル値
+		// （extid ミラーを作り直せず再試行も積めなかった延べ件数）。
+		'affilicard_derived_meta_unsynced_count',
+		// Affilicard\Repository\DerivedMetaSync::OPTION_UNSYNCED_POST_IDS のリテラル値
+		// （同上の post ID 一覧）。
+		'affilicard_derived_meta_unsynced_post_ids',
 	);
 
 	/**
@@ -42,11 +67,31 @@ final class Uninstall {
 	 */
 	private const AUTOMATIC_ACCOUNT_CODES_FALLBACK = array( 'dmm', 'rakuten' );
 
+	/**
+	 * 全ユーザーに残る本プラグインのユーザーメタを消す。
+	 *
+	 * OPTION_KEYS の掃除は options テーブルしか触らないため、移行通知の「閉じた」印
+	 * （{@see \Affilicard\Admin\OffersMigrationNotice} が update_user_meta() で書く）は
+	 * アンインストール後も全ユーザーに残り続けていた。ユーザー数ぶん個別に消すのは
+	 * 現実的でないので、delete_metadata() の delete-all で一括削除する。
+	 */
+	private static function deleteUserMeta(): void {
+		// Affilicard\Admin\OffersMigrationNotice::DISMISS_META のリテラル値。
+		delete_metadata( 'user', 0, 'affilicard_offers_migration_notice_dismissed', '', true );
+		// Affilicard\Admin\OffersMigrationNotice::DISMISS_FAILED_META のリテラル値
+		// （「移行できなかった商品」通知を閉じた時点の件数）。
+		delete_metadata( 'user', 0, 'affilicard_offers_migration_failed_notice_dismissed', '', true );
+		// Affilicard\Admin\DerivedMetaSyncNotice::DISMISS_META のリテラル値
+		// （「索引を作り直せなかった商品」通知を閉じた時点の件数）。
+		delete_metadata( 'user', 0, 'affilicard_derived_meta_unsynced_notice_dismissed', '', true );
+	}
+
 	public static function run(): void {
 		foreach ( self::OPTION_KEYS as $option_key ) {
 			delete_option( $option_key );
 		}
 
+		self::deleteUserMeta();
 		self::deleteProviderCredentials();
 		self::deleteAccountCredentials();
 		self::cleanupQueue();
@@ -142,6 +187,11 @@ final class Uninstall {
 
 		if ( $canUnschedule ) {
 			as_unschedule_all_actions( '', array(), 'affilicard-sweep' );
+			// offers 移行バッチの group（Affilicard\Upgrade\PluginUpgrade::MIGRATION_GROUP の
+			// リテラル値）。移行が未完のままアンインストールされると、継続ジョブが
+			// pending で残る。リテラルで持つ理由は OPTION_KEYS と同じ（vendor/ 不在
+			// フォールバックでは当該クラスが未 autoload）。
+			as_unschedule_all_actions( '', array(), 'affilicard-migration' );
 		}
 	}
 

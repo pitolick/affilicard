@@ -87,7 +87,7 @@ final class CardRendererTest extends TestCase {
 		if ( '' !== $badge ) {
 			$listing['badge'] = $badge;
 		}
-		return $this->product( array( 'listings' => array( $listing ) ) );
+		return $this->product( array( 'listings' => array( $this->toListing( $listing ) ) ) );
 	}
 
 	private function product( array $overrides = array() ): array {
@@ -107,6 +107,48 @@ final class CardRendererTest extends TestCase {
 		);
 	}
 
+	/**
+	 * offers[] 移行に伴うテスト側のみの配線ヘルパー。
+	 *
+	 * 移行前のテストは listing と offer（購入リンク）のフィールドを 1 つの flat な配列に
+	 * 混在させて書いていた。CardRenderer は listing の 'offers' を読むようになったため、
+	 * ここで offer 相当のキー（OfferSelector / PriceFreshness が読むフィールド）だけを
+	 * 'offers' => array( $offer ) へ括り出す。CardRenderer の実装ロジックそのものには関与しない。
+	 *
+	 * @param array<string, mixed> $fields
+	 * @return array<string, mixed>
+	 */
+	private function toListing( array $fields ): array {
+		$offer_keys = array(
+			'display_order',
+			'external_id',
+			'regular_url',
+			'affiliate_url',
+			'price',
+			'list_price',
+			'badge',
+			'image_url',
+			'search_key',
+			'fetch_status',
+			'last_fetched_at',
+			'last_verified_at',
+		);
+
+		$listing = array();
+		$offer   = array();
+		foreach ( $fields as $key => $value ) {
+			if ( in_array( $key, $offer_keys, true ) ) {
+				$offer[ $key ] = $value;
+			} else {
+				$listing[ $key ] = $value;
+			}
+		}
+		if ( array() !== $offer ) {
+			$listing['offers'] = array( $offer );
+		}
+		return $listing;
+	}
+
 	public function test_renders_title_and_root_class(): void {
 		$html = ( new CardRenderer() )->render( $this->product(), array( $this->store() ) );
 		$this->assertStringContainsString( 'affilicard-card', $html );
@@ -117,11 +159,13 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://aff.example/x',
-						'regular_url'   => 'https://example.com/1',
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://aff.example/x',
+							'regular_url'   => 'https://example.com/1',
+						)
 					),
 				),
 			)
@@ -136,11 +180,13 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => '',
-						'regular_url'   => 'https://example.com/1',
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => '',
+							'regular_url'   => 'https://example.com/1',
+						)
 					),
 				),
 			)
@@ -149,15 +195,46 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringContainsString( 'https://example.com/1', $html );
 	}
 
+	/**
+	 * CodeRabbit round 2: ctaHref() は affiliate_url が非空なら検証せずそのまま採用していた。
+	 * legacyOffers()（{@see \Affilicard\Pricing\LegacyOffer}）は v3 以前の flat な listing の
+	 * 生データ（保存時の ProductSchema::sanitizeOffers() を経ていない）をそのまま offer へ
+	 * 変換して ctaHref() に渡すため、affiliate_url が不正スキーム（javascript: 等）でも
+	 * 「非空」というだけで採用され、出力直前の esc_url() で初めて空文字へ落ちて
+	 * href="" の壊れた CTA になっていた。ctaHref() 自身が esc_url_raw() で検証し、
+	 * 不正なら正当な regular_url へフォールバックしなければならない。
+	 */
+	public function test_不正なaffiliate_urlは正当なregular_urlへフォールバックする(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'javascript:alert(1)',
+							'regular_url'   => 'https://example.com/1',
+						)
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringContainsString( 'https://example.com/1', $html );
+		$this->assertStringNotContainsString( 'javascript:', $html );
+	}
+
 	public function test_skips_listing_when_both_urls_empty(): void {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => '',
-						'regular_url'   => '',
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => '',
+							'regular_url'   => '',
+						)
 					),
 				),
 			)
@@ -171,11 +248,13 @@ final class CardRendererTest extends TestCase {
 			array(
 				'stock_status' => 'out_of_stock',
 				'listings'     => array(
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://aff.example/x',
-						'regular_url'   => '',
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://aff.example/x',
+							'regular_url'   => '',
+						)
 					),
 				),
 			)
@@ -189,11 +268,13 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'              => 'example-store',
-						'enabled'               => true,
-						'affiliate_url'         => 'https://x',
-						'button_label_override' => '今すぐ購入',
+					$this->toListing(
+						array(
+							'platform'              => 'example-store',
+							'enabled'               => true,
+							'affiliate_url'         => 'https://x',
+							'button_label_override' => '今すぐ購入',
+						)
 					),
 				),
 			)
@@ -206,10 +287,12 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://x',
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://x',
+						)
 					),
 				),
 			)
@@ -218,15 +301,113 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringNotContainsString( 'affilicard-card__cta', $html );
 	}
 
+	/**
+	 * 非スカラーの書影 URL は「値なし」として飛ばし、アイキャッチへ落とす。
+	 *
+	 * `(string)` で直にキャストすると配列は `'Array'` になり、esc_url_raw() を
+	 * 素通りして `<img src="Array">` という実在しない相対 URL が出る。壊れた画像が
+	 * カードの一等地に出続けるうえ、後続の listing が持つ正しい書影も選ばれない。
+	 */
+	public function test_非スカラーの書影URLは採用せずアイキャッチへ落とす(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://x',
+							'image_url'     => array( 'https://cdn.example/cover.jpg' ),
+						)
+					),
+				),
+			)
+		);
+
+		$html = ( new CardRenderer() )->render( $product, array( $this->store() ), array( 'image_url' => 'https://cdn.example/eyecatch.jpg' ) );
+
+		$this->assertStringContainsString( 'https://cdn.example/eyecatch.jpg', $html );
+		$this->assertStringNotContainsString( 'src="Array"', $html );
+	}
+
+	/**
+	 * 非スカラーの価格は「値なし」として扱い、価格エリアごと出さない。
+	 *
+	 * `(string)` で直にキャストすると `'Array'` が空判定をすり抜け、
+	 * PriceFreshness::isPriceDisplayable() が「価格あり・鮮度内」と判定して
+	 * カードに `¥Array` が出る（esc_html は通してしまう）。金額はカードで
+	 * いちばん強い主張なので、でたらめな値を出すくらいなら出さない。
+	 */
+	public function test_非スカラーの価格は価格エリアごと出さない(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					$this->toListing(
+						array(
+							'platform'         => 'example-store',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://x',
+							'price'            => array( '660' ),
+							'last_verified_at' => gmdate( 'c', time() - 3600 ),
+						)
+					),
+				),
+			)
+		);
+
+		$html = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+
+		$this->assertStringNotContainsString( 'Array', $html );
+		$this->assertStringNotContainsString( 'affilicard-card__price', $html );
+		// CTA は残る（価格が読めないだけで購入リンク自体は生きている）。
+		$this->assertStringContainsString( 'affilicard-card__cta', $html );
+	}
+
+	/**
+	 * 価格が正しくても、非スカラーの通常価格・割引バッジは表示しない。
+	 *
+	 * 価格そのものは表示ゲート（PriceFreshness）を通るので、この 2 つは
+	 * CardRenderer が自分で読む。`(string)` の直キャストだと取り消し線の
+	 * 通常価格が `¥Array`、割引バッジが `Array` として出る。
+	 */
+	public function test_非スカラーの通常価格と割引バッジは表示しない(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					$this->toListing(
+						array(
+							'platform'         => 'example-store',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://x',
+							'price'            => '660',
+							'list_price'       => array( '880' ),
+							'badge'            => array( '25%OFF' ),
+							'last_verified_at' => gmdate( 'c', time() - 3600 ),
+						)
+					),
+				),
+			)
+		);
+
+		$html = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+
+		$this->assertStringNotContainsString( 'Array', $html );
+		$this->assertStringContainsString( 'affilicard-card__price', $html );
+		$this->assertStringNotContainsString( 'affilicard-card__list-price', $html );
+		$this->assertStringNotContainsString( 'affilicard-card__discount', $html );
+	}
+
 	public function test_hide_media_omits_image_column_entirely(): void {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://x',
-						'image_url'     => 'https://cdn.example/cover.jpg',
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://x',
+							'image_url'     => 'https://cdn.example/cover.jpg',
+						)
 					),
 				),
 			)
@@ -255,11 +436,13 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://x',
-						'image_url'     => 'https://cdn.example/cover.jpg',
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://x',
+							'image_url'     => 'https://cdn.example/cover.jpg',
+						)
 					),
 				),
 			)
@@ -282,15 +465,19 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'      => 'unknown',
-						'enabled'       => true,
-						'affiliate_url' => 'https://x',
+					$this->toListing(
+						array(
+							'platform'      => 'unknown',
+							'enabled'       => true,
+							'affiliate_url' => 'https://x',
+						)
 					),
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://ok',
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://ok',
+						)
 					),
 				),
 			)
@@ -342,10 +529,12 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://x',
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://x',
+						)
 					),
 				),
 			)
@@ -358,10 +547,12 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => false,
-						'affiliate_url' => 'https://x',
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => false,
+							'affiliate_url' => 'https://x',
+						)
 					),
 				),
 			)
@@ -374,12 +565,14 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'         => 'example-store',
-						'enabled'          => true,
-						'affiliate_url'    => 'https://x',
-						'price'            => '¥1,200',
-						'last_verified_at' => gmdate( 'c', time() - 3600 ),
+					$this->toListing(
+						array(
+							'platform'         => 'example-store',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://x',
+							'price'            => '¥1,200',
+							'last_verified_at' => gmdate( 'c', time() - 3600 ),
+						)
 					),
 				),
 			)
@@ -753,11 +946,13 @@ final class CardRendererTest extends TestCase {
 			'title'        => 'テスト商品',
 			'stock_status' => 'available',
 			'listings'     => array(
-				array(
-					'platform'              => 'dmm-books',
-					'affiliate_url'         => 'https://example.test/a',
-					'button_label_override' => 'listing上書き',
-					'enabled'               => true,
+				$this->toListing(
+					array(
+						'platform'              => 'dmm-books',
+						'affiliate_url'         => 'https://example.test/a',
+						'button_label_override' => 'listing上書き',
+						'enabled'               => true,
+					)
 				),
 			),
 		);
@@ -779,11 +974,13 @@ final class CardRendererTest extends TestCase {
 			'title'        => 'テスト商品',
 			'stock_status' => 'available',
 			'listings'     => array(
-				array(
-					'platform'              => 'dmm-books',
-					'affiliate_url'         => 'https://example.test/a',
-					'button_label_override' => 'listing上書き',
-					'enabled'               => true,
+				$this->toListing(
+					array(
+						'platform'              => 'dmm-books',
+						'affiliate_url'         => 'https://example.test/a',
+						'button_label_override' => 'listing上書き',
+						'enabled'               => true,
+					)
 				),
 			),
 		);
@@ -803,10 +1000,12 @@ final class CardRendererTest extends TestCase {
 				'product_type' => 'ebook',
 				'title'        => 'テスト漫画 1巻',
 				'listings'     => array(
-					array(
-						'platform'      => 'dmm-books',
-						'enabled'       => true,
-						'affiliate_url' => 'https://al.dmm.com/x',
+					$this->toListing(
+						array(
+							'platform'      => 'dmm-books',
+							'enabled'       => true,
+							'affiliate_url' => 'https://al.dmm.com/x',
+						)
 					),
 				),
 			)
@@ -851,12 +1050,14 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'         => 'example-store',
-						'enabled'          => true,
-						'affiliate_url'    => 'https://x',
-						'price'            => '600',
-						'last_verified_at' => gmdate( 'c', time() - 3600 ),
+					$this->toListing(
+						array(
+							'platform'         => 'example-store',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://x',
+							'price'            => '600',
+							'last_verified_at' => gmdate( 'c', time() - 3600 ),
+						)
 					),
 				),
 			)
@@ -874,12 +1075,14 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'         => 'example-store',
-						'enabled'          => true,
-						'affiliate_url'    => 'https://x',
-						'price'            => '¥1,200',
-						'last_verified_at' => gmdate( 'c', time() - 3600 ),
+					$this->toListing(
+						array(
+							'platform'         => 'example-store',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://x',
+							'price'            => '¥1,200',
+							'last_verified_at' => gmdate( 'c', time() - 3600 ),
+						)
 					),
 				),
 			)
@@ -893,13 +1096,15 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'         => 'example-store',
-						'enabled'          => true,
-						'affiliate_url'    => 'https://x',
-						'price'            => '600',
-						'badge'            => '40%OFF',
-						'last_verified_at' => gmdate( 'c', time() - 3600 ),
+					$this->toListing(
+						array(
+							'platform'         => 'example-store',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://x',
+							'price'            => '600',
+							'badge'            => '40%OFF',
+							'last_verified_at' => gmdate( 'c', time() - 3600 ),
+						)
 					),
 				),
 			)
@@ -913,11 +1118,13 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://x',
-						'price'         => '',
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://x',
+							'price'         => '',
+						)
 					),
 				),
 			)
@@ -931,12 +1138,14 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'         => 'example-store',
-						'enabled'          => true,
-						'affiliate_url'    => 'https://x',
-						'price'            => '600',
-						'last_verified_at' => '2026-04-20T10:30:00+09:00',
+					$this->toListing(
+						array(
+							'platform'         => 'example-store',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://x',
+							'price'            => '600',
+							'last_verified_at' => '2026-04-20T10:30:00+09:00',
+						)
 					),
 				),
 			)
@@ -953,19 +1162,23 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'         => 'example-store',
-						'enabled'          => true,
-						'affiliate_url'    => 'https://a',
-						'price'            => '600',
-						'last_verified_at' => '2026-04-18T09:00:00+09:00',
+					$this->toListing(
+						array(
+							'platform'         => 'example-store',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://a',
+							'price'            => '600',
+							'last_verified_at' => '2026-04-18T09:00:00+09:00',
+						)
 					),
-					array(
-						'platform'         => 'example-store',
-						'enabled'          => true,
-						'affiliate_url'    => 'https://b',
-						'price'            => '660',
-						'last_verified_at' => '2026-04-20T09:00:00+09:00',
+					$this->toListing(
+						array(
+							'platform'         => 'example-store',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://b',
+							'price'            => '660',
+							'last_verified_at' => '2026-04-20T09:00:00+09:00',
+						)
 					),
 				),
 			)
@@ -978,12 +1191,14 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://x',
-						'price'         => '600',
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://x',
+							'price'         => '600',
 						// last_verified_at 無し＝手動/未確認。price はあっても表示ゲート対象外。
+						)
 					),
 				),
 			)
@@ -998,12 +1213,14 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'         => 'example-store',
-						'enabled'          => true,
-						'affiliate_url'    => 'https://x',
-						'badge'            => 'NEW',
-						'last_verified_at' => gmdate( 'c', time() - 3600 ),
+					$this->toListing(
+						array(
+							'platform'         => 'example-store',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://x',
+							'badge'            => 'NEW',
+							'last_verified_at' => gmdate( 'c', time() - 3600 ),
+						)
 					),
 				),
 			)
@@ -1017,12 +1234,14 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'         => 'example-store',
-						'enabled'          => true,
-						'affiliate_url'    => 'https://x',
-						'price'            => '600',
-						'last_verified_at' => 'not-a-date',
+					$this->toListing(
+						array(
+							'platform'         => 'example-store',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://x',
+							'price'            => '600',
+							'last_verified_at' => 'not-a-date',
+						)
 					),
 				),
 			)
@@ -1050,7 +1269,7 @@ final class CardRendererTest extends TestCase {
 			),
 			$listingOverrides
 		);
-		$product  = $this->product( array( 'listings' => array( $listing ) ) );
+		$product  = $this->product( array( 'listings' => array( $this->toListing( $listing ) ) ) );
 		$platform = new PlatformDefinition( 'rakuten-kobo', '楽天Kobo', 'manual', 3, true, array( 'ebook' ), 'Koboで読む', '#bf0000', '#ffffff', priceTtlHours: 24 );
 		return ( new CardRenderer() )->render( $product, array( $platform ) );
 	}
@@ -1132,15 +1351,19 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'      => 'dmm-books',
-						'enabled'       => true,
-						'affiliate_url' => 'https://dmm',
+					$this->toListing(
+						array(
+							'platform'      => 'dmm-books',
+							'enabled'       => true,
+							'affiliate_url' => 'https://dmm',
+						)
 					),
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://store',
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://store',
+						)
 					),
 				),
 			)
@@ -1158,15 +1381,19 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'      => 'dmm-books',
-						'enabled'       => true,
-						'affiliate_url' => 'https://dmm',
+					$this->toListing(
+						array(
+							'platform'      => 'dmm-books',
+							'enabled'       => true,
+							'affiliate_url' => 'https://dmm',
+						)
 					),
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://store',
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://store',
+						)
 					),
 				),
 			)
@@ -1184,15 +1411,19 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'      => 'dmm-books',
-						'enabled'       => true,
-						'affiliate_url' => 'https://dmm',
+					$this->toListing(
+						array(
+							'platform'      => 'dmm-books',
+							'enabled'       => true,
+							'affiliate_url' => 'https://dmm',
+						)
 					),
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://store',
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://store',
+						)
 					),
 				),
 			)
@@ -1215,19 +1446,23 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'         => 'dmm-books',
-						'enabled'          => true,
-						'affiliate_url'    => 'https://dmm',
-						'price'            => '600',
-						'last_verified_at' => '2026-04-18T09:00:00+09:00',
+					$this->toListing(
+						array(
+							'platform'         => 'dmm-books',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://dmm',
+							'price'            => '600',
+							'last_verified_at' => '2026-04-18T09:00:00+09:00',
+						)
 					),
-					array(
-						'platform'         => 'example-store',
-						'enabled'          => true,
-						'affiliate_url'    => 'https://store',
-						'price'            => '600',
-						'last_verified_at' => '2026-04-25T09:00:00+09:00',
+					$this->toListing(
+						array(
+							'platform'         => 'example-store',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://store',
+							'price'            => '600',
+							'last_verified_at' => '2026-04-25T09:00:00+09:00',
+						)
 					),
 				),
 			)
@@ -1246,20 +1481,24 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'         => 'dmm-books',
-						'enabled'          => true,
-						'affiliate_url'    => 'https://dmm',
-						'price'            => '600',
-						'last_verified_at' => '2026-04-18T09:00:00+09:00',
+					$this->toListing(
+						array(
+							'platform'         => 'dmm-books',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://dmm',
+							'price'            => '600',
+							'last_verified_at' => '2026-04-18T09:00:00+09:00',
+						)
 					),
-					array(
-						'platform'         => 'example-store',
-						'enabled'          => true,
-						'affiliate_url'    => '',
-						'regular_url'      => '',
-						'price'            => '600',
-						'last_verified_at' => '2026-04-25T09:00:00+09:00',
+					$this->toListing(
+						array(
+							'platform'         => 'example-store',
+							'enabled'          => true,
+							'affiliate_url'    => '',
+							'regular_url'      => '',
+							'price'            => '600',
+							'last_verified_at' => '2026-04-25T09:00:00+09:00',
+						)
 					),
 				),
 			)
@@ -1274,19 +1513,23 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'         => 'dmm-books',
-						'enabled'          => true,
-						'affiliate_url'    => 'https://dmm',
-						'price'            => '600',
-						'last_verified_at' => '2026-04-18T09:00:00+09:00',
+					$this->toListing(
+						array(
+							'platform'         => 'dmm-books',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://dmm',
+							'price'            => '600',
+							'last_verified_at' => '2026-04-18T09:00:00+09:00',
+						)
 					),
-					array(
-						'platform'         => 'example-store',
-						'enabled'          => true,
-						'affiliate_url'    => 'https://store',
-						'price'            => '600',
-						'last_verified_at' => '2026-04-25T09:00:00+09:00',
+					$this->toListing(
+						array(
+							'platform'         => 'example-store',
+							'enabled'          => true,
+							'affiliate_url'    => 'https://store',
+							'price'            => '600',
+							'last_verified_at' => '2026-04-25T09:00:00+09:00',
+						)
 					),
 				),
 			)
@@ -1304,10 +1547,12 @@ final class CardRendererTest extends TestCase {
 		return $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'      => 'example-store',
-						'enabled'       => true,
-						'affiliate_url' => 'https://aff.example/x',
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://aff.example/x',
+						)
 					),
 				),
 			)
@@ -1365,11 +1610,13 @@ final class CardRendererTest extends TestCase {
 		$product = $this->product(
 			array(
 				'listings' => array(
-					array(
-						'platform'              => 'example-store',
-						'enabled'               => true,
-						'affiliate_url'         => 'https://aff.example/x',
-						'button_label_override' => 'いますぐ予約',
+					$this->toListing(
+						array(
+							'platform'              => 'example-store',
+							'enabled'               => true,
+							'affiliate_url'         => 'https://aff.example/x',
+							'button_label_override' => 'いますぐ予約',
+						)
 					),
 				),
 			)
@@ -1482,15 +1729,19 @@ final class CardRendererTest extends TestCase {
 			'title'        => 'X',
 			'stock_status' => 'available',
 			'listings'     => array(
-				array(
-					'platform'      => 'rakuten-kobo',
-					'affiliate_url' => 'https://a/kobo',
-					'image_url'     => 'https://cdn/kobo.jpg',
+				$this->toListing(
+					array(
+						'platform'      => 'rakuten-kobo',
+						'affiliate_url' => 'https://a/kobo',
+						'image_url'     => 'https://cdn/kobo.jpg',
+					)
 				),
-				array(
-					'platform'      => 'dmm-books',
-					'affiliate_url' => 'https://a/dmm',
-					'image_url'     => 'https://cdn/dmm.jpg',
+				$this->toListing(
+					array(
+						'platform'      => 'dmm-books',
+						'affiliate_url' => 'https://a/dmm',
+						'image_url'     => 'https://cdn/dmm.jpg',
+					)
 				),
 			),
 		);
@@ -1505,15 +1756,19 @@ final class CardRendererTest extends TestCase {
 			'title'        => 'X',
 			'stock_status' => 'available',
 			'listings'     => array(
-				array(
-					'platform'      => 'dmm-books',
-					'affiliate_url' => 'https://a/dmm',
-					'image_url'     => 'https://cdn/dmm.jpg',
+				$this->toListing(
+					array(
+						'platform'      => 'dmm-books',
+						'affiliate_url' => 'https://a/dmm',
+						'image_url'     => 'https://cdn/dmm.jpg',
+					)
 				),
-				array(
-					'platform'      => 'rakuten-kobo',
-					'affiliate_url' => 'https://a/kobo',
-					'image_url'     => 'https://cdn/kobo.jpg',
+				$this->toListing(
+					array(
+						'platform'      => 'rakuten-kobo',
+						'affiliate_url' => 'https://a/kobo',
+						'image_url'     => 'https://cdn/kobo.jpg',
+					)
 				),
 			),
 		);
@@ -1535,9 +1790,11 @@ final class CardRendererTest extends TestCase {
 			'title'        => 'X',
 			'stock_status' => 'available',
 			'listings'     => array(
-				array(
-					'platform'      => 'dmm-books',
-					'affiliate_url' => 'https://a/dmm',
+				$this->toListing(
+					array(
+						'platform'      => 'dmm-books',
+						'affiliate_url' => 'https://a/dmm',
+					)
 				), // image_url 無し
 			),
 		);
@@ -1550,10 +1807,12 @@ final class CardRendererTest extends TestCase {
 			'title'        => 'X',
 			'stock_status' => 'available',
 			'listings'     => array(
-				array(
-					'platform'      => 'dmm-books',
-					'affiliate_url' => 'https://a/dmm',
-					'image_url'     => '',
+				$this->toListing(
+					array(
+						'platform'      => 'dmm-books',
+						'affiliate_url' => 'https://a/dmm',
+						'image_url'     => '',
+					)
 				),
 			),
 		);
@@ -1568,10 +1827,12 @@ final class CardRendererTest extends TestCase {
 			'title'        => 'X',
 			'stock_status' => 'available',
 			'listings'     => array(
-				array(
-					'platform'      => 'dmm-books',
-					'affiliate_url' => 'https://a/dmm',
-					'image_url'     => 'javascript:alert(1)',
+				$this->toListing(
+					array(
+						'platform'      => 'dmm-books',
+						'affiliate_url' => 'https://a/dmm',
+						'image_url'     => 'javascript:alert(1)',
+					)
 				),
 			),
 		);
@@ -1605,10 +1866,12 @@ final class CardRendererTest extends TestCase {
 	private function productWithListings( array $codes ): array {
 		$listings = array();
 		foreach ( $codes as $code ) {
-			$listings[] = array(
-				'platform'      => $code,
-				'enabled'       => true,
-				'affiliate_url' => 'https://example.test/' . $code,
+			$listings[] = $this->toListing(
+				array(
+					'platform'      => $code,
+					'enabled'       => true,
+					'affiliate_url' => 'https://example.test/' . $code,
+				)
 			);
 		}
 		return array(
@@ -1696,17 +1959,21 @@ final class CardRendererTest extends TestCase {
 			'title'        => 'テスト商品',
 			'stock_status' => 'available',
 			'listings'     => array(
-				array(
-					'platform'      => 'store-b',
-					'enabled'       => true,
-					'affiliate_url' => 'https://example.test/store-b',
-					'image_url'     => 'https://cdn.test/b.jpg',
+				$this->toListing(
+					array(
+						'platform'      => 'store-b',
+						'enabled'       => true,
+						'affiliate_url' => 'https://example.test/store-b',
+						'image_url'     => 'https://cdn.test/b.jpg',
+					)
 				),
-				array(
-					'platform'      => 'store-a',
-					'enabled'       => true,
-					'affiliate_url' => 'https://example.test/store-a',
-					'image_url'     => 'https://cdn.test/a.jpg',
+				$this->toListing(
+					array(
+						'platform'      => 'store-a',
+						'enabled'       => true,
+						'affiliate_url' => 'https://example.test/store-a',
+						'image_url'     => 'https://cdn.test/a.jpg',
+					)
 				),
 			),
 		);
@@ -1724,17 +1991,21 @@ final class CardRendererTest extends TestCase {
 			'title'        => 'テスト商品',
 			'stock_status' => 'available',
 			'listings'     => array(
-				array(
-					'platform'      => 'store-a',
-					'enabled'       => true,
-					'affiliate_url' => 'https://example.test/store-a',
-					'image_url'     => '',
+				$this->toListing(
+					array(
+						'platform'      => 'store-a',
+						'enabled'       => true,
+						'affiliate_url' => 'https://example.test/store-a',
+						'image_url'     => '',
+					)
 				),
-				array(
-					'platform'      => 'store-b',
-					'enabled'       => true,
-					'affiliate_url' => 'https://example.test/store-b',
-					'image_url'     => 'https://cdn.test/b.jpg',
+				$this->toListing(
+					array(
+						'platform'      => 'store-b',
+						'enabled'       => true,
+						'affiliate_url' => 'https://example.test/store-b',
+						'image_url'     => 'https://cdn.test/b.jpg',
+					)
 				),
 			),
 		);
@@ -1748,14 +2019,203 @@ final class CardRendererTest extends TestCase {
 			'title'        => 'テスト商品',
 			'stock_status' => 'available',
 			'listings'     => array(
-				array(
-					'platform'      => 'store-a',
-					'enabled'       => true,
-					'affiliate_url' => 'https://example.test/store-a',
+				$this->toListing(
+					array(
+						'platform'      => 'store-a',
+						'enabled'       => true,
+						'affiliate_url' => 'https://example.test/store-a',
+					)
 				),
 			),
 		);
 		$html      = ( new CardRenderer() )->render( $product, $platforms, array( 'image_url' => 'https://cdn.test/eyecatch.jpg' ) );
 		$this->assertStringContainsString( 'https://cdn.test/eyecatch.jpg', $html );
+	}
+
+	// ------------------------------------------------------------------
+	// Task 9: CardRenderer が購入リンクの選択を一箇所（visibleListings()）に集約する。
+	// OfferSelector::select() の結果だけを CTA・書影・日時フッターが共有すること、
+	// PriceFreshness::isPriceDisplayable() の判定対象が offer に切り替わったことを検証する。
+	// ------------------------------------------------------------------
+
+	/** rakuten-kobo（priceTtlHours=可変）の platform を作る。 */
+	private function rakutenPlatform( int $priceTtlHours = 24 ): PlatformDefinition {
+		return new PlatformDefinition( 'rakuten-kobo', '楽天Kobo', 'manual', 3, true, array( 'ebook' ), 'Koboで読む', '#bf0000', '#ffffff', priceTtlHours: $priceTtlHours );
+	}
+
+	/** @param list<array<string, mixed>> $offers */
+	private function renderWithOffers( array $offers, bool $fallbackOnTerminal = false ): string {
+		$product = array(
+			'id'           => 1,
+			'title'        => '対象巻',
+			'stock_status' => 'available',
+			'listings'     => array(
+				array(
+					'platform' => 'rakuten-kobo',
+					'enabled'  => true,
+					'offers'   => $offers,
+				),
+			),
+		);
+		return ( new CardRenderer() )->render(
+			$product,
+			array( $this->rakutenPlatform() ),
+			array( 'fallback_on_terminal' => $fallbackOnTerminal )
+		);
+	}
+
+	public function test_購入ボタンと書影が同じ購入リンクを指す(): void {
+		// 集約の要点。ボタンと書影が別の offer を指すズレを構造的に潰す。
+		$html = $this->renderWithOffers(
+			array(
+				array(
+					'display_order' => 10,
+					'external_id'   => 'sale',
+					'regular_url'   => 'https://example.test/sale',
+					'affiliate_url' => 'https://af.test/sale',
+					'image_url'     => 'https://img.test/sale.jpg',
+				),
+				array(
+					'display_order' => 100,
+					'external_id'   => 'normal',
+					'regular_url'   => 'https://example.test/normal',
+					'affiliate_url' => 'https://af.test/normal',
+					'image_url'     => 'https://img.test/normal.jpg',
+				),
+			)
+		);
+
+		$this->assertStringContainsString( 'https://af.test/sale', $html );
+		$this->assertStringContainsString( 'https://img.test/sale.jpg', $html );
+		$this->assertStringNotContainsString( 'https://img.test/normal.jpg', $html );
+	}
+
+	public function test_設定OFFならterminalでも先頭の購入リンクを出す(): void {
+		$html = $this->renderWithOffers(
+			array(
+				array(
+					'display_order' => 10,
+					'external_id'   => 'dead',
+					'regular_url'   => 'https://example.test/dead',
+					'fetch_status'  => 'terminal',
+				),
+				array(
+					'display_order' => 100,
+					'external_id'   => 'alive',
+					'regular_url'   => 'https://example.test/alive',
+				),
+			),
+			false // fallback OFF（既定）。
+		);
+
+		$this->assertStringContainsString( 'https://example.test/dead', $html );
+		$this->assertStringNotContainsString( 'https://example.test/alive', $html );
+	}
+
+	public function test_設定ONならterminalを飛ばして次の購入リンクを出す(): void {
+		$html = $this->renderWithOffers(
+			array(
+				array(
+					'display_order' => 10,
+					'external_id'   => 'dead',
+					'regular_url'   => 'https://example.test/dead',
+					'fetch_status'  => 'terminal',
+				),
+				array(
+					'display_order' => 100,
+					'external_id'   => 'alive',
+					'regular_url'   => 'https://example.test/alive',
+				),
+			),
+			true
+		);
+
+		$this->assertStringContainsString( 'https://example.test/alive', $html );
+		$this->assertStringNotContainsString( 'https://example.test/dead', $html );
+	}
+
+	public function test_アフィリURLが空なら通常URLへ倒れる(): void {
+		// 既存挙動（affiliate_url ?: regular_url）が offer 単位でも維持されること。
+		$html = $this->renderWithOffers(
+			array(
+				array(
+					'display_order' => 100,
+					'external_id'   => 'x',
+					'regular_url'   => 'https://example.test/x',
+					'affiliate_url' => '',
+				),
+			)
+		);
+
+		$this->assertStringContainsString( 'https://example.test/x', $html );
+	}
+
+	public function test_鮮度切れの価格は表示されない(): void {
+		// 判定対象が選択された offer になっても、規約（24h）はそのまま効くこと。
+		$html = $this->renderWithOffers(
+			array(
+				array(
+					'display_order'    => 100,
+					'external_id'      => 'x',
+					'regular_url'      => 'https://example.test/x',
+					'price'            => '660',
+					'last_verified_at' => gmdate( 'c', time() - 25 * 3600 ),
+				),
+			)
+		);
+
+		$this->assertStringNotContainsString( '660', $html );
+	}
+
+	public function test_offersが1件なら移行前と同じ出力になる(): void {
+		// 移行直後の回帰防止。既存のゴールデン出力と突き合わせる。
+		$html = $this->renderWithOffers(
+			array(
+				array(
+					'display_order'    => 100,
+					'external_id'      => 'x',
+					'regular_url'      => 'https://example.test/x',
+					'affiliate_url'    => 'https://af.test/x',
+					'price'            => '660',
+					'last_verified_at' => gmdate( 'c' ),
+				),
+			)
+		);
+
+		$this->assertStringContainsString( 'https://af.test/x', $html );
+		$this->assertStringContainsString( '660', $html );
+	}
+
+	/**
+	 * 移行バッチが到達するまでの窓（v4 のコードは動いているが当該商品の meta はまだ flat）で
+	 * カードが空にならないこと。
+	 *
+	 * PluginUpgrade::maybeUpgrade() は移行を「積む」だけなので、Action Scheduler が
+	 * 止まっている（CronDisabledNotice が出るインストール）等の理由で、v4 のコードが
+	 * flat な listing を読む状況は現実に起こる。読み側で offers[0] を合成しないと、
+	 * 購入ボタン・価格・書影のすべてが落ちたカードがカタログ全体で出続ける。
+	 */
+	public function test_offersが無いflatなlistingでも購入ボタンと価格と書影を描画する(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform'         => 'example-store',
+						'enabled'          => true,
+						'affiliate_url'    => 'https://aff.example/legacy',
+						'regular_url'      => 'https://example.com/legacy',
+						'price'            => '660',
+						'image_url'        => 'https://img.example/legacy.jpg',
+						'last_verified_at' => gmdate( 'c', time() - 3600 ),
+					),
+				),
+			)
+		);
+
+		$html = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+
+		$this->assertStringContainsString( 'https://aff.example/legacy', $html, '移行前の listing で購入ボタンが消えている' );
+		$this->assertStringContainsString( '660', $html, '移行前の listing で価格が消えている' );
+		$this->assertStringContainsString( 'https://img.example/legacy.jpg', $html, '移行前の listing で書影が消えている' );
 	}
 }

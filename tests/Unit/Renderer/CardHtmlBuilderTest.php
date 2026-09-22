@@ -35,9 +35,11 @@ final class CardHtmlBuilderTest extends TestCase {
 			'extras'       => array(),
 			'listings'     => array(
 				array(
-					'platform'      => 'dmm-books',
-					'enabled'       => true,
-					'affiliate_url' => 'https://al.dmm.com/x',
+					'platform' => 'dmm-books',
+					'enabled'  => true,
+					'offers'   => array(
+						array( 'affiliate_url' => 'https://al.dmm.com/x' ),
+					),
 				),
 			),
 			'modified'     => '',
@@ -155,9 +157,11 @@ final class CardHtmlBuilderTest extends TestCase {
 			'extras'       => array(),
 			'listings'     => array(
 				array(
-					'platform'      => 'dmm-books',
-					'enabled'       => true,
-					'affiliate_url' => 'https://al.dmm.com/x',
+					'platform' => 'dmm-books',
+					'enabled'  => true,
+					'offers'   => array(
+						array( 'affiliate_url' => 'https://al.dmm.com/x' ),
+					),
 				),
 			),
 			'modified'     => '',
@@ -244,10 +248,14 @@ final class CardHtmlBuilderTest extends TestCase {
 			array(
 				'listings' => array(
 					array(
-						'platform'      => 'dmm-books',
-						'enabled'       => true,
-						'affiliate_url' => 'https://al.dmm.com/x',
-						'image_url'     => 'https://cdn.example/cover.jpg',
+						'platform' => 'dmm-books',
+						'enabled'  => true,
+						'offers'   => array(
+							array(
+								'affiliate_url' => 'https://al.dmm.com/x',
+								'image_url'     => 'https://cdn.example/cover.jpg',
+							),
+						),
 					),
 				),
 			)

@@ -89,9 +89,17 @@ final class Enqueuer {
 	 * ドロップ→force が失われるため。as_unschedule_all_actions は pending のみ取り消し
 	 * in-progress は残すので、base args の掃除だけでは in-progress との衝突を避けられない。
 	 *
-	 * run 時に鮮度スキップは存在しない（鮮度判定は QueueMaintenance::sweep() の enqueue 時点のみ・
-	 * refreshOne は必ず fetch する）ため、force の実行時挙動は sweep と同一＝「必ず fetch」で、
-	 * force が確実に積まれることだけ保証すればよい（ハンドラ側は force を見ない）。
+	 * **鮮度による run 時スキップは存在しない**（鮮度判定は QueueMaintenance::sweep() の
+	 * enqueue 時点のみ）。したがって force の実行時挙動は sweep と同一で、force が確実に
+	 * 積まれることだけ保証すればよい（ハンドラ側は force を見ない）。
+	 *
+	 * **run 時に取得を見送る条件は「鮮度以外の、その listing が今は対象外である」もの
+	 * だけである。** ListingRefresher::refreshOne() は削除済み商品・実行時に無効化／
+	 * 手動化された listing・**offers 移行がまだ到達していない listing**
+	 * （{@see \Affilicard\Cron\ListingRefresher::isHeldForMigration()}）を no-op
+	 * （WorkOutcome::SUCCESS）で返す。いずれも force でも同じ——force は「鮮度を無視して
+	 * 積む」ためのものであって、対象外の listing を無理に書き込ませるためのものではない。
+	 * 見送られた listing は last_fetched_at が据え置かれるので、掃引が次の周回でまた積む。
 	 */
 	public function enqueueForced( int $postId, string $platform, string $account ): void {
 		$baseArgs  = array(
@@ -130,6 +138,42 @@ final class Enqueuer {
 
 		as_unschedule_all_actions( self::HOOK_REFRESH, $args, $group );
 		as_schedule_single_action( time(), self::HOOK_REFRESH, $args, $group, true, self::PRIORITY_MANUAL );
+	}
+
+	/**
+	 * 実行中のジョブに後追いさせる follow-up（繰り上がりトリガー専用）。
+	 *
+	 * **base args（{post_id, platform}）では積めない。** `as_schedule_single_action()` の
+	 * unique 判定は pending だけでなく **in-progress のアクションも重複とみなして**
+	 * 新しいアクションを作らず 0 を返す（ActionScheduler_DBStore::isActionUnique）。
+	 * `as_unschedule_all_actions()` が消せるのも pending だけである。したがって
+	 * ジョブが実行中のあいだに購入リンクが変わっても、enqueueManual() は「呼ばれるが
+	 * 何も作らない」——実行中のジョブは**変更前の** listing を読んで走っているため、
+	 * その変更に対する取得が次の掃引まで丸ごと落ちる。
+	 *
+	 * そこで args に `follow_up` を足して**別の unique キー**にする。enqueueForced() が
+	 * force=true で in-progress との衝突を避けているのと同じ手である。args が違えば
+	 * 実行中の base args アクションに吸収されない。
+	 *
+	 * unique=true は follow-up **同士**にだけ効く。実行中のジョブが長引き、そのあいだに
+	 * 何度保存されても follow-up は 1 件へ収束する（積み直しの churn が出ない）。
+	 * 遅れて 1 件走る follow-up はそのとき最新の listing を読むので、まとめて拾える。
+	 *
+	 * 予定時刻は time()（即時）。unschedule → schedule で「今へ動かす」必要は無い——
+	 * このアクションは常に即時で積まれ、pending のまま将来へ寝ることが無いからである。
+	 *
+	 * ハンドラ（RefreshHandler::handle）は post_id と platform の 2 引数しか受け取らない
+	 * （Plugin.php の add_action は accepted_args=2）ため、`follow_up` は enqueueForced() の
+	 * `force` と同じくハンドラ側からは見えない——unique キーを分けるためだけの印である。
+	 */
+	public function enqueueFollowUp( int $postId, string $platform, string $account ): void {
+		$args = array(
+			'post_id'   => $postId,
+			'platform'  => $platform,
+			'follow_up' => true,
+		);
+
+		as_schedule_single_action( time(), self::HOOK_REFRESH, $args, $this->group( $account ), true, self::PRIORITY_MANUAL );
 	}
 
 	/**

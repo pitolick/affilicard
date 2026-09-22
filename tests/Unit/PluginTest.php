@@ -322,6 +322,30 @@ final class PluginTest extends TestCase {
 	}
 
 	/**
+	 * 派生 meta 同期の再試行アクションが Plugin::boot() から配線されることを固定する。
+	 *
+	 * これが欠けると、ロック競合で見送ったミラー同期の再投入が Action Scheduler 上に
+	 * 滞留したまま一切実行されず、ミラーが listings と食い違ったまま放置される
+	 * （自動作成が既存商品を見落として重複を作る）。
+	 */
+	public function test_boot_registers_derived_meta_sync_retry_hook(): void {
+		WP_Mock::userFunction( 'is_admin', array( 'return' => false ) );
+		WP_Mock::userFunction( 'register_activation_hook', array( 'return' => true ) );
+		WP_Mock::userFunction( 'register_deactivation_hook', array( 'return' => true ) );
+
+		WP_Mock::expectActionAdded(
+			\Affilicard\Repository\DerivedMetaSync::HOOK,
+			array( \Affilicard\Repository\DerivedMetaSync::class, 'run' ),
+			10,
+			2
+		);
+
+		Plugin::boot();
+
+		$this->assertConditionsMet();
+	}
+
+	/**
 	 * 先行タスクからの申し送り: BatchRefreshHandler::handle(array $args) は AS フックへ
 	 * 直付けできない（Action Scheduler は do_action_ref_array($hook, array_values($args))
 	 * で args を位置引数に展開するため、直付けすると第1引数に文字列 'account' が渡り

@@ -66,29 +66,31 @@ final class CardHtmlBuilder {
 		$is_preorder  = \Affilicard\Stock\ReleaseDate::isPreorder( $release_date, $today );
 
 		$options = array(
-			'hide_platforms'      => $hide_platforms,
-			'only_platforms'      => $only_platforms,
-			'image_url'           => $this->featuredImageUrl( (int) ( $product['id'] ?? 0 ) ),
-			'colors'              => array(
+			'hide_platforms'       => $hide_platforms,
+			'only_platforms'       => $only_platforms,
+			'image_url'            => $this->featuredImageUrl( (int) ( $product['id'] ?? 0 ) ),
+			'colors'               => array(
 				'card_bg'     => isset( $attributes['cardBgColor'] ) ? (string) $attributes['cardBgColor'] : '',
 				'card_border' => isset( $attributes['cardBorderColor'] ) ? (string) $attributes['cardBorderColor'] : '',
 				'cta_bg'      => isset( $attributes['ctaBgColor'] ) ? (string) $attributes['ctaBgColor'] : '',
 				'cta_text'    => isset( $attributes['ctaTextColor'] ) ? (string) $attributes['ctaTextColor'] : '',
 			),
-			'header_keys'         => $header_keys,
-			'hidden_keys'         => $hidden_keys,
-			'media_label'         => $media_label,
-			'media_aspect_ratio'  => $media_aspect,
-			'cta_label_overrides' => $cta_overrides,
-			'is_preorder'         => $is_preorder,
-			'release_date_label'  => $is_preorder ? \Affilicard\Stock\ReleaseDate::label( $release_date ) : '',
-			'mask_blur'           => $mask['blur'],
-			'mask_r18'            => $mask['r18'],
-			'mask_label'          => $mask['label'],
+			'header_keys'          => $header_keys,
+			'hidden_keys'          => $hidden_keys,
+			'media_label'          => $media_label,
+			'media_aspect_ratio'   => $media_aspect,
+			'cta_label_overrides'  => $cta_overrides,
+			'is_preorder'          => $is_preorder,
+			'release_date_label'   => $is_preorder ? \Affilicard\Stock\ReleaseDate::label( $release_date ) : '',
+			'mask_blur'            => $mask['blur'],
+			'mask_r18'             => $mask['r18'],
+			'mask_label'           => $mask['label'],
 			// ブロック属性で明示されていればそれを、無ければグローバル設定を使う（マスクと同じ優先順）。
-			'hide_media'          => array_key_exists( 'hideMedia', $attributes ) && null !== $attributes['hideMedia']
+			'hide_media'           => array_key_exists( 'hideMedia', $attributes ) && null !== $attributes['hideMedia']
 				? (bool) $attributes['hideMedia']
 				: \Affilicard\Settings\GeneralSettings::hidesProductImages(),
+			// CardRenderer は option を読まない（純粋レンダラの制約）ため、ここで解決して渡す。
+			'fallback_on_terminal' => \Affilicard\Settings\GeneralSettings::fallbackOnTerminal(),
 		);
 
 		return ( new CardRenderer() )->render( $product, $platforms, $options );

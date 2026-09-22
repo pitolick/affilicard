@@ -1,13 +1,19 @@
 jest.mock( '../../../src/Admin/api/platforms' );
+jest.mock( '../../../src/Admin/api/settings' );
 
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { setEntityMeta, _reset, getLastSetterCall, clearLastSetterCall } from '@wordpress/core-data';
 import { fetchPlatforms } from '../../../src/Admin/api/platforms';
+import { fetchEditorSettings } from '../../../src/Admin/api/settings';
 import { ProductSettingsPanel } from '../../../src/Admin/components/ProductSettingsPanel';
 
 beforeEach( () => {
 	_reset();
 	fetchPlatforms.mockResolvedValue( [ { code: 'dmm-books', name: 'DMM Books' } ] );
+	// ListingsEditor の「使用中」判定に使う GeneralSettings::fallbackOnTerminal()。
+	// 既定 OFF（PHP 側の既定と揃える）。
+	fetchEditorSettings.mockResolvedValue( { fallback_on_terminal: false } );
 } );
 
 describe( 'ProductSettingsPanel', () => {
@@ -15,13 +21,24 @@ describe( 'ProductSettingsPanel', () => {
 		setEntityMeta( {
 			affilicard_product_type: 'ebook',
 			affilicard_stock_status: 'available',
-			affilicard_listings: [ { platform: 'dmm-books', enabled: true, affiliate_url: 'https://a' } ],
+			affilicard_listings: [
+				{
+					platform: 'dmm-books',
+					enabled: true,
+					offers: [ { display_order: 100, external_id: '', affiliate_url: 'https://a' } ],
+				},
+			],
 			affilicard_extras: [],
 		} );
 		render( <ProductSettingsPanel /> );
 		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
-		expect( screen.getByDisplayValue( 'https://a' ) ).toBeInTheDocument();
 		expect( screen.getByDisplayValue( '電子書籍' ) ).toBeInTheDocument();
+		// 購入リンクの入力欄は既定で畳まれているため、開いてから値を確認する
+		// （external_id 未設定なのでプレースホルダ見出しが行タイトルになる）。
+		await userEvent.click(
+			screen.getByRole( 'button', { name: /（外部 ID 未設定）/ } )
+		);
+		expect( screen.getByDisplayValue( 'https://a' ) ).toBeInTheDocument();
 	} );
 
 	test( 'meta が未定義/非配列でも空配列で安全に描画する', async () => {
@@ -79,6 +96,45 @@ describe( 'ProductSettingsPanel', () => {
 		clearLastSetterCall();
 		fireEvent.click( screen.getByLabelText( '表紙にぼかしを掛ける' ) );
 		expect( getLastSetterCall() ).toMatchObject( { affilicard_mask_blur: true } );
+	} );
+
+	// GeneralSettings::fallbackOnTerminal() は REST（fetchEditorSettings）経由で取得し
+	// ListingsEditor まで配線している。これまで ListingsEditor 単体には ON の
+	// テストがあったが、ProductSettingsPanel からの配線そのものは未検証だった
+	// （配線先の endpoint が権限で 403 になっていても、ListingsEditor 単体テストは
+	// 気づけない）。ここでは実際に fetchEditorSettings → 「使用中」表示までを通す。
+	test( 'fallback_on_terminal=ON がサイト設定から「使用中」の印まで届く', async () => {
+		fetchEditorSettings.mockResolvedValue( { fallback_on_terminal: true } );
+		setEntityMeta( {
+			affilicard_listings: [
+				{
+					platform: 'dmm-books',
+					enabled: true,
+					offers: [
+						{
+							display_order: 10,
+							external_id: 'dead',
+							regular_url: 'https://a',
+							fetch_status: 'terminal',
+						},
+						{
+							display_order: 100,
+							external_id: 'alive',
+							regular_url: 'https://b',
+						},
+					],
+				},
+			],
+			affilicard_extras: [],
+		} );
+		render( <ProductSettingsPanel /> );
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+
+		// fallback_on_terminal は非同期取得（REST）なので反映を待つ。
+		await waitFor( () =>
+			expect( screen.getByTestId( 'offer-alive' ) ).toHaveTextContent( '使用中' )
+		);
+		expect( screen.getByTestId( 'offer-dead' ) ).not.toHaveTextContent( '使用中' );
 	} );
 
 	// 回帰防止: setMeta(object) で meta が更新され再レンダーされること。

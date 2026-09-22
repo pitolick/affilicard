@@ -5,7 +5,9 @@ namespace Affilicard\Queue;
 
 use Affilicard\Cron\ListingRefresher;
 use Affilicard\Platform\PlatformConfig;
+use Affilicard\Pricing\FetchStatus;
 use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Util\ScalarField;
 
 /**
  * affilicard_refresh_listing アクションのハンドラ。ThrottledActionHandler の骨格に
@@ -27,6 +29,37 @@ final class RefreshHandler extends ThrottledActionHandler {
 	 */
 	public static function giveUpTransientKey( int $postId, string $platform ): string {
 		return 'affilicard_refresh_gaveup_' . $postId . '_' . $platform;
+	}
+
+	/**
+	 * give-up マーカーが「今使う購入リンク」に効いているか。投入経路
+	 * （QueueMaintenance::sweep / OfferPromotionTrigger）はこの判定だけを見る。
+	 *
+	 * **マーカーのキーは (post_id, platform) 単位でしか立たない。** onTerminalFailure() が
+	 * 受け取る args にどの購入リンクだったかの情報が無く、キーへ offer の身元を混ぜるには
+	 * 実行時にもう一度 listing を読んで選択をやり直すしかない（すでに書かれた既存キーの
+	 * 面倒も見る必要がある）。代わりに、恒久失敗した購入リンク自身が持つ
+	 * `fetch_status=terminal` を併せて見る——ListingRefresher は TERMINAL_FAILURE を返す
+	 * 前に必ずその offer へ terminal を書き込み、保存に失敗した場合は
+	 * TRANSIENT_FAILURE へ落ちてマーカー自体が立たないため、マーカーと terminal な
+	 * offer は常に対で残る。
+	 *
+	 * これにより、恒久失敗した購入リンク A のマーカーが、繰り上げた別の購入リンク B
+	 * （一度も失敗していない）まで TTL のあいだ止める事故が起きない。B が選ばれている
+	 * 間は取得が走り、成功すれば onSuccess() がマーカーを消す。
+	 *
+	 * @param array<string, mixed> $selectedOffer OfferSelector::select() が選んだ購入リンク。
+	 */
+	public static function isGivenUp( int $postId, string $platform, array $selectedOffer ): bool {
+		if ( ! get_transient( self::giveUpTransientKey( $postId, $platform ) ) ) {
+			return false;
+		}
+		// **status は {@see ScalarField::string()} で読む。** `(string)` の直キャストだと、
+		// 壊れた meta や外部ツールの直書きで入った配列が「Array to string conversion」の
+		// 警告を出したうえで `'Array'` になる。判定は偽のままだが、警告はこの関数を
+		// 呼ぶ掃引・繰り上がりのたびにキューのログへ積まれる。同じ値を読む
+		// {@see \Affilicard\PostType\ProductListColumns::renderFallbackColumn()} と流儀を揃える。
+		return FetchStatus::isTerminal( ScalarField::string( $selectedOffer, 'fetch_status' ) );
 	}
 
 	public function __construct(
@@ -56,6 +89,35 @@ final class RefreshHandler extends ThrottledActionHandler {
 		// give-up マーカーの set/delete は onTerminalFailure/onSuccess フックに集約する
 		// （run() が outcome を見て呼び分ける）。ここでは refreshOne の結果をそのまま返す。
 		return $this->refresher->refreshOne( (int) $args['post_id'], (string) $args['platform'] );
+	}
+
+	/**
+	 * refreshOne() が実際に fetch する件数（OfferSelector::select() の選択結果件数）。
+	 * ThrottledActionHandler::run() が performWork() の**前**にこれを呼び、レート制限の
+	 * 枠をこの件数に比例させて確保する。
+	 *
+	 * **ここと refreshOne() は listing を別々に読む（意図的に受容している競合）。**
+	 * 2 回の読み取りの間に管理画面が同じ listing を保存すると、確保した枠と実際の
+	 * fetch 件数がずれる。ずれは今日の選択係が 0 or 1 件しか返さないため最大 1 件で、
+	 * 「枠を取ったのに fetch しない（account の次の要求が 1 間隔ぶん無駄に遅れる）」か
+	 * 「枠を取らずに fetch する（1 要求が間隔より早く出る）」のどちらかに収まり、
+	 * いずれも次の呼び出しで解消する。
+	 *
+	 * スナップショットを共有しないのは、手段がどれも割に合わないためである。
+	 * ロックは refreshOne() が外部 API を叩くあいだ保持することになり有害。
+	 * このハンドラはリクエストごとに 1 つ生成されて複数アクションで再利用されるので、
+	 * インスタンスへ memo すると別アクションへ古い listing を配ってしまい今より悪い。
+	 * 選択結果を performWork() へ引き渡す形は ThrottledActionHandler の契約
+	 * （全ハンドラ共通）を変えることになる。窓はこの 2 呼び出しの間だけで外部 I/O を
+	 * 挟まず、影響も上記のとおり有界なので、現状は受容する。
+	 *
+	 * **受容するのは管理画面の編集によるズレだけである。** 移行バッチ（別リクエストで走り、
+	 * 多数の listing を一斉に変換する）でこの隙間が開くケースは受容しない——
+	 * {@see ListingRefresher::targetCount()} が「見送りが解けたら叩き得る件数」を返して
+	 * 枠を取りに倒すことで塞いでいる（同 docblock 参照）。
+	 */
+	protected function refreshTargetCount( array $args ): int {
+		return $this->refresher->targetCount( (int) $args['post_id'], (string) $args['platform'] );
 	}
 
 	/**
