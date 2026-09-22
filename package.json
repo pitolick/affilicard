@@ -28,7 +28,7 @@
 		"@testing-library/react": "^16.3.2",
 		"@testing-library/user-event": "^14.6.6",
 		"@wordpress/env": "^11.13.0",
-		"@wordpress/scripts": "^33.0.0",
+		"@wordpress/scripts": "^34.1.0",
 		"eslint": "^10.9.1",
 		"prettier": "^3.9.6"
 	},
