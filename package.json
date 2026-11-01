@@ -33,7 +33,7 @@
 		"prettier": "^3.9.10"
 	},
 	"dependencies": {
-		"@wordpress/api-fetch": "^7.56.0",
+		"@wordpress/api-fetch": "^8.0.0",
 		"@wordpress/components": "^37.0.0",
 		"@wordpress/data": "^10.56.0",
 		"@wordpress/element": "^8.2.0",
