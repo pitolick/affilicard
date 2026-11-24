@@ -1218,6 +1218,8 @@ final class CardRendererTest extends TestCase {
 		);
 		$html = ( new CardRenderer() )->render( $product, array( $this->store() ) );
 		$this->assertStringNotContainsString( 'affilicard-card__timestamp', $html );
+		// 注釈が 1 つも無いカードには注釈の枠ごと出さない。
+		$this->assertStringNotContainsString( 'affilicard-card__notes', $html );
 	}
 
 	public function test_renders_badge_hidden_when_price_absent_even_with_verified_at(): void {

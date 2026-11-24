@@ -218,11 +218,16 @@ final class CardRenderer {
 		$html .= '</div>'; // __body
 		$html .= '</div>'; // __inner
 
+		// 注釈（価格の確認時刻・提供元の表記）は 1 つの枠に箇条書きでまとめる。
+		// 「※」は CSS の ::before で描き、折り返した行が「※」の下に回り込まないようにする。
+		$notes = '';
 		if ( $is_available ) {
-			$html .= $this->renderTimestamp( $visible_listings );
+			$notes .= $this->renderTimestamp( $visible_listings );
 		}
-
-		$html .= $this->renderAttribution( $visible_listings, $is_available, $image['code'] );
+		$notes .= $this->renderAttribution( $visible_listings, $is_available, $image['code'] );
+		if ( '' !== $notes ) {
+			$html .= '<div class="affilicard-card__notes"><ul class="affilicard-card__notes-list">' . $notes . '</ul></div>';
+		}
 
 		$html .= '</div>'; // __card
 		return $html;
@@ -321,7 +326,8 @@ final class CardRenderer {
 
 	/**
 	 * 表示中（API確認済み・鮮度内＝PriceFreshness::isPriceDisplayable）listing のうち
-	 * 最新 last_verified_at（ISO8601）から「※ YYYY年M月D日 HH:MM時点の価格です。…」を生成する。
+	 * 最新 last_verified_at（ISO8601）から「YYYY年M月D日 HH:MM時点の価格です。…」の注釈（li）を生成する
+	 * （先頭の「※」は CSS で描く）。
 	 * 日付のみだと「時点」が最大24時間の幅を持ち、規約（価格は取得後24h以内）に照らして
 	 * 期限超過に見え得るため、時刻（サイトのタイムゾーン）まで明示して鮮度を一意にする。
 	 * 表示中の価格 listing が1件も無ければ空文字（免責文言は出さない＝手動/未確認/期限切れのみの
@@ -356,7 +362,7 @@ final class CardRenderer {
 		$date = (string) wp_date( 'Y年n月j日 H:i', $latest );
 		$note = sprintf(
 			/* translators: %s: formatted date and time */
-			(string) __( '※ %s時点の価格です。最新価格は各販売サイトでご確認ください。', 'affilicard' ),
+			(string) __( '%s時点の価格です。最新価格は各販売サイトでご確認ください。', 'affilicard' ),
 			$date
 		);
 
@@ -382,7 +388,7 @@ final class CardRenderer {
 			$details .= '</details>';
 		}
 
-		return '<div class="affilicard-card__timestamp">' . esc_html( $note ) . $details . '</div>';
+		return '<li class="affilicard-card__note affilicard-card__timestamp">' . esc_html( $note ) . $details . '</li>';
 	}
 
 	/**
@@ -415,7 +421,7 @@ final class CardRenderer {
 		}
 		$html = '';
 		foreach ( array_keys( $texts ) as $text ) {
-			$html .= '<p class="affilicard-card__attribution">' . esc_html( (string) $text ) . '</p>';
+			$html .= '<li class="affilicard-card__note affilicard-card__attribution">' . esc_html( (string) $text ) . '</li>';
 		}
 		return $html;
 	}

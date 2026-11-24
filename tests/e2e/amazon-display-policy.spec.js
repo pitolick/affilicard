@@ -106,6 +106,29 @@ test.describe( 'Amazon のライセンスが求める表示', () => {
 		await expect( disclaimer.getByText( DISCLAIMER ) ).toBeVisible();
 
 		await expect( card.locator( '.affilicard-card__attribution' ) ).toContainText( ATTRIBUTION );
+
+		// 注釈は 1 つの枠に箇条書きでまとまり、「※」は ::before で描く。スマホ幅で折り返しても、
+		// 2 行目以降は「※」の下に回り込まず本文の頭に揃う（ぶら下げ字下げ）。
+		await expect( card.locator( '.affilicard-card__notes li.affilicard-card__note' ) ).toHaveCount( 2 );
+		await page.setViewportSize( { width: 360, height: 800 } );
+		const layout = await card.locator( '.affilicard-card__attribution' ).evaluate( ( li ) => {
+			const marker = getComputedStyle( li, '::before' );
+			const range = document.createRange();
+			range.selectNodeContents( li );
+			const lefts = [ ...range.getClientRects() ].map( ( r ) => Math.round( r.left ) );
+			return {
+				marker: marker.content,
+				liLeft: Math.round( li.getBoundingClientRect().left ),
+				lefts,
+				text: li.textContent,
+			};
+		} );
+		expect( layout.marker ).toBe( '"※"' );
+		expect( layout.text.startsWith( '※' ) ).toBe( false );
+		expect( layout.lefts.length ).toBeGreaterThan( 1 );
+		expect( new Set( layout.lefts ).size ).toBe( 1 );
+		expect( layout.lefts[ 0 ] ).toBeGreaterThan( layout.liLeft );
+
 		await expect( card.locator( 'img.affilicard-card__media-image' ) ).toHaveAttribute(
 			'src',
 			/m\.media-amazon\.com/
