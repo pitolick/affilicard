@@ -142,8 +142,9 @@ offersV2.listings.dealDetails / offersV2.listings.availability / offersV2.listin
 | `affiliate_url` | `detailPageURL`（タグ付き。**改変しない**） |
 | `platform_extras` | `release_date`（`productInfo.releaseDate` の日付部分）・`author`（`byLineInfo.contributors` の Author）・`publisher`（`byLineInfo.manufacturer`） |
 
-値が返らなかったフィールドは**キーごと落とす**（空文字で既存値を消さない。`ListingRefresher` は
-`isset()` で判定するため）。
+**価格と書影は、返らなかったら空文字にする**（既存値を残さない）。`ListingRefresher` は取得成功で
+`last_verified_at` を更新するため、残すと古い値が「今確認した値」として表示される。Amazon の値は API からしか
+入らず、ライセンス (g) も Amazon に無くなったコンテンツの速やかな削除を求めている。
 
 ### 4-6. 結果の分類（FetchResult）
 

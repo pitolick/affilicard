@@ -213,8 +213,11 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider {
 	/**
 	 * 応答の item を listing のフィールドへ写す。
 	 *
-	 * **返らなかったフィールドはキーごと落とす。** ListingRefresher は isset() で取り込むため、
-	 * 空文字を返すと、作品のまとめページのように価格が付かない ASIN で既存値を消してしまう。
+	 * **価格と書影は、返らなかったら空文字で返す（既存値を残さない）。** ListingRefresher は取得に
+	 * 成功すると last_verified_at を更新するため、古い価格・書影を残すと「今確認した値」として
+	 * 表示されてしまう。Amazon の値は API からしか入らず、ライセンスも Amazon に無くなった
+	 * コンテンツの速やかな削除を求めている（(g)）。作品のまとめページのように価格が付かない ASIN は、
+	 * 価格を出さないのが正しい。
 	 *
 	 * `list_price` / `badge` はここでは入れない（基準価格のラベルをカードに出せるようになるまで。設計 §4-5）。
 	 *
@@ -232,6 +235,9 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider {
 			$data['title'] = $title;
 		}
 
+		$data['price']     = '';
+		$data['image_url'] = '';
+
 		$offer = self::chooseOffer( $item );
 		if ( null !== $offer ) {
 			$amount = $offer['price']['money']['amount'] ?? null;
@@ -240,10 +246,7 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider {
 			}
 		}
 
-		$image = self::stringAt( $item, array( 'images', 'primary', 'large', 'url' ) );
-		if ( '' !== $image ) {
-			$data['image_url'] = $image;
-		}
+		$data['image_url'] = self::stringAt( $item, array( 'images', 'primary', 'large', 'url' ) );
 
 		// 返ってきたリンクのパラメータは改変しない（帰属が外れて紹介料を失う。Best Programming Practices）。
 		$detail = isset( $item['detailPageURL'] ) && is_string( $item['detailPageURL'] ) ? $item['detailPageURL'] : '';

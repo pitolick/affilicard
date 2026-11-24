@@ -210,7 +210,7 @@ final class AmazonProviderTest extends TestCase {
 		$this->assertArrayNotHasKey( 'badge', $data );
 	}
 
-	public function test_価格や書影が返らなければキーごと落とす(): void {
+	public function test_価格や書影が返らなければ空にして古い値を残さない(): void {
 		$this->stubCredentials();
 		$item = self::item();
 		unset( $item['offersV2'], $item['images'] );
@@ -219,9 +219,9 @@ final class AmazonProviderTest extends TestCase {
 
 		$data = ( new AmazonProvider( $client ) )->fetch( 'B008ODF84I', array() )->data;
 
-		// 空文字で返すと、ListingRefresher が既存の値を消してしまう。
-		$this->assertArrayNotHasKey( 'price', $data );
-		$this->assertArrayNotHasKey( 'image_url', $data );
+		// 取得成功で last_verified_at が更新されるため、残すと古い値が「今の値」として出てしまう。
+		$this->assertSame( '', $data['price'] );
+		$this->assertSame( '', $data['image_url'] );
 		$this->assertSame( 'https://www.amazon.co.jp/dp/B008ODF84I', $data['regular_url'] );
 	}
 
