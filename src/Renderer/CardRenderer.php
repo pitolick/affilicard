@@ -624,20 +624,20 @@ final class CardRenderer {
 				$price    = trim( ScalarField::string( $offer, 'price' ) );
 				$list_raw = trim( ScalarField::string( $offer, 'list_price' ) );
 
-				// 通常価格(取り消し線): list_price と price が共に正の数値で list_price > price のときのみ。
-				$list_num  = self::priceToNumber( $list_raw );
-				$price_num = self::priceToNumber( $price );
-				if ( null !== $list_num && null !== $price_num && $list_num > $price_num ) {
+				// 参考価格(取り消し線): list_price と price が共に正の数値で list_price > price、かつ
+				// 何と比べた価格か（list_price_label。例「過去価格:」「定価」）があるときのみ。
+				// 根拠の分からない比較対照価格は、景品表示法の価格表示ガイドラインが不当表示の
+				// おそれを挙げる「あいまいな表示」になるため、ラベルの無い参考価格は出さない。
+				$list_label = trim( ScalarField::string( $offer, 'list_price_label' ) );
+				$list_num   = self::priceToNumber( $list_raw );
+				$price_num  = self::priceToNumber( $price );
+				if ( '' !== $list_label && null !== $list_num && null !== $price_num && $list_num > $price_num ) {
 					$list_no_yen = (string) preg_replace( '/^[\x{00A5}\x{FFE5}\s]+/u', '', $list_raw );
-					// 何と比べた価格か（例「過去価格:」）。比較対照価格の根拠を示す。
 					// ラベルと参考価格は 1 行目、販売価格・（税込）・割引率は 2 行目に置く
 					// （1 行に詰めると、どの価格に何が掛かっているのか読み取りにくい）。
-					$list_label = trim( ScalarField::string( $offer, 'list_price_label' ) );
-					$pricing   .= '<span class="affilicard-card__list-price-line">';
-					if ( '' !== $list_label ) {
-						$pricing .= '<span class="affilicard-card__list-price-label">' . esc_html( $list_label ) . '</span>';
-					}
-					$pricing .= '<span class="affilicard-card__list-price">¥' . esc_html( $list_no_yen ) . '</span>';
+					$pricing .= '<span class="affilicard-card__list-price-line">'
+						. '<span class="affilicard-card__list-price-label">' . esc_html( $list_label ) . '</span>'
+						. '<span class="affilicard-card__list-price">¥' . esc_html( $list_no_yen ) . '</span>';
 					$pricing .= '</span>';
 				}
 

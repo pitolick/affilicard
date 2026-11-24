@@ -75,13 +75,14 @@ final class CardRendererTest extends TestCase {
 	 * price/list_price/badge を持つ 1 listing の商品を組み立てる（URL 必須＝価格行が描画される）。
 	 * last_verified_at は「1時間前」固定＝ store() 既定 TTL(24h) 内で常に displayable。
 	 */
-	private function pricedProduct( string $price, string $listPrice, string $badge = '' ): array {
+	private function pricedProduct( string $price, string $listPrice, string $badge = '', string $listPriceLabel = '定価' ): array {
 		$listing = array(
 			'platform'         => 'example-store',
 			'enabled'          => true,
 			'affiliate_url'    => 'https://x',
 			'price'            => $price,
 			'list_price'       => $listPrice,
+			'list_price_label' => $listPriceLabel,
 			'last_verified_at' => gmdate( 'c', time() - 3600 ),
 		);
 		if ( '' !== $badge ) {
@@ -126,6 +127,7 @@ final class CardRendererTest extends TestCase {
 			'affiliate_url',
 			'price',
 			'list_price',
+			'list_price_label',
 			'badge',
 			'image_url',
 			'search_key',
@@ -591,6 +593,17 @@ final class CardRendererTest extends TestCase {
 			strpos( $html, 'affilicard-card__price' ),
 			strpos( $html, 'affilicard-card__list-price' )
 		);
+	}
+
+	/**
+	 * 何と比べた価格か（ラベル）が無い参考価格は取り消し線で出さない。比較対照価格の根拠が
+	 * 分からない二重価格表示は、景品表示法の「あいまいな表示」に当たるおそれがあるため。
+	 * 割引率のバッジは従来どおり出す。
+	 */
+	public function test_list_price_hidden_when_label_empty(): void {
+		$html = ( new CardRenderer() )->render( $this->pricedProduct( '100', '814', '88%OFF', '' ), array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__list-price', $html );
+		$this->assertStringContainsString( '¥100', $html );
 	}
 
 	public function test_list_price_hidden_when_equal_to_price(): void {

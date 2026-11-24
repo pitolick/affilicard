@@ -620,7 +620,7 @@ function OffersEditor({ offers, fallbackOnTerminal, onChange }) {
 								value={offer.list_price_label ?? ''}
 								placeholder={__('例: 過去価格:', 'affilicard')}
 								help={__(
-									'取り消し線の価格の前に出す文言。何と比べた価格かを示します（空なら出しません）。',
+									'取り消し線の価格の前に出す文言（例: 定価、過去価格:）。ストアのページに書かれている名称をそのまま入れてください。空の場合、参考価格は表示されません。',
 									'affilicard'
 								)}
 								onChange={(v) =>

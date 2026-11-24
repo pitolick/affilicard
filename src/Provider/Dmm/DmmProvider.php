@@ -248,15 +248,18 @@ final class DmmProvider implements ProviderInterface {
 		$affiliate_url = self::buildAffiliateUrl( $regular_url, $linkId );
 
 		return array(
-			'title'           => isset( $item['title'] ) ? (string) $item['title'] : '',
-			'price'           => $price,
-			'list_price'      => $list_price,
-			'badge'           => $badge,
-			'image_url'       => $image_url,
-			'regular_url'     => $regular_url,
-			'affiliate_url'   => $affiliate_url,
-			'platform_extras' => array(),
-			'raw'             => $item,
+			'title'            => isset( $item['title'] ) ? (string) $item['title'] : '',
+			'price'            => $price,
+			'list_price'       => $list_price,
+			// DMM 商品検索 API v3 のリファレンスは prices.list_price を「定価」と定義している。
+			// 取り消し線の価格には何と比べた価格かを添える（カードはラベルの無い参考価格を出さない）。
+			'list_price_label' => '' !== $list_price ? __( '定価', 'affilicard' ) : '',
+			'badge'            => $badge,
+			'image_url'        => $image_url,
+			'regular_url'      => $regular_url,
+			'affiliate_url'    => $affiliate_url,
+			'platform_extras'  => array(),
+			'raw'              => $item,
 		);
 	}
 
