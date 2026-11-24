@@ -229,7 +229,7 @@ final class Enqueuer {
 	 * @param list<array{post_id: int, platform: string}> $items
 	 * @return int action ID。0 は未投入（items が空・重複・投入失敗）。
 	 */
-	public function enqueueBatch( string $account, array $items, int $when = 0, bool $unique = true ): int {
+	public function enqueueBatch( string $account, array $items, int $when = 0, bool $unique = true, int $priority = self::PRIORITY_SWEEP ): int {
 		if ( array() === $items ) {
 			return 0;
 		}
@@ -245,7 +245,7 @@ final class Enqueuer {
 			$args,
 			$this->group( $account ),
 			$unique,
-			self::PRIORITY_SWEEP
+			$priority
 		);
 	}
 
@@ -341,9 +341,30 @@ final class Enqueuer {
 	 * @return int enqueue した listing 件数
 	 */
 	public function enqueueProductListings( int $postId, array $product, bool $manual, bool $force = false ): int {
+		$targets = $this->eligibleTargets( $product, $force );
+		foreach ( $targets as $target ) {
+			if ( $manual ) {
+				$this->enqueueManual( $postId, $target['platform'], $target['account'] );
+			} else {
+				$this->enqueueForced( $postId, $target['platform'], $target['account'] );
+			}
+		}
+		return count( $targets );
+	}
+
+	/**
+	 * 商品の listing のうち、取得ジョブを積む対象（ELIGIBLE かつ account が解決できるもの）。
+	 *
+	 * enqueueProductListings() と手動更新のまとめ取得（RefreshController）が同じ判定を使う。
+	 * 判定を 2 か所に書くと、片方だけ直したときに「1 件ずつなら積むのにまとめると積まない」が起きる。
+	 *
+	 * @param array<string, mixed> $product Repository::find() の戻り
+	 * @return list<array{platform: string, account: string}>
+	 */
+	public function eligibleTargets( array $product, bool $force = false ): array {
 		$listings = is_array( $product['listings'] ?? null ) ? $product['listings'] : array();
 
-		$count = 0;
+		$targets = array();
 		foreach ( $listings as $listing ) {
 			if ( ! is_array( $listing ) ) {
 				continue;
@@ -363,15 +384,12 @@ final class Enqueuer {
 				continue;
 			}
 
-			if ( $manual ) {
-				$this->enqueueManual( $postId, $platform, $account );
-			} else {
-				$this->enqueueForced( $postId, $platform, $account );
-			}
-			++$count;
+			$targets[] = array(
+				'platform' => $platform,
+				'account'  => $account,
+			);
 		}
-
-		return $count;
+		return $targets;
 	}
 
 	/**
