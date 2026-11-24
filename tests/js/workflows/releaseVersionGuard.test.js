@@ -119,7 +119,7 @@ describe( 'release.yml の package.json バージョン整合ガード', () => {
 
 		expect( result.status ).toBe( 1 );
 		expect( result.output ).toContain(
-			'::error::package.json の version (4.0.9) がタグ (4.1.0) と一致しません。'
+			'::error::package.json の version (4.0.9) がリリースするバージョン (4.1.0) と一致しません。'
 		);
 	} );
 
@@ -134,7 +134,7 @@ describe( 'release.yml の package.json バージョン整合ガード', () => {
 		const mismatch = runGuard( dir, '4.1.0' );
 		expect( mismatch.status ).toBe( 1 );
 		expect( mismatch.output ).toContain(
-			'::error::package.json の version (3.9.0) がタグ (4.1.0) と一致しません。'
+			'::error::package.json の version (3.9.0) がリリースするバージョン (4.1.0) と一致しません。'
 		);
 	} );
 
@@ -146,7 +146,7 @@ describe( 'release.yml の package.json バージョン整合ガード', () => {
 
 		expect( result.status ).toBe( 1 );
 		expect( result.output ).toContain(
-			'::error::package.json の version () がタグ (4.1.0) と一致しません。'
+			'::error::package.json の version () がリリースするバージョン (4.1.0) と一致しません。'
 		);
 	} );
 } );
