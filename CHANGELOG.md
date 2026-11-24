@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-11-24
+
 ### Added
 
 - **Amazon Creators API の自動取得 Provider（`amazon-creators`）を追加した。** Amazon Kindle の listing の価格・書影・商品リンク（トラッキングタグ付き）を、DMM / 楽天と同じ自動更新キューで取得する。設定 → プラットフォーム → API 認証 の「Amazon」に Credential ID・Credential Secret・トラッキングID（任意でマーケットプレイス。既定 `www.amazon.co.jp`）を入れ、Amazon Kindle の「自動取得（Amazon Creators API）」を ON にすると始まる。**既定は手動入力のまま**で、更新しただけでは何も変わらない
