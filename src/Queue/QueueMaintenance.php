@@ -9,7 +9,6 @@ use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\ListingEligibility;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Pricing\PriceFreshness;
-use Affilicard\Provider\BatchFetchingProvider;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Repository\ProductRepositoryInterface;
 use Affilicard\Settings\GeneralSettings;
@@ -50,19 +49,11 @@ final class QueueMaintenance {
 	public const OPTION_LAST_COMPLETED = 'affilicard_last_sweep_completed_at';
 
 	/**
-	 * AS の `action_scheduler_queue_runner_time_limit` フィルタが未登録のときに使う既定値
-	 * （秒）。AS 自身（ActionScheduler_Abstract_QueueRunner::get_time_limit()）と同じ既定値・
-	 * 同じフィルタ名を使うことで、サイトがランナーの時間予算を変更していれば
-	 * batchSizeFor() の算出にもそのまま反映される（spec §4-1 Important 2）。
+	 * バッチの件数（掃引と手動更新で共用する計算）。
+	 *
+	 * @var BatchSizer|null
 	 */
-	private const DEFAULT_TIME_LIMIT_SECONDS = 30;
-
-	/**
-	 * バッチサイズ算出時の安全マージン（秒）。BatchRefreshHandler の既定
-	 * safetyMarginSeconds と同じ値（spec §4-1 の例: 楽天 1.1s・time limit 30 秒・
-	 * 安全マージン 5 秒→実効 25 秒で 22 件）。
-	 */
-	private const DEFAULT_SAFETY_MARGIN_SECONDS = 5;
+	private ?BatchSizer $batchSizer = null;
 
 	public function __construct(
 		private ProductRepositoryInterface $repository,
@@ -407,56 +398,11 @@ final class QueueMaintenance {
 	}
 
 	/**
-	 * account 単位のバッチサイズ。AS の `action_scheduler_queue_runner_time_limit`
-	 * フィルタ（既定 30 秒。AS 自身も同じフィルタを適用する。
-	 * ActionScheduler_Abstract_QueueRunner::get_time_limit()）から安全マージンを引いた
-	 * 実効秒数を、account の実効レート間隔（RateLimiter::effectiveIntervalMs）で割って
-	 * 算出する（spec §4-1 Important 2。楽天 1.1s・time limit 30 秒・安全マージン 5 秒→
-	 * 実効 25 秒で 22 件）。
-	 *
-	 * 算出結果は `affilicard_refresh_batch_size` フィルタで上書き可能にする（spec §8-2:
-	 * 実環境の fetch 所要時間を測って安全マージンを調整する運用を、コードリリース無しで
-	 * 行えるようにするため）。最終値は 1 件未満にならないようクランプする（0 だと
-	 * バッチが永久に flush されず listing が積みっぱなしになる）。
+	 * account 単位のバッチサイズ（{@see BatchSizer::sizeFor()}。手動更新と同じ計算）。
 	 */
 	private function batchSizeFor( string $account ): int {
-		$timeLimit  = (int) apply_filters( 'action_scheduler_queue_runner_time_limit', self::DEFAULT_TIME_LIMIT_SECONDS ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- AS 自身が定義・適用する既存フィルタを読むだけで、affilicard がここで新しく hook を定義しているわけではない。
-		$intervalMs = $this->intervalMsFor( $account );
-
-		$effectiveSeconds = max( 0, $timeLimit - self::DEFAULT_SAFETY_MARGIN_SECONDS );
-		$intervalSeconds  = $intervalMs / 1000;
-		$size             = $intervalSeconds > 0 ? (int) floor( $effectiveSeconds / $intervalSeconds ) : $effectiveSeconds;
-		$size             = max( 1, $size );
-		// まとめ取得できる Provider は、レート枠 1 つで最大 maxBatchSize() 件を取る
-		// （設計 2026-11-24 §4-3）。1 ジョブあたりの API 呼び出し回数を変えずに件数を増やす。
-		$size *= $this->batchMultiplierFor( $account );
-
-		return max( 1, (int) apply_filters( 'affilicard_refresh_batch_size', $size, $account ) );
-	}
-
-	private function batchMultiplierFor( string $account ): int {
-		foreach ( $this->providerRegistry->all() as $provider ) {
-			if ( $provider->accountCode() === $account ) {
-				return $provider instanceof BatchFetchingProvider ? max( 1, $provider->maxBatchSize() ) : 1;
-			}
-		}
-		return 1;
-	}
-
-	/**
-	 * account の実効レート間隔（ms）。BatchRefreshHandler::intervalMsFor() と同じロジック
-	 * （providerRegistry で accountCode() 一致の provider を探し minRequestIntervalMs を
-	 * 求め、GeneralSettings::throttleOverrideMs で上書き）。
-	 */
-	private function intervalMsFor( string $account ): int {
-		$floorMs = 0;
-		foreach ( $this->providerRegistry->all() as $provider ) {
-			if ( $provider->accountCode() === $account ) {
-				$floorMs = $provider->minRequestIntervalMs();
-				break;
-			}
-		}
-		return $this->rateLimiter->effectiveIntervalMs( $floorMs, GeneralSettings::throttleOverrideMs( $account ) );
+		$this->batchSizer ??= new BatchSizer( $this->providerRegistry, $this->rateLimiter );
+		return $this->batchSizer->sizeFor( $account );
 	}
 
 	/**
