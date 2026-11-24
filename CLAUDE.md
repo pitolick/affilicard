@@ -165,6 +165,7 @@ WP 公式ディレクトリは経由せず、`yahnis-elsts/plugin-update-checker
 2. **Actions → Release → Run workflow**（ブランチは `main`、`version` に `x.y.z`）。API なら `workflow_dispatch` を `ref: main`・`inputs.version` で起動する。main の先頭コミットのバージョン表記と CHANGELOG を検証し、通ればタグ `vx.y.z` を作って zip 付きの Release を出す
    - タグを手元で push しても従来どおりリリースされる（どちらか一方でよい）
    - 既にあるタグ・main 以外からの実行は弾く
+3. 1 のリリース用 PR がバージョン表記と CHANGELOG の日付だけの変更なら、CodeRabbit のレビュー（無料枠の上限で 1 時間ほど止まることがある）は待たず、CI が通ったらマージしてよい。リリースに含める変更そのものは、それぞれの PR でレビューを済ませておく
 
 ### ローカル PHP 実行
 
