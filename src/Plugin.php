@@ -565,6 +565,12 @@ final class Plugin {
 
 		if ( $changed ) {
 			PlatformConfig::save( $out );
+			// save() は保存の成否を返さない（update_option() の失敗は false で黙って返る）。
+			// 読み直して入っていなければ印を立てず、次の管理画面表示で再試行する。
+			$saved = PlatformConfig::find( 'amazon-kindle' );
+			if ( null === $saved || '' === $saved->eligibleProvider ) {
+				return;
+			}
 		}
 
 		update_option( self::AMAZON_ELIGIBLE_BACKFILLED_OPTION, 1, false );
