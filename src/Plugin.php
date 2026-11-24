@@ -5,6 +5,7 @@ namespace Affilicard;
 
 use Affilicard\Account\AccountRegistry;
 use Affilicard\Account\AccountUiList;
+use Affilicard\Account\AmazonAccount;
 use Affilicard\Account\DmmAccount;
 use Affilicard\Account\RakutenAccount;
 use Affilicard\AutoCreate\ProductAutoCreator;
@@ -15,6 +16,7 @@ use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductListColumns;
 use Affilicard\PostType\ProductMetaBox;
 use Affilicard\PostType\ProductPostType;
+use Affilicard\Provider\Amazon\AmazonProvider;
 use Affilicard\Provider\Dmm\DmmProvider;
 use Affilicard\Provider\ManualProvider;
 use Affilicard\Provider\ProviderRegistry;
@@ -128,6 +130,7 @@ final class Plugin {
 			add_action( 'admin_enqueue_scripts', array( self::class, 'enqueueSettingsAssets' ) );
 			add_action( 'admin_init', array( self::class, 'purgeLegacyProviderCredentials' ) );
 			add_action( 'admin_init', array( self::class, 'backfillEligibleProviders' ) );
+			add_action( 'admin_init', array( self::class, 'backfillAmazonEligibleProvider' ) );
 		}
 
 		// ProductType レジストリ（Block の type 解決でも buildProductTypeRegistry() を参照）
@@ -327,6 +330,7 @@ final class Plugin {
 		$registry->register( new ManualProvider() );
 		$registry->register( new DmmProvider() );
 		$registry->register( new RakutenProvider() );
+		$registry->register( new AmazonProvider() );
 		return $registry;
 	}
 
@@ -429,6 +433,7 @@ final class Plugin {
 		$registry = new AccountRegistry();
 		$registry->register( new RakutenAccount() );
 		$registry->register( new DmmAccount() );
+		$registry->register( new AmazonAccount() );
 		return $registry;
 	}
 
@@ -526,6 +531,43 @@ final class Plugin {
 		}
 
 		update_option( 'affilicard_eligible_provider_backfilled', 1, false );
+	}
+
+	/** {@see self::backfillAmazonEligibleProvider()} の一度きりフラグ。 */
+	public const AMAZON_ELIGIBLE_BACKFILLED_OPTION = 'affilicard_amazon_eligible_provider_backfilled';
+
+	/**
+	 * 既存インストールの `amazon-kindle` platform に、自動取得の候補 `amazon-creators` を一度だけ補完する。
+	 *
+	 * `PlatformConfig::defaults()` は新規インストールの seed にしか効かず、既存の
+	 * {@see self::backfillEligibleProviders()} はフラグが立っていて二度と走らない。補完しないと
+	 * 管理画面で Amazon Kindle を「自動取得」に切り替えられない。`provider` は変えない
+	 * （手動のまま。自動取得を始めるかは管理者が決める）。既に値がある platform は上書きしない。
+	 */
+	public static function backfillAmazonEligibleProvider(): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		if ( get_option( self::AMAZON_ELIGIBLE_BACKFILLED_OPTION ) ) {
+			return;
+		}
+
+		$changed = false;
+		$out     = array();
+		foreach ( PlatformConfig::all() as $definition ) {
+			$arr = $definition->toArray();
+			if ( 'amazon-kindle' === $definition->code && '' === $definition->eligibleProvider ) {
+				$arr['eligibleProvider'] = 'amazon-creators';
+				$changed                 = true;
+			}
+			$out[] = $arr;
+		}
+
+		if ( $changed ) {
+			PlatformConfig::save( $out );
+		}
+
+		update_option( self::AMAZON_ELIGIBLE_BACKFILLED_OPTION, 1, false );
 	}
 
 	public static function registerSettingsPage(): void {

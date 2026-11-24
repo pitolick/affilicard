@@ -1413,6 +1413,116 @@ final class QueueMaintenanceTest extends TestCase {
 		$this->assertConditionsMet();
 	}
 
+	/** affilicard_platforms option を amazon-kindle（自動取得に切り替え済み）1件で stub する。 */
+	private function stubAmazonPlatform(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( \Affilicard\Platform\PlatformConfig::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					array(
+						'code'          => 'amazon-kindle',
+						'name'          => 'Amazon Kindle',
+						'provider'      => 'amazon-creators',
+						'displayOrder'  => 2,
+						'enabled'       => true,
+						'priceTtlHours' => 24,
+					),
+				)
+			);
+	}
+
+	private function amazonRegistry(): ProviderRegistry {
+		$registry = new ProviderRegistry();
+		$registry->register( new \Affilicard\Provider\Amazon\AmazonProvider() );
+		return $registry;
+	}
+
+	public function test_sweep_まとめ取得できるProviderはバッチサイズにmaxBatchSizeを掛ける(): void {
+		$this->stubCursor( 0 );
+		$this->stubGeneralSettings();
+		$this->stubQueueDepth( 0 );
+		$this->stubFilterCleanup();
+		$this->stubCompletion();
+		$this->stubAmazonPlatform();
+		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
+
+		// time limit 30・安全マージン 5・1.1s で 22 件、まとめ取得（10 件/リクエスト）で ×10＝220 件。
+		// 掛けた値がフィルタに渡ることを、フィルタで 1 に落として個別バッチになることで確かめる。
+		WP_Mock::onFilter( 'affilicard_refresh_batch_size' )
+			->with( 220, 'amazon' )
+			->reply( 1 );
+
+		WP_Mock::userFunction( 'get_posts' )->andReturn( array( 41, 42 ) );
+
+		$stale = gmdate( 'c', time() - 25 * 3600 );
+		$repo  = Mockery::mock( ProductRepositoryInterface::class );
+		foreach ( array( 41, 42 ) as $id ) {
+			$repo->shouldReceive( 'find' )->once()->with( $id )->andReturn(
+				$this->product(
+					$id,
+					array(
+						array(
+							'platform'    => 'amazon-kindle',
+							'enabled'     => true,
+							'update_mode' => 'auto',
+							'auto_update' => true,
+							'offers'      => array(
+								array(
+									'external_id'     => 'e' . $id,
+									'last_fetched_at' => $stale,
+								),
+							),
+						),
+					)
+				)
+			);
+		}
+
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH_BATCH,
+				array(
+					'account' => 'amazon',
+					'items'   => array(
+						array(
+							'post_id'  => 41,
+							'platform' => 'amazon-kindle',
+						),
+					),
+				),
+				'affilicard-amazon',
+				true,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 601 );
+		WP_Mock::userFunction( 'as_schedule_single_action' )
+			->once()
+			->with(
+				Mockery::type( 'int' ),
+				Enqueuer::HOOK_REFRESH_BATCH,
+				array(
+					'account' => 'amazon',
+					'items'   => array(
+						array(
+							'post_id'  => 42,
+							'platform' => 'amazon-kindle',
+						),
+					),
+				),
+				'affilicard-amazon',
+				true,
+				Enqueuer::PRIORITY_SWEEP
+			)
+			->andReturn( 602 );
+
+		$result = ( new QueueMaintenance( $repo, new Enqueuer(), $this->amazonRegistry(), new SweepCursor() ) )->sweep();
+
+		$this->assertTrue( $result );
+		$this->assertConditionsMet();
+	}
+
 	public function test_registerRetentionFilters_completedとfailedの両フィルタを登録する(): void {
 		WP_Mock::expectFilterAdded(
 			'action_scheduler_retention_period',

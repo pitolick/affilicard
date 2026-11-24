@@ -9,6 +9,7 @@ use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\ListingEligibility;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Pricing\PriceFreshness;
+use Affilicard\Provider\BatchFetchingProvider;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Repository\ProductRepositoryInterface;
 use Affilicard\Settings\GeneralSettings;
@@ -426,8 +427,20 @@ final class QueueMaintenance {
 		$intervalSeconds  = $intervalMs / 1000;
 		$size             = $intervalSeconds > 0 ? (int) floor( $effectiveSeconds / $intervalSeconds ) : $effectiveSeconds;
 		$size             = max( 1, $size );
+		// まとめ取得できる Provider は、レート枠 1 つで最大 maxBatchSize() 件を取る
+		// （設計 2026-11-24 §4-3）。1 ジョブあたりの API 呼び出し回数を変えずに件数を増やす。
+		$size *= $this->batchMultiplierFor( $account );
 
 		return max( 1, (int) apply_filters( 'affilicard_refresh_batch_size', $size, $account ) );
+	}
+
+	private function batchMultiplierFor( string $account ): int {
+		foreach ( $this->providerRegistry->all() as $provider ) {
+			if ( $provider->accountCode() === $account ) {
+				return $provider instanceof BatchFetchingProvider ? max( 1, $provider->maxBatchSize() ) : 1;
+			}
+		}
+		return 1;
 	}
 
 	/**

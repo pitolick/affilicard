@@ -115,6 +115,7 @@ final class PlatformConfig {
 				__( 'Kindleで読む', 'affilicard' ),
 				'#ff9900',
 				'#000000',
+				eligibleProvider: 'amazon-creators',
 				priceTtlHours: 24
 			),
 			new PlatformDefinition(

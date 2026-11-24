@@ -31,6 +31,9 @@
 | `Affilicard\Provider\ProviderCredentials` | AES-256-CBC で認証情報を暗号化保存 (`patch` 的更新) |
 | `Affilicard\Provider\ManualProvider` | 手動入力（API 不要） |
 | `Affilicard\Provider\Dmm\DmmProvider` | DMM Web Service API v3 |
+| `Affilicard\Provider\Rakuten\RakutenProvider` | 楽天Kobo 電子書籍検索 API |
+| `Affilicard\Provider\Amazon\AmazonProvider` | Amazon Creators API（`getItems`・最大 10 ASIN/リクエスト。トークンは `AmazonCreatorsClient` が transient にキャッシュ） |
+| `Affilicard\Provider\BatchFetchingProvider` | 複数商品を 1 リクエストで取れる Provider の任意インターフェース（`BatchRefreshHandler` がまとめ取得に使う） |
 | `Affilicard\Rest\RestController` | `affilicard/v1` 名前空間のルート集約 |
 | `Affilicard\Rest\ProductSchema` | Product CRUD の REST schema + sanitize |
 | `Affilicard\Rest\ProductsController` | `/products` CRUD + search |
