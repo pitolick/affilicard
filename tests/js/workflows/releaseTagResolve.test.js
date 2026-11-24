@@ -139,7 +139,7 @@ describe( 'release.yml のバージョンとタグの決定', () => {
 		expect( result.githubEnv ).toBe( '' );
 	} );
 
-	test.each( [ '4.2', '4.2.0; rm -rf /', '$(echo 4.2.0)', '' ] )(
+	test.each( [ '4.2', '4.2.0; rm -rf /', '$(echo 4.2.0)', '', '4.2.0\nVERSION=4.1.0', 'VERSION=4.1.0\n4.2.0' ] )(
 		'手動実行: x.y.z 形式でない入力（%p）は止める',
 		( version ) => {
 			const result = dispatch( version );
@@ -155,6 +155,16 @@ describe( 'release.yml のバージョンとタグの決定', () => {
 
 		expect( result.status ).toBe( 1 );
 		expect( result.output ).toContain( '::error::タグ v4.1.0 は既にあります。' );
+		expect( result.githubEnv ).toBe( '' );
+	} );
+
+	test( '手動実行: タグの有無を確認できなければ止める（「タグなし」と取り違えない）', () => {
+		git( work, 'remote', 'set-url', 'origin', path.join( root, 'missing.git' ) );
+
+		const result = dispatch( '4.1.0' );
+
+		expect( result.status ).toBe( 1 );
+		expect( result.output ).toContain( '::error::タグ v4.1.0 の有無を確認できませんでした' );
 		expect( result.githubEnv ).toBe( '' );
 	} );
 
