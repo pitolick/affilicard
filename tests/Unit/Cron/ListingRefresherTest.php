@@ -935,6 +935,30 @@ final class ListingRefresherTest extends TestCase {
 		$this->assertSame( 0, $count );
 	}
 
+	/**
+	 * fetchTargetExternalIds() は targetCount() が数える集合そのもの（まとめ取得の対象。設計 2026-11-24 §4-3）。
+	 * 外部 API を叩かない購入リンク（external_id 無し）は含めない。
+	 */
+	public function test_fetchTargetExternalIds_叩き得る購入リンクの外部IDだけを返す(): void {
+		$this->stubRakutenPlatform();
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		$repo      = $this->repoWithOffers(
+			array(
+				array(
+					'external_id' => 'e1',
+					'regular_url' => 'https://example.test/a',
+				),
+			)
+		);
+		$registry  = $this->rakutenProvider( FetchResult::hit( array( 'price' => '100' ) ) );
+		$refresher = new ListingRefresher( $registry, $repo );
+
+		$this->assertSame( array( 'e1' ), $refresher->fetchTargetExternalIds( 20, 'rakuten-kobo' ) );
+		$this->assertSame( array(), $refresher->fetchTargetExternalIds( 20, 'other-platform' ) );
+	}
+
 	/** offers が空なら OfferSelector::select() の選択結果も空＝0（refreshOne 自身も fetch しない）。 */
 	public function test_targetCount_offersが空なら0を返す(): void {
 		WP_Mock::userFunction( 'get_option' )

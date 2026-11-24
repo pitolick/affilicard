@@ -301,6 +301,10 @@ final class UninstallTest extends TestCase {
 			->once()
 			->with( '', array(), 'affilicard-rakuten' )
 			->andReturn( null );
+		WP_Mock::userFunction( 'as_unschedule_all_actions' )
+			->once()
+			->with( '', array(), 'affilicard-amazon' )
+			->andReturn( null );
 		// v3.5.0: 掃引トリガー（affilicard_sweep）の group（'affilicard-sweep'）も
 		// account 別 group と同様に unschedule する。
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )

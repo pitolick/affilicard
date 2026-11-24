@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Queue;
 
 use Affilicard\Cron\ListingRefresher;
+use Affilicard\Provider\BatchFetchingProvider;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Settings\GeneralSettings;
 
@@ -29,6 +30,12 @@ final class BatchRefreshHandler {
 	 * 期限判定に用いる（spec §4-1）。
 	 */
 	private const PROVIDER_TIMEOUT_SECONDS = 10;
+
+	/**
+	 * まとめ取得で結果が手元にある listing 1 件の所要見込み（秒）。HTTP は走らず、
+	 * 保存（ロック＋post meta 書き込み）だけなので小さく見積もる。
+	 */
+	private const PREFETCHED_ITEM_SECONDS = 2;
 
 	public function __construct(
 		private Enqueuer $enqueuer,
@@ -94,6 +101,24 @@ final class BatchRefreshHandler {
 		// 1 件あたりの最悪所要 = レート待ち + Provider の HTTP タイムアウト（DMM/楽天とも 10 秒）。
 		$perItemSeconds = $intervalSec + self::PROVIDER_TIMEOUT_SECONDS;
 
+		// まとめ取得できる Provider（設計 2026-11-24 §4-3）。結果はこのジョブの中だけで使う。
+		$batchProvider = $this->batchProviderFor( $account );
+		if ( null !== $batchProvider ) {
+			$batchProvider->clearPrefetched();
+		}
+		try {
+			$this->processItems( $account, $items, $deadline, $intervalMs, $perItemSeconds, $batchProvider );
+		} finally {
+			if ( null !== $batchProvider ) {
+				$batchProvider->clearPrefetched();
+			}
+		}
+	}
+
+	/**
+	 * @param list<array{post_id:int, platform:string}> $items
+	 */
+	private function processItems( string $account, array $items, JobDeadline $deadline, int $intervalMs, int $perItemSeconds, ?BatchFetchingProvider $batchProvider ): void {
 		// 前進保証（spec §4-1 Ruling 6）: このジョブでまだ 1 件も処理していない状態で
 		// perItemSeconds が期限枠（timeLimitSeconds - safetyMarginSeconds）を超えていると、
 		// 毎回 index 0 で期限チェックに弾かれ「1件も処理せず積み直す」を無限に繰り返す
@@ -102,12 +127,32 @@ final class BatchRefreshHandler {
 		// ぶん time limit を超えるが、AS は次のバッチで回復するため「1 件も処理できない」
 		// より無害。2 件目以降は通常どおり期限で弾く。
 		$processedAny = false;
+		/** @var array<int, list<string>> $idsByIndex fetchTargetExternalIds() の結果（重複して読まないため）。 */
+		$idsByIndex = array();
 
 		foreach ( $items as $index => $item ) {
 			$postId   = isset( $item['post_id'] ) ? (int) $item['post_id'] : 0;
 			$platform = isset( $item['platform'] ) ? (string) $item['platform'] : '';
 			if ( 0 === $postId || '' === $platform ) {
 				continue;
+			}
+
+			$prefetchIds = array();
+			if ( null !== $batchProvider ) {
+				$ids = $this->targetIds( $idsByIndex, $index, $item );
+				if ( array() !== $ids && self::allPrefetched( $batchProvider, $ids ) ) {
+					// 先のまとめ取得で結果が手元にある＝外部 API を叩かない。レート枠は取らない。
+					if ( $processedAny && ! $deadline->canAfford( time(), self::PREFETCHED_ITEM_SECONDS ) ) {
+						$this->requeueRemaining( $account, $items, $index );
+						return;
+					}
+					$processedAny = true;
+					$this->applyOutcome( $postId, $platform, $account, $this->refresher->refreshOne( $postId, $platform ) );
+					continue;
+				}
+				if ( array() !== $ids ) {
+					$prefetchIds = $this->collectPrefetchIds( $batchProvider, $items, $index, $idsByIndex );
+				}
 			}
 
 			$mustAttempt = ! $processedAny;
@@ -180,24 +225,110 @@ final class BatchRefreshHandler {
 				}
 			}
 
-			$outcome = $this->refresher->refreshOne( $postId, $platform );
-			if ( WorkOutcome::TRANSIENT_FAILURE === $outcome ) {
-				// 一時失敗は per-listing へ落とし、既存の backoff / failed 可視化に委ねる。
-				$this->enqueuer->enqueueManual( $postId, $platform, $account );
-				continue;
+			if ( null !== $batchProvider && array() !== $prefetchIds ) {
+				// 取ったレート枠 1 つで、この listing から先の最大 maxBatchSize 件ぶんをまとめて取る。
+				$batchProvider->prefetch( $prefetchIds );
 			}
-			if ( WorkOutcome::TERMINAL_FAILURE === $outcome ) {
-				// 恒久失敗は give-up マーカーを立てて次へ（per-listing へは落とさない）。
-				set_transient(
-					RefreshHandler::giveUpTransientKey( $postId, $platform ),
-					1,
-					3 * DAY_IN_SECONDS
-				);
-				continue;
-			}
-			// SUCCESS: give-up マーカーを解除する（復旧した listing を通常周期に戻す）。
-			delete_transient( RefreshHandler::giveUpTransientKey( $postId, $platform ) );
+
+			$this->applyOutcome( $postId, $platform, $account, $this->refresher->refreshOne( $postId, $platform ) );
 		}
+	}
+
+	private function applyOutcome( int $postId, string $platform, string $account, WorkOutcome $outcome ): void {
+		if ( WorkOutcome::TRANSIENT_FAILURE === $outcome ) {
+			// 一時失敗は per-listing へ落とし、既存の backoff / failed 可視化に委ねる。
+			$this->enqueuer->enqueueManual( $postId, $platform, $account );
+			return;
+		}
+		if ( WorkOutcome::TERMINAL_FAILURE === $outcome ) {
+			// 恒久失敗は give-up マーカーを立てて次へ（per-listing へは落とさない）。
+			set_transient(
+				RefreshHandler::giveUpTransientKey( $postId, $platform ),
+				1,
+				3 * DAY_IN_SECONDS
+			);
+			return;
+		}
+		// SUCCESS: give-up マーカーを解除する（復旧した listing を通常周期に戻す）。
+		delete_transient( RefreshHandler::giveUpTransientKey( $postId, $platform ) );
+	}
+
+	/**
+	 * account の Provider がまとめ取得に対応していればそれを返す。
+	 */
+	private function batchProviderFor( string $account ): ?BatchFetchingProvider {
+		foreach ( $this->registry->all() as $provider ) {
+			if ( $provider->accountCode() === $account ) {
+				return $provider instanceof BatchFetchingProvider ? $provider : null;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * @param array<int, list<string>>              $idsByIndex
+	 * @param array{post_id?:int, platform?:string} $item
+	 * @return list<string>
+	 */
+	private function targetIds( array &$idsByIndex, int $index, array $item ): array {
+		if ( ! isset( $idsByIndex[ $index ] ) ) {
+			$postId               = isset( $item['post_id'] ) ? (int) $item['post_id'] : 0;
+			$platform             = isset( $item['platform'] ) ? (string) $item['platform'] : '';
+			$idsByIndex[ $index ] = ( 0 === $postId || '' === $platform )
+				? array()
+				: $this->refresher->fetchTargetExternalIds( $postId, $platform );
+		}
+		return $idsByIndex[ $index ];
+	}
+
+	/**
+	 * $fromIndex の listing から先へ、まだ取っていない外部 ID を最大 maxBatchSize 件集める。
+	 * $fromIndex 自身の外部 ID は件数に関係なく必ず含める（このあと必ず fetch するため）。
+	 *
+	 * @param list<array{post_id:int, platform:string}> $items
+	 * @param array<int, list<string>>                  $idsByIndex
+	 * @return list<string>
+	 */
+	private function collectPrefetchIds( BatchFetchingProvider $provider, array $items, int $fromIndex, array &$idsByIndex ): array {
+		$max     = max( 1, $provider->maxBatchSize() );
+		$collect = array();
+		foreach ( $this->targetIds( $idsByIndex, $fromIndex, $items[ $fromIndex ] ) as $id ) {
+			if ( ! $provider->hasPrefetched( $id ) ) {
+				$collect[ $id ] = true;
+			}
+		}
+		$total = count( $items );
+		for ( $i = $fromIndex + 1; $i < $total; $i++ ) {
+			$collected = count( $collect );
+			if ( $collected >= $max ) {
+				break;
+			}
+			$ids = $this->targetIds( $idsByIndex, $i, $items[ $i ] );
+			$new = array();
+			foreach ( $ids as $id ) {
+				if ( ! isset( $collect[ $id ] ) && ! $provider->hasPrefetched( $id ) ) {
+					$new[ $id ] = true;
+				}
+			}
+			if ( $collected + count( $new ) > $max ) {
+				// listing 単位で区切る（1 listing の外部 ID を 2 回のリクエストに割らない）。
+				break;
+			}
+			$collect += $new;
+		}
+		return array_map( 'strval', array_keys( $collect ) );
+	}
+
+	/**
+	 * @param list<string> $ids
+	 */
+	private static function allPrefetched( BatchFetchingProvider $provider, array $ids ): bool {
+		foreach ( $ids as $id ) {
+			if ( ! $provider->hasPrefetched( $id ) ) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/**

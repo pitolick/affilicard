@@ -6,7 +6,7 @@
 
 - カスタム投稿タイプ `affilicard_product` で 1 商品 = N プラットフォーム listing を管理
 - 商品タイプ拡張 (`Affilicard\Types\ProductTypeInterface`): 汎用 / 電子書籍 / VOD (4a-4)
-- Provider 拡張 (`Affilicard\Provider\ProviderInterface`): 手動入力 / DMM ebook API / Amazon (4b) / 楽天 (4b)
+- Provider 拡張 (`Affilicard\Provider\ProviderInterface`): 手動入力 / DMM ebook API / 楽天Kobo API / Amazon Creators API
 - React + `@wordpress/scripts` ベースの管理画面 (Settings + 商品編集 Metabox)
 - WP REST API (`/wp-json/affilicard/v1/*`) で外部ツールから商品 upsert 可能
 - AES-256-CBC で Provider 認証情報を暗号化保存
@@ -268,6 +268,10 @@ curl -u 'username:xxxx xxxx xxxx xxxx xxxx xxxx' \
    `Plugin::buildAccountRegistry()` に register する。
 2. `src/Provider/<Name>/<Name>Provider.php` に `ProviderInterface`（`code`/`label`/`isAutomatic`/
    `accountCode`/`fetch`/`testConnection`）を実装し、`Plugin::buildProviderRegistry()` に register する。
+
+3. 1 リクエストで複数商品を取れる API なら、`BatchFetchingProvider`（`maxBatchSize`/`prefetch`/
+   `hasPrefetched`/`clearPrefetched`）も実装する。バッチ更新ジョブがレート枠 1 つで最大
+   `maxBatchSize` 件をまとめて取得し、ジョブのバッチサイズも同じ倍率で増える（例: `AmazonProvider`）。
 
 設定画面のアカウント認証フィールド・provider ドロップダウンは、`AccountUiList`/`ProviderUiList` →
 `wp_add_inline_script` → `accounts.js`/`providers.js` で **自動生成**される（管理画面 JS の改修は不要）。

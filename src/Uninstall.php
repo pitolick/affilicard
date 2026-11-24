@@ -56,6 +56,8 @@ final class Uninstall {
 		// Affilicard\Repository\DerivedMetaSync::OPTION_UNSYNCED_POST_IDS のリテラル値
 		// （同上の post ID 一覧）。
 		'affilicard_derived_meta_unsynced_post_ids',
+		// Affilicard\Plugin::AMAZON_ELIGIBLE_BACKFILLED_OPTION のリテラル値。
+		'affilicard_amazon_eligible_provider_backfilled',
 	);
 
 	/**
@@ -65,7 +67,7 @@ final class Uninstall {
 	 *
 	 * @var list<string>
 	 */
-	private const AUTOMATIC_ACCOUNT_CODES_FALLBACK = array( 'dmm', 'rakuten' );
+	private const AUTOMATIC_ACCOUNT_CODES_FALLBACK = array( 'dmm', 'rakuten', 'amazon' );
 
 	/**
 	 * 全ユーザーに残る本プラグインのユーザーメタを消す。

@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Amazon Creators API の自動取得 Provider（`amazon-creators`）を追加した。** Amazon Kindle の listing の価格・書影・商品リンク（トラッキングタグ付き）を、DMM / 楽天と同じ自動更新キューで取得する。設定 → プラットフォーム → API 認証 の「Amazon」に Credential ID・Credential Secret・トラッキングID（任意でマーケットプレイス。既定 `www.amazon.co.jp`）を入れ、Amazon Kindle の「自動取得（Amazon Creators API）」を ON にすると始まる。**既定は手動入力のまま**で、更新しただけでは何も変わらない
+  - **最大 10 ASIN を 1 リクエストでまとめて取得する。** Creators API の 1 日の上限は Creators API 経由の売上に比例して決まり、10 ASIN でも 1 回と数えられるため。バッチ更新ジョブはレート枠 1 つで 10 件を取り、ジョブのバッチサイズも 10 倍になる（新設の任意インターフェース `BatchFetchingProvider`。他の Provider の挙動は変わらない）
+  - アクセストークン（1 時間有効）は暗号化して transient に保存し、期限の 60 秒前まで使い回す。401 が返ったら 1 回だけ取り直す
+  - **`403 AssociateNotEligible`（売上要件を満たしていない）は一時失敗として扱う。** 要件は直近 30 日の窓で出入りするため、恒久失敗にして listing を give-up すると、要件を満たし直しても戻らない
+  - 付与ポイント・成人向けフラグ・セール情報も同じリクエストで取得している（後続の機能でリクエストを増やさないため）。現時点ではカードに出さない
+  - 通常価格（取り消し線）と割引率は、Amazon が返す基準価格のラベル（「過去価格:」等）をカードに出せるようになるまで登録しない
+- 既存インストールの Amazon Kindle に、自動取得の候補（`amazon-creators`）を一度だけ補完する
+
 ## [4.0.0] - 2026-09-23
 
 ### Added

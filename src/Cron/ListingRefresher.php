@@ -138,16 +138,29 @@ class ListingRefresher {
 	 * すり抜けた 1 リクエストのほうが高くつくため、取りに倒す。
 	 */
 	public function targetCount( int $postId, string $platform ): int {
+		return count( $this->fetchTargetExternalIds( $postId, $platform ) );
+	}
+
+	/**
+	 * refreshOne() が **叩き得る** 購入リンクの外部 ID（{@see self::targetCount()} が数える集合）。
+	 *
+	 * まとめ取得できる Provider（{@see \Affilicard\Provider\BatchFetchingProvider}）へ
+	 * 先に渡す外部 ID を求めるために使う（BatchRefreshHandler）。件数の判定と同じ選択ロジックを
+	 * 共有する——別々に書くと「数えた集合」と「先に取った集合」がずれる。
+	 *
+	 * @return list<string>
+	 */
+	public function fetchTargetExternalIds( int $postId, string $platform ): array {
 		$product = $this->repository->find( $postId );
 		if ( null === $product || ! is_array( $product['listings'] ?? null ) ) {
-			return 0;
+			return array();
 		}
 		foreach ( $product['listings'] as $listing ) {
 			if ( ! is_array( $listing ) || ( $listing['platform'] ?? '' ) !== $platform ) {
 				continue;
 			}
 			if ( ! ListingEligibility::isEnabledAuto( $listing ) ) {
-				return 0;
+				return array();
 			}
 			// refreshListing() と同じフォールバックを通す。ここだけ offers を直接読むと、
 			// 移行前の flat な listing で「refreshOne は fetch するのに枠は 0 件ぶんしか
@@ -160,15 +173,15 @@ class ListingRefresher {
 			// external_id 無し）はレート制限の枠を使わない。判定は refreshListing() と
 			// 同じ willFetch() に委ねる——条件をここへ写すと、片方だけ変えたときに
 			// 「枠は取るのに叩かない／叩くのに枠が無い」というズレが生まれる。
-			$count = 0;
+			$ids = array();
 			foreach ( $selected as $offer ) {
 				if ( is_array( $offer ) && $this->willFetch( $listing, $offer ) ) {
-					++$count;
+					$ids[] = ScalarField::string( $offer, 'external_id' );
 				}
 			}
-			return $count;
+			return $ids;
 		}
-		return 0;
+		return array();
 	}
 
 	/**
