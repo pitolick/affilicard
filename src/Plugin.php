@@ -26,6 +26,7 @@ use Affilicard\Queue\ActionSchedulerLoader;
 use Affilicard\Queue\ActionSchedulerStore;
 use Affilicard\Queue\AutoCreateHandler;
 use Affilicard\Queue\BatchRefreshHandler;
+use Affilicard\Queue\BatchSizer;
 use Affilicard\Pricing\PriceFreshness;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\OfferPromotionTrigger;
@@ -156,7 +157,7 @@ final class Plugin {
 			new SettingsController(),
 			new PlatformsController(),
 			new CredentialsController( $providers, $accounts ),
-			new RefreshController( $repository, $enqueuer ),
+			new RefreshController( $repository, $enqueuer, new BatchSizer( $providers ) ),
 			new CardPreviewController( $repository ),
 			new QueueController(
 				new QueueStats( $automaticAccountCodes ),

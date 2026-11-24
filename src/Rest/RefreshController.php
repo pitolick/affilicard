@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Rest;
 
 use Affilicard\PostType\ProductPostType;
+use Affilicard\Queue\BatchSizer;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Repository\ProductRepositoryInterface;
 use WP_REST_Request;
@@ -22,12 +23,19 @@ use WP_REST_Response;
  * のみ（Enqueuer::enqueueProductListings と同一の判定）。`force` request param は旧
  * ListingRefresher::run($force) 由来の挙動（管理画面「強制更新」ボタン）で、
  * auto_update=false（手動上書き中）の listing も対象に含める。
+ *
+ * まとめ取得できる Provider（BatchFetchingProvider。Amazon 等）の account は、1 件ずつの
+ * ジョブではなく掃引と同じバッチジョブ（Enqueuer::HOOK_REFRESH_BATCH・手動の優先度）に積む。
+ * 1 件ずつのジョブは別々のリクエストで走るため、まとめ取得が効かず API 呼び出しが件数ぶん
+ * 発生する（Amazon Creators API は 1 日の上限が売上に比例するため、10 倍の差が効く）。
  */
 final class RefreshController {
 
 	public function __construct(
 		private ProductRepositoryInterface $repository,
-		private Enqueuer $enqueuer
+		private Enqueuer $enqueuer,
+		/** null なら従来どおり全件を 1 件ずつのジョブに積む。 */
+		private ?BatchSizer $batchSizer = null
 	) {}
 
 	public function registerRoutes( string $namespace ): void {
@@ -87,6 +95,8 @@ final class RefreshController {
 		}
 
 		$queued = 0;
+		/** @var array<string, list<array{post_id: int, platform: string}>> $batchItems account => まとめて積む listing */
+		$batchItems = array();
 		foreach ( $ids as $id ) {
 			$product = $this->repository->find( (int) $id );
 			if ( null === $product ) {
@@ -103,7 +113,24 @@ final class RefreshController {
 				);
 			}
 
-			$queued += $this->enqueuer->enqueueProductListings( (int) $id, $product, true, $force );
+			foreach ( $this->enqueuer->eligibleTargets( $product, $force ) as $target ) {
+				++$queued;
+				if ( null !== $this->batchSizer && $this->batchSizer->isBatchFetching( $target['account'] ) ) {
+					$batchItems[ $target['account'] ][] = array(
+						'post_id'  => (int) $id,
+						'platform' => $target['platform'],
+					);
+					continue;
+				}
+				$this->enqueuer->enqueueManual( (int) $id, $target['platform'], $target['account'] );
+			}
+		}
+
+		foreach ( $batchItems as $account => $items ) {
+			$size = max( 1, $this->batchSizer->sizeFor( (string) $account ) );
+			foreach ( array_chunk( $items, $size ) as $chunk ) {
+				$this->enqueuer->enqueueBatch( (string) $account, $chunk, 0, true, Enqueuer::PRIORITY_MANUAL );
+			}
 		}
 
 		return $queued;
