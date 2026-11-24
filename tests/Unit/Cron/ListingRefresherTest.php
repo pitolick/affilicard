@@ -202,12 +202,13 @@ final class ListingRefresherTest extends TestCase {
 		)->andReturn(
 			FetchResult::hit(
 				array(
-					'price'         => '693',
-					'list_price'    => '900',
-					'badge'         => '23%OFF',
-					'image_url'     => 'https://example.test/i',
-					'regular_url'   => 'https://example.test/r',
-					'affiliate_url' => 'https://example.test/a',
+					'price'            => '693',
+					'list_price'       => '900',
+					'list_price_label' => '過去価格:',
+					'badge'            => '23%OFF',
+					'image_url'        => 'https://example.test/i',
+					'regular_url'      => 'https://example.test/r',
+					'affiliate_url'    => 'https://example.test/a',
 				)
 			)
 		);
@@ -249,6 +250,7 @@ final class ListingRefresherTest extends TestCase {
 				$this->assertSame( 'rakuten-kobo', $platform );
 				$this->assertSame( '693', $offer['price'] );
 				$this->assertSame( '900', $offer['list_price'] );
+				$this->assertSame( '過去価格:', $offer['list_price_label'] );
 				$this->assertSame( '23%OFF', $offer['badge'] );
 				$this->assertSame( 'https://example.test/i', $offer['image_url'] );
 				$this->assertSame( 'https://example.test/r', $offer['regular_url'] );

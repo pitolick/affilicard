@@ -327,6 +327,11 @@
 	min-width: 0;
 }
 
+.affilicard-card__list-price-label {
+	font-size: 11px;
+	color: var(--affilicard-text-light);
+}
+
 .affilicard-card__list-price {
 	font-size: 13px;
 	color: var(--affilicard-text-light);
@@ -388,6 +393,41 @@
 	border-top: 1px solid var(--affilicard-border);
 	font-size: 11px;
 	color: var(--affilicard-text-light);
+}
+
+/* 価格の免責文言（ストアのライセンスが求める場合のみ）。「詳しくはこちら」で開く。 */
+.affilicard-card__price-disclaimer {
+	display: inline;
+	margin-left: 4px;
+}
+
+.affilicard-card__price-disclaimer summary {
+	display: inline;
+	cursor: pointer;
+	text-decoration: underline;
+}
+
+.affilicard-card__price-disclaimer[open] {
+	display: block;
+	margin: 4px 0 0;
+}
+
+.affilicard-card__price-disclaimer p {
+	margin: 4px 0 0;
+}
+
+/* ストアの情報を表示しているときの提供元の表記（ライセンスが求める場合のみ）。 */
+.affilicard-card__attribution {
+	margin: 0;
+	padding: 6px 20px 8px;
+	background: var(--affilicard-footer-bg);
+	font-size: 10px;
+	line-height: 1.5;
+	color: var(--affilicard-text-light);
+}
+
+.affilicard-card__timestamp + .affilicard-card__attribution {
+	padding-top: 0;
 }
 
 /* 狭幅: 1 カラム、書影トップ中央、店舗行は縦積み。

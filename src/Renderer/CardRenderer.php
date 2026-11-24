@@ -8,6 +8,7 @@ use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Pricing\OfferUrl;
 use Affilicard\Pricing\PriceFreshness;
+use Affilicard\Provider\DisplayPolicy;
 use Affilicard\Stock\StockStatus;
 use Affilicard\Util\ScalarField;
 
@@ -33,11 +34,27 @@ final class CardRenderer {
 	private const MEDIA_PLACEHOLDER_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="画像なし"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M4 17l5-5 4 4 3-3 4 4"/></svg>';
 
 	/**
+	 * platform code => そのストアの Provider が申告した表示の決まり（設計 2026-11-24 §5）。
+	 *
+	 * @var array<string, DisplayPolicy>
+	 */
+	private array $policies = array();
+
+	/**
 	 * @param array<string, mixed>     $product   ProductRepository::find() の戻り値形
 	 * @param list<PlatformDefinition> $platforms enabled な platform（displayOrder 昇順想定）
-	 * @param array<string, mixed>     $options   hide_platforms / image_url / colors
+	 * @param array<string, mixed>     $options   hide_platforms / image_url / colors / display_policies
 	 */
 	public function render( array $product, array $platforms, array $options = array() ): string {
+		$this->policies = array();
+		if ( isset( $options['display_policies'] ) && is_array( $options['display_policies'] ) ) {
+			foreach ( $options['display_policies'] as $code => $policy ) {
+				if ( $policy instanceof DisplayPolicy ) {
+					$this->policies[ (string) $code ] = $policy;
+				}
+			}
+		}
+
 		$by_code = array();
 		foreach ( $platforms as $platform ) {
 			if ( $platform instanceof PlatformDefinition ) {
@@ -60,7 +77,13 @@ final class CardRenderer {
 		// 画像だけ空にしてプレースホルダに落とすと「画像がありません」と出て
 		// 読み込み失敗に見えるため、枠ごと畳んで本文を全幅にする。
 		$hide_media   = ! empty( $options['hide_media'] );
-		$image_url    = $hide_media ? '' : $this->selectCardImage( $visible_listings, $fallback_image );
+		$image        = $hide_media
+			? array(
+				'url'  => '',
+				'code' => '',
+			)
+			: $this->selectCardImage( $visible_listings, $fallback_image );
+		$image_url    = $image['url'];
 		$colors       = isset( $options['colors'] ) && is_array( $options['colors'] ) ? $options['colors'] : array();
 		$header_keys  = isset( $options['header_keys'] ) && is_array( $options['header_keys'] ) ? array_map( 'strval', $options['header_keys'] ) : array( 'author', 'publisher' );
 		$hidden_keys  = isset( $options['hidden_keys'] ) && is_array( $options['hidden_keys'] ) ? array_map( 'strval', $options['hidden_keys'] ) : array();
@@ -189,6 +212,8 @@ final class CardRenderer {
 		if ( $is_available ) {
 			$html .= $this->renderTimestamp( $visible_listings );
 		}
+
+		$html .= $this->renderAttribution( $visible_listings, $is_available, $image['code'] );
 
 		$html .= '</div>'; // __card
 		return $html;
@@ -325,7 +350,65 @@ final class CardRenderer {
 			(string) __( '※ %s時点の価格です。最新価格は各販売サイトでご確認ください。', 'affilicard' ),
 			$date
 		);
-		return '<div class="affilicard-card__timestamp">' . esc_html( $note ) . '</div>';
+
+		// 価格を出しているストアのうち、免責文言を求めるもの（Amazon のライセンス (o) 等）。
+		// 文言は「詳しくはこちら」から開く形で出す（ライセンスがリンク・ポップアップでの表示を認めている）。
+		$disclaimers = array();
+		foreach ( $entries as $entry ) {
+			if ( ! PriceFreshness::isPriceDisplayable( $entry['offer'], $entry['platform'], $now_ts ) ) {
+				continue;
+			}
+			$policy = $this->policies[ $entry['platform']->code ] ?? null;
+			if ( null !== $policy && '' !== $policy->priceDisclaimer ) {
+				$disclaimers[ $policy->priceDisclaimer ] = true;
+			}
+		}
+		$details = '';
+		if ( array() !== $disclaimers ) {
+			$details = '<details class="affilicard-card__price-disclaimer">'
+				. '<summary>' . esc_html__( '詳しくはこちら', 'affilicard' ) . '</summary>';
+			foreach ( array_keys( $disclaimers ) as $text ) {
+				$details .= '<p>' . esc_html( (string) $text ) . '</p>';
+			}
+			$details .= '</details>';
+		}
+
+		return '<div class="affilicard-card__timestamp">' . esc_html( $note ) . $details . '</div>';
+	}
+
+	/**
+	 * そのストアの情報（価格・書影）を表示しているときに、Provider が求める提供元の表記を出す
+	 * （Amazon のライセンス (q)。カードごとに出す）。
+	 *
+	 * @param list<array{listing: array<string, mixed>, offer: array<string, mixed>, platform: PlatformDefinition}> $entries    visibleListings() の戻り
+	 * @param string                                                                                                $imageCode 書影の出所の platform code（無ければ空）
+	 */
+	private function renderAttribution( array $entries, bool $pricesShown, string $imageCode ): string {
+		$codes = array();
+		if ( '' !== $imageCode ) {
+			$codes[ $imageCode ] = true;
+		}
+		if ( $pricesShown ) {
+			$now_ts = time();
+			foreach ( $entries as $entry ) {
+				if ( PriceFreshness::isPriceDisplayable( $entry['offer'], $entry['platform'], $now_ts ) ) {
+					$codes[ $entry['platform']->code ] = true;
+				}
+			}
+		}
+
+		$texts = array();
+		foreach ( array_keys( $codes ) as $code ) {
+			$policy = $this->policies[ (string) $code ] ?? null;
+			if ( null !== $policy && '' !== $policy->contentAttribution ) {
+				$texts[ $policy->contentAttribution ] = true;
+			}
+		}
+		$html = '';
+		foreach ( array_keys( $texts ) as $text ) {
+			$html .= '<p class="affilicard-card__attribution">' . esc_html( (string) $text ) . '</p>';
+		}
+		return $html;
 	}
 
 	/**
@@ -447,18 +530,52 @@ final class CardRenderer {
 	 * CTA ボタンと書影が別の offer を指すことがない（visibleListings() が両方の唯一の出所）。
 	 *
 	 * @param list<array{listing: array<string, mixed>, offer: array<string, mixed>, platform: PlatformDefinition}> $visibleListings visibleListings() の戻り（displayOrder 昇順）
+	 * @return array{url: string, code: string} 書影の URL と、その出所の platform code（アイキャッチなら空）
 	 */
-	private function selectCardImage( array $visibleListings, string $fallback ): string {
+	private function selectCardImage( array $visibleListings, string $fallback ): array {
+		$now_ts = time();
 		foreach ( $visibleListings as $entry ) {
 			$offer = isset( $entry['offer'] ) && is_array( $entry['offer'] ) ? $entry['offer'] : array();
 			$img   = trim( ScalarField::string( $offer, 'image_url' ) );
 			// esc_url_raw は javascript: 等の危険スキームを空文字にする。空になった offer は飛ばす。
 			$img = esc_url_raw( $img );
-			if ( '' !== $img ) {
-				return $img;
+			if ( '' === $img ) {
+				continue;
 			}
+			$code = $entry['platform']->code;
+			if ( ! $this->isImageWithinTtl( $offer, $code, $now_ts ) ) {
+				// 表示期限を過ぎた書影（Amazon のライセンス (n) は画像へのリンクを最長 24 時間に限る）は
+				// 候補から外し、表示順で次のストアの書影へ譲る。
+				continue;
+			}
+			return array(
+				'url'  => $img,
+				'code' => $code,
+			);
 		}
-		return $fallback;
+		return array(
+			'url'  => $fallback,
+			'code' => '',
+		);
+	}
+
+	/**
+	 * その platform の Provider が書影の表示期限を申告していれば、last_verified_at から期限内か。
+	 * 申告が無ければ常に true。確認時刻が無い・読めない書影は、期限内と言えないので false。
+	 *
+	 * @param array<string, mixed> $offer
+	 */
+	private function isImageWithinTtl( array $offer, string $code, int $nowTs ): bool {
+		$policy = $this->policies[ $code ] ?? null;
+		if ( null === $policy || null === $policy->imageTtlHours ) {
+			return true;
+		}
+		$at = trim( ScalarField::string( $offer, 'last_verified_at' ) );
+		$ts = '' !== $at ? strtotime( $at ) : false;
+		if ( false === $ts ) {
+			return false;
+		}
+		return ( $nowTs - $ts ) <= $policy->imageTtlHours * HOUR_IN_SECONDS;
 	}
 
 	/**
@@ -512,7 +629,12 @@ final class CardRenderer {
 				$price_num = self::priceToNumber( $price );
 				if ( null !== $list_num && null !== $price_num && $list_num > $price_num ) {
 					$list_no_yen = (string) preg_replace( '/^[\x{00A5}\x{FFE5}\s]+/u', '', $list_raw );
-					$pricing    .= '<span class="affilicard-card__list-price">¥' . esc_html( $list_no_yen ) . '</span>';
+					// 何と比べた価格か（例「過去価格:」）。比較対照価格の根拠を示す。
+					$list_label = trim( ScalarField::string( $offer, 'list_price_label' ) );
+					if ( '' !== $list_label ) {
+						$pricing .= '<span class="affilicard-card__list-price-label">' . esc_html( $list_label ) . '</span>';
+					}
+					$pricing .= '<span class="affilicard-card__list-price">¥' . esc_html( $list_no_yen ) . '</span>';
 				}
 
 				if ( '' !== $price ) {

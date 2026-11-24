@@ -136,7 +136,7 @@ offersV2.listings.dealDetails / offersV2.listings.availability / offersV2.listin
 | --- | --- |
 | `title` | `itemInfo.title.displayValue` |
 | `price` | `offersV2.listings[]` の `isBuyBoxWinner` が真のもの（無ければ先頭）の `price.money.amount` |
-| `list_price` / `badge` | **PR1 では入れない**（基準価格のラベルを出せるようになる PR2 で入れる） |
+| `list_price` / `list_price_label` / `badge` | PR1 では入れない。PR2 で、`savingBasisTypeLabel` が返り基準価格が販売価格を上回るときだけ `savingBasis.money.amount` / ラベル / `savings.percentage`→`N%OFF` を入れ、それ以外は**空にする**（終わったセールの表示を残さない） |
 | `image_url` | `images.primary.large.url`（ホットリンク。保存しない） |
 | `regular_url` | `https://{marketplace}/dp/{ASIN}` |
 | `affiliate_url` | `detailPageURL`（タグ付き。**改変しない**） |
@@ -176,21 +176,24 @@ offersV2.listings.dealDetails / offersV2.listings.availability / offersV2.listin
 Amazon 固有の文言をカードへ直書きせず、Provider が「表示上の決まり」を申告する任意インターフェースを足す:
 
 ```php
-interface DisplayPolicyProvider {
-	public function priceDisclaimer(): string;   // (o) 価格の免責文言
-	public function contentAttribution(): string; // (q) 提供元の表記
-	public function imageTtlHours(): ?int;       // (n) 書影を表示してよい時間（null＝制限なし）
+final class DisplayPolicy {            // 値オブジェクト
+	public readonly string $priceDisclaimer;    // (o) 価格の免責文言
+	public readonly string $contentAttribution; // (q) 提供元の表記
+	public readonly ?int $imageTtlHours;        // (n) 書影を表示してよい時間（null＝制限なし）
 }
+interface DisplayPolicyProvider { public function displayPolicy(): DisplayPolicy; }
 ```
 
-カードは listing の platform → `PlatformDefinition::provider` → Provider を引き、申告があれば従う。
+`CardHtmlBuilder` が platform ごとに `provider` → それが申告しなければ `eligibleProvider` の順で Provider を引き、
+`display_policies`（platform code => DisplayPolicy）として `CardRenderer` へ渡す。`eligibleProvider` まで見るのは、
+自動取得から手動入力へ戻した platform にも API で取った書影が残るため（Amazon の書影は API 経由でしか使えない）。
 
 | 項目 | 表示 |
 | --- | --- |
-| (o) 価格の免責文言 | 既存の時点表示の後ろに「詳しくはこちら」を付け、開くと免責文言が出る（`<details>`。JS 不要） |
-| (q) 提供元の表記 | その Provider の listing を表示しているカードの下に小さく出す（**カードごとに出す**。1 ページに複数あっても可） |
-| (n) 書影 24 時間 | `last_verified_at` から `imageTtlHours()` を過ぎた offer の `image_url` は書影の候補から外す（既存の優先順で他ストアの書影へ切り替わる） |
-| 基準価格のラベル | offer に `list_price_label` を新設し、`<ラベル> ~~¥990~~` の形で出す。Amazon は `savingBasisTypeLabel` が返ったときだけ `list_price` / `list_price_label` / `badge`（`savings.percentage` から `N%OFF`）を入れる。DMM の表示は変えない |
+| (o) 価格の免責文言 | 既存の時点表示（「※ ◯時点の価格です」）の後ろに「詳しくはこちら」を付け、開くと免責文言が出る（`<details>`。JS 不要）。そのストアの価格を表示しているときだけ |
+| (q) 提供元の表記 | そのストアの価格か書影を表示しているカードの下に小さく出す（**カードごとに出す**。1 ページに複数あっても可） |
+| (n) 書影 24 時間 | `last_verified_at` から `imageTtlHours()` を過ぎた offer、または確認時刻の無い offer の `image_url` は書影の候補から外す（表示順で次のストアの書影 → アイキャッチへ切り替わる） |
+| 基準価格のラベル | offer に `list_price_label` を新設（REST・自動更新・自動作成・管理画面の購入リンク編集が保持）。`<ラベル> ~~¥990~~` の形で出す。ラベルが空の listing（DMM・手入力）の表示は変えない |
 
 ## 6. この設計が破綻する条件
 
@@ -200,5 +203,6 @@ interface DisplayPolicyProvider {
 2. **認証情報のリージョンとマーケットプレイスが食い違う**（例: US で作った認証情報で JP を引く）:
    トークン取得先の推定が外れる。→ `credential_version` の入力欄を足す。
 3. **Amazon 以外にも表示上の決まりが増える／文言を言語ごとに変える必要が出る**: `DisplayPolicyProvider`
-   で吸収できるが、文言の多言語化は別途。
+   で吸収できるが、文言の多言語化は別途。免責文言は「Amazon.co.jp」を含む日本向けの原文で、他の
+   マーケットプレイスを使うサイトでは文言を出し分ける必要がある。
 4. **ライセンスが「キャッシュ期限」を 24 時間より短くする**: `PriceFreshness` の TTL と `imageTtlHours()` を合わせて短くする。

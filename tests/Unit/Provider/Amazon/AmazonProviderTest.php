@@ -205,9 +205,41 @@ final class AmazonProviderTest extends TestCase {
 			),
 			$data['platform_extras']
 		);
-		// 基準価格のラベルを出せるようになるまで list_price / badge は入れない（設計 §4-5）。
-		$this->assertArrayNotHasKey( 'list_price', $data );
-		$this->assertArrayNotHasKey( 'badge', $data );
+		// 基準価格は Amazon が返すラベルと一緒に入れる（何と比べた価格かを示す）。
+		$this->assertSame( '990', $data['list_price'] );
+		$this->assertSame( '過去価格:', $data['list_price_label'] );
+		$this->assertSame( '44%OFF', $data['badge'] );
+	}
+
+	public function test_割引が無ければ基準価格とバッジを空にして古いセール表示を残さない(): void {
+		$item = self::item();
+		unset( $item['offersV2']['listings'][1]['price']['savingBasis'], $item['offersV2']['listings'][1]['price']['savings'] );
+
+		$data = AmazonProvider::normalizeItem( $item );
+
+		$this->assertSame( '550', $data['price'] );
+		$this->assertSame( '', $data['list_price'] );
+		$this->assertSame( '', $data['list_price_label'] );
+		$this->assertSame( '', $data['badge'] );
+	}
+
+	public function test_ラベルの無い基準価格は入れない(): void {
+		$item = self::item();
+		unset( $item['offersV2']['listings'][1]['price']['savingBasis']['savingBasisTypeLabel'] );
+
+		$data = AmazonProvider::normalizeItem( $item );
+
+		$this->assertSame( '', $data['list_price'] );
+		$this->assertSame( '', $data['badge'] );
+	}
+
+	public function test_表示の決まりを申告する(): void {
+		$policy = ( new AmazonProvider() )->displayPolicy();
+
+		$this->assertStringContainsString( '表示された日付/時刻の時点のもの', $policy->priceDisclaimer );
+		$this->assertStringContainsString( 'Amazon.co.jp', $policy->priceDisclaimer );
+		$this->assertStringContainsString( 'アマゾンジャパン合同会社', $policy->contentAttribution );
+		$this->assertSame( 24, $policy->imageTtlHours );
 	}
 
 	public function test_価格や書影が返らなければ空にして古い値を残さない(): void {

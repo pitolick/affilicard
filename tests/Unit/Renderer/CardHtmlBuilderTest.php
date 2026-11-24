@@ -114,6 +114,67 @@ final class CardHtmlBuilderTest extends TestCase {
 		$this->assertStringContainsString( 'affilicard-card', $html );
 	}
 
+	/**
+	 * Amazon Kindle は自動取得を ON にしていても、手動入力へ戻していても（eligibleProvider 経由）、
+	 * Amazon Provider の表示の決まりがカードに渡る（設計 2026-11-24 §5）。
+	 *
+	 * @dataProvider amazonProviderSettings
+	 */
+	public function test_build_Amazonの表示の決まりをカードへ渡す( string $provider ): void {
+		\WP_Mock::userFunction( 'get_option' )->andReturn(
+			array(
+				array(
+					'code'             => 'amazon-kindle',
+					'name'             => 'Amazon Kindle',
+					'provider'         => $provider,
+					'eligibleProvider' => 'amazon-creators',
+					'displayOrder'     => 2,
+					'enabled'          => true,
+					'applicableTypes'  => array( 'generic' ),
+					'buttonLabel'      => 'Kindleで読む',
+					'brandColor'       => '#ff9900',
+					'buttonTextColor'  => '#000000',
+				),
+			)
+		);
+		\WP_Mock::userFunction( 'get_post_thumbnail_id' )->andReturn( 0 );
+		\WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing(
+			static fn( $v ) => is_string( $v ) ? trim( $v ) : ''
+		);
+		\WP_Mock::userFunction( 'current_time', array( 'return' => '2026-11-24' ) );
+		\WP_Mock::passthruFunction( 'esc_url_raw' );
+		\WP_Mock::passthruFunction( 'esc_html__' );
+
+		$product = $this->productWith(
+			array(
+				'listings' => array(
+					array(
+						'platform' => 'amazon-kindle',
+						'enabled'  => true,
+						'offers'   => array(
+							array(
+								'affiliate_url'    => 'https://www.amazon.co.jp/dp/B0?tag=x',
+								'image_url'        => 'https://m.media-amazon.com/x.jpg',
+								'last_verified_at' => gmdate( 'c', time() - 3600 ),
+							),
+						),
+					),
+				),
+			)
+		);
+
+		$html = ( new CardHtmlBuilder() )->build( $product, array() );
+
+		$this->assertStringContainsString( 'https://m.media-amazon.com/x.jpg', $html );
+		$this->assertStringContainsString( 'アマゾンジャパン合同会社', $html );
+	}
+
+	/** @return iterable<string, array{0: string}> */
+	public static function amazonProviderSettings(): iterable {
+		yield '自動取得' => array( 'amazon-creators' );
+		yield '手動入力へ戻した' => array( 'manual' );
+	}
+
 	public function test_sanitize_only_platforms_keeps_known_codes_only(): void {
 		$builder = new CardHtmlBuilder();
 		$result  = $builder->sanitizeOnlyPlatforms(

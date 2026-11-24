@@ -113,6 +113,7 @@ function emptyOffer() {
 		affiliate_url: '',
 		price: '',
 		list_price: '',
+		list_price_label: '',
 		badge: '',
 		image_url: '',
 		search_key: '',
@@ -612,6 +613,18 @@ function OffersEditor({ offers, fallbackOnTerminal, onChange }) {
 								placeholder={__('例: 880', 'affilicard')}
 								onChange={(v) =>
 									updateOffer(i, { list_price: v })
+								}
+							/>
+							<TextControl
+								label={__('参考価格のラベル', 'affilicard')}
+								value={offer.list_price_label ?? ''}
+								placeholder={__('例: 過去価格:', 'affilicard')}
+								help={__(
+									'取り消し線の価格の前に出す文言。何と比べた価格かを示します（空なら出しません）。',
+									'affilicard'
+								)}
+								onChange={(v) =>
+									updateOffer(i, { list_price_label: v })
 								}
 							/>
 							<TextControl

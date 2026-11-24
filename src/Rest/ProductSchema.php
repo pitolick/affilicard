@@ -366,6 +366,8 @@ final class ProductSchema {
 				'affiliate_url'    => (string) esc_url_raw( self::stringField( $offer, 'affiliate_url' ) ),
 				'price'            => (string) sanitize_text_field( self::stringField( $offer, 'price' ) ),
 				'list_price'       => (string) sanitize_text_field( self::stringField( $offer, 'list_price' ) ),
+				// 基準価格の種類を示すラベル（例「過去価格:」）。取り消し線の価格が何と比べた値かを示す。
+				'list_price_label' => (string) sanitize_text_field( self::stringField( $offer, 'list_price_label' ) ),
 				'badge'            => (string) sanitize_text_field( self::stringField( $offer, 'badge' ) ),
 				'image_url'        => (string) esc_url_raw( self::stringField( $offer, 'image_url' ) ),
 				'search_key'       => (string) sanitize_text_field( self::stringField( $offer, 'search_key' ) ),
