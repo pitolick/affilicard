@@ -74,6 +74,11 @@ final class AmazonRegistrationTest extends TestCase {
 				array(
 					self::platform( 'amazon-kindle' ),
 					self::platform( 'mystery-platform' ),
+				),
+				// 保存後の読み直し（保存が効いたことを確かめてから印を立てる）。
+				array(
+					self::platform( 'amazon-kindle', array( 'eligibleProvider' => 'amazon-creators' ) ),
+					self::platform( 'mystery-platform' ),
 				)
 			);
 		WP_Mock::userFunction( 'update_option' )
@@ -93,6 +98,28 @@ final class AmazonRegistrationTest extends TestCase {
 			->once()
 			->with( Plugin::AMAZON_ELIGIBLE_BACKFILLED_OPTION, 1, false )
 			->andReturn( true );
+
+		Plugin::backfillAmazonEligibleProvider();
+
+		$this->assertConditionsMet();
+	}
+
+	public function test_保存が効いていなければ印を立てず次回に再試行する(): void {
+		WP_Mock::userFunction( 'current_user_can' )->with( 'manage_options' )->andReturn( true );
+		WP_Mock::userFunction( 'get_option' )
+			->with( Plugin::AMAZON_ELIGIBLE_BACKFILLED_OPTION )
+			->andReturn( false );
+		// update_option() が黙って失敗し、読み直しても空のまま。
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->andReturn( array( self::platform( 'amazon-kindle' ) ) );
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->with( PlatformConfig::OPTION_KEY, WP_Mock\Functions::type( 'array' ), false )
+			->andReturn( false );
+		WP_Mock::userFunction( 'update_option' )
+			->with( Plugin::AMAZON_ELIGIBLE_BACKFILLED_OPTION, 1, false )
+			->never();
 
 		Plugin::backfillAmazonEligibleProvider();
 

@@ -341,6 +341,46 @@ final class AmazonProviderTest extends TestCase {
 		$this->assertFalse( $late->isTerminalMiss() );
 	}
 
+	/**
+	 * 数字だけの ISBN-10 は配列キーにすると int になる。API へは文字列で送り、
+	 * 覚えた結果も見失わない（成功・一時失敗の両方で fetch() が叩き直さない）。
+	 */
+	public function test_数字だけのISBN10も文字列で送り_覚えた結果を見失わない(): void {
+		$this->stubCredentials();
+		$client = $this->client();
+		$client->shouldReceive( 'getItems' )
+			->once()
+			->withArgs(
+				static function ( $creds, $ids ) {
+					return array( 'B008ODF84I', '4087104472', '408710447X' ) === $ids
+						&& array( 'string', 'string', 'string' ) === array_map( 'gettype', $ids );
+				}
+			)
+			->andReturn( self::ok( array( self::item( '4087104472' ) ) ) );
+		$client->shouldReceive( 'getItems' )
+			->once()
+			->withArgs( static fn( $creds, $ids ) => array( '4088820010' ) === $ids )
+			->andReturn(
+				array(
+					'error'   => false,
+					'code'    => 429,
+					'decoded' => array(),
+				)
+			);
+
+		$provider = new AmazonProvider( $client );
+		$provider->prefetch( array( 'B008ODF84I', '4087104472', '408710447x' ) );
+		$provider->prefetch( array( '4088820010' ) );
+
+		$this->assertTrue( $provider->hasPrefetched( '4087104472' ) );
+		$this->assertTrue( $provider->hasPrefetched( '4088820010' ) );
+		// 以降の fetch は HTTP しない（getItems は上の 2 回だけ）。
+		$this->assertTrue( $provider->fetch( '4087104472', array() )->isHit() );
+		$late = $provider->fetch( '4088820010', array() );
+		$this->assertFalse( $late->isHit() );
+		$this->assertFalse( $late->isTerminalMiss() );
+	}
+
 	public function test_clearPrefetched後は再び取りに行く(): void {
 		$this->stubCredentials();
 		$client = $this->client();

@@ -123,8 +123,14 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider {
 			$valid[ $asin ] = true;
 		}
 
-		foreach ( array_chunk( array_keys( $valid ), self::MAX_BATCH_SIZE ) as $chunk ) {
-			$this->prefetched = array_merge( $this->prefetched, $this->fetchMany( $chunk, $credentials ) );
+		// 数字だけの ISBN-10（例 4087104472）は配列キーにすると int になる。array_keys() の戻りを
+		// 文字列へ戻してから送り（API は文字列のリストを要求する）、結果も array_merge() ではなく
+		// キーごとに代入する（array_merge() は int キーを 0 から振り直し、覚えた結果を見失う）。
+		$asins = array_map( 'strval', array_keys( $valid ) );
+		foreach ( array_chunk( $asins, self::MAX_BATCH_SIZE ) as $chunk ) {
+			foreach ( $this->fetchMany( $chunk, $credentials ) as $asin => $result ) {
+				$this->prefetched[ (string) $asin ] = $result;
+			}
 		}
 	}
 
