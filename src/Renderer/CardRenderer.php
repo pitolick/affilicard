@@ -41,11 +41,20 @@ final class CardRenderer {
 	private array $policies = array();
 
 	/**
+	 * この描画で使う現在時刻。価格の鮮度・書影の表示期限の判定を 1 回の描画の中で揃える
+	 * （別々に time() を取ると、期限ちょうどで価格は出たのに免責文言や提供元表記が出ない、が起き得る）。
+	 *
+	 * @var int
+	 */
+	private int $nowTs = 0;
+
+	/**
 	 * @param array<string, mixed>     $product   ProductRepository::find() の戻り値形
 	 * @param list<PlatformDefinition> $platforms enabled な platform（displayOrder 昇順想定）
 	 * @param array<string, mixed>     $options   hide_platforms / image_url / colors / display_policies
 	 */
 	public function render( array $product, array $platforms, array $options = array() ): string {
+		$this->nowTs    = time();
 		$this->policies = array();
 		if ( isset( $options['display_policies'] ) && is_array( $options['display_policies'] ) ) {
 			foreach ( $options['display_policies'] as $code => $policy ) {
@@ -323,7 +332,7 @@ final class CardRenderer {
 	 * @param list<array{listing: array<string, mixed>, offer: array<string, mixed>, platform: PlatformDefinition}> $entries visibleListings() の戻り
 	 */
 	private function renderTimestamp( array $entries ): string {
-		$now_ts = time();
+		$now_ts = $this->nowTs;
 		$latest = 0;
 		foreach ( $entries as $entry ) {
 			$offer    = $entry['offer'];
@@ -389,7 +398,7 @@ final class CardRenderer {
 			$codes[ $imageCode ] = true;
 		}
 		if ( $pricesShown ) {
-			$now_ts = time();
+			$now_ts = $this->nowTs;
 			foreach ( $entries as $entry ) {
 				if ( PriceFreshness::isPriceDisplayable( $entry['offer'], $entry['platform'], $now_ts ) ) {
 					$codes[ $entry['platform']->code ] = true;
@@ -533,7 +542,7 @@ final class CardRenderer {
 	 * @return array{url: string, code: string} 書影の URL と、その出所の platform code（アイキャッチなら空）
 	 */
 	private function selectCardImage( array $visibleListings, string $fallback ): array {
-		$now_ts = time();
+		$now_ts = $this->nowTs;
 		foreach ( $visibleListings as $entry ) {
 			$offer = isset( $entry['offer'] ) && is_array( $entry['offer'] ) ? $entry['offer'] : array();
 			$img   = trim( ScalarField::string( $offer, 'image_url' ) );
@@ -584,7 +593,7 @@ final class CardRenderer {
 	 */
 	private function renderListings( array $visible_listings, array $cta_overrides = array(), bool $is_preorder = false, array $tracking = array() ): string {
 		$rows   = '';
-		$now_ts = time();
+		$now_ts = $this->nowTs;
 		foreach ( $visible_listings as $entry ) {
 			$listing  = $entry['listing'];
 			$offer    = $entry['offer'];

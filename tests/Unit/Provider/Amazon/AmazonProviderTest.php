@@ -234,12 +234,23 @@ final class AmazonProviderTest extends TestCase {
 	}
 
 	public function test_表示の決まりを申告する(): void {
+		$this->stubCredentials();
 		$policy = ( new AmazonProvider() )->displayPolicy();
 
 		$this->assertStringContainsString( '表示された日付/時刻の時点のもの', $policy->priceDisclaimer );
 		$this->assertStringContainsString( 'Amazon.co.jp', $policy->priceDisclaimer );
 		$this->assertStringContainsString( 'アマゾンジャパン合同会社', $policy->contentAttribution );
 		$this->assertSame( 24, $policy->imageTtlHours );
+	}
+
+	public function test_免責文言の購入先は設定したマーケットプレイスに合わせる(): void {
+		$this->stubCredentials( array_merge( self::CREDS, array( 'marketplace' => 'www.amazon.com' ) ) );
+		$policy = ( new AmazonProvider() )->displayPolicy();
+
+		// 商品リンクと同じサイトを案内する（Amazon.co.jp 固定にしない）。
+		$this->assertStringContainsString( '購入の時点でamazon.comに表示されている', $policy->priceDisclaimer );
+		$this->assertStringNotContainsString( 'Amazon.co.jp', $policy->priceDisclaimer );
+		$this->assertStringNotContainsString( 'アマゾンジャパン合同会社', $policy->contentAttribution );
 	}
 
 	public function test_価格や書影が返らなければ空にして古い値を残さない(): void {

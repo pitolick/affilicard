@@ -145,9 +145,20 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 	 * - (n) 画像へのリンクは最長 24 時間まで
 	 */
 	public function displayPolicy(): DisplayPolicy {
+		// 商品リンク（regular_url）は設定されたマーケットプレイスへ向くため、免責文言が案内する
+		// 購入先も同じサイトにする（Amazon.co.jp 固定だと、他のマーケットプレイスでリンク先と食い違う）。
+		$marketplace = AmazonCreatorsClient::marketplace( AccountCredentials::get( (string) $this->accountCode() ) );
+		$isJapan     = AmazonCreatorsClient::DEFAULT_MARKETPLACE === $marketplace;
+		$siteName    = $isJapan ? 'Amazon.co.jp' : (string) preg_replace( '/^www\./', '', $marketplace );
 		return new DisplayPolicy(
-			__( '価格および発送可能時期は表示された日付/時刻の時点のものであり、変更される場合があります。本商品の購入においては、購入の時点でAmazon.co.jpに表示されている価格および発送可能時期の情報が適用されます。', 'affilicard' ),
-			__( '本サイト上で表示されるコンテンツの一部は、アマゾンジャパン合同会社またはその関連会社により提供されたものです。これらのコンテンツは「現状有姿」で提供されており、随時変更または削除される場合があります。', 'affilicard' ),
+			sprintf(
+				/* translators: %s: Amazon のサイト名（例 Amazon.co.jp） */
+				__( '価格および発送可能時期は表示された日付/時刻の時点のものであり、変更される場合があります。本商品の購入においては、購入の時点で%sに表示されている価格および発送可能時期の情報が適用されます。', 'affilicard' ),
+				$siteName
+			),
+			$isJapan
+				? __( '本サイト上で表示されるコンテンツの一部は、アマゾンジャパン合同会社またはその関連会社により提供されたものです。これらのコンテンツは「現状有姿」で提供されており、随時変更または削除される場合があります。', 'affilicard' )
+				: __( '本サイト上で表示されるコンテンツの一部は、Amazon またはその関連会社により提供されたものです。これらのコンテンツは「現状有姿」で提供されており、随時変更または削除される場合があります。', 'affilicard' ),
 			24
 		);
 	}
