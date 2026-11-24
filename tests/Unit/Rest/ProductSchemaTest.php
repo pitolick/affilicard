@@ -129,9 +129,29 @@ final class ProductSchemaTest extends TestCase {
 		$this->assertSame( '', $offer['affiliate_url'] );
 		$this->assertSame( '', $offer['external_id'] );
 		$this->assertSame( '', $offer['list_price'] );
+		$this->assertSame( '', $offer['list_price_label'] );
 		$this->assertSame( '', $offer['badge'] );
 		$this->assertSame( '', $offer['image_url'] );
 		$this->assertSame( '', $offer['last_fetched_at'] );
+	}
+
+	public function test_sanitize_listings_参考価格のラベルを保存する(): void {
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform' => 'amazon-kindle',
+					'offers'   => array(
+						array(
+							'external_id'      => 'B008ODF84I',
+							'list_price'       => '990',
+							'list_price_label' => '過去価格:',
+						),
+					),
+				),
+			)
+		);
+
+		$this->assertSame( '過去価格:', $result[0]['offers'][0]['list_price_label'] );
 	}
 
 	public function test_sanitize_listings_returns_empty_when_not_array(): void {

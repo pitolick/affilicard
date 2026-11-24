@@ -5,6 +5,8 @@ namespace Affilicard\Provider\Amazon;
 
 use Affilicard\Account\AccountCredentials;
 use Affilicard\Provider\BatchFetchingProvider;
+use Affilicard\Provider\DisplayPolicy;
+use Affilicard\Provider\DisplayPolicyProvider;
 use Affilicard\Provider\FetchResult;
 use Affilicard\Provider\ProviderInterface;
 
@@ -17,7 +19,7 @@ use Affilicard\Provider\ProviderInterface;
  * - **後続機能（付与ポイント・成人向けフラグ・セール情報）のためにリクエストを増やさない。**
  *   それらの resource も最初から同じ `getItems` に載せる（設計 §4-4）。
  */
-final class AmazonProvider implements ProviderInterface, BatchFetchingProvider {
+final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, DisplayPolicyProvider {
 
 	private const MAX_BATCH_SIZE = 10;
 
@@ -134,6 +136,33 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider {
 		}
 	}
 
+	/**
+	 * Amazon.co.jp Product Advertising API ライセンス契約（Creators API の日本向けライセンス）の
+	 * 表示要件（設計 2026-11-24 §2・§5）。
+	 *
+	 * - (o) 価格の横（またはリンク・ポップアップ）に出す免責文言。文言はライセンスの原文どおり
+	 * - (q) テキストのコンテンツを表示するときに、はっきり見える所に出す提供元の表記
+	 * - (n) 画像へのリンクは最長 24 時間まで
+	 */
+	public function displayPolicy(): DisplayPolicy {
+		// 商品リンク（regular_url）は設定されたマーケットプレイスへ向くため、免責文言が案内する
+		// 購入先も同じサイトにする（Amazon.co.jp 固定だと、他のマーケットプレイスでリンク先と食い違う）。
+		$marketplace = AmazonCreatorsClient::marketplace( AccountCredentials::get( (string) $this->accountCode() ) );
+		$isJapan     = AmazonCreatorsClient::DEFAULT_MARKETPLACE === $marketplace;
+		$siteName    = $isJapan ? 'Amazon.co.jp' : (string) preg_replace( '/^www\./', '', $marketplace );
+		return new DisplayPolicy(
+			sprintf(
+				/* translators: %s: Amazon のサイト名（例 Amazon.co.jp） */
+				__( '価格および発送可能時期は表示された日付/時刻の時点のものであり、変更される場合があります。本商品の購入においては、購入の時点で%sに表示されている価格および発送可能時期の情報が適用されます。', 'affilicard' ),
+				$siteName
+			),
+			$isJapan
+				? __( '本サイト上で表示されるコンテンツの一部は、アマゾンジャパン合同会社またはその関連会社により提供されたものです。これらのコンテンツは「現状有姿」で提供されており、随時変更または削除される場合があります。', 'affilicard' )
+				: __( '本サイト上で表示されるコンテンツの一部は、Amazon またはその関連会社により提供されたものです。これらのコンテンツは「現状有姿」で提供されており、随時変更または削除される場合があります。', 'affilicard' ),
+			24
+		);
+	}
+
 	public function hasPrefetched( string $externalId ): bool {
 		return isset( $this->prefetched[ self::normalizeAsin( $externalId ) ] );
 	}
@@ -225,7 +254,8 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider {
 	 * コンテンツの速やかな削除を求めている（(g)）。作品のまとめページのように価格が付かない ASIN は、
 	 * 価格を出さないのが正しい。
 	 *
-	 * `list_price` / `badge` はここでは入れない（基準価格のラベルをカードに出せるようになるまで。設計 §4-5）。
+	 * 基準価格（`list_price`）は、Amazon が返すラベル（「過去価格:」等）が付くときだけ入れる。
+	 * 何と比べた価格かを示さない取り消し線は、比較対照価格の表示として誤解を招く（設計 §5）。
 	 *
 	 * @param array<string, mixed> $item
 	 * @return array<string, mixed>
@@ -244,11 +274,18 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider {
 		$data['price']     = '';
 		$data['image_url'] = '';
 
+		// 基準価格（取り消し線）・ラベル・割引率。返らなければ空にする——セールが終わったあとに
+		// 「44%OFF」を残すと、終わった割引を表示し続けることになる（プログラム・ポリシー）。
+		$data['list_price']       = '';
+		$data['list_price_label'] = '';
+		$data['badge']            = '';
+
 		$offer = self::chooseOffer( $item );
 		if ( null !== $offer ) {
 			$amount = $offer['price']['money']['amount'] ?? null;
-			if ( is_int( $amount ) || is_float( $amount ) || ( is_string( $amount ) && is_numeric( $amount ) ) ) {
+			if ( self::isAmount( $amount ) ) {
 				$data['price'] = self::formatAmount( $amount );
+				$data          = array_merge( $data, self::savings( $offer, (float) $amount ) );
 			}
 		}
 
@@ -268,6 +305,40 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider {
 		$data['raw']             = $item;
 
 		return $data;
+	}
+
+	/**
+	 * @param mixed $amount
+	 */
+	private static function isAmount( $amount ): bool {
+		return is_int( $amount ) || is_float( $amount ) || ( is_string( $amount ) && is_numeric( $amount ) );
+	}
+
+	/**
+	 * 基準価格・ラベル・割引率。ラベルが無い、または基準価格が販売価格以下なら何も入れない。
+	 *
+	 * @param array<string, mixed> $offer
+	 * @return array{list_price?: string, list_price_label?: string, badge?: string}
+	 */
+	private static function savings( array $offer, float $price ): array {
+		$basis = $offer['price']['savingBasis'] ?? null;
+		if ( ! is_array( $basis ) ) {
+			return array();
+		}
+		$amount = $basis['money']['amount'] ?? null;
+		$label  = isset( $basis['savingBasisTypeLabel'] ) && is_string( $basis['savingBasisTypeLabel'] ) ? trim( $basis['savingBasisTypeLabel'] ) : '';
+		if ( ! self::isAmount( $amount ) || '' === $label || (float) $amount <= $price ) {
+			return array();
+		}
+		$out        = array(
+			'list_price'       => self::formatAmount( $amount ),
+			'list_price_label' => $label,
+		);
+		$percentage = $offer['price']['savings']['percentage'] ?? null;
+		if ( is_int( $percentage ) && $percentage > 0 ) {
+			$out['badge'] = $percentage . '%OFF';
+		}
+		return $out;
 	}
 
 	/**

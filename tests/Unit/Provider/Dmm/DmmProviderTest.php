@@ -299,6 +299,10 @@ final class DmmProviderTest extends TestCase {
 		$result = ( new DmmProvider() )->fetch( 'ext-123', array() );
 		$this->assertTrue( $result->isHit() );
 		$this->assertSame( 'サンプル商品タイトル', $result->data['title'] );
+		// API リファレンスの定義どおり「定価」を添える（カードはラベルの無い参考価格を出さない）。
+		$this->assertSame( '1000', $result->data['list_price'] );
+		$this->assertSame( '定価', $result->data['list_price_label'] );
+		$this->assertSame( '50%OFF', $result->data['badge'] );
 	}
 
 	public function test_fetch_credentials未設定はerror_transient(): void {

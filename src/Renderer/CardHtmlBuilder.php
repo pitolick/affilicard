@@ -5,6 +5,9 @@ namespace Affilicard\Renderer;
 
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\Plugin;
+use Affilicard\Provider\DisplayPolicy;
+use Affilicard\Provider\DisplayPolicyProvider;
+use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Types\ProductTypeRegistry;
 
 /**
@@ -17,6 +20,8 @@ use Affilicard\Types\ProductTypeRegistry;
 final class CardHtmlBuilder {
 
 	private static ?ProductTypeRegistry $typeRegistry = null;
+
+	private static ?ProviderRegistry $providerRegistry = null;
 
 	/**
 	 * @param array<string, mixed> $product    ProductRepository::find() の戻り値形
@@ -91,6 +96,7 @@ final class CardHtmlBuilder {
 				: \Affilicard\Settings\GeneralSettings::hidesProductImages(),
 			// CardRenderer は option を読まない（純粋レンダラの制約）ため、ここで解決して渡す。
 			'fallback_on_terminal' => \Affilicard\Settings\GeneralSettings::fallbackOnTerminal(),
+			'display_policies'     => self::displayPolicies( $platforms ),
 		);
 
 		return ( new CardRenderer() )->render( $product, $platforms, $options );
@@ -159,6 +165,33 @@ final class CardHtmlBuilder {
 			'r18'   => $r18,
 			'label' => $label,
 		);
+	}
+
+	/**
+	 * platform code => そのストアの Provider が申告した表示の決まり（設計 2026-11-24 §5）。
+	 *
+	 * platform の現在の Provider で決め、それが申告しなければ自動取得の候補（eligibleProvider）で決める。
+	 * 自動取得から手動入力へ戻した platform にも、API で取った書影が残っているため
+	 * （Amazon の書影は API 経由でしか使えず、表示期限はそのまま適用する必要がある）。
+	 *
+	 * @param list<\Affilicard\Platform\PlatformDefinition> $platforms
+	 * @return array<string, DisplayPolicy>
+	 */
+	private static function displayPolicies( array $platforms ): array {
+		if ( null === self::$providerRegistry ) {
+			self::$providerRegistry = Plugin::buildProviderRegistry();
+		}
+		$policies = array();
+		foreach ( $platforms as $platform ) {
+			foreach ( array( $platform->provider, $platform->eligibleProvider ) as $code ) {
+				$provider = '' !== $code ? self::$providerRegistry->get( $code ) : null;
+				if ( $provider instanceof DisplayPolicyProvider ) {
+					$policies[ $platform->code ] = $provider->displayPolicy();
+					break;
+				}
+			}
+		}
+		return $policies;
 	}
 
 	private static function typeRegistry(): ProductTypeRegistry {
