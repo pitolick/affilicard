@@ -103,7 +103,31 @@ final class CardRendererDisplayPolicyTest extends TestCase {
 		);
 
 		$this->assertStringContainsString( '<details class="affilicard-card__price-disclaimer"><summary>詳しくはこちら</summary><p>' . self::DISCLAIMER . '</p></details>', $html );
-		$this->assertStringContainsString( '<p class="affilicard-card__attribution">' . self::ATTRIBUTION . '</p>', $html );
+		$this->assertStringContainsString( '<li class="affilicard-card__note affilicard-card__attribution">' . self::ATTRIBUTION . '</li>', $html );
+	}
+
+	public function test_注釈は確認時刻と提供元の表記を1つの枠に箇条書きでまとめる(): void {
+		$html = ( new CardRenderer() )->render(
+			self::product(
+				array(
+					'price'            => '550',
+					'last_verified_at' => self::hoursAgo( 1 ),
+				)
+			),
+			self::platforms(),
+			self::options()
+		);
+
+		$this->assertSame( 1, substr_count( $html, '<div class="affilicard-card__notes">' ) );
+		$this->assertMatchesRegularExpression(
+			'#<div class="affilicard-card__notes"><ul class="affilicard-card__notes-list">'
+			. '<li class="affilicard-card__note affilicard-card__timestamp">[^<]*時点の価格です。[^<]*<details .*?</details></li>'
+			. '<li class="affilicard-card__note affilicard-card__attribution">[^<]*</li>'
+			. '</ul></div></div>$#u',
+			$html
+		);
+		// 「※」は CSS（::before）で描く。本文に入れると折り返しが「※」の下に回り込む。
+		$this->assertStringNotContainsString( '※', $html );
 	}
 
 	public function test_決まりを申告しないストアだけのカードには何も足さない(): void {
@@ -169,7 +193,9 @@ final class CardRendererDisplayPolicyTest extends TestCase {
 		);
 
 		$this->assertStringContainsString( 'https://m.media-amazon.com/new.jpg', $html );
-		$this->assertStringContainsString( 'affilicard-card__attribution', $html );
+		// 確認時刻の注釈は無くても、提供元の表記だけで注釈の枠を出す。
+		$this->assertStringContainsString( '<div class="affilicard-card__notes"><ul class="affilicard-card__notes-list"><li class="affilicard-card__note affilicard-card__attribution">', $html );
+		$this->assertStringNotContainsString( 'affilicard-card__timestamp', $html );
 		$this->assertStringNotContainsString( 'affilicard-card__price-disclaimer', $html );
 	}
 

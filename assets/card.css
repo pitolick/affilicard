@@ -395,12 +395,40 @@
 }
 
 /* 価格時点フッタ: グリッド外・カード全幅 */
-.affilicard-card__timestamp {
+/* 注釈（価格の確認時刻・ストアのライセンスが求める提供元の表記）。1 つの枠に箇条書きで並べる。 */
+.affilicard-card__notes {
 	padding: 8px 20px;
 	background: var(--affilicard-footer-bg);
 	border-top: 1px solid var(--affilicard-border);
+}
+
+.affilicard-card__notes-list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+/* 「※」は ::before で左の余白に置く。折り返した行も本文の頭に揃い、「※」の下に回り込まない。
+   text-indent ではなく絶対配置にしているのは、「詳しくはこちら」を開いたときの段落に
+   字下げが引き継がれないようにするため。 */
+.affilicard-card__note {
+	position: relative;
+	margin: 0;
+	padding: 0 0 0 1.2em;
 	font-size: 11px;
+	line-height: 1.6;
 	color: var(--affilicard-text-light);
+}
+
+.affilicard-card__note::before {
+	content: "※";
+	position: absolute;
+	top: 0;
+	left: 0;
+}
+
+.affilicard-card__note + .affilicard-card__note {
+	margin-top: 2px;
 }
 
 /* 価格の免責文言（ストアのライセンスが求める場合のみ）。「詳しくはこちら」で開く。 */
@@ -422,20 +450,6 @@
 
 .affilicard-card__price-disclaimer p {
 	margin: 4px 0 0;
-}
-
-/* ストアの情報を表示しているときの提供元の表記（ライセンスが求める場合のみ）。 */
-.affilicard-card__attribution {
-	margin: 0;
-	padding: 6px 20px 8px;
-	background: var(--affilicard-footer-bg);
-	font-size: 10px;
-	line-height: 1.5;
-	color: var(--affilicard-text-light);
-}
-
-.affilicard-card__timestamp + .affilicard-card__attribution {
-	padding-top: 0;
 }
 
 /* 狭幅: 1 カラム、書影トップ中央、店舗行は縦積み。
