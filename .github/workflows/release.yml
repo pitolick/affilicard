@@ -1,37 +1,80 @@
 name: Release
 
+# 2 通りで起動する。
+# - タグの push（v*）: 従来どおり。タグのコミットをそのままリリースする
+# - 手動実行（workflow_dispatch）: main の先頭コミットを version で検証し、通ればタグを作って
+#   リリースする。タグを push できない環境（Claude Code のクラウドセッション等）からも
+#   Actions の API だけでリリースできるようにするため
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'リリースするバージョン（例 4.1.1。先頭の v は不要）。main の affilicard.php・package.json・CHANGELOG と一致している必要がある'
+        required: true
+        type: string
 
 permissions:
   contents: write
+
+# リリースは 1 本ずつ走らせる（手動実行の二度押しで同じタグを作り合わないため）。
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: CHANGELOG にタグ対応セクションがあるか検証
+      - name: リリースするバージョンとタグを決める
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            # 手動実行は main からだけ。別ブランチのコミットにタグを打つと、main に無い変更が
+            # 自動更新で配られてしまうため。
+            if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+              echo "::error::手動リリースは main からだけ実行できます（実行元: ${GITHUB_REF}）。"
+              exit 1
+            fi
+            VERSION="${INPUT_VERSION#v}"
+            if ! printf '%s' "${VERSION}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+              echo "::error::version (${INPUT_VERSION}) が x.y.z の形式ではありません。"
+              exit 1
+            fi
+            TAG="v${VERSION}"
+            # 既にあるタグへは打ち直さない（リリース済みの版の中身を差し替えないため）。
+            if [ -n "$(git ls-remote --tags origin "refs/tags/${TAG}")" ]; then
+              echo "::error::タグ ${TAG} は既にあります。バージョンを上げてから実行してください。"
+              exit 1
+            fi
+          else
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+          fi
+          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
+          echo "TAG=${TAG}" >> "${GITHUB_ENV}"
+          echo "リリース: ${TAG}（コミット ${GITHUB_SHA}）"
+      - name: CHANGELOG にリリースするバージョンのセクションがあるか検証
+        run: |
           if ! grep -qE "^## \[${VERSION}\]" CHANGELOG.md; then
             echo "::error::CHANGELOG.md に '## [${VERSION}]' セクションがありません。リリース前に追記してください。"
             exit 1
           fi
           echo "CHANGELOG にバージョン ${VERSION} のセクションを確認しました。"
-      - name: コミット済み Version ヘッダがタグと一致するか検証（PUC 自動更新検知のため）
+      - name: コミット済み Version ヘッダがリリースするバージョンと一致するか検証（PUC 自動更新検知のため）
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
           # plugin-update-checker はタグ名でなく、タグのツリーにコミットされた
           # affilicard.php の "Version:" ヘッダを最新版数として読む。zip へのビルド時注入だけでは
           # 検知されないため、コミット済みヘッダがタグと一致していることをリリース前に必須化する。
           COMMITTED="$(grep -E '^ \* Version:' affilicard.php | head -1 | sed -E 's/^ \* Version:[[:space:]]*//')"
           if [ "${COMMITTED}" != "${VERSION}" ]; then
-            echo "::error::affilicard.php のコミット済み Version (${COMMITTED}) がタグ (${VERSION}) と一致しません。plugin-update-checker はタグのツリーの Version ヘッダを読むため、リリース前に affilicard.php の Version をタグと同じ値にコミットしてください。"
+            echo "::error::affilicard.php のコミット済み Version (${COMMITTED}) がリリースするバージョン (${VERSION}) と一致しません。plugin-update-checker はタグのツリーの Version ヘッダを読むため、リリース前に affilicard.php の Version をタグと同じ値にコミットしてください。"
             exit 1
           fi
-          echo "コミット済み Version (${COMMITTED}) = タグ (${VERSION}) を確認しました。"
+          echo "コミット済み Version (${COMMITTED}) = リリースするバージョン (${VERSION}) を確認しました。"
           # AFFILICARD_VERSION は PluginUpgrade::maybeUpgrade() が「保存済みバージョンとの差分」を
           # 見る唯一の値で、移行バッチの起動条件そのものである。下の注入 sed が（行の書式変更などで）
           # 空振りしても sed は成功扱いで黙るため、コミット済みの時点で一致を必須にする。
@@ -39,10 +82,10 @@ jobs:
           # 古いままだと移行が永久に走らない。
           COMMITTED_CONST="$(grep -E "define\( 'AFFILICARD_VERSION'," affilicard.php | head -1 | sed -E "s/.*'AFFILICARD_VERSION',[[:space:]]*'([^']*)'.*/\1/")"
           if [ "${COMMITTED_CONST}" != "${VERSION}" ]; then
-            echo "::error::affilicard.php のコミット済み AFFILICARD_VERSION (${COMMITTED_CONST}) がタグ (${VERSION}) と一致しません。この定数は移行バッチの起動条件（PluginUpgrade::maybeUpgrade）なので、リリース前にタグと同じ値へ揃えてコミットしてください。"
+            echo "::error::affilicard.php のコミット済み AFFILICARD_VERSION (${COMMITTED_CONST}) がリリースするバージョン (${VERSION}) と一致しません。この定数は移行バッチの起動条件（PluginUpgrade::maybeUpgrade）なので、リリース前にタグと同じ値へ揃えてコミットしてください。"
             exit 1
           fi
-          echo "コミット済み AFFILICARD_VERSION (${COMMITTED_CONST}) = タグ (${VERSION}) を確認しました。"
+          echo "コミット済み AFFILICARD_VERSION (${COMMITTED_CONST}) = リリースするバージョン (${VERSION}) を確認しました。"
           # package.json / package-lock.json（lock はリリース zip に含めないが、次回の npm ci の
           # 入力であり、ずれたまま残ると誰も直さない）。
           # JSON は jq で読む（ubuntu-latest にプリインストール済み。このステップは
@@ -53,14 +96,13 @@ jobs:
           for f in package.json package-lock.json; do
             PKG="$(jq -r '.version // empty' "${f}")"
             if [ "${PKG}" != "${VERSION}" ]; then
-              echo "::error::${f} の version (${PKG}) がタグ (${VERSION}) と一致しません。"
+              echo "::error::${f} の version (${PKG}) がリリースするバージョン (${VERSION}) と一致しません。"
               exit 1
             fi
           done
           echo "package.json / package-lock.json のバージョンもタグと一致しています。"
-      - name: タグからバージョンを affilicard.php / package.json に注入
+      - name: バージョンを affilicard.php / package.json に注入
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
           echo "Injecting version: ${VERSION}"
           sed -i -E "s/^( \* Version:[[:space:]]*).*/\1${VERSION}/" affilicard.php
           sed -i -E "s/(define\( 'AFFILICARD_VERSION', ')[^']*(' \);)/\1${VERSION}\2/" affilicard.php
@@ -71,7 +113,7 @@ jobs:
           INJECTED_HEADER="$(grep -E '^ \* Version:' affilicard.php | head -1 | sed -E 's/^ \* Version:[[:space:]]*//')"
           INJECTED_CONST="$(grep -E "define\( 'AFFILICARD_VERSION'," affilicard.php | head -1 | sed -E "s/.*'AFFILICARD_VERSION',[[:space:]]*'([^']*)'.*/\1/")"
           if [ "${INJECTED_HEADER}" != "${VERSION}" ] || [ "${INJECTED_CONST}" != "${VERSION}" ]; then
-            echo "::error::注入後の affilicard.php が Version=${INJECTED_HEADER} / AFFILICARD_VERSION=${INJECTED_CONST} でタグ (${VERSION}) と一致しません。注入 sed のパターンが実ファイルと合っていない可能性があります。"
+            echo "::error::注入後の affilicard.php が Version=${INJECTED_HEADER} / AFFILICARD_VERSION=${INJECTED_CONST} でリリースするバージョン (${VERSION}) と一致しません。注入 sed のパターンが実ファイルと合っていない可能性があります。"
             exit 1
           fi
       - name: PHP セットアップ
@@ -112,9 +154,14 @@ jobs:
             --exclude='dist' \
             ./ dist/affilicard/
           cd dist
-          zip -r ../affilicard-${{ github.ref_name }}.zip affilicard
+          zip -r "../affilicard-${TAG}.zip" affilicard
       - name: GitHub Release 作成
         uses: softprops/action-gh-release@v3
         with:
-          files: affilicard-${{ github.ref_name }}.zip
+          # 手動実行ではタグがまだ無い。tag_name と target_commitish を渡すと、Release の作成と同時に
+          # 検証したコミット（github.sha）へタグが作られる。GITHUB_TOKEN で作ったタグは新しい
+          # workflow run を起こさないので、タグ push 契機でこの workflow が二重に走ることもない。
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          files: affilicard-${{ env.TAG }}.zip
           generate_release_notes: true
