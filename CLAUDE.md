@@ -159,6 +159,13 @@ WP 公式ディレクトリは経由せず、`yahnis-elsts/plugin-update-checker
 - 外部 API (DMM / Amazon / 楽天 / WP REST 等) はすべてモックする
 - 特定サイト固有のコードを混入させない（汎用性を損なう変更は却下）
 
+### リリース
+
+1. リリース用の PR で `affilicard.php`（` * Version:` と `AFFILICARD_VERSION`）・`package.json`・`package-lock.json` のバージョンを上げ、`CHANGELOG.md` の `[Unreleased]` を `## [x.y.z] - YYYY-MM-DD` にしてマージする
+2. **Actions → Release → Run workflow**（ブランチは `main`、`version` に `x.y.z`）。API なら `workflow_dispatch` を `ref: main`・`inputs.version` で起動する。main の先頭コミットのバージョン表記と CHANGELOG を検証し、通ればタグ `vx.y.z` を作って zip 付きの Release を出す
+   - タグを手元で push しても従来どおりリリースされる（どちらか一方でよい）
+   - 既にあるタグ・main 以外からの実行は弾く
+
 ### ローカル PHP 実行
 
 ローカル Mac には PHP/Composer を入れず、Docker イメージで実行する:
