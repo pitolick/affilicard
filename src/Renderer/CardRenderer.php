@@ -630,11 +630,15 @@ final class CardRenderer {
 				if ( null !== $list_num && null !== $price_num && $list_num > $price_num ) {
 					$list_no_yen = (string) preg_replace( '/^[\x{00A5}\x{FFE5}\s]+/u', '', $list_raw );
 					// 何と比べた価格か（例「過去価格:」）。比較対照価格の根拠を示す。
+					// ラベルと参考価格は 1 行目、販売価格・（税込）・割引率は 2 行目に置く
+					// （1 行に詰めると、どの価格に何が掛かっているのか読み取りにくい）。
 					$list_label = trim( ScalarField::string( $offer, 'list_price_label' ) );
+					$pricing   .= '<span class="affilicard-card__list-price-line">';
 					if ( '' !== $list_label ) {
 						$pricing .= '<span class="affilicard-card__list-price-label">' . esc_html( $list_label ) . '</span>';
 					}
 					$pricing .= '<span class="affilicard-card__list-price">¥' . esc_html( $list_no_yen ) . '</span>';
+					$pricing .= '</span>';
 				}
 
 				if ( '' !== $price ) {

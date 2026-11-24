@@ -198,7 +198,7 @@ final class CardRendererDisplayPolicyTest extends TestCase {
 		);
 
 		$this->assertStringContainsString(
-			'<span class="affilicard-card__list-price-label">過去価格:</span><span class="affilicard-card__list-price">¥990</span>',
+			'<span class="affilicard-card__list-price-line"><span class="affilicard-card__list-price-label">過去価格:</span><span class="affilicard-card__list-price">¥990</span></span>',
 			$html
 		);
 		$this->assertStringContainsString( '44%OFF', $html );

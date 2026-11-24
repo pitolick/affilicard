@@ -327,6 +327,14 @@
 	min-width: 0;
 }
 
+.affilicard-card__list-price-line {
+	/* 参考価格（＋ラベル）だけで 1 行を占め、販売価格以降を次の行へ送る。 */
+	flex-basis: 100%;
+	display: flex;
+	align-items: baseline;
+	gap: 4px;
+}
+
 .affilicard-card__list-price-label {
 	font-size: 11px;
 	color: var(--affilicard-text-light);
