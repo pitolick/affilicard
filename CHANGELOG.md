@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [4.1.1] - 2026-11-24
+
 ### Added
 
 - リリース workflow を Actions の手動実行（`workflow_dispatch`・`version` を指定）でも起動できるようにした。main の先頭コミットを検証し、通ればタグを作って Release を出す。タグの push からのリリースも従来どおり使える
