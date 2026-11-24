@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [4.1.2] - 2026-11-25
+
 ### Changed
 
 - **カード下の注釈（価格の確認時刻・提供元の表記）を 1 つの枠にまとめ、箇条書きにした。** 2 つの文の文字サイズ・余白を揃え、同じ並びに見えるようにした。「※」は CSS（`::before`）で描き、折り返した行が「※」の下に回り込まないようにした（ぶら下げ字下げ）。マークアップは `div.affilicard-card__notes > ul.affilicard-card__notes-list > li.affilicard-card__note` で、各 `li` には従来の `affilicard-card__timestamp` / `affilicard-card__attribution` クラスも残している。注記の文言から先頭の「※ 」を外した
