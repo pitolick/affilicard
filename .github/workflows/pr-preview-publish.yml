@@ -15,9 +15,12 @@ permissions:
 
 # 同じ PR（ブランチ）の公開は 1 本ずつ走らせる。Build が続けて完了すると公開が並走し、
 # 古いプレビュー zip の掃除で同じ asset を消し合って、遅れた側が「not found」で失敗していた。
+# 待機は 1 件までが既定で、後から来た実行が待機中の実行を置き換える。失敗したビルドの公開（中身は
+# スキップされる）が、先に待っていた成功したビルドの公開を押し出さないよう、待機を並べて全部残す。
 concurrency:
   group: pr-preview-publish-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   publish:
