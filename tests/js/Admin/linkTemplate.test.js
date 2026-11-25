@@ -38,6 +38,11 @@ describe( 'canApplyLinkTemplate', () => {
 		);
 	} );
 
+	test( 'スキーム省略の URL（//host/...）も PHP と同じくホストを照合する', () => {
+		expect( canApplyLinkTemplate( hulu, '//www.hulu.jp/nny' ) ).toBe( true );
+		expect( canApplyLinkTemplate( hulu, '//example.test/x' ) ).toBe( false );
+	} );
+
 	test( 'ドット境界でない末尾一致や別ドメインには当たらない', () => {
 		expect( canApplyLinkTemplate( hulu, 'https://evilhulu.jp/x' ) ).toBe(
 			false

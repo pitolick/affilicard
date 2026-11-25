@@ -278,7 +278,7 @@ CTA のリンク先は次の順で決まる:
 | --- | --- |
 | `{url}` | `regular_url` そのまま |
 | `{url_enc}` | `regular_url` を URL エンコードしたもの |
-| `{sep}` | `regular_url` にクエリがあれば `&`、無ければ `?` |
+| `{sep}` | `regular_url` にクエリがあれば `&`、無ければ `?`。`?` や `&` で終わっていれば空 |
 
 ```text
 https://example.com/redirect?id=XXXX&url={url_enc}   … リダイレクタで包む ASP

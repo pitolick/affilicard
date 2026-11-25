@@ -38,9 +38,13 @@ export function canApplyLinkTemplate(platform, url) {
 	if (hosts.length === 0 || typeof url !== 'string' || url.trim() === '') {
 		return false;
 	}
+	// PHP 側（esc_url_raw + wp_parse_url）はスキーム省略の `//host/...` もホストを取れる。
+	// base なしの new URL() はこれを例外にするため、スキームを補ってから解析する。
+	const trimmed = url.trim();
+	const absolute = trimmed.startsWith('//') ? `https:${trimmed}` : trimmed;
 	let host;
 	try {
-		host = new URL(url.trim()).hostname.toLowerCase();
+		host = new URL(absolute).hostname.toLowerCase();
 	} catch {
 		return false;
 	}

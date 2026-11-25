@@ -71,6 +71,59 @@ final class PlatformDefinitionLinkTemplateTest extends TestCase {
 	}
 
 	/**
+	 * 末尾が `?` の URL（空のクエリ）に `?` を重ねない。
+	 */
+	public function test_sepは空のクエリなら区切り文字を足さない(): void {
+		$def = $this->platform( '{url}{sep}tag=example-22', array( 'amazon.co.jp' ) );
+
+		$this->assertSame(
+			'https://www.amazon.co.jp/gp/video/detail/B0TEST?tag=example-22',
+			$def->applyLinkTemplate( 'https://www.amazon.co.jp/gp/video/detail/B0TEST?' )
+		);
+		$this->assertSame(
+			'https://www.amazon.co.jp/gp/video/detail/B0TEST?ref=x&tag=example-22',
+			$def->applyLinkTemplate( 'https://www.amazon.co.jp/gp/video/detail/B0TEST?ref=x&' )
+		);
+	}
+
+	/**
+	 * クエリ追記型は、フラグメントの前にパラメータを入れる（後ろだとサーバへ送られない）。
+	 */
+	public function test_クエリ追記型はフラグメントの前にパラメータを入れる(): void {
+		$def = $this->platform( '{url}{sep}tag=example-22', array( 'amazon.co.jp' ) );
+
+		$this->assertSame(
+			'https://www.amazon.co.jp/dp/B000000000?tag=example-22#details',
+			$def->applyLinkTemplate( 'https://www.amazon.co.jp/dp/B000000000#details' )
+		);
+		$this->assertSame(
+			'https://www.amazon.co.jp/dp/B000000000?ref=x&tag=example-22#details',
+			$def->applyLinkTemplate( 'https://www.amazon.co.jp/dp/B000000000?ref=x#details' )
+		);
+	}
+
+	/**
+	 * 包む型は作品 URL をフラグメントごとエンコードして渡す（遷移先で同じ位置を開く）。
+	 */
+	public function test_包む型は作品URLをフラグメントごと渡す(): void {
+		$def = $this->platform( 'https://h.example.test/?url={url_enc}', array( 'hulu.jp' ) );
+
+		$this->assertSame(
+			'https://h.example.test/?url=https%3A%2F%2Fwww.hulu.jp%2Fnny%23ep1',
+			$def->applyLinkTemplate( 'https://www.hulu.jp/nny#ep1' )
+		);
+	}
+
+	public function test_スキーム省略のURLもホストを照合する(): void {
+		$def = $this->platform( 'https://h.example.test/?url={url_enc}', array( 'hulu.jp' ) );
+
+		$this->assertSame(
+			'https://h.example.test/?url=%2F%2Fwww.hulu.jp%2Fnny',
+			$def->applyLinkTemplate( '//www.hulu.jp/nny' )
+		);
+	}
+
+	/**
 	 * url_enc の置換結果に `{url}` という文字列が含まれていても二重に置換しない。
 	 */
 	public function test_置換は一度だけ行う(): void {

@@ -15,7 +15,7 @@ final class PlatformDefinition {
 	 *
 	 * - `{url}`     作品 URL（regular_url）そのまま
 	 * - `{url_enc}` 作品 URL を rawurlencode() したもの
-	 * - `{sep}`     作品 URL にクエリがあれば `&`、無ければ `?`
+	 * - `{sep}`     作品 URL にクエリがあれば `&`、無ければ `?`（`?` / `&` で終わっていれば空）
 	 */
 	public const PLACEHOLDER_URL     = '{url}';
 	public const PLACEHOLDER_URL_ENC = '{url_enc}';
@@ -88,17 +88,40 @@ final class PlatformDefinition {
 		if ( ! is_string( $host ) || ! self::hostMatches( strtolower( $host ), $this->linkHosts ) ) {
 			return '';
 		}
-		$query = wp_parse_url( $url, PHP_URL_QUERY );
-		$sep   = is_string( $query ) && '' !== $query ? '&' : '?';
+		// フラグメント（#以降）はクエリより後ろに来るため、区切り文字の判定から外す。
+		$hash_pos = strpos( $url, '#' );
+		$base     = false === $hash_pos ? $url : substr( $url, 0, $hash_pos );
+		$fragment = false === $hash_pos ? '' : substr( $url, $hash_pos );
 
-		return strtr(
+		// クエリ追記型（`{url}{sep}tag=…`）は、テンプレートが作品 URL で始まる。
+		// このときフラグメントの後ろにパラメータを足すとクエリにならない（サーバへ送られない）
+		// ため、作品 URL はフラグメント抜きで差し込み、フラグメントは最後に戻す。
+		// 包む型（`https://…?url={url_enc}`）は作品 URL をフラグメントごと渡す。
+		$appends = str_starts_with( $this->linkTemplate, self::PLACEHOLDER_URL );
+
+		$result = strtr(
 			$this->linkTemplate,
 			array(
 				self::PLACEHOLDER_URL_ENC => rawurlencode( $url ),
-				self::PLACEHOLDER_URL     => $url,
-				self::PLACEHOLDER_SEP     => $sep,
+				self::PLACEHOLDER_URL     => $appends ? $base : $url,
+				self::PLACEHOLDER_SEP     => self::querySeparator( $base ),
 			)
 		);
+		return $appends ? $result . $fragment : $result;
+	}
+
+	/**
+	 * 作品 URL（フラグメント抜き）にクエリを足すときの区切り文字。
+	 *
+	 * - クエリが無い → `?`
+	 * - `?` や `&` で終わっている（空のクエリ・末尾の区切り） → 区切り文字なし（`??` を作らない）
+	 * - クエリがある → `&`
+	 */
+	private static function querySeparator( string $base ): string {
+		if ( ! str_contains( $base, '?' ) ) {
+			return '?';
+		}
+		return str_ends_with( $base, '?' ) || str_ends_with( $base, '&' ) ? '' : '&';
 	}
 
 	/**
