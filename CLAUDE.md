@@ -123,7 +123,7 @@ affilicard/
 
 ### URL フォールバック
 
-全タイプ共通で `affiliate_url ?? regular_url`。両方空なら CTA 非表示。発生時は admin 可視化（CPT 一覧 + ダッシュボードウィジェット）。
+全タイプ共通で `affiliate_url` → プラットフォームの `linkTemplate` で `regular_url` から組み立てた URL（`linkHosts` に一致するときだけ）→ `regular_url` の順（判定は `Pricing\OfferUrl` 1 箇所）。どれも無ければ CTA 非表示。`regular_url` に落ちたときは admin 可視化（CPT 一覧 + ダッシュボードウィジェット）。
 
 ### Credentials 部分更新 (PATCH 的)
 

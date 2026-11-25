@@ -198,7 +198,7 @@ curl -u 'username:xxxx xxxx xxxx xxxx xxxx xxxx' \
        "products": [
          { "title": "作品A", "product_type": "vod",
            "extras": [{ "key": "director", "label": "監督", "value": "山田太郎" }],
-           "listings": [{ "platform": "u-next", "affiliate_url": "https://example.com/a" }] },
+           "listings": [{ "platform": "u-next", "regular_url": "https://www.video.unext.jp/title/SID0000000", "affiliate_url": "https://example.com/a" }] },
          { "title": "作品B", "product_type": "ebook" }
        ]
      }'
@@ -261,6 +261,33 @@ curl -u 'username:xxxx xxxx xxxx xxxx xxxx xxxx' \
 6. `Plugin::buildProductTypeRegistry()` に `$registry->register(new MyType())` を追加
 
 実装例は `src/Types/EbookType.php`（API provider 連携あり）と `src/Types/VodType.php`（手動入力のみ・監督/出演を header に昇格）を参照。VOD のように provider 連携が無い場合は `extractExtrasFromProvider()` を空配列で返すだけでよい。新しいプラットフォームを使う場合は `PlatformConfig::defaults()` に `applicableTypes` を新タイプの code にした `PlatformDefinition` を追加する（`src/Platform/PlatformConfig.php` の VOD platform 群を参照）。
+
+### リンクテンプレート（作品 URL からアフィリエイトリンクを組み立てる）
+
+プラットフォームに `linkTemplate`（組み立て方）と `linkHosts`（対象ドメイン）を設定すると、購入リンクに `affiliate_url` が無いとき、`regular_url`（作品・商品ページ）からアフィリエイトリンクを**表示時に**組み立てる。ASP を乗り換えても設定 1 箇所を直せば全カードに反映される。
+
+CTA のリンク先は次の順で決まる:
+
+1. `affiliate_url`（購入リンクごとの上書き。リンクごとに ID を発行する ASP 用）
+2. `linkTemplate` で `regular_url` から組み立てた URL（`regular_url` のドメインが `linkHosts` に一致するときだけ）
+3. `regular_url`
+
+2 で組み立てた購入リンクはフォールバック扱いにしない（一覧の警告列・ダッシュボードの件数に出ない）。
+
+| 差し込み口 | 置き換わる値 |
+| --- | --- |
+| `{url}` | `regular_url` そのまま |
+| `{url_enc}` | `regular_url` を URL エンコードしたもの |
+| `{sep}` | `regular_url` にクエリがあれば `&`、無ければ `?` |
+
+```text
+https://example.com/redirect?id=XXXX&url={url_enc}   … リダイレクタで包む ASP
+{url}{sep}tag=XXXX                                    … クエリを足す ASP
+```
+
+- `https://` か `{url}` で始まり、`{url}` か `{url_enc}` を含む形だけ有効（それ以外は保存時に空になる）
+- `linkHosts` はサブドメインにも当たる（`hulu.jp` は `www.hulu.jp` にも一致）。空ならテンプレートを使わない
+- 設定は管理画面（設定 → プラットフォーム）か `PUT /affilicard/v1/platforms`（`manage_options`）。トラッキング ID はサイトごとに違うため、既定値には入れていない
 
 ### Account / Provider を追加する
 

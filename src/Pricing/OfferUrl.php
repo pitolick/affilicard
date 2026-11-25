@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Pricing;
 
+use Affilicard\Platform\PlatformDefinition;
 use Affilicard\Util\ScalarField;
 
 /**
@@ -34,15 +35,22 @@ use Affilicard\Util\ScalarField;
 final class OfferUrl {
 
 	/**
-	 * 購入リンクの href を決める。アフィリエイト URL が無ければ通常 URL へ倒れる。
+	 * 購入リンクの href を決める。
+	 *
+	 * 解決順:
+	 *
+	 * 1. `affiliate_url`（購入リンクごとの上書き）
+	 * 2. プラットフォームのリンクテンプレートで `regular_url` から組み立てた URL
+	 *    （{@see PlatformDefinition::applyLinkTemplate()}。`$platform` が null なら飛ばす）
+	 * 3. `regular_url`
 	 *
 	 * 「無い」は**検証後**の空を意味する（危険スキーム等で `esc_url_raw()` が空に
 	 * 落とした URL も「無い」）。空文字を返したら出せる URL が 1 つも無い。
 	 *
 	 * @param array<string, mixed> $offer
 	 */
-	public static function ctaHref( array $offer ): string {
-		$affiliate = self::validated( $offer, 'affiliate_url' );
+	public static function ctaHref( array $offer, ?PlatformDefinition $platform = null ): string {
+		$affiliate = self::affiliateHref( $offer, $platform );
 		if ( '' !== $affiliate ) {
 			return $affiliate;
 		}
@@ -56,11 +64,34 @@ final class OfferUrl {
 	 * 出せる URL が 1 つも無い offer（両方とも空・不正）は false——フォールバックでは
 	 * なく、そもそも表示されない。
 	 *
+	 * テンプレートで組み立てられた offer はフォールバックではない（アフィリエイトリンクを出している）。
+	 *
 	 * @param array<string, mixed> $offer
 	 */
-	public static function isRegularUrlFallback( array $offer ): bool {
-		return '' === self::validated( $offer, 'affiliate_url' )
+	public static function isRegularUrlFallback( array $offer, ?PlatformDefinition $platform = null ): bool {
+		return '' === self::affiliateHref( $offer, $platform )
 			&& '' !== self::validated( $offer, 'regular_url' );
+	}
+
+	/**
+	 * アフィリエイトリンク（上書き → テンプレート）を検証済みで返す。無ければ空文字。
+	 *
+	 * テンプレートの元にするのは**検証済みの** regular_url で、組み立てた結果も
+	 * `esc_url_raw()` を通す（テンプレート側の不備で危険な URL を出さない）。
+	 *
+	 * @param array<string, mixed> $offer
+	 */
+	private static function affiliateHref( array $offer, ?PlatformDefinition $platform ): string {
+		$affiliate = self::validated( $offer, 'affiliate_url' );
+		if ( '' !== $affiliate || null === $platform ) {
+			return $affiliate;
+		}
+		$regular = self::validated( $offer, 'regular_url' );
+		if ( '' === $regular ) {
+			return '';
+		}
+		$built = $platform->applyLinkTemplate( $regular );
+		return '' === $built ? '' : (string) esc_url_raw( $built );
 	}
 
 	/**

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Tests\Unit\Pricing;
 
+use Affilicard\Platform\PlatformDefinition;
 use Affilicard\Pricing\OfferUrl;
 use Mockery;
 use WP_Mock;
@@ -122,6 +123,86 @@ final class OfferUrlTest extends TestCase {
 		);
 
 		$this->assertSame( 'https://example.test/a', OfferUrl::ctaHref( $offer ) );
+		$this->assertTrue( OfferUrl::isRegularUrlFallback( $offer ) );
+	}
+
+	/**
+	 * リンクテンプレートを持つプラットフォーム定義（以下、定義を渡したときのテスト用）。
+	 */
+	private function hulu( string $template = 'https://h.example.test/sp/cc?rk=ABC&url={url_enc}' ): PlatformDefinition {
+		WP_Mock::userFunction( 'wp_parse_url' )->andReturnUsing(
+			static function ( $url, $component = -1 ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- wp_parse_url() のテストダブル
+				return parse_url( (string) $url, $component );
+			}
+		);
+		return PlatformDefinition::fromArray(
+			array(
+				'code'         => 'hulu',
+				'linkTemplate' => $template,
+				'linkHosts'    => array( 'hulu.jp' ),
+			)
+		);
+	}
+
+	public function test_テンプレートがあれば作品URLからアフィリエイトリンクを組み立てフォールバックと数えない(): void {
+		$offer = array(
+			'affiliate_url' => '',
+			'regular_url'   => 'https://www.hulu.jp/nny',
+		);
+		$hulu  = $this->hulu();
+
+		$this->assertSame(
+			'https://h.example.test/sp/cc?rk=ABC&url=https%3A%2F%2Fwww.hulu.jp%2Fnny',
+			OfferUrl::ctaHref( $offer, $hulu )
+		);
+		$this->assertFalse( OfferUrl::isRegularUrlFallback( $offer, $hulu ) );
+	}
+
+	/**
+	 * 作品ごとの上書き（リンクごとに ID を発行する ASP 用）はテンプレートより優先する。
+	 */
+	public function test_アフィリURLの上書きはテンプレートより優先する(): void {
+		$offer = array(
+			'affiliate_url' => 'https://t.example.test/visit.php?a=X1',
+			'regular_url'   => 'https://www.hulu.jp/nny',
+		);
+
+		$this->assertSame( 'https://t.example.test/visit.php?a=X1', OfferUrl::ctaHref( $offer, $this->hulu() ) );
+	}
+
+	public function test_対象ホスト外の作品URLは通常URLへ倒れフォールバックと数える(): void {
+		$offer = array(
+			'affiliate_url' => '',
+			'regular_url'   => 'https://www.netflix.com/title/1',
+		);
+		$hulu  = $this->hulu();
+
+		$this->assertSame( 'https://www.netflix.com/title/1', OfferUrl::ctaHref( $offer, $hulu ) );
+		$this->assertTrue( OfferUrl::isRegularUrlFallback( $offer, $hulu ) );
+	}
+
+	/**
+	 * テンプレートの元にするのは検証済みの regular_url。危険スキームはテンプレートへ渡さない。
+	 */
+	public function test_不正な通常URLはテンプレートに渡さない(): void {
+		$offer = array(
+			'affiliate_url' => '',
+			'regular_url'   => 'javascript:alert(1)',
+		);
+		$hulu  = $this->hulu();
+
+		$this->assertSame( '', OfferUrl::ctaHref( $offer, $hulu ) );
+		$this->assertFalse( OfferUrl::isRegularUrlFallback( $offer, $hulu ) );
+	}
+
+	public function test_定義を渡さなければテンプレートを考えない(): void {
+		$offer = array(
+			'affiliate_url' => '',
+			'regular_url'   => 'https://www.hulu.jp/nny',
+		);
+
+		$this->assertSame( 'https://www.hulu.jp/nny', OfferUrl::ctaHref( $offer ) );
 		$this->assertTrue( OfferUrl::isRegularUrlFallback( $offer ) );
 	}
 }

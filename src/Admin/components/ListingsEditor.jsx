@@ -10,6 +10,7 @@ import {
 } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import { fetchPlatforms } from '../api/platforms';
+import { canApplyLinkTemplate } from '../linkTemplate';
 
 // Affilicard\Pricing\OfferSelector::DEFAULT_ORDER と揃える。
 const DEFAULT_DISPLAY_ORDER = 100;
@@ -407,9 +408,22 @@ function offerStatusLabel(status) {
 }
 
 // アフィリエイト URL 未設定・通常 URL 設定済みなら、カード描画は通常 URL へ
-// フォールバックする（CardRenderer と同じ判定）。
-function isOfferFallback(offer) {
-	return (offer.affiliate_url ?? '') === '' && (offer.regular_url ?? '') !== '';
+// フォールバックする（CardRenderer と同じ判定）。ただしプラットフォームのリンク
+// テンプレートで組み立てられるならフォールバックではない（PHP の OfferUrl と同じ規則）。
+function isOfferFallback(offer, platform) {
+	return (
+		(offer.affiliate_url ?? '') === '' &&
+		(offer.regular_url ?? '') !== '' &&
+		!canApplyLinkTemplate(platform, offer.regular_url)
+	);
+}
+
+// アフィリエイト URL 未設定で、リンクテンプレートで組み立てる購入リンクか。
+function isOfferTemplated(offer, platform) {
+	return (
+		(offer.affiliate_url ?? '') === '' &&
+		canApplyLinkTemplate(platform, offer.regular_url ?? '')
+	);
 }
 
 function offerTitle(offer) {
@@ -422,7 +436,7 @@ function offerTestId(offer, index) {
 	return id !== '' ? id : `pos-${index}`;
 }
 
-function OffersEditor({ offers, fallbackOnTerminal, onChange }) {
+function OffersEditor({ offers, fallbackOnTerminal, platform, onChange }) {
 	const rows = Array.isArray(offers) ? offers : [];
 
 	// 行の身元（React key ＝ PanelBody の開閉キー）は、中身（external_id 等）から
@@ -555,10 +569,18 @@ function OffersEditor({ offers, fallbackOnTerminal, onChange }) {
 									{statusLabel}
 								</span>
 							)}
-							{isOfferFallback(offer) && (
+							{isOfferFallback(offer, platform) && (
 								<Notice status="warning" isDismissible={false}>
 									{__(
 										'⚠ アフィリエイト URL 未設定、通常 URL にフォールバック中',
+										'affilicard'
+									)}
+								</Notice>
+							)}
+							{isOfferTemplated(offer, platform) && (
+								<Notice status="info" isDismissible={false}>
+									{__(
+										'アフィリエイト URL はプラットフォームのリンクテンプレートで通常 URL から組み立てます',
 										'affilicard'
 									)}
 								</Notice>
@@ -781,6 +803,9 @@ export function ListingsEditor({
 						<OffersEditor
 							offers={row.offers}
 							fallbackOnTerminal={fallbackOnTerminal}
+							platform={(platforms || []).find(
+								(p) => p.code === row.platform
+							)}
 							onChange={(nextOffers) =>
 								updateRow(i, { offers: nextOffers })
 							}

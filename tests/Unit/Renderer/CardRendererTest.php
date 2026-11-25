@@ -226,6 +226,45 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringNotContainsString( 'javascript:', $html );
 	}
 
+	/**
+	 * プラットフォームのリンクテンプレートがあれば、作品 URL だけの購入リンクでも
+	 * CTA はアフィリエイトリンクになる（VOD の作品ページ → ASP のリダイレクタ）。
+	 */
+	public function test_リンクテンプレートで作品URLからCTAのアフィリエイトリンクを組み立てる(): void {
+		WP_Mock::userFunction( 'wp_parse_url' )->andReturnUsing(
+			static function ( $url, $component = -1 ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- wp_parse_url() のテストダブル
+				return parse_url( (string) $url, $component );
+			}
+		);
+		$hulu    = PlatformDefinition::fromArray(
+			array(
+				'code'         => 'hulu',
+				'name'         => 'Hulu',
+				'buttonLabel'  => 'Huluで見る',
+				'linkTemplate' => 'https://h.example.test/sp/cc?rk=ABC&url={url_enc}',
+				'linkHosts'    => array( 'hulu.jp' ),
+			)
+		);
+		$product = $this->product(
+			array(
+				'product_type' => 'vod',
+				'listings'     => array(
+					$this->toListing(
+						array(
+							'platform'      => 'hulu',
+							'enabled'       => true,
+							'affiliate_url' => '',
+							'regular_url'   => 'https://www.hulu.jp/nny',
+						)
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $hulu ) );
+		$this->assertStringContainsString( 'href="https://h.example.test/sp/cc?rk=ABC&url=https%3A%2F%2Fwww.hulu.jp%2Fnny"', $html );
+	}
+
 	public function test_skips_listing_when_both_urls_empty(): void {
 		$product = $this->product(
 			array(

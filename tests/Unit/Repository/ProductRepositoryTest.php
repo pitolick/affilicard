@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Tests\Unit\Repository;
 
+use Affilicard\Platform\PlatformConfig;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Pricing\FetchStatus;
 use Affilicard\Repository\ProductLockUnavailable;
@@ -1236,6 +1237,12 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array() );
+		// フォールバックの疑いが出たとき、リンクテンプレートの判定にプラットフォーム定義を
+		// 1 回だけ読む（定義が無い＝テンプレートなし＝フォールバックのまま）。
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->once()
+			->andReturn( array() );
 
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 1, ProductPostType::META_LISTINGS, true )
@@ -1294,6 +1301,10 @@ final class ProductRepositoryTest extends TestCase {
 	public function test_アフィリURL欠落の判定は選択された購入リンクを見る(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		// フォールバックの疑いが出たらリンクテンプレートの判定にプラットフォーム定義を読む。
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
 			->andReturn( array() );
 
 		$listings = array(
@@ -1356,6 +1367,10 @@ final class ProductRepositoryTest extends TestCase {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array() );
+		// フォールバックの疑いが出たらリンクテンプレートの判定にプラットフォーム定義を読む。
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->andReturn( array() );
 
 		$listings = array(
 			array(
@@ -1416,6 +1431,10 @@ final class ProductRepositoryTest extends TestCase {
 	public function test_アフィリURL欠落の判定はoffersが無いflatなlistingでも機能する(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		// フォールバックの疑いが出たらリンクテンプレートの判定にプラットフォーム定義を読む。
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
 			->andReturn( array() );
 
 		$listings = array(

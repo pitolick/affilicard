@@ -149,6 +149,73 @@ describe( 'ListingsEditor', () => {
 		).not.toBeInTheDocument();
 	} );
 
+	describe( 'リンクテンプレート', () => {
+		const huluPlatforms = [
+			...platforms,
+			{
+				code: 'hulu',
+				name: 'Hulu',
+				linkTemplate: 'https://h.example.test/?url={url_enc}',
+				linkHosts: [ 'hulu.jp' ],
+			},
+		];
+		const huluListing = ( regularUrl ) =>
+			listingWith( {
+				platform: 'hulu',
+				offers: [
+					{
+						display_order: 100,
+						external_id: 'h1',
+						regular_url: regularUrl,
+						affiliate_url: '',
+					},
+				],
+			} );
+
+		test( 'テンプレートで組み立てられる購入リンクはフォールバック警告を出さず、組み立てる旨を出す', async () => {
+			fetchPlatforms.mockResolvedValue( huluPlatforms );
+			render(
+				<ListingsEditor
+					listings={ [ huluListing( 'https://www.hulu.jp/nny' ) ] }
+					onChange={ () => {} }
+				/>
+			);
+			await waitFor( () =>
+				expect( fetchPlatforms ).toHaveBeenCalled()
+			);
+			await waitFor( () =>
+				expect(
+					screen.getByText( /リンクテンプレートで通常 URL から組み立てます/ )
+				).toBeInTheDocument()
+			);
+			expect(
+				screen.queryByText(
+					/アフィリエイト URL 未設定、通常 URL にフォールバック中/
+				)
+			).not.toBeInTheDocument();
+		} );
+
+		test( '対象ドメイン外の通常 URL はフォールバック警告を出す', async () => {
+			fetchPlatforms.mockResolvedValue( huluPlatforms );
+			render(
+				<ListingsEditor
+					listings={ [ huluListing( 'https://example.test/x' ) ] }
+					onChange={ () => {} }
+				/>
+			);
+			await waitFor( () =>
+				expect(
+					screen.getByText(
+						/アフィリエイト URL 未設定、通常 URL にフォールバック中/
+					)
+				).toBeInTheDocument()
+			);
+			expect(
+				screen.queryByText( /リンクテンプレートで通常 URL から組み立てます/ )
+			).not.toBeInTheDocument();
+		} );
+	} );
+
 	test( 'clicking "listing を追加" appends an EMPTY_LISTING', async () => {
 		fetchPlatforms.mockResolvedValue( platforms );
 		const onChange = jest.fn();

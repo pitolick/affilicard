@@ -314,6 +314,59 @@ final class ProductListColumnsTest extends TestCase {
 		$this->assertStringContainsString( '—', $output );
 	}
 
+	/**
+	 * プラットフォームのリンクテンプレートで組み立てられる購入リンクはフォールバックではない
+	 * （カードはアフィリエイトリンクを出している）。カードの CTA と同じ規則で判定する。
+	 */
+	public function test_renderColumn_リンクテンプレートで組み立てられるならfallback警告を出さない(): void {
+		WP_Mock::userFunction( 'get_post_meta' )
+			->with( 457, ProductPostType::META_LISTINGS, true )
+			->andReturn(
+				array(
+					array(
+						'platform' => 'hulu',
+						'offers'   => array(
+							array(
+								'affiliate_url' => '',
+								'regular_url'   => 'https://www.hulu.jp/nny',
+							),
+						),
+					),
+				)
+			);
+		WP_Mock::userFunction( 'get_option' )
+			->andReturnUsing(
+				static function ( $key, $default = false ) {
+					if ( PlatformConfig::OPTION_KEY === $key ) {
+						return array(
+							array(
+								'code'         => 'hulu',
+								'linkTemplate' => 'https://h.example.test/sp/cc?rk=ABC&url={url_enc}',
+								'linkHosts'    => array( 'hulu.jp' ),
+							),
+						);
+					}
+					if ( GeneralSettings::OPTION_KEY === $key ) {
+						return array( 'fallback_on_terminal' => false );
+					}
+					return $default;
+				}
+			);
+		WP_Mock::userFunction( 'wp_parse_url' )->andReturnUsing(
+			static function ( $url, $component = -1 ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- wp_parse_url() のテストダブル
+				return parse_url( (string) $url, $component );
+			}
+		);
+
+		ob_start();
+		ProductListColumns::renderColumn( ProductListColumns::COLUMN_KEY, 457 );
+		$output = (string) ob_get_clean();
+
+		$this->assertStringNotContainsString( 'フォールバック', $output );
+		$this->assertStringContainsString( '—', $output );
+	}
+
 	public function test_renderColumn_echoes_em_dash_when_no_fallback(): void {
 		WP_Mock::userFunction( 'get_post_meta' )
 			->with( 456, ProductPostType::META_LISTINGS, true )

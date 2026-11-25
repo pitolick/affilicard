@@ -495,13 +495,14 @@ final class CardRenderer {
 			$offer = $selected[0];
 			// URL が無い offer は CTA 行を出さない＝非表示扱い。
 			// renderListings の行と renderTimestamp の日付計算を同一集合に揃える。
-			if ( '' === OfferUrl::ctaHref( $offer ) ) {
+			$platform = $by_code[ (string) $listing['platform'] ];
+			if ( '' === OfferUrl::ctaHref( $offer, $platform ) ) {
 				continue;
 			}
 			$out[] = array(
 				'listing'  => $listing,
 				'offer'    => $offer,
-				'platform' => $by_code[ (string) $listing['platform'] ],
+				'platform' => $platform,
 			);
 		}
 		return $out;
@@ -620,7 +621,7 @@ final class CardRenderer {
 			$platform = $entry['platform'];
 			$code     = $platform->code;
 
-			$url = OfferUrl::ctaHref( $offer );
+			$url = OfferUrl::ctaHref( $offer, $platform );
 
 			$block_override = isset( $cta_overrides[ $code ] ) ? trim( (string) $cta_overrides[ $code ] ) : '';
 			$override       = isset( $listing['button_label_override'] ) ? trim( (string) $listing['button_label_override'] ) : '';
