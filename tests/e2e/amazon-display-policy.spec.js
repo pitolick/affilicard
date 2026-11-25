@@ -17,6 +17,7 @@ const { test, expect } = require( '@playwright/test' );
 
 const DISCLAIMER = '本商品の購入においては、購入の時点でAmazon.co.jpに表示されている価格';
 const ATTRIBUTION = 'アマゾンジャパン合同会社またはその関連会社により提供されたもの';
+const POINTS_NOTE = '付与ポイントは表示された日付/時刻の時点のもの';
 
 async function restClient( page ) {
 	await page.goto( '/wp-admin/' );
@@ -85,6 +86,7 @@ test.describe( 'Amazon のライセンスが求める表示', () => {
 						list_price: '990',
 						list_price_label: '過去価格:',
 						badge: '44%OFF',
+						points: '28',
 						image_url: 'https://m.media-amazon.com/images/I/51f7n+2hquL._SL500_.jpg',
 						last_verified_at: hoursAgo( 1 ),
 					},
@@ -99,11 +101,14 @@ test.describe( 'Amazon のライセンスが求める表示', () => {
 		await expect( card.locator( '.affilicard-card__list-price-label' ) ).toHaveText( '過去価格:' );
 		await expect( card.locator( '.affilicard-card__list-price' ) ).toHaveText( '¥990' );
 		await expect( card.locator( '.affilicard-card__discount' ) ).toHaveText( '44%OFF' );
+		// 付与ポイントは保存（REST の sanitize）を通っても残り、数のまま「◯pt還元」で出る。
+		await expect( card.locator( '.affilicard-card__points' ) ).toHaveText( '28pt還元' );
 
 		const disclaimer = card.locator( '.affilicard-card__price-disclaimer' );
 		await expect( disclaimer.getByText( DISCLAIMER ) ).toBeHidden();
 		await disclaimer.getByText( '詳しくはこちら' ).click();
 		await expect( disclaimer.getByText( DISCLAIMER ) ).toBeVisible();
+		await expect( disclaimer.getByText( POINTS_NOTE ) ).toBeVisible();
 
 		await expect( card.locator( '.affilicard-card__attribution' ) ).toContainText( ATTRIBUTION );
 

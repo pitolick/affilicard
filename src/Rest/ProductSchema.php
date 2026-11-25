@@ -369,6 +369,8 @@ final class ProductSchema {
 				// 基準価格の種類を示すラベル（例「過去価格:」）。取り消し線の価格が何と比べた値かを示す。
 				'list_price_label' => (string) sanitize_text_field( self::stringField( $offer, 'list_price_label' ) ),
 				'badge'            => (string) sanitize_text_field( self::stringField( $offer, 'badge' ) ),
+				// 付与ポイント（整数）。数字以外は空にする（カードは数字だけを「◯pt還元」と出す）。
+				'points'           => self::pointsField( $offer ),
 				'image_url'        => (string) esc_url_raw( self::stringField( $offer, 'image_url' ) ),
 				'search_key'       => (string) sanitize_text_field( self::stringField( $offer, 'search_key' ) ),
 				'fetch_status'     => FetchStatus::normalise( (string) sanitize_key( self::stringField( $offer, 'fetch_status' ) ) ),
@@ -378,5 +380,27 @@ final class ProductSchema {
 		}
 
 		return array_values( $byKey );
+	}
+
+	/**
+	 * 付与ポイントを正の整数の文字列に揃える。数値で来ても文字列で来てもよい。それ以外（0・負数・小数・
+	 * 数字以外）は空文字。
+	 *
+	 * @param array<string, mixed> $offer
+	 */
+	private static function pointsField( array $offer ): string {
+		$raw = $offer['points'] ?? '';
+		if ( is_int( $raw ) ) {
+			$raw = (string) $raw;
+		}
+		if ( ! is_string( $raw ) ) {
+			return '';
+		}
+		$raw = trim( $raw );
+		if ( 1 !== preg_match( '/^[0-9]+$/', $raw ) ) {
+			return '';
+		}
+		$value = ltrim( $raw, '0' );
+		return '' === $value ? '' : $value;
 	}
 }

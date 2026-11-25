@@ -159,7 +159,14 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 			$isJapan
 				? __( '本サイト上で表示されるコンテンツの一部は、アマゾンジャパン合同会社またはその関連会社により提供されたものです。これらのコンテンツは「現状有姿」で提供されており、随時変更または削除される場合があります。', 'affilicard' )
 				: __( '本サイト上で表示されるコンテンツの一部は、Amazon またはその関連会社により提供されたものです。これらのコンテンツは「現状有姿」で提供されており、随時変更または削除される場合があります。', 'affilicard' ),
-			24
+			24,
+			// 付与ポイントはライセンスの免責文言（価格・発送可能時期）の対象として明記されていないが、
+			// 実質の価格に直結するため同じ扱いにする。規定の文言は改変せず、別の 1 文として添える。
+			sprintf(
+				/* translators: %s: Amazon のサイト名（例 Amazon.co.jp） */
+				__( '付与ポイントは表示された日付/時刻の時点のものであり、変更される場合があります。購入の時点で%sに表示されている付与ポイントが適用されます。', 'affilicard' ),
+				$siteName
+			)
 		);
 	}
 
@@ -279,6 +286,8 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 		$data['list_price']       = '';
 		$data['list_price_label'] = '';
 		$data['badge']            = '';
+		// 付与ポイント（日本のマーケットプレイスだけが返す）。返らなければ空にして、古い値を残さない。
+		$data['points'] = '';
 
 		$offer = self::chooseOffer( $item );
 		if ( null !== $offer ) {
@@ -286,6 +295,11 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 			if ( self::isAmount( $amount ) ) {
 				$data['price'] = self::formatAmount( $amount );
 				$data          = array_merge( $data, self::savings( $offer, (float) $amount ) );
+				// 価格と同じ出品のポイントだけを取る（価格の無い出品のポイントは意味を持たない）。
+				$points = $offer['loyaltyPoints']['points'] ?? null;
+				if ( is_int( $points ) && $points > 0 ) {
+					$data['points'] = (string) $points;
+				}
 			}
 		}
 

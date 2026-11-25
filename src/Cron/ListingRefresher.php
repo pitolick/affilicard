@@ -370,7 +370,7 @@ class ListingRefresher {
 		// **取得が返さなかった項目はパッチに入れない。** 以前は取得前の値を書き戻していたが、
 		// それでは fetch 中に管理者が編集した値を古い写しで上書きしてしまう。キーを落とせば
 		// 保存側のマージで最新の値がそのまま残る。
-		foreach ( array( 'price', 'list_price', 'list_price_label', 'badge', 'image_url' ) as $field ) {
+		foreach ( array( 'price', 'list_price', 'list_price_label', 'badge', 'points', 'image_url' ) as $field ) {
 			if ( isset( $fetched[ $field ] ) ) {
 				$patch[ $field ] = (string) $fetched[ $field ];
 			}

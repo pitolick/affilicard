@@ -30,6 +30,7 @@
 	--affilicard-border: #e8e3de;
 	--affilicard-badge-bg: #fff4ed;
 	--affilicard-badge-border: #f0c9a8;
+	--affilicard-points-text: #b45309;
 	--affilicard-footer-bg: #faf9f8;
 	--affilicard-radius: 14px;
 
@@ -367,6 +368,28 @@
 	border: 1px solid var(--affilicard-badge-border);
 }
 
+/* 割引率のバッジと付与ポイントのまとまり。片方だけなら販売価格の横に並べ、両方あるときは
+   販売価格の下の段にまとめて送る（広い幅では価格の列が狭く、ポイントだけが下に落ちて
+   割引と離れてしまうため）。狭い幅（下の @container）では両方あっても価格の横に並べる。 */
+.affilicard-card__perks {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+
+.affilicard-card__perks--both {
+	flex-basis: 100%;
+}
+
+/* 付与ポイント。割引（%OFF）と見分けられるよう、枠や背景を付けず文字色だけで示す。 */
+.affilicard-card__points {
+	font-size: 12px;
+	font-weight: 700;
+	color: var(--affilicard-points-text);
+	white-space: nowrap;
+}
+
 /* CTA の背景/文字色はプラットフォーム別ブランド色を CardRenderer がインラインで付与する
    （style="background:var(--affilicard-cta-bg,<brand>);color:var(--affilicard-cta-text,<text>);"）。
    ここでは形状とホバー挙動のみを定義し、色はインラインに委ねる。 */
@@ -485,6 +508,11 @@
 
 	.affilicard-card__platform {
 		width: auto;
+	}
+
+	/* 狭い幅では店舗行が縦積みで価格の列が広いので、両方あっても価格の横に並べる。 */
+	.affilicard-card__perks--both {
+		flex-basis: auto;
 	}
 
 	.affilicard-card__cta {
