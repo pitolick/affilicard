@@ -212,6 +212,15 @@ test.describe( 'affilicard/v1 の商品保存（書き込み検証つき）', ()
 		expect( bulkBody.created ).toBe( 0 );
 		expect( bulkBody.results[ 0 ].status ).toBe( 'error' );
 
+		// null は未指定として扱い、既存の発売日を消さない（WordPress は null の検証は
+		// 飛ばすがサニタイズは呼ぶので、サニタイズで空文字にすると消えてしまう）。
+		const nulled = await ctx.patch( `/wp-json/affilicard/v1/products/${ id }`, {
+			headers,
+			data: { release_date: null },
+		} );
+		expect( nulled.status() ).toBe( 200 );
+		expect( await read() ).toBe( '2026-09-16' );
+
 		// 空文字は「発売日を消す」として通す。
 		const cleared = await ctx.patch( `/wp-json/affilicard/v1/products/${ id }`, {
 			headers,

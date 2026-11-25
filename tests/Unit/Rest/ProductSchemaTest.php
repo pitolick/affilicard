@@ -658,6 +658,16 @@ final class ProductSchemaTest extends TestCase {
 		$this->assertInstanceOf( \WP_Error::class, ProductSchema::validateReleaseDate( '2026/09/16' ) );
 	}
 
+	public function test_release_dateのRESTサニタイズはnullを未指定のまま残す(): void {
+		// WordPress は null の引数を検証しないがサニタイズは呼ぶ。ここで空文字にすると
+		// {"release_date": null} の PATCH で既存の発売日が消える。
+		$sanitize = ProductSchema::updateArgs()['release_date']['sanitize_callback'];
+		$this->assertNull( call_user_func( $sanitize, null ) );
+		$this->assertSame( '', call_user_func( $sanitize, '' ) );
+		$this->assertSame( '2026-09-16', call_user_func( $sanitize, ' 2026-09-16 ' ) );
+		$this->assertSame( $sanitize, ProductSchema::args()['release_date']['sanitize_callback'] );
+	}
+
 	public function test_release_dateの引数は作成でも更新でも形式を検証する(): void {
 		$callback = array( ProductSchema::class, 'validateReleaseDate' );
 		$this->assertSame( $callback, ProductSchema::args()['release_date']['validate_callback'] );

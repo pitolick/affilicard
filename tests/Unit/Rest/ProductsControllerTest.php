@@ -519,6 +519,25 @@ final class ProductsControllerTest extends TestCase {
 		$this->assertSame( '2011-12-28', $response->get_data()['release_date'] );
 	}
 
+	public function test_updateはrelease_dateがnullなら既存の値を残す(): void {
+		$this->mockListingLockWpdb();
+		$this->storedMeta[ ProductPostType::META_RELEASE_DATE ] = '2011-12-28';
+		$this->mockFindReturnsProduct( 7, 'Keep Title' );
+		WP_Mock::userFunction( 'wp_update_post' )->once()->andReturn( 7 );
+		$this->mockMetaWriteThrough();
+
+		$controller = new ProductsController( new ProductRepository() );
+		$request    = new WP_REST_Request( 'PATCH', '/affilicard/v1/products/7' );
+		$request->set_param( 'id', 7 );
+		// WordPress のサニタイズ（sanitizeReleaseDateParam）を通った後の値。
+		$request->set_param( 'release_date', ProductSchema::sanitizeReleaseDateParam( null ) );
+
+		$response = $controller->update( $request );
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertSame( '2011-12-28', $response->get_data()['release_date'] );
+	}
+
 	public function test_createはrelease_dateを保存する(): void {
 		$this->mockListingLockWpdb();
 		WP_Mock::userFunction( 'wp_insert_post' )->once()->andReturn( 42 );

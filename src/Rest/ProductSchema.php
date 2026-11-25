@@ -101,7 +101,7 @@ final class ProductSchema {
 				'type'              => 'string',
 				'required'          => false,
 				'default'           => '',
-				'sanitize_callback' => array( self::class, 'sanitizeReleaseDate' ),
+				'sanitize_callback' => array( self::class, 'sanitizeReleaseDateParam' ),
 				'validate_callback' => array( self::class, 'validateReleaseDate' ),
 			),
 			'listings'     => array(
@@ -255,6 +255,22 @@ final class ProductSchema {
 	 */
 	public static function releaseDateErrorMessage(): string {
 		return __( 'release_date は YYYY-MM-DD 形式の実在する日付か、空文字で指定してください。', 'affilicard' );
+	}
+
+	/**
+	 * REST の sanitize_callback。`null` は `null` のまま返す（＝未指定として扱う）。
+	 *
+	 * WordPress は `null` の引数の**検証は飛ばすが、サニタイズは呼ぶ**
+	 * （`WP_REST_Request::has_valid_params()` は `null !== $param` のときだけ検証し、
+	 * `sanitize_params()` は値を問わずサニタイズする）。{@see self::sanitizeReleaseDate()} を
+	 * そのまま使うと `null` が空文字になり、`{"release_date": null}` の PATCH で既存の発売日が
+	 * 消える。`null` を残せば {@see \Affilicard\Rest\ProductsController} の取り出しが
+	 * 未指定として読み飛ばす。meta の保存は従来どおり {@see self::sanitizeReleaseDate()} を使う。
+	 *
+	 * @param mixed $value
+	 */
+	public static function sanitizeReleaseDateParam( $value ): ?string {
+		return null === $value ? null : self::sanitizeReleaseDate( $value );
 	}
 
 	/**
