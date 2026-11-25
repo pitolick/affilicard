@@ -114,14 +114,16 @@ final class PlatformDefinition {
 	 * 作品 URL（フラグメント抜き）にクエリを足すときの区切り文字。
 	 *
 	 * - クエリが無い → `?`
-	 * - `?` や `&` で終わっている（空のクエリ・末尾の区切り） → 区切り文字なし（`??` を作らない）
-	 * - クエリがある → `&`
+	 * - クエリが空（最初の `?` の後ろに何も無い）か `&` で終わっている → 区切り文字なし（`??` を作らない）
+	 * - クエリがある → `&`（クエリ内の `?` はデータなので、末尾が `?` でも `&` を足す）
 	 */
 	private static function querySeparator( string $base ): string {
-		if ( ! str_contains( $base, '?' ) ) {
+		$query_pos = strpos( $base, '?' );
+		if ( false === $query_pos ) {
 			return '?';
 		}
-		return str_ends_with( $base, '?' ) || str_ends_with( $base, '&' ) ? '' : '&';
+		$query = substr( $base, $query_pos + 1 );
+		return '' === $query || str_ends_with( $query, '&' ) ? '' : '&';
 	}
 
 	/**

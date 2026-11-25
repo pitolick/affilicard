@@ -87,6 +87,18 @@ final class PlatformDefinitionLinkTemplateTest extends TestCase {
 	}
 
 	/**
+	 * クエリ内の `?` はデータ。空でないクエリが `?` で終わっていても `&` で区切る。
+	 */
+	public function test_sepは空でないクエリの末尾の疑問符ではアンパサンドを返す(): void {
+		$def = $this->platform( '{url}{sep}tag=example-22', array( 'amazon.co.jp' ) );
+
+		$this->assertSame(
+			'https://www.amazon.co.jp/dp/X?ref=search?&tag=example-22',
+			$def->applyLinkTemplate( 'https://www.amazon.co.jp/dp/X?ref=search?' )
+		);
+	}
+
+	/**
 	 * クエリ追記型は、フラグメントの前にパラメータを入れる（後ろだとサーバへ送られない）。
 	 */
 	public function test_クエリ追記型はフラグメントの前にパラメータを入れる(): void {
