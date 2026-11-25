@@ -245,7 +245,7 @@ final class CardRendererDisplayPolicyTest extends TestCase {
 		);
 
 		$this->assertStringContainsString(
-			'<span class="affilicard-card__price">¥781</span><span class="affilicard-card__tax">（税込）</span><span class="affilicard-card__points">28pt還元</span>',
+			'<span class="affilicard-card__price">¥781</span><span class="affilicard-card__tax">（税込）</span><span class="affilicard-card__perks"><span class="affilicard-card__points">28pt還元</span></span>',
 			$html
 		);
 		// 規定の免責文言はそのまま残し、ポイントの添え書きは別の段落で後ろに置く。
@@ -308,5 +308,44 @@ final class CardRendererDisplayPolicyTest extends TestCase {
 
 		$this->assertStringNotContainsString( 'pt還元', $html );
 		$this->assertStringNotContainsString( self::POINTS_NOTE, $html );
+	}
+
+	/**
+	 * 割引率のバッジと付与ポイントは 1 つのまとまりにし、両方あるときだけ --both を付ける
+	 * （広い幅では下の段へまとめて送る）。どちらも無ければまとまりごと出さない。
+	 *
+	 * @dataProvider perksCases
+	 */
+	public function test_割引とポイントのまとまり( string $badge, string $points, string $expected ): void {
+		$html = ( new CardRenderer() )->render(
+			self::product(
+				array(
+					'price'            => '781',
+					'badge'            => $badge,
+					'points'           => $points,
+					'last_verified_at' => self::hoursAgo( 1 ),
+				)
+			),
+			self::platforms(),
+			self::options()
+		);
+
+		if ( '' === $expected ) {
+			$this->assertStringNotContainsString( 'affilicard-card__perks', $html );
+			return;
+		}
+		$this->assertStringContainsString( '<span class="affilicard-card__tax">（税込）</span>' . $expected, $html );
+	}
+
+	/**
+	 * @return array<string, array{0: string, 1: string, 2: string}>
+	 */
+	public static function perksCases(): array {
+		return array(
+			'両方なし'   => array( '', '', '' ),
+			'割引だけ'   => array( '44%OFF', '', '<span class="affilicard-card__perks"><span class="affilicard-card__discount">44%OFF</span></span>' ),
+			'ポイントだけ' => array( '', '28', '<span class="affilicard-card__perks"><span class="affilicard-card__points">28pt還元</span></span>' ),
+			'両方あり'   => array( '44%OFF', '28', '<span class="affilicard-card__perks affilicard-card__perks--both"><span class="affilicard-card__discount">44%OFF</span><span class="affilicard-card__points">28pt還元</span></span>' ),
+		);
 	}
 }

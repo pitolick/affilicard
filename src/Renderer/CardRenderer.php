@@ -676,21 +676,29 @@ final class CardRenderer {
 					$pricing     .= '<span class="affilicard-card__price">¥' . esc_html( $price_no_yen ) . '</span>';
 					$pricing     .= '<span class="affilicard-card__tax">' . esc_html__( '（税込）', 'affilicard' ) . '</span>';
 				}
+				// 割引率のバッジと付与ポイントは 1 つのまとまりにする。両方あるときは
+				// `--both` を付け、広い幅では販売価格の下の段にまとめて送る（CSS）。
+				$perks = array();
 				$badge = trim( ScalarField::string( $offer, 'badge' ) );
 				if ( '' !== $badge ) {
-					$pricing .= '<span class="affilicard-card__discount">' . esc_html( $badge ) . '</span>';
+					$perks[] = '<span class="affilicard-card__discount">' . esc_html( $badge ) . '</span>';
 				}
 				// 付与ポイント。ストアが返した数をそのまま出す（還元率や「実質◯円」は自前で計算しない。
 				// ストア側の丸めやクーポン時の上限で実際の値とずれ、情報の書き足しにもなるため）。
 				$points = self::displayablePoints( $offer );
 				if ( '' !== $price && '' !== $points ) {
-					$pricing .= '<span class="affilicard-card__points">' . esc_html(
+					$perks[] = '<span class="affilicard-card__points">' . esc_html(
 						sprintf(
 							/* translators: %s: 付与ポイント数 */
 							(string) __( '%spt還元', 'affilicard' ),
 							$points
 						)
 					) . '</span>';
+				}
+				if ( array() !== $perks ) {
+					$pricing .= '<span class="affilicard-card__perks' . ( count( $perks ) > 1 ? ' affilicard-card__perks--both' : '' ) . '">'
+						. implode( '', $perks )
+						. '</span>';
 				}
 			}
 
