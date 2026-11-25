@@ -430,6 +430,28 @@ describe( 'ListingsEditor 購入リンク（offers）', () => {
 		expect( onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].points ).toBe( '28' );
 	} );
 
+	test( '提供形態を入力すると購入リンクの plan_label に入る', async () => {
+		const onChange = jest.fn();
+		render(
+			<ListingsEditor
+				listings={ listingWithOffers( [
+					{ display_order: 100, external_id: 'a', plan_label: '' },
+				] ) }
+				platforms={ platforms }
+				onChange={ onChange }
+			/>
+		);
+
+		await userEvent.click( screen.getByRole( 'button', { name: 'a' } ) );
+		fireEvent.change( screen.getByLabelText( '提供形態' ), {
+			target: { value: '見放題' },
+		} );
+
+		expect(
+			onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].plan_label
+		).toBe( '見放題' );
+	} );
+
 	test( '追加した購入リンクは付与ポイントが空で始まる', async () => {
 		const onChange = jest.fn();
 		render(
@@ -445,6 +467,9 @@ describe( 'ListingsEditor 購入リンク（offers）', () => {
 		);
 
 		expect( onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].points ).toBe( '' );
+		expect(
+			onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].plan_label
+		).toBe( '' );
 	} );
 
 	test( '↑ で購入リンクの順序が上がる', async () => {

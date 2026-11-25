@@ -64,6 +64,20 @@ final class LegacyOfferTest extends TestCase {
 	}
 
 	/**
+	 * flat な listing（v3 以前の形・呼び出し元が offers を組まずに渡す形）の提供形態ラベルも offer へ写す。
+	 */
+	public function test_提供形態のラベルをofferへ写す(): void {
+		$offer = LegacyOffer::toOffer(
+			array(
+				'regular_url' => 'https://www.hulu.jp/x',
+				'plan_label'  => '見放題',
+			)
+		);
+
+		$this->assertSame( '見放題', $offer['plan_label'] );
+	}
+
+	/**
 	 * 取得状態も他のフィールドと同じく非スカラーを捨てる。
 	 *
 	 * `(string)` で直にキャストすると「Array to string conversion」の警告を出したうえで

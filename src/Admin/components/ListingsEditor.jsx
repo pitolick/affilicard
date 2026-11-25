@@ -116,6 +116,7 @@ function emptyOffer() {
 		list_price: '',
 		list_price_label: '',
 		badge: '',
+		plan_label: '',
 		points: '',
 		adult: '',
 		image_url: '',
@@ -206,6 +207,7 @@ function legacyOffer(listing) {
 		price: scalarString(listing.price),
 		list_price: scalarString(listing.list_price),
 		badge: scalarString(listing.badge),
+		plan_label: scalarString(listing.plan_label),
 		image_url: scalarString(listing.image_url),
 		search_key: scalarString(listing.search_key),
 		fetch_status:
@@ -658,6 +660,16 @@ function OffersEditor({ offers, fallbackOnTerminal, platform, onChange }) {
 								onChange={(v) =>
 									updateOffer(i, { list_price_label: v })
 								}
+							/>
+							<TextControl
+								label={__('提供形態', 'affilicard')}
+								value={offer.plan_label ?? ''}
+								placeholder={__('例: 見放題', 'affilicard')}
+								help={__(
+									'見放題・レンタル・読み放題など、このストアでの提供形態。価格の有無に関係なくカードに出ます。',
+									'affilicard'
+								)}
+								onChange={(v) => updateOffer(i, { plan_label: v })}
 							/>
 							<TextControl
 								label={__('バッジ', 'affilicard')}

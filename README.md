@@ -262,6 +262,10 @@ curl -u 'username:xxxx xxxx xxxx xxxx xxxx xxxx' \
 
 実装例は `src/Types/EbookType.php`（API provider 連携あり）と `src/Types/VodType.php`（手動入力のみ・監督/出演を header に昇格）を参照。VOD のように provider 連携が無い場合は `extractExtrasFromProvider()` を空配列で返すだけでよい。新しいプラットフォームを使う場合は `PlatformConfig::defaults()` に `applicableTypes` を新タイプの code にした `PlatformDefinition` を追加する（`src/Platform/PlatformConfig.php` の VOD platform 群を参照）。
 
+### 提供形態のラベル（見放題・レンタルなど）
+
+購入リンク（offer）の `plan_label` に入れた文字列（例「見放題」「レンタル」「読み放題」）は、カードの価格欄にラベルとして出る。価格の主張ではないため、**価格の鮮度に関係なく表示する**（手入力で価格を持たない VOD の購入リンクでも出る）。価格に紐づく割引の `badge`（「40%OFF」など）は従来どおり、価格を表示できるときだけ出す。
+
 ### リンクテンプレート（作品 URL からアフィリエイトリンクを組み立てる）
 
 プラットフォームに `linkTemplate`（組み立て方）と `linkHosts`（対象ドメイン）を設定すると、購入リンクに `affiliate_url` が無いとき、`regular_url`（作品・商品ページ）からアフィリエイトリンクを**表示時に**組み立てる。ASP を乗り換えても設定 1 箇所を直せば全カードに反映される。

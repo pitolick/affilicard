@@ -129,6 +129,7 @@ final class CardRendererTest extends TestCase {
 			'list_price',
 			'list_price_label',
 			'badge',
+			'plan_label',
 			'image_url',
 			'search_key',
 			'fetch_status',
@@ -1282,6 +1283,51 @@ final class CardRendererTest extends TestCase {
 		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
 		$this->assertStringNotContainsString( 'affilicard-card__discount', $html );
 		$this->assertStringContainsString( 'affilicard-card__cta', $html );
+	}
+
+	/**
+	 * 提供形態のラベル（見放題など）は価格の主張ではないので、価格を表示しない
+	 * （手入力・未確認・価格なし）購入リンクでも出す。割引の badge とは別に扱う。
+	 */
+	public function test_提供形態のラベルは価格を出さない購入リンクでも表示する(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://x',
+							'plan_label'    => '見放題',
+							'badge'         => '40%OFF',
+						)
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringContainsString( '<span class="affilicard-card__plan">見放題</span>', $html );
+		// 価格が出ないので、価格に紐づく割引の badge は従来どおり出さない。
+		$this->assertStringNotContainsString( 'affilicard-card__discount', $html );
+	}
+
+	public function test_提供形態のラベルが空なら枠を出さない(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://x',
+							'plan_label'    => '   ',
+						)
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__plan', $html );
 	}
 
 	public function test_ignores_non_date_last_verified_at(): void {

@@ -31,6 +31,8 @@
 	--affilicard-badge-bg: #fff4ed;
 	--affilicard-badge-border: #f0c9a8;
 	--affilicard-points-text: #b45309;
+	--affilicard-plan-bg: #f1efec;
+	--affilicard-plan-text: #3d3935;
 	--affilicard-footer-bg: #faf9f8;
 	--affilicard-radius: 14px;
 
@@ -356,6 +358,17 @@
 .affilicard-card__tax {
 	font-size: 11px;
 	color: var(--affilicard-text-light);
+}
+
+/* 提供形態のラベル（見放題・レンタルなど）。割引（%OFF）と見分けられるよう、塗りつぶしで示す。 */
+.affilicard-card__plan {
+	font-size: 11px;
+	font-weight: 700;
+	background: var(--affilicard-plan-bg);
+	color: var(--affilicard-plan-text);
+	padding: 2px 8px;
+	border-radius: 4px;
+	white-space: nowrap;
 }
 
 .affilicard-card__discount {

@@ -649,7 +649,13 @@ final class CardRenderer {
 			// 価格エリア（通常価格(取り消し線) + ¥価格 + （税込） + 割引バッジ）。
 			// API 確認済み・鮮度内（PriceFreshness::isPriceDisplayable）のときだけ表示する。
 			// 手動入力／未確認／TTL 期限切れの listing は CTA ボタンのみを残す。
-			$pricing = '';
+			// 提供形態のラベル（見放題・レンタルなど）。価格の主張ではないため、価格の鮮度に
+			// 関係なく出す（手入力で価格を持たない VOD でも出る）。割引の badge とは別物。
+			$pricing    = '';
+			$plan_label = trim( ScalarField::string( $offer, 'plan_label' ) );
+			if ( '' !== $plan_label ) {
+				$pricing .= '<span class="affilicard-card__plan">' . esc_html( $plan_label ) . '</span>';
+			}
 			if ( PriceFreshness::isPriceDisplayable( $offer, $platform, $now_ts ) ) {
 				$price    = trim( ScalarField::string( $offer, 'price' ) );
 				$list_raw = trim( ScalarField::string( $offer, 'list_price' ) );

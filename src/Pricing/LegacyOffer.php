@@ -64,6 +64,7 @@ final class LegacyOffer {
 			'price'            => ScalarField::string( $listing, 'price' ),
 			'list_price'       => ScalarField::string( $listing, 'list_price' ),
 			'badge'            => ScalarField::string( $listing, 'badge' ),
+			'plan_label'       => ScalarField::string( $listing, 'plan_label' ),
 			'image_url'        => ScalarField::string( $listing, 'image_url' ),
 			'search_key'       => ScalarField::string( $listing, 'search_key' ),
 			'fetch_status'     => self::resolveFetchStatus( $listing ),
