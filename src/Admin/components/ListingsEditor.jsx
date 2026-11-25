@@ -115,6 +115,7 @@ function emptyOffer() {
 		list_price: '',
 		list_price_label: '',
 		badge: '',
+		points: '',
 		image_url: '',
 		search_key: '',
 		fetch_status: '',
@@ -632,6 +633,16 @@ function OffersEditor({ offers, fallbackOnTerminal, onChange }) {
 								value={offer.badge ?? ''}
 								placeholder={__('例: 40%OFF', 'affilicard')}
 								onChange={(v) => updateOffer(i, { badge: v })}
+							/>
+							<TextControl
+								label={__('付与ポイント', 'affilicard')}
+								value={offer.points ?? ''}
+								placeholder={__('例: 28', 'affilicard')}
+								help={__(
+									'ストアのページに表示されている付与ポイント数（数字のみ）。価格の横に「28pt還元」のように出ます。空の場合は表示されません。',
+									'affilicard'
+								)}
+								onChange={(v) => updateOffer(i, { points: v })}
 							/>
 							<TextControl
 								label={__('画像 URL', 'affilicard')}

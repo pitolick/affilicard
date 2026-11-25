@@ -30,6 +30,7 @@
 	--affilicard-border: #e8e3de;
 	--affilicard-badge-bg: #fff4ed;
 	--affilicard-badge-border: #f0c9a8;
+	--affilicard-points-text: #b45309;
 	--affilicard-footer-bg: #faf9f8;
 	--affilicard-radius: 14px;
 
@@ -365,6 +366,14 @@
 	padding: 2px 8px;
 	border-radius: 4px;
 	border: 1px solid var(--affilicard-badge-border);
+}
+
+/* 付与ポイント。割引（%OFF）と見分けられるよう、枠や背景を付けず文字色だけで示す。 */
+.affilicard-card__points {
+	font-size: 12px;
+	font-weight: 700;
+	color: var(--affilicard-points-text);
+	white-space: nowrap;
 }
 
 /* CTA の背景/文字色はプラットフォーム別ブランド色を CardRenderer がインラインで付与する

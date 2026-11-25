@@ -206,6 +206,7 @@ final class ListingRefresherTest extends TestCase {
 					'list_price'       => '900',
 					'list_price_label' => '過去価格:',
 					'badge'            => '23%OFF',
+					'points'           => '28',
 					'image_url'        => 'https://example.test/i',
 					'regular_url'      => 'https://example.test/r',
 					'affiliate_url'    => 'https://example.test/a',
@@ -252,6 +253,7 @@ final class ListingRefresherTest extends TestCase {
 				$this->assertSame( '900', $offer['list_price'] );
 				$this->assertSame( '過去価格:', $offer['list_price_label'] );
 				$this->assertSame( '23%OFF', $offer['badge'] );
+				$this->assertSame( '28', $offer['points'] );
 				$this->assertSame( 'https://example.test/i', $offer['image_url'] );
 				$this->assertSame( 'https://example.test/r', $offer['regular_url'] );
 				$this->assertSame( 'https://example.test/a', $offer['affiliate_url'] );

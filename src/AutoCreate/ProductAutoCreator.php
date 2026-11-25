@@ -173,6 +173,7 @@ final class ProductAutoCreator {
 							'list_price'       => isset( $fetched['list_price'] ) ? (string) $fetched['list_price'] : '',
 							'list_price_label' => isset( $fetched['list_price_label'] ) ? (string) $fetched['list_price_label'] : '',
 							'badge'            => isset( $fetched['badge'] ) ? (string) $fetched['badge'] : '',
+							'points'           => isset( $fetched['points'] ) ? (string) $fetched['points'] : '',
 							'image_url'        => isset( $fetched['image_url'] ) ? (string) $fetched['image_url'] : '',
 							'search_key'       => isset( $fetched['search_key'] ) ? (string) $fetched['search_key'] : '',
 							'fetch_status'     => FetchStatus::NONE,

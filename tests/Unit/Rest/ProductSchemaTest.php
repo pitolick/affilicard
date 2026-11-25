@@ -131,6 +131,7 @@ final class ProductSchemaTest extends TestCase {
 		$this->assertSame( '', $offer['list_price'] );
 		$this->assertSame( '', $offer['list_price_label'] );
 		$this->assertSame( '', $offer['badge'] );
+		$this->assertSame( '', $offer['points'] );
 		$this->assertSame( '', $offer['image_url'] );
 		$this->assertSame( '', $offer['last_fetched_at'] );
 	}
@@ -152,6 +153,46 @@ final class ProductSchemaTest extends TestCase {
 		);
 
 		$this->assertSame( '過去価格:', $result[0]['offers'][0]['list_price_label'] );
+	}
+
+	/**
+	 * @dataProvider pointsCases
+	 * @param mixed $input
+	 */
+	public function test_付与ポイントは正の整数だけを残す( $input, string $expected ): void {
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform' => 'amazon-kindle',
+					'offers'   => array(
+						array(
+							'external_id' => 'B008ODF84I',
+							'points'      => $input,
+						),
+					),
+				),
+			)
+		);
+
+		$this->assertSame( $expected, $result[0]['offers'][0]['points'] );
+	}
+
+	/**
+	 * @return array<string, array{0: mixed, 1: string}>
+	 */
+	public static function pointsCases(): array {
+		return array(
+			'文字列の数字' => array( '28', '28' ),
+			'整数'     => array( 28, '28' ),
+			'前後の空白'  => array( ' 28 ', '28' ),
+			'先頭の 0'  => array( '028', '28' ),
+			'0'      => array( '0', '' ),
+			'負数'     => array( -3, '' ),
+			'小数'     => array( '2.5', '' ),
+			'単位付き'   => array( '28pt', '' ),
+			'空'      => array( '', '' ),
+			'配列'     => array( array( 28 ), '' ),
+		);
 	}
 
 	public function test_sanitize_listings_returns_empty_when_not_array(): void {

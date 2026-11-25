@@ -209,6 +209,28 @@ final class AmazonProviderTest extends TestCase {
 		$this->assertSame( '990', $data['list_price'] );
 		$this->assertSame( '過去価格:', $data['list_price_label'] );
 		$this->assertSame( '44%OFF', $data['badge'] );
+		// 付与ポイントは価格と同じ出品（カートを取っている出品）のものを、数のまま入れる。
+		$this->assertSame( '6', $data['points'] );
+	}
+
+	public function test_付与ポイントが返らなければ空にして古い値を残さない(): void {
+		$item = self::item();
+		unset( $item['offersV2']['listings'][1]['loyaltyPoints'] );
+
+		$this->assertSame( '', AmazonProvider::normalizeItem( $item )['points'] );
+
+		$item['offersV2']['listings'][1]['loyaltyPoints'] = array( 'points' => 0 );
+		$this->assertSame( '', AmazonProvider::normalizeItem( $item )['points'] );
+	}
+
+	public function test_価格の無い出品の付与ポイントは入れない(): void {
+		$item = self::item();
+		unset( $item['offersV2']['listings'][1]['price'] );
+
+		$data = AmazonProvider::normalizeItem( $item );
+
+		$this->assertSame( '', $data['price'] );
+		$this->assertSame( '', $data['points'] );
 	}
 
 	public function test_割引が無ければ基準価格とバッジを空にして古いセール表示を残さない(): void {
@@ -241,6 +263,10 @@ final class AmazonProviderTest extends TestCase {
 		$this->assertStringContainsString( 'Amazon.co.jp', $policy->priceDisclaimer );
 		$this->assertStringContainsString( 'アマゾンジャパン合同会社', $policy->contentAttribution );
 		$this->assertSame( 24, $policy->imageTtlHours );
+		// 付与ポイントの添え書きは、規定の免責文言とは別の文として持つ（原文を改変しない）。
+		$this->assertStringContainsString( '付与ポイントは表示された日付/時刻の時点のもの', $policy->pointsNote );
+		$this->assertStringContainsString( 'Amazon.co.jp', $policy->pointsNote );
+		$this->assertStringNotContainsString( 'ポイント', $policy->priceDisclaimer );
 	}
 
 	public function test_免責文言の購入先は設定したマーケットプレイスに合わせる(): void {

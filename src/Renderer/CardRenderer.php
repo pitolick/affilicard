@@ -378,6 +378,20 @@ final class CardRenderer {
 				$disclaimers[ $policy->priceDisclaimer ] = true;
 			}
 		}
+		// 付与ポイントを出しているストアの添え書き。免責文言（規定の原文）の後ろに別の段落で置く。
+		foreach ( $entries as $entry ) {
+			if ( ! PriceFreshness::isPriceDisplayable( $entry['offer'], $entry['platform'], $now_ts ) ) {
+				continue;
+			}
+			$policy = $this->policies[ $entry['platform']->code ] ?? null;
+			if (
+				null !== $policy && '' !== $policy->pointsNote
+				&& '' !== trim( ScalarField::string( $entry['offer'], 'price' ) )
+				&& '' !== self::displayablePoints( $entry['offer'] )
+			) {
+				$disclaimers[ $policy->pointsNote ] = true;
+			}
+		}
 		$details = '';
 		if ( array() !== $disclaimers ) {
 			$details = '<details class="affilicard-card__price-disclaimer">'
@@ -666,6 +680,18 @@ final class CardRenderer {
 				if ( '' !== $badge ) {
 					$pricing .= '<span class="affilicard-card__discount">' . esc_html( $badge ) . '</span>';
 				}
+				// 付与ポイント。ストアが返した数をそのまま出す（還元率や「実質◯円」は自前で計算しない。
+				// ストア側の丸めやクーポン時の上限で実際の値とずれ、情報の書き足しにもなるため）。
+				$points = self::displayablePoints( $offer );
+				if ( '' !== $price && '' !== $points ) {
+					$pricing .= '<span class="affilicard-card__points">' . esc_html(
+						sprintf(
+							/* translators: %s: 付与ポイント数 */
+							(string) __( '%spt還元', 'affilicard' ),
+							$points
+						)
+					) . '</span>';
+				}
 			}
 
 			$cta_tracking = array_merge( array( 'platform' => $code ), $tracking );
@@ -677,6 +703,16 @@ final class CardRenderer {
 				. '</li>';
 		}
 		return '' === $rows ? '' : '<ul class="affilicard-card__listings">' . $rows . '</ul>';
+	}
+
+	/**
+	 * カードに出してよい付与ポイント（正の整数の文字列）。無い・数字でなければ空文字。
+	 *
+	 * @param array<string, mixed> $offer
+	 */
+	private static function displayablePoints( array $offer ): string {
+		$points = trim( ScalarField::string( $offer, 'points' ) );
+		return 1 === preg_match( '/^[1-9][0-9]*$/', $points ) ? $points : '';
 	}
 
 	/**

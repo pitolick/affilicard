@@ -16,6 +16,7 @@ final class CardRendererDisplayPolicyTest extends TestCase {
 
 	private const DISCLAIMER  = '価格および発送可能時期は表示された日付/時刻の時点のものであり、変更される場合があります。';
 	private const ATTRIBUTION = '本サイト上で表示されるコンテンツの一部は、アマゾンジャパン合同会社またはその関連会社により提供されたものです。';
+	private const POINTS_NOTE = '付与ポイントは表示された日付/時刻の時点のものであり、変更される場合があります。';
 
 	protected function setUp(): void {
 		WP_Mock::setUp();
@@ -49,7 +50,7 @@ final class CardRendererDisplayPolicyTest extends TestCase {
 		return array_merge(
 			array(
 				'display_policies' => array(
-					'amazon-kindle' => new DisplayPolicy( self::DISCLAIMER, self::ATTRIBUTION, 24 ),
+					'amazon-kindle' => new DisplayPolicy( self::DISCLAIMER, self::ATTRIBUTION, 24, self::POINTS_NOTE ),
 				),
 			),
 			$extra
@@ -228,5 +229,84 @@ final class CardRendererDisplayPolicyTest extends TestCase {
 			$html
 		);
 		$this->assertStringContainsString( '44%OFF', $html );
+	}
+
+	public function test_付与ポイントは価格の横に数のまま出し_免責文言の後ろに添え書きを置く(): void {
+		$html = ( new CardRenderer() )->render(
+			self::product(
+				array(
+					'price'            => '781',
+					'points'           => '28',
+					'last_verified_at' => self::hoursAgo( 1 ),
+				)
+			),
+			self::platforms(),
+			self::options()
+		);
+
+		$this->assertStringContainsString(
+			'<span class="affilicard-card__price">¥781</span><span class="affilicard-card__tax">（税込）</span><span class="affilicard-card__points">28pt還元</span>',
+			$html
+		);
+		// 規定の免責文言はそのまま残し、ポイントの添え書きは別の段落で後ろに置く。
+		$this->assertStringContainsString(
+			'<summary>詳しくはこちら</summary><p>' . self::DISCLAIMER . '</p><p>' . self::POINTS_NOTE . '</p></details>',
+			$html
+		);
+	}
+
+	public function test_付与ポイントが無ければポイントも添え書きも出さない(): void {
+		foreach ( array( '', '0', 'abc', '-3' ) as $points ) {
+			$html = ( new CardRenderer() )->render(
+				self::product(
+					array(
+						'price'            => '781',
+						'points'           => $points,
+						'last_verified_at' => self::hoursAgo( 1 ),
+					)
+				),
+				self::platforms(),
+				self::options()
+			);
+
+			$this->assertStringNotContainsString( 'affilicard-card__points', $html, "points={$points}" );
+			$this->assertStringNotContainsString( self::POINTS_NOTE, $html, "points={$points}" );
+			// 価格の免責文言はポイントの有無に関わらず出る。
+			$this->assertStringContainsString( self::DISCLAIMER, $html );
+		}
+	}
+
+	public function test_価格を出せない購入リンクの付与ポイントは出さない(): void {
+		// 確認から 25 時間経った（価格の表示期限切れ）。
+		$html = ( new CardRenderer() )->render(
+			self::product(
+				array(
+					'price'            => '781',
+					'points'           => '28',
+					'last_verified_at' => self::hoursAgo( 25 ),
+				)
+			),
+			self::platforms(),
+			self::options()
+		);
+
+		$this->assertStringNotContainsString( 'pt還元', $html );
+		$this->assertStringNotContainsString( self::POINTS_NOTE, $html );
+
+		// 価格が空なら、ポイントだけを出すこともしない。
+		$html = ( new CardRenderer() )->render(
+			self::product(
+				array(
+					'price'            => '',
+					'points'           => '28',
+					'last_verified_at' => self::hoursAgo( 1 ),
+				)
+			),
+			self::platforms(),
+			self::options()
+		);
+
+		$this->assertStringNotContainsString( 'pt還元', $html );
+		$this->assertStringNotContainsString( self::POINTS_NOTE, $html );
 	}
 }

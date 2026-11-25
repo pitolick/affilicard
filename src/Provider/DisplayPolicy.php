@@ -15,10 +15,12 @@ final class DisplayPolicy {
 	 * @param string   $priceDisclaimer    価格の時点表示に添える免責文言（空なら出さない）
 	 * @param string   $contentAttribution そのストアの情報を表示しているカードに出す提供元の表記（空なら出さない）
 	 * @param int|null $imageTtlHours      取得から何時間まで書影を表示してよいか（null は制限なし）
+	 * @param string   $pointsNote         付与ポイントを表示しているときに免責文言の後へ添える 1 文（空なら出さない）
 	 */
 	public function __construct(
 		public readonly string $priceDisclaimer = '',
 		public readonly string $contentAttribution = '',
-		public readonly ?int $imageTtlHours = null
+		public readonly ?int $imageTtlHours = null,
+		public readonly string $pointsNote = ''
 	) {}
 }

@@ -343,6 +343,43 @@ describe( 'ListingsEditor 購入リンク（offers）', () => {
 		expect( onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers ).toHaveLength( 1 );
 	} );
 
+	test( '付与ポイントを入力すると購入リンクの points に入る', async () => {
+		const onChange = jest.fn();
+		render(
+			<ListingsEditor
+				listings={ listingWithOffers( [
+					{ display_order: 100, external_id: 'a', price: '781', points: '' },
+				] ) }
+				platforms={ platforms }
+				onChange={ onChange }
+			/>
+		);
+
+		await userEvent.click( screen.getByRole( 'button', { name: 'a' } ) );
+		fireEvent.change( screen.getByLabelText( '付与ポイント' ), {
+			target: { value: '28' },
+		} );
+
+		expect( onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].points ).toBe( '28' );
+	} );
+
+	test( '追加した購入リンクは付与ポイントが空で始まる', async () => {
+		const onChange = jest.fn();
+		render(
+			<ListingsEditor
+				listings={ listingWithOffers( [] ) }
+				platforms={ platforms }
+				onChange={ onChange }
+			/>
+		);
+
+		await userEvent.click(
+			screen.getByRole( 'button', { name: '購入リンクを追加' } )
+		);
+
+		expect( onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].points ).toBe( '' );
+	} );
+
 	test( '↑ で購入リンクの順序が上がる', async () => {
 		const onChange = jest.fn();
 		render(
