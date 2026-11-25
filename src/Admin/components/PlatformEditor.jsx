@@ -1,4 +1,4 @@
-import { useState } from '@wordpress/element';
+import { useState, useEffect } from '@wordpress/element';
 import {
 	TextControl,
 	ToggleControl,
@@ -10,9 +10,38 @@ import { __, sprintf } from '@wordpress/i18n';
 import { triggerRefresh } from '../api/refresh';
 import { providerLabel } from '../providers';
 
+/**
+ * 対象ドメインの入力（カンマ区切り）を配列にする。空要素は除く。
+ * 正規化（小文字化・パス除去など）はサーバ側（PlatformDefinition::fromArray）が行う。
+ *
+ * @param {string} value カンマ区切りの入力値
+ * @return {string[]} ドメインの配列
+ */
+export function parseLinkHosts(value) {
+	return String(value ?? '')
+		.split(',')
+		.map((host) => host.trim())
+		.filter((host) => host !== '');
+}
+
 export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 	const [refreshing, setRefreshing] = useState(false);
 	const [notice, setNotice] = useState(null);
+	// 入力中の文字列はそのまま持つ（配列から毎回組み立て直すと、末尾のカンマが消えて
+	// 2 つ目のドメインを打てなくなる）。保存用の配列は入力のたびに親へ渡す。
+	const [hostsDraft, setHostsDraft] = useState(() =>
+		(Array.isArray(platform.linkHosts) ? platform.linkHosts : []).join(', ')
+	);
+	// 外から値が変わったとき（保存後にサーバが正規化した値が返る等）だけ入力欄へ反映する。
+	// 入力中は「入力欄を配列にしたもの」と親の値が一致しているので上書きしない。
+	const hostsKey = (
+		Array.isArray(platform.linkHosts) ? platform.linkHosts : []
+	).join(', ');
+	useEffect(() => {
+		setHostsDraft((draft) =>
+			parseLinkHosts(draft).join(', ') === hostsKey ? draft : hostsKey
+		);
+	}, [hostsKey]);
 	const update = (patch) => onChange({ ...platform, ...patch });
 
 	const onRefresh = async () => {
@@ -82,6 +111,33 @@ export function PlatformEditor({ platform, onChange, initialOpen = false }) {
 					label={__('ボタン文字色', 'affilicard')}
 					value={platform.buttonTextColor ?? '#ffffff'}
 					onChange={(v) => update({ buttonTextColor: v })}
+				/>
+			</div>
+
+			<div className="affilicard-platform-editor__section affilicard-platform-editor__section--link">
+				<h4 className="affilicard-platform-editor__subhead">
+					{__('アフィリエイトリンクの組み立て', 'affilicard')}
+				</h4>
+				<TextControl
+					label={__('リンクテンプレート', 'affilicard')}
+					value={platform.linkTemplate ?? ''}
+					onChange={(v) => update({ linkTemplate: v })}
+					help={__(
+						'購入リンクにアフィリエイト URL が無いとき、通常 URL（作品・商品ページ）からアフィリエイトリンクを組み立てます。{url}＝通常 URL、{url_enc}＝通常 URL を URL エンコードしたもの、{sep}＝通常 URL にクエリがあれば「&」無ければ「?」。例: https://example.com/link?id=XXXX&url={url_enc} ／ {url}{sep}tag=XXXX。https:// か {url} で始まり、{url} か {url_enc} を含む形だけが有効です。',
+						'affilicard'
+					)}
+				/>
+				<TextControl
+					label={__('対象ドメイン', 'affilicard')}
+					value={hostsDraft}
+					onChange={(v) => {
+						setHostsDraft(v);
+						update({ linkHosts: parseLinkHosts(v) });
+					}}
+					help={__(
+						'テンプレートを当てる通常 URL のドメイン（カンマ区切り）。サブドメインも対象になります（例: hulu.jp は www.hulu.jp にも当たる）。一致しない URL や、ここが空のときはテンプレートを使いません。',
+						'affilicard'
+					)}
 				/>
 			</div>
 

@@ -4,7 +4,9 @@ declare(strict_types=1);
 namespace Affilicard\Types;
 
 /**
- * VOD（動画配信）タイプ。推奨フィールドは監督・出演・配給の 3 つ。
+ * VOD（動画配信）タイプ。推奨フィールドは監督・出演・公開年・配給の 4 つ。
+ *
+ * 公開年は利用側が作品を「タイトル + 公開年」で同定するため、カードにも出せるようにしている。
  *
  * 当面は手動入力のみで外部 API provider を持たないため、
  * extractExtrasFromProvider() は常に空配列を返す。
@@ -32,6 +34,11 @@ final class VodType extends AbstractProductType {
 			array(
 				'key'   => 'cast',
 				'label' => __( '出演', 'affilicard' ),
+				'card'  => 'header',
+			),
+			array(
+				'key'   => 'release_year',
+				'label' => __( '公開年', 'affilicard' ),
 				'card'  => 'header',
 			),
 			array(

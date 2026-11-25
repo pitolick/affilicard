@@ -131,10 +131,28 @@ final class ProductSchemaTest extends TestCase {
 		$this->assertSame( '', $offer['list_price'] );
 		$this->assertSame( '', $offer['list_price_label'] );
 		$this->assertSame( '', $offer['badge'] );
+		$this->assertSame( '', $offer['plan_label'] );
 		$this->assertSame( '', $offer['points'] );
 		$this->assertSame( '', $offer['adult'] );
 		$this->assertSame( '', $offer['image_url'] );
 		$this->assertSame( '', $offer['last_fetched_at'] );
+	}
+
+	public function test_sanitize_listings_提供形態のラベルを保存する(): void {
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform' => 'hulu',
+					'offers'   => array(
+						array(
+							'regular_url' => 'https://www.hulu.jp/x',
+							'plan_label'  => ' 見放題 ',
+						),
+					),
+				),
+			)
+		);
+		$this->assertSame( '見放題', $result[0]['offers'][0]['plan_label'] );
 	}
 
 	public function test_sanitize_listings_参考価格のラベルを保存する(): void {

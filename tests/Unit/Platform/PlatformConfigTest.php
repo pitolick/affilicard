@@ -154,10 +154,10 @@ final class PlatformConfigTest extends TestCase {
 		PlatformConfig::save( array( $first, $other, $second ) );
 	}
 
-	public function test_defaults_returns_eight_entries_with_expected_codes(): void {
+	public function test_defaults_returns_seven_entries_with_expected_codes(): void {
 		$defaults = PlatformConfig::defaults();
 
-		$this->assertCount( 8, $defaults );
+		$this->assertCount( 7, $defaults );
 		$codes = array_map(
 			static function ( PlatformDefinition $d ): string {
 				return $d->code;
@@ -165,7 +165,7 @@ final class PlatformConfigTest extends TestCase {
 			$defaults
 		);
 		$this->assertSame(
-			array( 'dmm-books', 'amazon-kindle', 'rakuten-kobo', 'u-next', 'netflix', 'hulu', 'prime-video', 'danime' ),
+			array( 'dmm-books', 'amazon-kindle', 'rakuten-kobo', 'u-next', 'hulu', 'prime-video', 'dmm-tv' ),
 			$codes
 		);
 		$this->assertSame( 'dmm-ebook', $defaults[0]->provider );
@@ -174,32 +174,44 @@ final class PlatformConfigTest extends TestCase {
 		$this->assertSame( 3, $defaults[2]->displayOrder );
 	}
 
+	/**
+	 * VOD は作品単位のアフィリエイトリンクを持てるサービスだけを置く。
+	 * Netflix（アフィリエイト無し）・dアニメストア（入会 LP 固定）は既定から外した。
+	 */
 	public function test_defaults_include_vod_platforms(): void {
 		$defaults = PlatformConfig::defaults();
-		$this->assertCount( 8, $defaults );
 
 		$by_code = array();
 		foreach ( $defaults as $def ) {
 			$by_code[ $def->code ] = $def;
 		}
 
-		foreach ( array( 'u-next', 'netflix', 'hulu', 'prime-video', 'danime' ) as $code ) {
+		$expected = array(
+			'u-next'      => array( 5, array( 'video.unext.jp' ) ),
+			'hulu'        => array( 6, array( 'hulu.jp' ) ),
+			'prime-video' => array( 7, array( 'amazon.co.jp' ) ),
+			'dmm-tv'      => array( 8, array( 'tv.dmm.com' ) ),
+		);
+		foreach ( $expected as $code => list( $order, $hosts ) ) {
 			$this->assertArrayHasKey( $code, $by_code, "VOD platform {$code} が defaults に存在する" );
 			$this->assertSame( 'manual', $by_code[ $code ]->provider );
 			$this->assertSame( array( 'vod' ), $by_code[ $code ]->applicableTypes );
 			$this->assertTrue( $by_code[ $code ]->enabled );
-		}
-
-		// ebook (1-3) に続く VOD の displayOrder が 5-9 であることを確認する（4 は BookWalker 削除で欠番）。
-		$expected_orders = array(
-			'u-next'      => 5,
-			'netflix'     => 6,
-			'hulu'        => 7,
-			'prime-video' => 8,
-			'danime'      => 9,
-		);
-		foreach ( $expected_orders as $code => $order ) {
 			$this->assertSame( $order, $by_code[ $code ]->displayOrder, "{$code} の displayOrder" );
+			$this->assertSame( $hosts, $by_code[ $code ]->linkHosts, "{$code} の linkHosts" );
+			// トラッキング ID はサイトごとに違うため、汎用プラグインの既定には入れない。
+			$this->assertSame( '', $by_code[ $code ]->linkTemplate, "{$code} の linkTemplate は空" );
+		}
+		$this->assertArrayNotHasKey( 'netflix', $by_code );
+		$this->assertArrayNotHasKey( 'danime', $by_code );
+	}
+
+	public function test_defaults_電子書籍にはリンクテンプレートを持たせない(): void {
+		foreach ( PlatformConfig::defaults() as $d ) {
+			if ( in_array( 'ebook', $d->applicableTypes, true ) ) {
+				$this->assertSame( '', $d->linkTemplate, $d->code );
+				$this->assertSame( array(), $d->linkHosts, $d->code );
+			}
 		}
 	}
 

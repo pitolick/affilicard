@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Repository;
 
 use Affilicard\Platform\PlatformConfig;
+use Affilicard\Platform\PlatformDefinition;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferIdentity;
@@ -1009,11 +1010,15 @@ final class ProductRepository implements ProductRepositoryInterface {
 			return 0;
 		}
 
+		// リンクテンプレートの判定に使うプラットフォーム定義。フォールバックの疑いが出た
+		// ときに 1 回だけ読む（hasFallbackListing() が埋める。商品ごとには読まない）。
+		$platforms = null;
+
 		$count = 0;
 		foreach ( $ids as $id ) {
 			$listings     = get_post_meta( (int) $id, ProductPostType::META_LISTINGS, true );
 			$listings_arr = is_string( $listings ) ? JsonField::decode( $listings, array() ) : ( is_array( $listings ) ? $listings : array() );
-			if ( self::hasFallbackListing( $listings_arr ) ) {
+			if ( self::hasFallbackListing( $listings_arr, $platforms ) ) {
 				++$count;
 			}
 		}
@@ -1198,9 +1203,13 @@ final class ProductRepository implements ProductRepositoryInterface {
 	 * offers[0] 相当へ変換してから選択に回す。これを飛ばすと、countFallbackProducts() が
 	 * 参照するダッシュボード件数から、移行バッチが到達するまでの窓で未移行の商品が漏れる。
 	 *
-	 * @param array<int, mixed> $listings
+	 * プラットフォームのリンクテンプレートで組み立てられる offer はフォールバックではない
+	 * （カードはアフィリエイトリンクを出している）。
+	 *
+	 * @param array<int, mixed>                      $listings
+	 * @param array<string, PlatformDefinition>|null $platforms code => 定義（テンプレート判定用）。null なら必要になったときに読んで埋める
 	 */
-	private static function hasFallbackListing( array $listings ): bool {
+	private static function hasFallbackListing( array $listings, ?array &$platforms = null ): bool {
 		$fallback_enabled = GeneralSettings::fallbackOnTerminal();
 
 		foreach ( $listings as $listing ) {
@@ -1216,7 +1225,19 @@ final class ProductRepository implements ProductRepositoryInterface {
 			// 判定は OfferUrl に委ねる（カードの CTA が使うのと同一の規則）。素の空判定だと、
 			// affiliate_url が不正で regular_url が正当な offer——カードは regular_url で
 			// 描画している＝正真正銘のフォールバック中——をこの件数だけが取りこぼす。
-			if ( OfferUrl::isRegularUrlFallback( $selected[0] ) ) {
+			if ( ! OfferUrl::isRegularUrlFallback( $selected[0] ) ) {
+				continue;
+			}
+			// テンプレートで組み立てられるならフォールバックではない（カードはアフィリエイト
+			// リンクを出している）。定義はフォールバックの疑いが出たときだけ読む。
+			if ( null === $platforms ) {
+				$platforms = array();
+				foreach ( PlatformConfig::all() as $definition ) {
+					$platforms[ $definition->code ] = $definition;
+				}
+			}
+			$code = isset( $listing['platform'] ) && is_string( $listing['platform'] ) ? $listing['platform'] : '';
+			if ( OfferUrl::isRegularUrlFallback( $selected[0], $platforms[ $code ] ?? null ) ) {
 				return true;
 			}
 		}

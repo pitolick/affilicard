@@ -149,6 +149,73 @@ describe( 'ListingsEditor', () => {
 		).not.toBeInTheDocument();
 	} );
 
+	describe( 'リンクテンプレート', () => {
+		const huluPlatforms = [
+			...platforms,
+			{
+				code: 'hulu',
+				name: 'Hulu',
+				linkTemplate: 'https://h.example.test/?url={url_enc}',
+				linkHosts: [ 'hulu.jp' ],
+			},
+		];
+		const huluListing = ( regularUrl ) =>
+			listingWith( {
+				platform: 'hulu',
+				offers: [
+					{
+						display_order: 100,
+						external_id: 'h1',
+						regular_url: regularUrl,
+						affiliate_url: '',
+					},
+				],
+			} );
+
+		test( 'テンプレートで組み立てられる購入リンクはフォールバック警告を出さず、組み立てる旨を出す', async () => {
+			fetchPlatforms.mockResolvedValue( huluPlatforms );
+			render(
+				<ListingsEditor
+					listings={ [ huluListing( 'https://www.hulu.jp/nny' ) ] }
+					onChange={ () => {} }
+				/>
+			);
+			await waitFor( () =>
+				expect( fetchPlatforms ).toHaveBeenCalled()
+			);
+			await waitFor( () =>
+				expect(
+					screen.getByText( /リンクテンプレートで通常 URL から組み立てます/ )
+				).toBeInTheDocument()
+			);
+			expect(
+				screen.queryByText(
+					/アフィリエイト URL 未設定、通常 URL にフォールバック中/
+				)
+			).not.toBeInTheDocument();
+		} );
+
+		test( '対象ドメイン外の通常 URL はフォールバック警告を出す', async () => {
+			fetchPlatforms.mockResolvedValue( huluPlatforms );
+			render(
+				<ListingsEditor
+					listings={ [ huluListing( 'https://example.test/x' ) ] }
+					onChange={ () => {} }
+				/>
+			);
+			await waitFor( () =>
+				expect(
+					screen.getByText(
+						/アフィリエイト URL 未設定、通常 URL にフォールバック中/
+					)
+				).toBeInTheDocument()
+			);
+			expect(
+				screen.queryByText( /リンクテンプレートで通常 URL から組み立てます/ )
+			).not.toBeInTheDocument();
+		} );
+	} );
+
 	test( 'clicking "listing を追加" appends an EMPTY_LISTING', async () => {
 		fetchPlatforms.mockResolvedValue( platforms );
 		const onChange = jest.fn();
@@ -363,6 +430,28 @@ describe( 'ListingsEditor 購入リンク（offers）', () => {
 		expect( onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].points ).toBe( '28' );
 	} );
 
+	test( '提供形態を入力すると購入リンクの plan_label に入る', async () => {
+		const onChange = jest.fn();
+		render(
+			<ListingsEditor
+				listings={ listingWithOffers( [
+					{ display_order: 100, external_id: 'a', plan_label: '' },
+				] ) }
+				platforms={ platforms }
+				onChange={ onChange }
+			/>
+		);
+
+		await userEvent.click( screen.getByRole( 'button', { name: 'a' } ) );
+		fireEvent.change( screen.getByLabelText( '提供形態' ), {
+			target: { value: '見放題' },
+		} );
+
+		expect(
+			onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].plan_label
+		).toBe( '見放題' );
+	} );
+
 	test( '追加した購入リンクは付与ポイントが空で始まる', async () => {
 		const onChange = jest.fn();
 		render(
@@ -378,6 +467,9 @@ describe( 'ListingsEditor 購入リンク（offers）', () => {
 		);
 
 		expect( onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].points ).toBe( '' );
+		expect(
+			onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].plan_label
+		).toBe( '' );
 	} );
 
 	test( '↑ で購入リンクの順序が上がる', async () => {

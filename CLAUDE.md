@@ -123,7 +123,7 @@ affilicard/
 
 ### URL フォールバック
 
-全タイプ共通で `affiliate_url ?? regular_url`。両方空なら CTA 非表示。発生時は admin 可視化（CPT 一覧 + ダッシュボードウィジェット）。
+全タイプ共通で `affiliate_url` → プラットフォームの `linkTemplate` で `regular_url` から組み立てた URL（`linkHosts` に一致するときだけ）→ `regular_url` の順（判定は `Pricing\OfferUrl` 1 箇所）。どれも無ければ CTA 非表示。`regular_url` に落ちたときは admin 可視化（CPT 一覧 + ダッシュボードウィジェット）。
 
 ### Credentials 部分更新 (PATCH 的)
 
@@ -159,6 +159,15 @@ WP 公式ディレクトリは経由せず、`yahnis-elsts/plugin-update-checker
 - 新機能・バグ修正には必ず `tests/Unit/` (PHP) または `tests/js/` (React) にユニットテストを追加する
 - 外部 API (DMM / Amazon / 楽天 / WP REST 等) はすべてモックする
 - 特定サイト固有のコードを混入させない（汎用性を損なう変更は却下）
+
+### プレビュー（Playground）のデモデータ
+
+PR ごとに WordPress Playground のプレビューが立ち、`blueprints/demo-seed.php` がダミーデータと固定ページ「**Affilicard デモ**」（トップページ）を作る。
+
+- **新しいプラットフォーム・商品タイプ（`src/Types/`）・カードの表示要素を追加・変更したら、同じ PR で `blueprints/demo-seed.php` にサンプル商品を足し、固定ページ「Affilicard デモ」に見出し付きのセクションとして並べる**（別の投稿に分けない。プレビューを開いてすぐ一覧で見た目を確認できるようにするため）
+- セクションの冒頭に、何を確認するためのサンプルかを 1 段落で書く。比べたい状態があれば対照のカードも並べる（例: テンプレートあり／なし）
+- 外部の ID・URL は架空の値にする（`example.com` / `example.test`・`demo-22` など）。実在のアフィリエイト ID は入れない
+- プラットフォーム設定が要るサンプル（リンクテンプレート等）は、seed の中で `PlatformConfig::save()` を使って設定する
 
 ### リリース
 

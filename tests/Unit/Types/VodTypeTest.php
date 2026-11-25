@@ -31,25 +31,28 @@ final class VodTypeTest extends TestCase {
 		$this->assertSame( '動画配信', $type->label() );
 	}
 
-	public function test_extras_schema_returns_three_recommended_fields(): void {
+	public function test_extras_schema_returns_four_recommended_fields(): void {
 		$type   = new VodType();
 		$schema = $type->extrasSchema();
 
-		$this->assertCount( 3, $schema );
+		$this->assertCount( 4, $schema );
 		$this->assertSame( 'director', $schema[0]['key'] );
 		$this->assertSame( '監督', $schema[0]['label'] );
 		$this->assertSame( 'cast', $schema[1]['key'] );
 		$this->assertSame( '出演', $schema[1]['label'] );
-		$this->assertSame( 'distributor', $schema[2]['key'] );
-		$this->assertSame( '配給', $schema[2]['label'] );
+		$this->assertSame( 'release_year', $schema[2]['key'] );
+		$this->assertSame( '公開年', $schema[2]['label'] );
+		$this->assertSame( 'distributor', $schema[3]['key'] );
+		$this->assertSame( '配給', $schema[3]['label'] );
 		$this->assertSame( 'header', $schema[0]['card'] );
 		$this->assertSame( 'header', $schema[1]['card'] );
-		$this->assertSame( 'detail', $schema[2]['card'] );
+		$this->assertSame( 'header', $schema[2]['card'] );
+		$this->assertSame( 'detail', $schema[3]['card'] );
 	}
 
-	public function test_card_header_keys_are_director_and_cast(): void {
+	public function test_card_header_keys_are_director_cast_and_release_year(): void {
 		$type = new VodType();
-		$this->assertSame( array( 'director', 'cast' ), $type->cardHeaderKeys() );
+		$this->assertSame( array( 'director', 'cast', 'release_year' ), $type->cardHeaderKeys() );
 	}
 
 	public function test_card_hidden_keys_is_empty(): void {

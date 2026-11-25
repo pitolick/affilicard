@@ -118,6 +118,12 @@ final class DashboardWidgetTest extends TestCase {
 		WP_Mock::userFunction( 'get_option' )
 			->with( \Affilicard\Settings\GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array() );
+		// フォールバックの疑いが出たとき、リンクテンプレートの判定にプラットフォーム定義を
+		// 1 回だけ読む（定義が無い＝テンプレートなし＝フォールバックのまま）。
+		WP_Mock::userFunction( 'get_option' )
+			->with( \Affilicard\Platform\PlatformConfig::OPTION_KEY, array() )
+			->once()
+			->andReturn( array() );
 
 		// 両 post_id とも fallback 状態 (affiliate_url='', regular_url 非空)
 		WP_Mock::userFunction( 'get_post_meta' )

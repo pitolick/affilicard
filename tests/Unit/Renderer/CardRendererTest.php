@@ -129,6 +129,7 @@ final class CardRendererTest extends TestCase {
 			'list_price',
 			'list_price_label',
 			'badge',
+			'plan_label',
 			'image_url',
 			'search_key',
 			'fetch_status',
@@ -224,6 +225,45 @@ final class CardRendererTest extends TestCase {
 		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
 		$this->assertStringContainsString( 'https://example.com/1', $html );
 		$this->assertStringNotContainsString( 'javascript:', $html );
+	}
+
+	/**
+	 * プラットフォームのリンクテンプレートがあれば、作品 URL だけの購入リンクでも
+	 * CTA はアフィリエイトリンクになる（VOD の作品ページ → ASP のリダイレクタ）。
+	 */
+	public function test_リンクテンプレートで作品URLからCTAのアフィリエイトリンクを組み立てる(): void {
+		WP_Mock::userFunction( 'wp_parse_url' )->andReturnUsing(
+			static function ( $url, $component = -1 ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- wp_parse_url() のテストダブル
+				return parse_url( (string) $url, $component );
+			}
+		);
+		$hulu    = PlatformDefinition::fromArray(
+			array(
+				'code'         => 'hulu',
+				'name'         => 'Hulu',
+				'buttonLabel'  => 'Huluで見る',
+				'linkTemplate' => 'https://h.example.test/sp/cc?rk=ABC&url={url_enc}',
+				'linkHosts'    => array( 'hulu.jp' ),
+			)
+		);
+		$product = $this->product(
+			array(
+				'product_type' => 'vod',
+				'listings'     => array(
+					$this->toListing(
+						array(
+							'platform'      => 'hulu',
+							'enabled'       => true,
+							'affiliate_url' => '',
+							'regular_url'   => 'https://www.hulu.jp/nny',
+						)
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $hulu ) );
+		$this->assertStringContainsString( 'href="https://h.example.test/sp/cc?rk=ABC&url=https%3A%2F%2Fwww.hulu.jp%2Fnny"', $html );
 	}
 
 	public function test_skips_listing_when_both_urls_empty(): void {
@@ -1243,6 +1283,51 @@ final class CardRendererTest extends TestCase {
 		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
 		$this->assertStringNotContainsString( 'affilicard-card__discount', $html );
 		$this->assertStringContainsString( 'affilicard-card__cta', $html );
+	}
+
+	/**
+	 * 提供形態のラベル（見放題など）は価格の主張ではないので、価格を表示しない
+	 * （手入力・未確認・価格なし）購入リンクでも出す。割引の badge とは別に扱う。
+	 */
+	public function test_提供形態のラベルは価格を出さない購入リンクでも表示する(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://x',
+							'plan_label'    => '見放題',
+							'badge'         => '40%OFF',
+						)
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringContainsString( '<span class="affilicard-card__plan">見放題</span>', $html );
+		// 価格が出ないので、価格に紐づく割引の badge は従来どおり出さない。
+		$this->assertStringNotContainsString( 'affilicard-card__discount', $html );
+	}
+
+	public function test_提供形態のラベルが空なら枠を出さない(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://x',
+							'plan_label'    => '   ',
+						)
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+		$this->assertStringNotContainsString( 'affilicard-card__plan', $html );
 	}
 
 	public function test_ignores_non_date_last_verified_at(): void {

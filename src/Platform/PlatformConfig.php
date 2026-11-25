@@ -86,7 +86,14 @@ final class PlatformConfig {
 	}
 
 	/**
-	 * デフォルトのプラットフォーム定義（8 件: ebook 3 + vod 5）。Plugin::onActivate で seed する想定。
+	 * デフォルトのプラットフォーム定義（7 件: ebook 3 + vod 4）。Plugin::onActivate で seed する想定。
+	 *
+	 * VOD は「作品単位のアフィリエイトリンクを持てるサービス」だけを置く（Netflix のように
+	 * アフィリエイトが無い・入会 LP 固定のサービスは商品カードの対象外）。`linkHosts` は
+	 * サービスのドメインなので既定に入れるが、`linkTemplate` はトラッキング ID を含みサイトごとに
+	 * 違うため空にする（管理者が設定画面で入れる）。
+	 *
+	 * 既定値が使われるのは初回有効化時の seed だけで、保存済みのサイトには影響しない。
 	 *
 	 * @return list<PlatformDefinition>
 	 */
@@ -141,55 +148,47 @@ final class PlatformConfig {
 				__( 'U-NEXTで見る', 'affilicard' ),
 				'#000000',
 				'#ffffff',
-				priceTtlHours: 24
-			),
-			new PlatformDefinition(
-				'netflix',
-				__( 'Netflix', 'affilicard' ),
-				'manual',
-				6,
-				true,
-				array( 'vod' ),
-				__( 'Netflixで見る', 'affilicard' ),
-				'#e50914',
-				'#ffffff',
-				priceTtlHours: 24
+				priceTtlHours: 24,
+				linkHosts: array( 'video.unext.jp' )
 			),
 			new PlatformDefinition(
 				'hulu',
 				__( 'Hulu', 'affilicard' ),
 				'manual',
-				7,
+				6,
 				true,
 				array( 'vod' ),
 				__( 'Huluで見る', 'affilicard' ),
 				'#1ce783',
 				'#000000',
-				priceTtlHours: 24
+				priceTtlHours: 24,
+				linkHosts: array( 'hulu.jp' )
 			),
 			new PlatformDefinition(
 				'prime-video',
 				__( 'Prime Video', 'affilicard' ),
 				'manual',
-				8,
+				7,
 				true,
 				array( 'vod' ),
 				__( 'Prime Videoで見る', 'affilicard' ),
 				'#00a8e1',
 				'#ffffff',
-				priceTtlHours: 24
+				priceTtlHours: 24,
+				linkHosts: array( 'amazon.co.jp' )
 			),
 			new PlatformDefinition(
-				'danime',
-				__( 'dアニメストア', 'affilicard' ),
+				'dmm-tv',
+				__( 'DMM TV', 'affilicard' ),
 				'manual',
-				9,
+				8,
 				true,
 				array( 'vod' ),
-				__( 'dアニメストアで見る', 'affilicard' ),
-				'#ff6600',
+				__( 'DMM TVで見る', 'affilicard' ),
+				'#222222',
 				'#ffffff',
-				priceTtlHours: 24
+				priceTtlHours: 24,
+				linkHosts: array( 'tv.dmm.com' )
 			),
 		);
 	}

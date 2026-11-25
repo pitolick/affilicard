@@ -495,13 +495,14 @@ final class CardRenderer {
 			$offer = $selected[0];
 			// URL が無い offer は CTA 行を出さない＝非表示扱い。
 			// renderListings の行と renderTimestamp の日付計算を同一集合に揃える。
-			if ( '' === OfferUrl::ctaHref( $offer ) ) {
+			$platform = $by_code[ (string) $listing['platform'] ];
+			if ( '' === OfferUrl::ctaHref( $offer, $platform ) ) {
 				continue;
 			}
 			$out[] = array(
 				'listing'  => $listing,
 				'offer'    => $offer,
-				'platform' => $by_code[ (string) $listing['platform'] ],
+				'platform' => $platform,
 			);
 		}
 		return $out;
@@ -620,7 +621,7 @@ final class CardRenderer {
 			$platform = $entry['platform'];
 			$code     = $platform->code;
 
-			$url = OfferUrl::ctaHref( $offer );
+			$url = OfferUrl::ctaHref( $offer, $platform );
 
 			$block_override = isset( $cta_overrides[ $code ] ) ? trim( (string) $cta_overrides[ $code ] ) : '';
 			$override       = isset( $listing['button_label_override'] ) ? trim( (string) $listing['button_label_override'] ) : '';
@@ -648,7 +649,13 @@ final class CardRenderer {
 			// 価格エリア（通常価格(取り消し線) + ¥価格 + （税込） + 割引バッジ）。
 			// API 確認済み・鮮度内（PriceFreshness::isPriceDisplayable）のときだけ表示する。
 			// 手動入力／未確認／TTL 期限切れの listing は CTA ボタンのみを残す。
-			$pricing = '';
+			// 提供形態のラベル（見放題・レンタルなど）。価格の主張ではないため、価格の鮮度に
+			// 関係なく出す（手入力で価格を持たない VOD でも出る）。割引の badge とは別物。
+			$pricing    = '';
+			$plan_label = trim( ScalarField::string( $offer, 'plan_label' ) );
+			if ( '' !== $plan_label ) {
+				$pricing .= '<span class="affilicard-card__plan">' . esc_html( $plan_label ) . '</span>';
+			}
 			if ( PriceFreshness::isPriceDisplayable( $offer, $platform, $now_ts ) ) {
 				$price    = trim( ScalarField::string( $offer, 'price' ) );
 				$list_raw = trim( ScalarField::string( $offer, 'list_price' ) );

@@ -21,7 +21,10 @@ jest.mock( '../../../src/Admin/providers', () => ( {
 } ) );
 
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { PlatformEditor } from '../../../src/Admin/components/PlatformEditor';
+import {
+	PlatformEditor,
+	parseLinkHosts,
+} from '../../../src/Admin/components/PlatformEditor';
 import { triggerRefresh } from '../../../src/Admin/api/refresh';
 
 const basePlatform = {
@@ -333,6 +336,102 @@ describe( 'PlatformEditor', () => {
 		expect( onChange ).toHaveBeenCalledWith(
 			expect.objectContaining( { name: 'DMM Books' } )
 		);
+	} );
+
+	describe( 'アフィリエイトリンクの組み立て', () => {
+		test( 'リンクテンプレートと対象ドメインを現在値で表示する', () => {
+			render(
+				<PlatformEditor
+					platform={ {
+						...basePlatform,
+						linkTemplate: 'https://h.example.test/?url={url_enc}',
+						linkHosts: [ 'hulu.jp', 'video.unext.jp' ],
+					} }
+					onChange={ jest.fn() }
+				/>
+			);
+			expect( screen.getByLabelText( 'リンクテンプレート' ) ).toHaveValue(
+				'https://h.example.test/?url={url_enc}'
+			);
+			expect( screen.getByLabelText( '対象ドメイン' ) ).toHaveValue(
+				'hulu.jp, video.unext.jp'
+			);
+		} );
+
+		test( '項目が無い既存の設定でも空欄で表示する', () => {
+			render(
+				<PlatformEditor platform={ basePlatform } onChange={ jest.fn() } />
+			);
+			expect( screen.getByLabelText( 'リンクテンプレート' ) ).toHaveValue(
+				''
+			);
+			expect( screen.getByLabelText( '対象ドメイン' ) ).toHaveValue( '' );
+		} );
+
+		test( 'リンクテンプレートの入力を親へ渡す', () => {
+			const onChange = jest.fn();
+			render(
+				<PlatformEditor platform={ basePlatform } onChange={ onChange } />
+			);
+			fireEvent.change( screen.getByLabelText( 'リンクテンプレート' ), {
+				target: { value: '{url}{sep}tag=example-22' },
+			} );
+			expect( onChange ).toHaveBeenCalledWith(
+				expect.objectContaining( {
+					linkTemplate: '{url}{sep}tag=example-22',
+				} )
+			);
+		} );
+
+		test( '対象ドメインはカンマ区切りを配列にして親へ渡し、入力中の文字列は保つ', () => {
+			const onChange = jest.fn();
+			render(
+				<PlatformEditor platform={ basePlatform } onChange={ onChange } />
+			);
+			const input = screen.getByLabelText( '対象ドメイン' );
+			fireEvent.change( input, { target: { value: 'hulu.jp, ' } } );
+			expect( onChange ).toHaveBeenLastCalledWith(
+				expect.objectContaining( { linkHosts: [ 'hulu.jp' ] } )
+			);
+			// 末尾のカンマが消えると 2 つ目のドメインを打てない
+			expect( input ).toHaveValue( 'hulu.jp, ' );
+
+			fireEvent.change( input, {
+				target: { value: 'hulu.jp, video.unext.jp' },
+			} );
+			expect( onChange ).toHaveBeenLastCalledWith(
+				expect.objectContaining( {
+					linkHosts: [ 'hulu.jp', 'video.unext.jp' ],
+				} )
+			);
+		} );
+
+		test( '保存後にサーバが正規化した対象ドメインを入力欄へ反映する', () => {
+			const { rerender } = render(
+				<PlatformEditor
+					platform={ { ...basePlatform, linkHosts: [ 'Hulu.JP' ] } }
+					onChange={ jest.fn() }
+				/>
+			);
+			rerender(
+				<PlatformEditor
+					platform={ { ...basePlatform, linkHosts: [ 'hulu.jp' ] } }
+					onChange={ jest.fn() }
+				/>
+			);
+			expect( screen.getByLabelText( '対象ドメイン' ) ).toHaveValue(
+				'hulu.jp'
+			);
+		} );
+
+		test( 'parseLinkHosts は空要素と前後の空白を除く', () => {
+			expect( parseLinkHosts( ' a.jp ,, b.jp ,' ) ).toEqual( [
+				'a.jp',
+				'b.jp',
+			] );
+			expect( parseLinkHosts( '' ) ).toEqual( [] );
+			expect( parseLinkHosts( undefined ) ).toEqual( [] );
+		} );
 	} );
 
 	test( 'does not render the credential editor inline', () => {

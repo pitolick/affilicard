@@ -210,16 +210,26 @@ final class ProductListColumns {
 			// 判定は OfferUrl に委ねる（カードの CTA が使うのと同一の規則）。素の空判定だと、
 			// affiliate_url が不正で regular_url が正当な offer——カードは regular_url で
 			// 描画している＝正真正銘のフォールバック中——にこの列だけ警告を出さない。
+			//
+			// プラットフォームのリンクテンプレートで組み立てられる offer はフォールバックではない
+			// （カードはアフィリエイトリンクを出している）。定義の読み込みはフォールバックの
+			// 疑いがあるときだけにする（アフィリエイト URL がある大半の listing では読まない）。
+			$definition  = null;
 			$is_fallback = OfferUrl::isRegularUrlFallback( $offer );
+			if ( $is_fallback && '' !== $platform_code ) {
+				$definition  = PlatformConfig::find( $platform_code );
+				$is_fallback = OfferUrl::isRegularUrlFallback( $offer, $definition );
+			}
 			if ( $is_fallback ) {
 				$has_fallback = true;
 			}
 
-			$definition      = null;
 			$is_price_hidden = false;
 			$price           = trim( ScalarField::string( $offer, 'price' ) );
 			if ( '' !== $price ) {
-				$definition = PlatformConfig::find( $platform_code );
+				if ( null === $definition ) {
+					$definition = PlatformConfig::find( $platform_code );
+				}
 				if ( ! PriceFreshness::isPriceDisplayable( $offer, $definition, $now_ts ) ) {
 					$has_hidden_price = true;
 					$is_price_hidden  = true;
