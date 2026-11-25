@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [4.1.5] - 2026-11-25
+
 ### Fixed
 
 - **REST（`POST /affilicard/v1/products`・`PATCH /affilicard/v1/products/{id}`）で送った `release_date` が保存されていなかったのを直した。** schema は受け付けていて 201 / 200 も返るのに、保存に渡すフィールドの一覧から抜けていたため、黙って捨てられていた（まとめて作る `POST /products/bulk` と管理画面は保存できていた）。送らない更新では従来どおり既存の値を残す
