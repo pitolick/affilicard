@@ -143,6 +143,93 @@ test.describe( 'affilicard/v1 の商品保存（書き込み検証つき）', ()
 		expect( changedBody.listings[ 0 ].offers[ 0 ].price ).toBe( '770' );
 		await ctx.dispose();
 	} );
+
+	// 単品の作成・更新は schema が受け付ける `release_date` を以前は黙って捨てていた
+	// （201 / 200 が返るのに保存されない）。実 WP の REST で書いて読み戻す。
+	test( 'release_date は作成と更新で保存され、送らない更新では残り、形式違いは 400 で弾く', async () => {
+		const ctx = await newApiContext();
+		const headers = getAuthHeaders();
+
+		const created = await ctx.post( '/wp-json/affilicard/v1/products', {
+			headers,
+			data: {
+				title: `${ TITLE } 発売日`,
+				status: 'draft',
+				release_date: '2011-12-28',
+				listings: LISTINGS,
+			},
+		} );
+		expect( created.status() ).toBe( 201 );
+		const id = ( await created.json() ).id;
+		const read = async () =>
+			( await ( await ctx.get( `/wp-json/affilicard/v1/products/${ id }`, { headers } ) ).json() )
+				.release_date;
+		expect( await read() ).toBe( '2011-12-28' );
+
+		const changed = await ctx.patch( `/wp-json/affilicard/v1/products/${ id }`, {
+			headers,
+			data: { release_date: '2026-09-16' },
+		} );
+		expect( changed.status() ).toBe( 200 );
+		expect( ( await changed.json() ).release_date ).toBe( '2026-09-16' );
+		expect( await read() ).toBe( '2026-09-16' );
+
+		// 送らなければ既存の値を残す（部分更新）。
+		const titleOnly = await ctx.patch( `/wp-json/affilicard/v1/products/${ id }`, {
+			headers,
+			data: { title: `${ TITLE } 発売日（改題）` },
+		} );
+		expect( titleOnly.status() ).toBe( 200 );
+		expect( await read() ).toBe( '2026-09-16' );
+
+		// 形式違いは 400 で弾き、既存の発売日を消さない（以前は空文字に丸めて保存していた）。
+		for ( const bad of [ '2026/09/16', '2026-02-30' ] ) {
+			const rejected = await ctx.patch( `/wp-json/affilicard/v1/products/${ id }`, {
+				headers,
+				data: { release_date: bad },
+			} );
+			expect( rejected.status() ).toBe( 400 );
+			expect( ( await rejected.json() ).code ).toBe( 'rest_invalid_param' );
+			expect( await read() ).toBe( '2026-09-16' );
+		}
+
+		// 作成でも弾く（商品を作らない）。
+		const badCreate = await ctx.post( '/wp-json/affilicard/v1/products', {
+			headers,
+			data: { title: `${ TITLE } 発売日不正`, status: 'draft', release_date: '2026/09/16' },
+		} );
+		expect( badCreate.status() ).toBe( 400 );
+
+		// bulk は形式違いの item だけを error にする。
+		const bulk = await ctx.post( '/wp-json/affilicard/v1/products/bulk', {
+			headers,
+			data: {
+				products: [ { title: `${ TITLE } 発売日不正bulk`, status: 'draft', release_date: '2026/09/16' } ],
+			},
+		} );
+		expect( bulk.status() ).toBe( 207 );
+		const bulkBody = await bulk.json();
+		expect( bulkBody.created ).toBe( 0 );
+		expect( bulkBody.results[ 0 ].status ).toBe( 'error' );
+
+		// null は未指定として扱い、既存の発売日を消さない（WordPress は null の検証は
+		// 飛ばすがサニタイズは呼ぶので、サニタイズで空文字にすると消えてしまう）。
+		const nulled = await ctx.patch( `/wp-json/affilicard/v1/products/${ id }`, {
+			headers,
+			data: { release_date: null },
+		} );
+		expect( nulled.status() ).toBe( 200 );
+		expect( await read() ).toBe( '2026-09-16' );
+
+		// 空文字は「発売日を消す」として通す。
+		const cleared = await ctx.patch( `/wp-json/affilicard/v1/products/${ id }`, {
+			headers,
+			data: { release_date: '' },
+		} );
+		expect( cleared.status() ).toBe( 200 );
+		expect( await read() ).toBe( '' );
+		await ctx.dispose();
+	} );
 } );
 
 test.describe( '書き込みを握り潰すフィルタがあるとき', () => {

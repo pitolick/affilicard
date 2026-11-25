@@ -385,6 +385,19 @@ final class ProductsController {
 				continue;
 			}
 
+			// 単品の作成・更新が 400 で弾く形式違いの発売日は、bulk でもこの item だけ
+			// error にする（空文字に丸めて保存すると、送った発売日が黙って消える）。null は
+			// 未指定として扱う（単品も WordPress が null の引数を検証しないので揃える）。
+			if ( isset( $raw['release_date'] ) && ! ProductSchema::isValidReleaseDate( $raw['release_date'] ) ) {
+				++$failed;
+				$results[] = array(
+					'index'   => $index,
+					'status'  => 'error',
+					'message' => ProductSchema::releaseDateErrorMessage(),
+				);
+				continue;
+			}
+
 			$data = $this->enforcePublishCapability( ProductSchema::sanitizeItem( $raw ) );
 			if ( '' === $data['title'] ) {
 				++$failed;
@@ -615,6 +628,15 @@ final class ProductsController {
 	}
 
 	/**
+	 * 単品の作成・更新で、リクエストから保存に渡すフィールドを取り出す。
+	 *
+	 * **ここに無いキーは、schema（{@see ProductSchema::args()}）が受け付けていても
+	 * 黙って捨てられる**（200 / 201 が返るのに保存されない）。以前は `release_date` が
+	 * 抜けていて、REST で発売日を直そうとしても変わらなかった。schema にキーを足すときは
+	 * ここにも足す（テストで schema のキーと突き合わせている）。
+	 *
+	 * 送られなかったキー（`get_param()` が null）は含めない。更新では既存値が残る。
+	 *
 	 * @return array<string, mixed>
 	 */
 	private function extractProductData( WP_REST_Request $request ): array {
@@ -624,6 +646,7 @@ final class ProductsController {
 			'status',
 			'product_type',
 			'stock_status',
+			'release_date',
 			'extras',
 			'listings',
 		);

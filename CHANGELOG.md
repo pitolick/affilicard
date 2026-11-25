@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **REST（`POST /affilicard/v1/products`・`PATCH /affilicard/v1/products/{id}`）で送った `release_date` が保存されていなかったのを直した。** schema は受け付けていて 201 / 200 も返るのに、保存に渡すフィールドの一覧から抜けていたため、黙って捨てられていた（まとめて作る `POST /products/bulk` と管理画面は保存できていた）。送らない更新では従来どおり既存の値を残す
+- **REST で形式違いの `release_date` を送ると、既存の発売日が黙って消えていたのを直した。** `YYYY-MM-DD` 以外（`2026/09/16` など）や実在しない日付（`2026-02-30`）を空文字に丸めて保存していたため、200 / 201 が返ったまま発売日が消えた。単品の作成・更新は 400（`rest_invalid_param`）で弾き、`POST /products/bulk` はその item だけを error にする。空文字は従来どおり「発売日を消す」として受け付け、`null` は未指定として既存の値を残す
+
 ## [4.1.4] - 2026-11-25
 
 ### Fixed

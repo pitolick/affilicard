@@ -101,7 +101,8 @@ final class ProductSchema {
 				'type'              => 'string',
 				'required'          => false,
 				'default'           => '',
-				'sanitize_callback' => array( self::class, 'sanitizeReleaseDate' ),
+				'sanitize_callback' => array( self::class, 'sanitizeReleaseDateParam' ),
+				'validate_callback' => array( self::class, 'validateReleaseDate' ),
 			),
 			'listings'     => array(
 				'type'              => 'array',
@@ -207,6 +208,69 @@ final class ProductSchema {
 		}
 
 		return $result;
+	}
+
+	/**
+	 * release_date が保存してよい値か。空文字（発売日を消す）か、実在する日付の `YYYY-MM-DD`。
+	 *
+	 * **形式違いは 400 で弾く**（{@see self::validateReleaseDate()}）。以前は
+	 * {@see self::sanitizeReleaseDate()} が空文字に丸めて保存していたため、`2026/09/16` の
+	 * ような値を送ると 200 が返ったまま**既存の発売日が消えていた**。
+	 *
+	 * @param mixed $value
+	 */
+	public static function isValidReleaseDate( $value ): bool {
+		if ( ! is_string( $value ) ) {
+			return false;
+		}
+		$str = trim( $value );
+		if ( '' === $str ) {
+			return true;
+		}
+		if ( 1 !== preg_match( '/^(\d{4})-(\d{2})-(\d{2})$/', $str, $m ) ) {
+			return false;
+		}
+		return checkdate( (int) $m[2], (int) $m[3], (int) $m[1] );
+	}
+
+	/**
+	 * REST の validate_callback。形式違いの release_date を 400（`rest_invalid_param`）にする。
+	 *
+	 * @param mixed $value
+	 * @return true|\WP_Error
+	 */
+	public static function validateReleaseDate( $value ) {
+		if ( self::isValidReleaseDate( $value ) ) {
+			return true;
+		}
+		return new \WP_Error(
+			'rest_invalid_param',
+			self::releaseDateErrorMessage(),
+			array( 'status' => 400 )
+		);
+	}
+
+	/**
+	 * release_date が形式違いのときのメッセージ（単品の 400 と bulk の item エラーで共有）。
+	 */
+	public static function releaseDateErrorMessage(): string {
+		return __( 'release_date は YYYY-MM-DD 形式の実在する日付か、空文字で指定してください。', 'affilicard' );
+	}
+
+	/**
+	 * REST の sanitize_callback。`null` は `null` のまま返す（＝未指定として扱う）。
+	 *
+	 * WordPress は `null` の引数の**検証は飛ばすが、サニタイズは呼ぶ**
+	 * （`WP_REST_Request::has_valid_params()` は `null !== $param` のときだけ検証し、
+	 * `sanitize_params()` は値を問わずサニタイズする）。{@see self::sanitizeReleaseDate()} を
+	 * そのまま使うと `null` が空文字になり、`{"release_date": null}` の PATCH で既存の発売日が
+	 * 消える。`null` を残せば {@see \Affilicard\Rest\ProductsController} の取り出しが
+	 * 未指定として読み飛ばす。meta の保存は従来どおり {@see self::sanitizeReleaseDate()} を使う。
+	 *
+	 * @param mixed $value
+	 */
+	public static function sanitizeReleaseDateParam( $value ): ?string {
+		return null === $value ? null : self::sanitizeReleaseDate( $value );
 	}
 
 	/**
