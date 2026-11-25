@@ -58,6 +58,9 @@ export function getCardPreview(id, params = {}) {
 	if (params.hideMedia !== undefined) {
 		query.set('hideMedia', params.hideMedia ? '1' : '0');
 	}
+	if (params.storeR18 !== undefined) {
+		query.set('storeR18', params.storeR18 ? '1' : '0');
+	}
 	const qs = query.toString();
 	return apiFetch({
 		path: `${BASE}/${id}/card-preview${qs ? `?${qs}` : ''}`,

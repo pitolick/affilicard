@@ -222,6 +222,19 @@ export function GeneralPanel() {
 
 				<ToggleControl
 					label={__(
+						'ストアが成人向けと判定した商品を R18 表示にする',
+						'affilicard'
+					)}
+					checked={settings.store_adult_r18 !== false}
+					onChange={(v) => update({ store_adult_r18: v })}
+					help={__(
+						'どれかのストア（現在は Amazon）が成人向けと判定した商品のカードを、18+ バッジとぼかしで表示します。成人向けのサイトで使う場合は OFF にしてください。ブロックごとにも切り替えられます。商品ごとの R18 設定はこの設定に関係なく効きます。',
+						'affilicard'
+					)}
+				/>
+
+				<ToggleControl
+					label={__(
 						'商品が見つからない購入リンクを飛ばして、次の購入リンクを表示する',
 						'affilicard'
 					)}

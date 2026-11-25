@@ -116,6 +116,7 @@ function emptyOffer() {
 		list_price_label: '',
 		badge: '',
 		points: '',
+		adult: '',
 		image_url: '',
 		search_key: '',
 		fetch_status: '',
@@ -568,6 +569,14 @@ function OffersEditor({ offers, fallbackOnTerminal, onChange }) {
 							opened={openKeys.has(key)}
 							onToggle={(isOpen) => setOpen(key, isOpen)}
 						>
+							{'1' === String(offer.adult ?? '') && (
+								<p className="components-base-control__help">
+									{__(
+										'ストアの判定: 成人向け（自動取得で更新されます）',
+										'affilicard'
+									)}
+								</p>
+							)}
 							<TextControl
 								label={__('外部 ID', 'affilicard')}
 								value={offer.external_id ?? ''}

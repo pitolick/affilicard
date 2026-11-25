@@ -326,6 +326,54 @@ final class CardPreviewControllerTest extends TestCase {
 		$this->assertStringNotContainsString( 'aria-label="18+"', $data['html'] );
 	}
 
+	/**
+	 * ブロックの storeR18 を送らなければサイト設定（既定 ON）に従い、false を送れば
+	 * ストアの成人向け判定を無視する。編集画面のプレビューと保存後の表示を揃えるため。
+	 */
+	public function test_preview_store_adult_flag_follows_block_attribute(): void {
+		WP_Mock::setUp();
+		$this->stubCommonWpFunctions();
+		WP_Mock::userFunction( 'get_post_thumbnail_id' )->andReturn( 321 );
+		WP_Mock::userFunction( 'wp_get_attachment_image_url' )->andReturn( 'https://example.com/cover.jpg' );
+
+		$repository = $this->createMock( ProductRepositoryInterface::class );
+		$repository->method( 'find' )->willReturn(
+			array(
+				'id'           => 9,
+				'title'        => '成人向け判定のある商品',
+				'content'      => '',
+				'status'       => 'publish',
+				'product_type' => 'generic',
+				'stock_status' => 'available',
+				'extras'       => array(),
+				'listings'     => array(
+					array(
+						'platform' => 'amazon-kindle',
+						'offers'   => array( array( 'adult' => '1' ) ),
+					),
+				),
+				'modified'     => '',
+				'mask_blur'    => false,
+				'mask_r18'     => false,
+				'mask_label'   => '',
+			)
+		);
+		$controller = new CardPreviewController( $repository );
+
+		$inherit = $controller->preview( $this->makeRequest( array( 'id' => 9 ) ) )->get_data();
+		$this->assertStringContainsString( 'affilicard-card__cover-badge', $inherit['html'] );
+
+		$ignored = $controller->preview(
+			$this->makeRequest(
+				array(
+					'id'       => 9,
+					'storeR18' => '0',
+				)
+			)
+		)->get_data();
+		$this->assertStringNotContainsString( 'affilicard-card__cover-badge', $ignored['html'] );
+	}
+
 	public function test_can_edit_posts_delegates_to_current_user_can(): void {
 		WP_Mock::userFunction( 'current_user_can' )
 			->with( 'edit_posts' )

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Affilicard\Provider\Amazon;
 
 use Affilicard\Account\AccountCredentials;
+use Affilicard\Content\AdultDetection;
 use Affilicard\Provider\BatchFetchingProvider;
 use Affilicard\Provider\DisplayPolicy;
 use Affilicard\Provider\DisplayPolicyProvider;
@@ -304,6 +305,10 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 		}
 
 		$data['image_url'] = self::stringAt( $item, array( 'images', 'primary', 'large', 'url' ) );
+
+		// 成人向けかどうか（R18 表示の自動判定に使う）。返らなければ未確認にする。
+		$adult         = $item['itemInfo']['productInfo']['isAdultProduct']['displayValue'] ?? null;
+		$data['adult'] = is_bool( $adult ) ? ( $adult ? AdultDetection::YES : AdultDetection::NO ) : AdultDetection::UNKNOWN;
 
 		// 返ってきたリンクのパラメータは改変しない（帰属が外れて紹介料を失う。Best Programming Practices）。
 		$detail = isset( $item['detailPageURL'] ) && is_string( $item['detailPageURL'] ) ? $item['detailPageURL'] : '';

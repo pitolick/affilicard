@@ -44,6 +44,7 @@
 | `Affilicard\Settings\PlatformsSettings` | `PlatformConfig` の REST wrapper |
 | `Affilicard\Settings\DashboardWidget` | WP ダッシュボードに Fallback 件数表示 |
 | `Affilicard\Block\Block` | Gutenberg block `affilicard/product-card` の登録 + サーバサイド render（商品解決 → 色 CSS 変数注入 → CardRenderer 委譲） |
+| `Affilicard\Content\AdultDetection` | ストアの成人向け判定（購入リンクの `adult`）から、成人向けと判定したストアを返す。どれか 1 つでも該当なら R18 表示（`CardHtmlBuilder::resolveMask`。サイト設定 `store_adult_r18` とブロックの `storeR18` で外せる） |
 | `Affilicard\Renderer\CardRenderer` | 商品データ + PlatformDefinition から商品カード HTML を生成する純粋レンダラ（type 非依存・色は sanitize_hex_color 経由） |
 | `Affilicard\Stock\StockStatus` | `available` / `out_of_stock` / `discontinued` |
 | `Affilicard\Schema\SchemaVersion` | schema migration トリガ用バージョン番号 (現在 `'2'` — v4.0.0 の offers 移行で '1' から更新) |

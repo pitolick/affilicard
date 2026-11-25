@@ -37,6 +37,7 @@
 		"hideMedia": { "type": "boolean" },
 		"maskBlur": { "type": "boolean" },
 		"maskR18": { "type": "boolean" },
+		"storeR18": { "type": "boolean" },
 		"maskLabel": { "type": "string" }
 	}
 }

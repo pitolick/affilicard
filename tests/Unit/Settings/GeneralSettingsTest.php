@@ -380,4 +380,24 @@ final class GeneralSettingsTest extends TestCase {
 
 		$this->assertFalse( $updated['fallback_on_terminal'] );
 	}
+
+	public function test_ストアの成人向け判定に従うのが既定(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+
+		$this->assertTrue( GeneralSettings::get()['store_adult_r18'] );
+		$this->assertTrue( GeneralSettings::followsStoreAdultFlag() );
+	}
+
+	public function test_ストアの成人向け判定はOFFにでき_文字列のfalseもOFFになる(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'update_option' )->andReturn( true );
+
+		$this->assertFalse( GeneralSettings::update( array( 'store_adult_r18' => false ) )['store_adult_r18'] );
+		// REST の body では文字列で届く。"false" を ON と取り違えない。
+		$this->assertFalse( GeneralSettings::update( array( 'store_adult_r18' => 'false' ) )['store_adult_r18'] );
+	}
 }

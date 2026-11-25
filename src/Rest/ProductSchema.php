@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Rest;
 
+use Affilicard\Content\AdultDetection;
 use Affilicard\Pricing\FetchStatus;
 use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\OfferSelector;
@@ -371,6 +372,8 @@ final class ProductSchema {
 				'badge'            => (string) sanitize_text_field( self::stringField( $offer, 'badge' ) ),
 				// 付与ポイント（整数）。数字以外は空にする（カードは数字だけを「◯pt還元」と出す）。
 				'points'           => self::pointsField( $offer ),
+				// ストアの成人向け判定（'1' / '0' / '' ＝未確認）。R18 表示の自動判定に使う。
+				'adult'            => AdultDetection::normalise( $offer['adult'] ?? '' ),
 				'image_url'        => (string) esc_url_raw( self::stringField( $offer, 'image_url' ) ),
 				'search_key'       => (string) sanitize_text_field( self::stringField( $offer, 'search_key' ) ),
 				'fetch_status'     => FetchStatus::normalise( (string) sanitize_key( self::stringField( $offer, 'fetch_status' ) ) ),

@@ -132,6 +132,7 @@ final class ProductSchemaTest extends TestCase {
 		$this->assertSame( '', $offer['list_price_label'] );
 		$this->assertSame( '', $offer['badge'] );
 		$this->assertSame( '', $offer['points'] );
+		$this->assertSame( '', $offer['adult'] );
 		$this->assertSame( '', $offer['image_url'] );
 		$this->assertSame( '', $offer['last_fetched_at'] );
 	}
@@ -193,6 +194,32 @@ final class ProductSchemaTest extends TestCase {
 			'空'      => array( '', '' ),
 			'配列'     => array( array( 28 ), '' ),
 		);
+	}
+
+	public function test_成人向けの判定は3値に揃える(): void {
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform' => 'amazon-kindle',
+					'offers'   => array(
+						array(
+							'external_id' => 'A',
+							'adult'       => true,
+						),
+						array(
+							'external_id' => 'B',
+							'adult'       => '0',
+						),
+						array(
+							'external_id' => 'C',
+							'adult'       => 'yes',
+						),
+					),
+				),
+			)
+		);
+
+		$this->assertSame( array( '1', '0', '' ), array_column( $result[0]['offers'], 'adult' ) );
 	}
 
 	public function test_sanitize_listings_returns_empty_when_not_array(): void {

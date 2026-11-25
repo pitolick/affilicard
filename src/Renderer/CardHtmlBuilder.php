@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Renderer;
 
+use Affilicard\Content\AdultDetection;
 use Affilicard\Platform\PlatformConfig;
 use Affilicard\Plugin;
 use Affilicard\Provider\DisplayPolicy;
@@ -146,17 +147,27 @@ final class CardHtmlBuilder {
 	 * boolean はブロック属性が存在し null でなければ採用、maskLabel は
 	 * 未定義＝継承／定義済み（空文字含む）＝上書き。
 	 *
+	 * R18 は「手動の設定（ブロック → 商品）」に「ストアの成人向け判定」を足す。判定に従うかは
+	 * ブロックの storeR18（未指定ならサイト設定）で決める。
+	 *
 	 * @param array<string, mixed> $attributes ブロック属性
 	 * @param array<string, mixed> $product    Repository::find() の戻り値形
 	 * @return array{blur: bool, r18: bool, label: string}
 	 */
 	public function resolveMask( array $attributes, array $product ): array {
-		$blur  = array_key_exists( 'maskBlur', $attributes ) && null !== $attributes['maskBlur']
+		$blur = array_key_exists( 'maskBlur', $attributes ) && null !== $attributes['maskBlur']
 			? (bool) $attributes['maskBlur']
 			: (bool) ( $product['mask_blur'] ?? false );
-		$r18   = array_key_exists( 'maskR18', $attributes ) && null !== $attributes['maskR18']
+		$r18  = array_key_exists( 'maskR18', $attributes ) && null !== $attributes['maskR18']
 			? (bool) $attributes['maskR18']
 			: (bool) ( $product['mask_r18'] ?? false );
+		// ストアの成人向け判定。手動の R18 とは別に足し合わせる（手動の OFF では外れない）。
+		// 外すのはブロックの storeR18=false か、サイト設定（GeneralSettings::followsStoreAdultFlag）。
+		if ( ! $r18 && array() !== AdultDetection::detectedBy( $product ) ) {
+			$r18 = array_key_exists( 'storeR18', $attributes ) && null !== $attributes['storeR18']
+				? (bool) $attributes['storeR18']
+				: \Affilicard\Settings\GeneralSettings::followsStoreAdultFlag();
+		}
 		$label = array_key_exists( 'maskLabel', $attributes ) && null !== $attributes['maskLabel']
 			? (string) $attributes['maskLabel']
 			: (string) ( $product['mask_label'] ?? '' );

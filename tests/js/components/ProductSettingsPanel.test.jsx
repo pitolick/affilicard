@@ -6,7 +6,10 @@ import userEvent from '@testing-library/user-event';
 import { setEntityMeta, _reset, getLastSetterCall, clearLastSetterCall } from '@wordpress/core-data';
 import { fetchPlatforms } from '../../../src/Admin/api/platforms';
 import { fetchEditorSettings } from '../../../src/Admin/api/settings';
-import { ProductSettingsPanel } from '../../../src/Admin/components/ProductSettingsPanel';
+import {
+	ProductSettingsPanel,
+	adultDetectedBy,
+} from '../../../src/Admin/components/ProductSettingsPanel';
 
 beforeEach( () => {
 	_reset();
@@ -16,7 +19,52 @@ beforeEach( () => {
 	fetchEditorSettings.mockResolvedValue( { fallback_on_terminal: false } );
 } );
 
+describe( 'adultDetectedBy', () => {
+	test( 'どれかの購入リンクが成人向けなら、そのストアを重複なしで返す', () => {
+		expect(
+			adultDetectedBy( [
+				{ platform: 'dmm-books', offers: [ { adult: '0' } ] },
+				{ platform: 'amazon-kindle', enabled: false, offers: [ { adult: '' }, { adult: '1' } ] },
+				{ platform: 'amazon-kindle', offers: [ { adult: '1' } ] },
+			] )
+		).toEqual( [ 'amazon-kindle' ] );
+	} );
+
+	test( '未確認・非該当・壊れた値だけなら空', () => {
+		expect( adultDetectedBy( [ { platform: 'x', offers: [ {} ] } ] ) ).toEqual( [] );
+		expect( adultDetectedBy( undefined ) ).toEqual( [] );
+	} );
+} );
+
 describe( 'ProductSettingsPanel', () => {
+	test( 'ストアが成人向けと判定していれば、R18 表示になる理由をストア名つきで出す', async () => {
+		fetchPlatforms.mockResolvedValue( [ { code: 'amazon-kindle', name: 'Amazon Kindle' } ] );
+		setEntityMeta( {
+			affilicard_listings: [
+				{ platform: 'amazon-kindle', enabled: true, offers: [ { external_id: 'B0', adult: '1' } ] },
+			],
+			affilicard_extras: [],
+		} );
+		render( <ProductSettingsPanel /> );
+
+		expect(
+			await screen.findByText( /^Amazon Kindle が成人向けと判定しています。/ )
+		).toBeInTheDocument();
+	} );
+
+	test( '成人向けの判定が無ければ注意書きを出さない', async () => {
+		setEntityMeta( {
+			affilicard_listings: [
+				{ platform: 'dmm-books', enabled: true, offers: [ { external_id: '1', adult: '0' } ] },
+			],
+			affilicard_extras: [],
+		} );
+		render( <ProductSettingsPanel /> );
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+
+		expect( screen.queryByText( /成人向けと判定しています/ ) ).not.toBeInTheDocument();
+	} );
+
 	test( '配列メタの listing をそのまま描画する', async () => {
 		setEntityMeta( {
 			affilicard_product_type: 'ebook',

@@ -31,6 +31,9 @@ final class GeneralSettings {
 		'stocktake_enabled'      => true,
 		'stocktake_days'         => 180,
 		'fallback_on_terminal'   => false,
+		// ストアが成人向けと判定した商品のカードを R18 表示（18+ バッジ＋ぼかし）にする。
+		// R18 向けのサイトで使うときは OFF にすれば、商品ごとに外して回らずに済む。
+		'store_adult_r18'        => true,
 	);
 
 	private const MIN_TTL = 60;
@@ -65,6 +68,13 @@ final class GeneralSettings {
 	 */
 	public static function hidesProductImages(): bool {
 		return ! empty( self::get()['hide_product_images'] );
+	}
+
+	/**
+	 * ストアの成人向け判定で R18 表示にするか（サイト全体の既定。ブロックごとに上書きできる）。
+	 */
+	public static function followsStoreAdultFlag(): bool {
+		return ! empty( self::get()['store_adult_r18'] );
 	}
 
 	public static function isQueuePaused(): bool {
@@ -194,6 +204,10 @@ final class GeneralSettings {
 			? rest_sanitize_boolean( $values['fallback_on_terminal'] )
 			: (bool) self::DEFAULTS['fallback_on_terminal'];
 
+		$store_adult_r18 = isset( $values['store_adult_r18'] )
+			? rest_sanitize_boolean( $values['store_adult_r18'] )
+			: (bool) self::DEFAULTS['store_adult_r18'];
+
 		return array(
 			'cache_ttl_seconds'      => $ttl,
 			'default_product_type'   => $type,
@@ -209,6 +223,7 @@ final class GeneralSettings {
 			'stocktake_enabled'      => $stocktake_enabled,
 			'stocktake_days'         => $stocktake_days,
 			'fallback_on_terminal'   => $fallback_on_terminal,
+			'store_adult_r18'        => $store_adult_r18,
 		);
 	}
 }
