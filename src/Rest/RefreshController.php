@@ -129,7 +129,19 @@ final class RefreshController {
 		foreach ( $batchItems as $account => $items ) {
 			$size = max( 1, $this->batchSizer->sizeFor( (string) $account ) );
 			foreach ( array_chunk( $items, $size ) as $chunk ) {
-				$this->enqueuer->enqueueBatch( (string) $account, $chunk, 0, true, Enqueuer::PRIORITY_MANUAL );
+				$actionId = $this->enqueuer->enqueueBatch( (string) $account, $chunk, 0, true, Enqueuer::PRIORITY_MANUAL );
+				if ( 0 === $actionId ) {
+					// 同じ items が既に積まれている（unique）か、登録に失敗した。後者は AS が例外を
+					// 握り潰して 0 を返すだけなので、ここで記録しないと気づけない。
+					// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+					error_log(
+						sprintf(
+							'affilicard: 手動更新のバッチを積めませんでした（account=%s, items=%d件）。同じ内容が既に積まれているか、登録に失敗しています。',
+							(string) $account,
+							count( $chunk )
+						)
+					);
+				}
 			}
 		}
 

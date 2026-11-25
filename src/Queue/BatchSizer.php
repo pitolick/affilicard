@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Affilicard\Queue;
 
+use Affilicard\Platform\PlatformConfig;
 use Affilicard\Provider\BatchFetchingProvider;
 use Affilicard\Provider\ProviderInterface;
 use Affilicard\Provider\ProviderRegistry;
@@ -30,6 +31,20 @@ final class BatchSizer {
 	 * 安全マージン 5 秒→実効 25 秒で 22 件）。
 	 */
 	public const DEFAULT_SAFETY_MARGIN_SECONDS = 5;
+
+	/**
+	 * バッチジョブの引数（`{"account":…,"items":[…]}` の JSON）の長さの上限（文字数）。
+	 *
+	 * Action Scheduler の DB ストアは、JSON にした引数が 8,000 文字を超えるジョブを登録しない
+	 * （ActionScheduler_DBStore::$max_args_length。例外は as_schedule_single_action() の中で
+	 * 握り潰され、error_log に 1 行残るだけで 0 が返る）。まとめ取得（10 件/リクエスト）で
+	 * 件数が 10 倍になると 220 件 ≒ 9,700 文字になり、ジョブが黙って消えていた。
+	 * 余裕を持たせて 7,000 文字に収める。
+	 */
+	public const MAX_ARGS_JSON_LENGTH = 7000;
+
+	/** 設定に platform が 1 つも無いときに仮定する platform code の長さ。 */
+	private const FALLBACK_PLATFORM_CODE_LENGTH = 32;
 
 	public function __construct(
 		private ProviderRegistry $registry,
@@ -64,7 +79,46 @@ final class BatchSizer {
 			$size *= max( 1, $provider->maxBatchSize() );
 		}
 
-		return max( 1, (int) apply_filters( 'affilicard_refresh_batch_size', $size, $account ) );
+		$size = max( 1, (int) apply_filters( 'affilicard_refresh_batch_size', $size, $account ) );
+
+		// フィルタで大きくされても、ジョブを登録できる長さには必ず収める。
+		return min( $size, self::maxItemsForArgs( $account ) );
+	}
+
+	/**
+	 * ジョブの引数が MAX_ARGS_JSON_LENGTH に収まる最大件数。
+	 *
+	 * 1 件の長さは最悪値で見積もる: post_id は PHP の整数の最大桁、platform は設定にある
+	 * platform code のうち最も長いもの（account を問わない。掃引と手動更新のどちらの items も
+	 * 収まるように）。
+	 */
+	public static function maxItemsForArgs( string $account ): int {
+		$longest = 0;
+		foreach ( PlatformConfig::all() as $platform ) {
+			$longest = max( $longest, strlen( $platform->code ) );
+		}
+		if ( 0 === $longest ) {
+			$longest = self::FALLBACK_PLATFORM_CODE_LENGTH;
+		}
+
+		$item     = strlen(
+			(string) json_encode(
+				array(
+					'post_id'  => PHP_INT_MAX,
+					'platform' => str_repeat( 'x', $longest ),
+				)
+			)
+		) + 1; // 区切りのカンマ。
+		$envelope = strlen(
+			(string) json_encode(
+				array(
+					'account' => $account,
+					'items'   => array(),
+				)
+			)
+		);
+
+		return max( 1, intdiv( self::MAX_ARGS_JSON_LENGTH - $envelope, $item ) );
 	}
 
 	/**
