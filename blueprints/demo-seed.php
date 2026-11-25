@@ -396,10 +396,147 @@ $block = static function ( int $id, array $attrs = array() ): string {
 	return '<!-- wp:affilicard/product-card ' . wp_json_encode( $a ) . ' /-->';
 };
 
+// VOD（動画配信）デモ: プラットフォームのリンクテンプレート（v4.2.0）の見た目確認用。
+// 購入リンクには作品ページの URL（regular_url）だけを入れ、CTA のリンク先は
+// プラットフォームのテンプレートで組み立てる。テンプレートの ID（rk / af_id / tag）は架空。
+//
+// - Hulu        : リダイレクタで包む型（{url_enc}）
+// - Prime Video : クエリを足す型（{url}{sep}tag=…）
+// - DMM TV      : リダイレクタで包む型
+// - U-NEXT      : テンプレートなし。作品ごとの affiliate_url で上書きする型
+$vod_templates = array(
+	'hulu'        => 'https://h.example.test/sp/cc?rk=DEMO&url={url_enc}',
+	'prime-video' => '{url}{sep}tag=demo-22',
+	'dmm-tv'      => 'https://al.example.test/?lurl={url_enc}&af_id=demo-001&ch=link_tool&ch_id=link',
+);
+$vod_platforms = array();
+foreach ( \Affilicard\Platform\PlatformConfig::all() as $definition ) {
+	$arr = $definition->toArray();
+	if ( isset( $vod_templates[ $definition->code ] ) ) {
+		$arr['linkTemplate'] = $vod_templates[ $definition->code ];
+	}
+	$vod_platforms[] = $arr;
+}
+\Affilicard\Platform\PlatformConfig::save( $vod_platforms );
+
+// VOD の購入リンク。価格は持たず、バッジで「見放題」「レンタル」などを出す。
+$vod_listing = static function ( string $platform, string $regular, string $badge = '', string $affiliate = '' ): array {
+	return array(
+		'platform'      => $platform,
+		'enabled'       => true,
+		'affiliate_url' => $affiliate,
+		'regular_url'   => $regular,
+		'price'         => '',
+		'badge'         => $badge,
+	);
+};
+
+$vod_extras = static function ( string $director, string $cast, string $year, string $distributor ): array {
+	return array(
+		array(
+			'key'   => 'director',
+			'label' => '監督',
+			'value' => $director,
+		),
+		array(
+			'key'   => 'cast',
+			'label' => '出演',
+			'value' => $cast,
+		),
+		array(
+			'key'   => 'release_year',
+			'label' => '公開年',
+			'value' => $year,
+		),
+		array(
+			'key'   => 'distributor',
+			'label' => '配給',
+			'value' => $distributor,
+		),
+	);
+};
+
+// 4 サービスすべてで配信している作品（テンプレート 3 種 + 作品ごとの上書き 1 件）。
+$p_vod_all = $repo->save(
+	array(
+		'title'        => 'サンプル映画 ザ・デモンストレーション',
+		'status'       => 'publish',
+		'product_type' => 'vod',
+		'stock_status' => 'available',
+		'content'      => "<!-- wp:paragraph -->\n<p>架空の映画のサンプル紹介文です。4 つの配信サービスの購入リンクと、監督・出演・公開年・配給の表示確認用ダミーデータ。</p>\n<!-- /wp:paragraph -->",
+		'listings'     => array(
+			$vod_listing( 'u-next', 'https://video.unext.jp/title/SID0000001', '見放題', 'https://t.example.test/visit.php?a=DEMO-UNEXT' ),
+			$vod_listing( 'hulu', 'https://www.hulu.jp/the-demonstration', '見放題' ),
+			$vod_listing( 'prime-video', 'https://www.amazon.co.jp/gp/video/detail/B0DEMO0001', 'レンタル' ),
+			$vod_listing( 'dmm-tv', 'https://tv.dmm.com/vod/detail/?season=demo0001', '見放題' ),
+		),
+		'extras'       => $vod_extras( '架空 監督', '架空 主演、架空 助演', '2024', 'サンプル配給' ),
+	)
+);
+
+// 1 サービスだけの作品（一般的なケース）。
+$p_vod_single = $repo->save(
+	array(
+		'title'        => 'サンプルアニメ映画 劇場版デモ',
+		'status'       => 'publish',
+		'product_type' => 'vod',
+		'stock_status' => 'available',
+		'listings'     => array(
+			$vod_listing( 'prime-video', 'https://www.amazon.co.jp/gp/video/detail/B0DEMO0002', '見放題' ),
+		),
+		'extras'       => $vod_extras( '架空 演出', '架空 声優', '2023', 'サンプルアニメーション' ),
+	)
+);
+
+// 対照: U-NEXT の作品 URL だけ（テンプレートなし・上書きなし）→ 通常 URL へフォールバックし、
+// 管理画面（商品一覧の警告列・ダッシュボード）にフォールバックとして出る。
+$p_vod_fallback = $repo->save(
+	array(
+		'title'        => 'サンプル映画（U-NEXT の上書き未設定・フォールバック）',
+		'status'       => 'publish',
+		'product_type' => 'vod',
+		'stock_status' => 'available',
+		'listings'     => array(
+			$vod_listing( 'u-next', 'https://video.unext.jp/title/SID0000003', '見放題' ),
+		),
+		'extras'       => $vod_extras( '架空 監督', '架空 俳優', '2022', 'サンプル配給' ),
+	)
+);
+
+$set_demo_cover( (int) $p_vod_all, 'THE DEMONSTRATION', '#1d2b53', 'square' );
+$set_demo_cover( (int) $p_vod_single, 'ANIME MOVIE', '#7e2553', 'square' );
+$set_demo_cover( (int) $p_vod_fallback, 'FALLBACK', '#5f574f', 'square' );
+
+// VOD のサンプル記事（映画レビュー記事の末尾に配信カードを置く想定）。
+$vod_post_content = implode(
+	"\n\n",
+	array(
+		'<!-- wp:paragraph --><p>映画レビュー記事の末尾に、配信サービスのカードを置く想定のサンプルです。ボタンのリンク先は、作品ページの URL からプラットフォームのリンクテンプレートで組み立てています（U-NEXT だけは作品ごとのアフィリエイト URL で上書き）。</p><!-- /wp:paragraph -->',
+		'<!-- wp:heading --><h2>配信情報</h2><!-- /wp:heading -->',
+		$block( $p_vod_all ),
+		'<!-- wp:heading {"level":3} --><h3>1 サービスだけの作品</h3><!-- /wp:heading -->',
+		$block( $p_vod_single ),
+		'<!-- wp:heading {"level":3} --><h3>対照：テンプレートも上書きも無い購入リンク</h3><!-- /wp:heading -->',
+		'<!-- wp:paragraph --><p>作品ページの URL がそのままリンク先になります（管理画面ではフォールバックとして警告が出ます）。</p><!-- /wp:paragraph -->',
+		$block( $p_vod_fallback ),
+	)
+);
+wp_insert_post(
+	array(
+		'post_type'    => 'post',
+		'post_status'  => 'publish',
+		'post_title'   => 'サンプル映画レビュー（VOD カードの表示確認）',
+		'post_content' => $vod_post_content,
+	)
+);
+
+
+
 $content = implode(
 	"\n\n",
 	array(
 		'<!-- wp:heading --><h2>Affilicard デモ（ダミーデータ）</h2><!-- /wp:heading -->',
+		'<!-- wp:paragraph --><p>VOD（動画配信）のカードは、投稿「サンプル映画レビュー（VOD カードの表示確認）」にまとめています。</p><!-- /wp:paragraph -->',
 		'<!-- wp:heading {"level":3} --><h3>予約（発売前）カード確認</h3><!-- /wp:heading -->',
 		'<!-- wp:paragraph --><p>上＝発売前（予約受付中・「予約する」・発売日表示）／下＝発売済み（通常表示）。発売日を過ぎると上のカードも自動で通常表示へ戻ります。</p><!-- /wp:paragraph -->',
 		$block( $p_preorder ),
