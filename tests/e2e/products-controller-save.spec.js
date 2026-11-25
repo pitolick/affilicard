@@ -143,6 +143,46 @@ test.describe( 'affilicard/v1 の商品保存（書き込み検証つき）', ()
 		expect( changedBody.listings[ 0 ].offers[ 0 ].price ).toBe( '770' );
 		await ctx.dispose();
 	} );
+
+	// 単品の作成・更新は schema が受け付ける `release_date` を以前は黙って捨てていた
+	// （201 / 200 が返るのに保存されない）。実 WP の REST で書いて読み戻す。
+	test( 'release_date は作成と更新で保存され、送らない更新では残る', async () => {
+		const ctx = await newApiContext();
+		const headers = getAuthHeaders();
+
+		const created = await ctx.post( '/wp-json/affilicard/v1/products', {
+			headers,
+			data: {
+				title: `${ TITLE } 発売日`,
+				status: 'draft',
+				release_date: '2011-12-28',
+				listings: LISTINGS,
+			},
+		} );
+		expect( created.status() ).toBe( 201 );
+		const id = ( await created.json() ).id;
+		const read = async () =>
+			( await ( await ctx.get( `/wp-json/affilicard/v1/products/${ id }`, { headers } ) ).json() )
+				.release_date;
+		expect( await read() ).toBe( '2011-12-28' );
+
+		const changed = await ctx.patch( `/wp-json/affilicard/v1/products/${ id }`, {
+			headers,
+			data: { release_date: '2026-09-16' },
+		} );
+		expect( changed.status() ).toBe( 200 );
+		expect( ( await changed.json() ).release_date ).toBe( '2026-09-16' );
+		expect( await read() ).toBe( '2026-09-16' );
+
+		// 送らなければ既存の値を残す（部分更新）。
+		const titleOnly = await ctx.patch( `/wp-json/affilicard/v1/products/${ id }`, {
+			headers,
+			data: { title: `${ TITLE } 発売日（改題）` },
+		} );
+		expect( titleOnly.status() ).toBe( 200 );
+		expect( await read() ).toBe( '2026-09-16' );
+		await ctx.dispose();
+	} );
 } );
 
 test.describe( '書き込みを握り潰すフィルタがあるとき', () => {

@@ -482,6 +482,85 @@ final class ProductsControllerTest extends TestCase {
 		$this->assertSame( 200, $response->get_status() );
 	}
 
+	public function test_updateはrelease_dateを保存する(): void {
+		$this->mockListingLockWpdb();
+		$this->storedMeta[ ProductPostType::META_RELEASE_DATE ] = '2011-12-28';
+		$this->mockFindReturnsProduct( 7, 'Keep Title' );
+		WP_Mock::userFunction( 'wp_update_post' )->once()->andReturn( 7 );
+		$this->mockMetaWriteThrough();
+
+		$controller = new ProductsController( new ProductRepository() );
+		$request    = new WP_REST_Request( 'PATCH', '/affilicard/v1/products/7' );
+		$request->set_param( 'id', 7 );
+		$request->set_param( 'release_date', '2026-09-16' );
+
+		$response = $controller->update( $request );
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertSame( '2026-09-16', $this->storedMeta[ ProductPostType::META_RELEASE_DATE ] );
+		$this->assertSame( '2026-09-16', $response->get_data()['release_date'] );
+	}
+
+	public function test_updateはrelease_dateを送らなければ既存の値を残す(): void {
+		$this->mockListingLockWpdb();
+		$this->storedMeta[ ProductPostType::META_RELEASE_DATE ] = '2011-12-28';
+		$this->mockFindReturnsProduct( 7, 'Keep Title' );
+		WP_Mock::userFunction( 'wp_update_post' )->once()->andReturn( 7 );
+		$this->mockMetaWriteThrough();
+
+		$controller = new ProductsController( new ProductRepository() );
+		$request    = new WP_REST_Request( 'PATCH', '/affilicard/v1/products/7' );
+		$request->set_param( 'id', 7 );
+		$request->set_param( 'stock_status', 'out_of_stock' );
+
+		$response = $controller->update( $request );
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertSame( '2011-12-28', $response->get_data()['release_date'] );
+	}
+
+	public function test_createはrelease_dateを保存する(): void {
+		$this->mockListingLockWpdb();
+		WP_Mock::userFunction( 'wp_insert_post' )->once()->andReturn( 42 );
+		$this->mockMetaWriteThrough();
+		$this->mockFindReturnsProduct( 42, 'タイトル' );
+
+		$controller = new ProductsController( new ProductRepository() );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products' );
+		$request->set_param( 'title', 'タイトル' );
+		$request->set_param( 'release_date', '2026-09-16' );
+
+		$response = $controller->create( $request );
+
+		$this->assertSame( 201, $response->get_status() );
+		$this->assertSame( '2026-09-16', $this->storedMeta[ ProductPostType::META_RELEASE_DATE ] );
+		$this->assertSame( '2026-09-16', $response->get_data()['release_date'] );
+	}
+
+	/**
+	 * schema が受け付けるキーは、単品の作成・更新でもすべて保存に渡す。
+	 *
+	 * 取り出すキーの一覧が schema とずれると、そのキーは 200 / 201 のまま黙って
+	 * 捨てられる（`release_date` がそうだった）。キーを足すときの取りこぼしをここで止める。
+	 */
+	public function test_単品の作成と更新はschemaの全キーを保存に渡す(): void {
+		$controller = new ProductsController( new ProductRepository() );
+		$request    = new WP_REST_Request( 'PATCH', '/affilicard/v1/products/7' );
+		foreach ( array_keys( ProductSchema::args() ) as $key ) {
+			$request->set_param( $key, 'x' );
+		}
+
+		$method = new \ReflectionMethod( ProductsController::class, 'extractProductData' );
+		$method->setAccessible( true );
+		$data = $method->invoke( $controller, $request );
+
+		$expected = array_keys( ProductSchema::args() );
+		$actual   = array_keys( $data );
+		sort( $expected );
+		sort( $actual );
+		$this->assertSame( $expected, $actual );
+	}
+
 	public function test_bulk_create_returns_207_with_per_item_results_partial_success(): void {
 		$this->mockListingLockWpdb();
 		WP_Mock::userFunction( 'wp_kses_post' )->andReturnUsing( static fn( $v ) => $v );

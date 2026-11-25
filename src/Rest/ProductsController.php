@@ -615,6 +615,15 @@ final class ProductsController {
 	}
 
 	/**
+	 * 単品の作成・更新で、リクエストから保存に渡すフィールドを取り出す。
+	 *
+	 * **ここに無いキーは、schema（{@see ProductSchema::args()}）が受け付けていても
+	 * 黙って捨てられる**（200 / 201 が返るのに保存されない）。以前は `release_date` が
+	 * 抜けていて、REST で発売日を直そうとしても変わらなかった。schema にキーを足すときは
+	 * ここにも足す（テストで schema のキーと突き合わせている）。
+	 *
+	 * 送られなかったキー（`get_param()` が null）は含めない。更新では既存値が残る。
+	 *
 	 * @return array<string, mixed>
 	 */
 	private function extractProductData( WP_REST_Request $request ): array {
@@ -624,6 +633,7 @@ final class ProductsController {
 			'status',
 			'product_type',
 			'stock_status',
+			'release_date',
 			'extras',
 			'listings',
 		);
