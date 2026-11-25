@@ -30,7 +30,6 @@
 
 const { test, expect } = require( '@playwright/test' );
 const {
-	getApiContext,
 	getAuthHeaders,
 	cleanupStaleFixtures,
 	newApiContext,
@@ -71,7 +70,11 @@ test.describe( 'affilicard/v1 の商品保存（書き込み検証つき）', ()
 	} );
 
 	test( '作成は 201 で listings を保存し、同じ listings で更新し直しても 200 を返す', async () => {
-		const ctx = await getApiContext();
+		// **使い回しのコンテキストは使わない。** 直前の beforeAll（stale fixture の掃除）で
+		// `wp-env run tests-cli` を挟んでおり、そのあいだに使い回しコンテキストの keep-alive
+		// 接続をサーバ側が閉じる。閉じた接続を掴んだまま投げると `socket hang up` で即死する
+		// （main への push の E2E で実際に断続的に落ちていた）。
+		const ctx = await newApiContext();
 		const headers = getAuthHeaders();
 
 		const created = await ctx.post( '/wp-json/affilicard/v1/products', {
@@ -138,6 +141,7 @@ test.describe( 'affilicard/v1 の商品保存（書き込み検証つき）', ()
 		const changedBody = await changed.json();
 		expect( changedBody.listings[ 0 ].offers[ 0 ].external_id ).toBe( 'e2e-save-2' );
 		expect( changedBody.listings[ 0 ].offers[ 0 ].price ).toBe( '770' );
+		await ctx.dispose();
 	} );
 } );
 
