@@ -385,6 +385,19 @@ final class ProductsController {
 				continue;
 			}
 
+			// 単品の作成・更新が 400 で弾く形式違いの発売日は、bulk でもこの item だけ
+			// error にする（空文字に丸めて保存すると、送った発売日が黙って消える）。null は
+			// 未指定として扱う（単品も WordPress が null の引数を検証しないので揃える）。
+			if ( isset( $raw['release_date'] ) && ! ProductSchema::isValidReleaseDate( $raw['release_date'] ) ) {
+				++$failed;
+				$results[] = array(
+					'index'   => $index,
+					'status'  => 'error',
+					'message' => ProductSchema::releaseDateErrorMessage(),
+				);
+				continue;
+			}
+
 			$data = $this->enforcePublishCapability( ProductSchema::sanitizeItem( $raw ) );
 			if ( '' === $data['title'] ) {
 				++$failed;

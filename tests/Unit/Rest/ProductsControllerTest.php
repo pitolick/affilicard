@@ -614,6 +614,36 @@ final class ProductsControllerTest extends TestCase {
 		$this->assertSame( 2, $data['failed'] );
 	}
 
+	public function test_bulkCreateは形式違いのrelease_dateのitemだけをerrorにして保存しない(): void {
+		WP_Mock::userFunction( 'wp_insert_post' )->never();
+
+		$controller = new ProductsController( new ProductRepository() );
+		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products/bulk' );
+		$request->set_param(
+			'products',
+			array(
+				array(
+					'title'        => 'X 1巻',
+					'release_date' => '2026/09/16',
+				),
+				array(
+					'title'        => 'X 2巻',
+					'release_date' => '2026-02-30',
+				),
+			)
+		);
+
+		$response = $controller->bulkCreate( $request );
+
+		$this->assertSame( 207, $response->get_status() );
+		$data = $response->get_data();
+		$this->assertSame( 0, $data['created'] );
+		$this->assertSame( 2, $data['failed'] );
+		$this->assertSame( 'error', $data['results'][0]['status'] );
+		$this->assertSame( ProductSchema::releaseDateErrorMessage(), $data['results'][0]['message'] );
+		$this->assertSame( 1, $data['results'][1]['index'] );
+	}
+
 	public function test_bulk_create_rejects_non_array_products(): void {
 		$controller = new ProductsController( new ProductRepository() );
 		$request    = new WP_REST_Request( 'POST', '/affilicard/v1/products/bulk' );

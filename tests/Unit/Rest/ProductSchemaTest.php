@@ -623,6 +623,47 @@ final class ProductSchemaTest extends TestCase {
 		$this->assertSame( '', $out['release_date'] );
 	}
 
+	/**
+	 * @dataProvider releaseDateCases
+	 * @param mixed $value
+	 */
+	public function test_isValidReleaseDateは空文字と実在するYYYY_MM_DDだけを通す( $value, bool $expected ): void {
+		$this->assertSame( $expected, ProductSchema::isValidReleaseDate( $value ) );
+	}
+
+	/**
+	 * @return array<string, array{0: mixed, 1: bool}>
+	 */
+	public function releaseDateCases(): array {
+		return array(
+			'YYYY-MM-DD'  => array( '2026-09-16', true ),
+			'前後の空白'       => array( ' 2026-09-16 ', true ),
+			'空文字（消す）'     => array( '', true ),
+			'うるう日'        => array( '2028-02-29', true ),
+			'スラッシュ区切り'    => array( '2026/09/16', false ),
+			'時刻つき'        => array( '2026-09-16T00:00:00', false ),
+			'ゼロ埋めなし'      => array( '2026-9-16', false ),
+			'実在しない日付'     => array( '2026-02-30', false ),
+			'実在しない月'      => array( '2026-13-01', false ),
+			'うるう年でない2/29' => array( '2026-02-29', false ),
+			'数値'          => array( 20260916, false ),
+			'配列'          => array( array( '2026-09-16' ), false ),
+			'null'        => array( null, false ),
+		);
+	}
+
+	public function test_validateReleaseDateは形式違いを400のWP_Errorにする(): void {
+		$this->assertTrue( ProductSchema::validateReleaseDate( '2026-09-16' ) );
+		$this->assertTrue( ProductSchema::validateReleaseDate( '' ) );
+		$this->assertInstanceOf( \WP_Error::class, ProductSchema::validateReleaseDate( '2026/09/16' ) );
+	}
+
+	public function test_release_dateの引数は作成でも更新でも形式を検証する(): void {
+		$callback = array( ProductSchema::class, 'validateReleaseDate' );
+		$this->assertSame( $callback, ProductSchema::args()['release_date']['validate_callback'] );
+		$this->assertSame( $callback, ProductSchema::updateArgs()['release_date']['validate_callback'] );
+	}
+
 	public function test_updateArgs_is_partial_no_required_no_defaults(): void {
 		// PATCH（部分更新）用 args は required / default を持たず、
 		// 未指定フィールドが null（未送信）扱いになるようにする。
