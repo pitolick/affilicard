@@ -72,6 +72,7 @@ export function Edit({ attributes, setAttributes }) {
 		maskR18,
 		maskLabel,
 		hideMedia,
+		storeR18,
 	} = attributes;
 	const [options, setOptions] = useState([]);
 	const [filter, setFilter] = useState('');
@@ -156,6 +157,7 @@ export function Edit({ attributes, setAttributes }) {
 				maskR18,
 				maskLabel,
 				hideMedia,
+				storeR18,
 			})
 				.then((res) => {
 					if (!active) return;
@@ -189,6 +191,7 @@ export function Edit({ attributes, setAttributes }) {
 		maskR18,
 		maskLabel,
 		hideMedia,
+		storeR18,
 	]);
 
 	const setCtaOverride = (code, value) => {
@@ -318,6 +321,36 @@ export function Edit({ attributes, setAttributes }) {
 					onChange={(value) => setAttributes({ maskLabel: value })}
 					placeholder={__('未設定（継承）', 'affilicard')}
 					__nextHasNoMarginBottom
+				/>
+				<SelectControl
+					label={__('ストアの成人向け判定', 'affilicard')}
+					value={storeR18 === undefined ? 'inherit' : String(storeR18)}
+					options={[
+						{
+							label: __('サイト設定に従う', 'affilicard'),
+							value: 'inherit',
+						},
+						{
+							label: __('判定に従って R18 表示にする', 'affilicard'),
+							value: 'true',
+						},
+						{
+							label: __('判定を無視する', 'affilicard'),
+							value: 'false',
+						},
+					]}
+					onChange={(value) =>
+						setAttributes({
+							storeR18:
+								'inherit' === value ? undefined : 'true' === value,
+						})
+					}
+					help={__(
+						'ストアが成人向けと判定した商品は、上の R18 のチェックが無くても R18 表示になります。「判定を無視する」にすると、このカードだけ判定を使いません（上の R18 のチェックは効きます）。',
+						'affilicard'
+					)}
+					__nextHasNoMarginBottom
+					__next40pxDefaultSize
 				/>
 			</PanelBody>
 		</InspectorControls>

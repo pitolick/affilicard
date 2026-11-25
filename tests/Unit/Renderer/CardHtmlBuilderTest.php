@@ -408,6 +408,47 @@ final class CardHtmlBuilderTest extends TestCase {
 		$this->assertSame( 'x', $resolved['label'] );
 	}
 
+	/**
+	 * ストアの成人向け判定は手動の R18 に足し合わせる。外せるのはブロックの storeR18=false と
+	 * サイト設定だけで、手動の R18 の OFF（商品・ブロック）では外れない。
+	 *
+	 * @dataProvider storeAdultCases
+	 * @param array<string, mixed> $attributes
+	 * @param array<string, mixed> $settings
+	 */
+	public function test_resolve_mask_follows_store_adult_flag( array $attributes, bool $manual, string $adult, array $settings, bool $expected ): void {
+		\WP_Mock::userFunction( 'get_option' )->andReturn( $settings );
+		$product = array(
+			'mask_r18' => $manual,
+			'listings' => array(
+				array(
+					'platform' => 'amazon-kindle',
+					'offers'   => array( array( 'adult' => $adult ) ),
+				),
+			),
+		);
+
+		$resolved = ( new \Affilicard\Renderer\CardHtmlBuilder() )->resolveMask( $attributes, $product );
+
+		$this->assertSame( $expected, $resolved['r18'] );
+	}
+
+	/**
+	 * @return array<string, array{0: array<string, mixed>, 1: bool, 2: string, 3: array<string, mixed>, 4: bool}>
+	 */
+	public static function storeAdultCases(): array {
+		return array(
+			'判定あり・既定（サイト設定 ON）'       => array( array(), false, '1', array(), true ),
+			'判定あり・手動の R18 をブロックで OFF' => array( array( 'maskR18' => false ), false, '1', array(), true ),
+			'判定あり・サイト設定 OFF'          => array( array(), false, '1', array( 'store_adult_r18' => false ), false ),
+			'判定あり・サイト OFF でもブロックで従う'  => array( array( 'storeR18' => true ), false, '1', array( 'store_adult_r18' => false ), true ),
+			'判定あり・ブロックで判定を無視'         => array( array( 'storeR18' => false ), false, '1', array(), false ),
+			'判定を無視しても手動の R18 は効く'     => array( array( 'storeR18' => false ), true, '1', array(), true ),
+			'非該当'                     => array( array(), false, '0', array(), false ),
+			'未確認'                     => array( array(), false, '', array(), false ),
+		);
+	}
+
 	public function test_resolve_mask_empty_string_label_is_override(): void {
 		$builder = new \Affilicard\Renderer\CardHtmlBuilder();
 		$product = array( 'mask_label' => '継承' );

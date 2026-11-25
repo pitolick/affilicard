@@ -103,6 +103,26 @@ describe( 'Edit', () => {
 		);
 	} );
 
+	test( 'ストアの成人向け判定の上書きをプレビューへ渡し、選ぶと storeR18 を設定する', async () => {
+		const { setAttributes } = setup( { productId: 7, storeR18: false } );
+		await waitFor( () =>
+			expect( screen.getByText( 'プレビュー本文' ) ).toBeInTheDocument()
+		);
+		expect( productsApi.getCardPreview ).toHaveBeenCalledWith(
+			7,
+			expect.objectContaining( { storeR18: false } )
+		);
+
+		const select = screen.getByLabelText( 'ストアの成人向け判定' );
+		expect( select.value ).toBe( 'false' );
+
+		fireEvent.change( select, { target: { value: 'inherit' } } );
+		expect( setAttributes ).toHaveBeenLastCalledWith( { storeR18: undefined } );
+
+		fireEvent.change( select, { target: { value: 'true' } } );
+		expect( setAttributes ).toHaveBeenLastCalledWith( { storeR18: true } );
+	} );
+
 	test( 'renders color palette controls in inspector', async () => {
 		setup( { productId: 7 } );
 		// getCardPreview の解決を待ってから色設定 UI を確認する。

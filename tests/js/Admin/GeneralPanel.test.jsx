@@ -136,3 +136,22 @@ describe( '一括更新ボタンの feedback', () => {
 		expect( screen.getByText( '一括更新' ) ).not.toBeDisabled();
 	} );
 } );
+
+describe( 'ストアの成人向け判定', () => {
+	const label = 'ストアが成人向けと判定した商品を R18 表示にする';
+
+	test( '未保存（キーが無い）なら既定の ON で表示する', async () => {
+		render( <GeneralPanel /> );
+		expect( await screen.findByLabelText( label ) ).toBeChecked();
+	} );
+
+	test( 'OFF にすると store_adult_r18: false が設定に入る', async () => {
+		fetchSettings.mockResolvedValue( { ...baseSettings, store_adult_r18: true } );
+		render( <GeneralPanel /> );
+		const toggle = await screen.findByLabelText( label );
+
+		fireEvent.click( toggle );
+
+		expect( toggle ).not.toBeChecked();
+	} );
+} );

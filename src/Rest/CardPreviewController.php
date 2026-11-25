@@ -70,6 +70,9 @@ final class CardPreviewController {
 						'hideMedia'         => array(
 							'type' => 'boolean',
 						),
+						'storeR18'          => array(
+							'type' => 'boolean',
+						),
 					),
 				),
 			)
@@ -119,6 +122,12 @@ final class CardPreviewController {
 		$hide_media = $request->get_param( 'hideMedia' );
 		if ( null !== $hide_media ) {
 			$attributes['hideMedia'] = filter_var( $hide_media, FILTER_VALIDATE_BOOLEAN );
+		}
+
+		// storeR18 も hideMedia と同じく、未指定ならキーごと入れない（サイト設定に従う）。
+		$store_r18 = $request->get_param( 'storeR18' );
+		if ( null !== $store_r18 ) {
+			$attributes['storeR18'] = filter_var( $store_r18, FILTER_VALIDATE_BOOLEAN );
 		}
 
 		$mask_label = $request->get_param( 'maskLabel' );

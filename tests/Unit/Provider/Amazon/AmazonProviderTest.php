@@ -503,4 +503,17 @@ final class AmazonProviderTest extends TestCase {
 
 		$this->assertTrue( ( new AmazonProvider( $client ) )->testConnection( self::CREDS )['ok'] );
 	}
+
+	public function test_成人向けの判定を3値で入れる(): void {
+		$item = self::item();
+		$item['itemInfo']['productInfo']['isAdultProduct'] = array( 'displayValue' => true );
+		$this->assertSame( '1', AmazonProvider::normalizeItem( $item )['adult'] );
+
+		$item['itemInfo']['productInfo']['isAdultProduct'] = array( 'displayValue' => false );
+		$this->assertSame( '0', AmazonProvider::normalizeItem( $item )['adult'] );
+
+		// 返らなければ未確認（成人向けではない、とは扱わない）。
+		unset( $item['itemInfo']['productInfo']['isAdultProduct'] );
+		$this->assertSame( '', AmazonProvider::normalizeItem( $item )['adult'] );
+	}
 }
