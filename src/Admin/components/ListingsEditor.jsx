@@ -117,6 +117,7 @@ function emptyOffer() {
 		list_price_label: '',
 		badge: '',
 		plan_label: '',
+		variant_label: '',
 		points: '',
 		adult: '',
 		image_url: '',
@@ -208,6 +209,7 @@ function legacyOffer(listing) {
 		list_price: scalarString(listing.list_price),
 		badge: scalarString(listing.badge),
 		plan_label: scalarString(listing.plan_label),
+		variant_label: scalarString(listing.variant_label),
 		image_url: scalarString(listing.image_url),
 		search_key: scalarString(listing.search_key),
 		fetch_status:
@@ -387,6 +389,43 @@ export function selectInUseOffer(offers, fallbackOnTerminal) {
 }
 
 /**
+ * バージョン（variant_label）ごとに使用中の購入リンクを返す。
+ *
+ * `Affilicard\Pricing\OfferSelector::selectPerVariant()`（PHP）の写し。同じバージョン名
+ * （空どうしも同じ）の購入リンクを 1 グループにし、表示順で最初に現れた位置の順に、
+ * 各グループから {@link selectInUseOffer} の規則で 1 件ずつ選ぶ。バージョン名を
+ * 誰も持たなければ selectInUseOffer() と同じ 1 件（空なら 0 件）になる。
+ *
+ * @param {Array<Object>} offers
+ * @param {boolean}       fallbackOnTerminal
+ * @return {Array<Object>} 使用中の offer（配列内の同一参照）
+ */
+export function selectInUseOffers(offers, fallbackOnTerminal) {
+	const rows = Array.isArray(offers) ? offers : [];
+	const groups = new Map();
+	for (const offer of sortOffersForSelection(rows)) {
+		// PHP の trim() と同じ文字だけを落とす（String.prototype.trim() は全角空白も
+		// 落とすため、「字幕版　」のような値で PHP とグループ分けが食い違う）。
+		const key = scalarString(offer.variant_label).replace(
+			/^[ \t\n\r\0\x0B]+|[ \t\n\r\0\x0B]+$/g,
+			''
+		);
+		if (!groups.has(key)) {
+			groups.set(key, []);
+		}
+		groups.get(key).push(offer);
+	}
+	const out = [];
+	for (const group of groups.values()) {
+		const selected = selectInUseOffer(group, fallbackOnTerminal);
+		if (selected) {
+			out.push(selected);
+		}
+	}
+	return out;
+}
+
+/**
  * `Affilicard\Pricing\FetchStatus::label()`（PHP）と同じ文言。
  *
  * unsupported と transient は再試行の分類こそ同じだが、人に見せる意味は別なので
@@ -455,7 +494,8 @@ function OffersEditor({ offers, fallbackOnTerminal, platform, onChange }) {
 	const [uids, setUids] = useState(() => rows.map(() => makeUid()));
 
 	const [openKeys, setOpenKeys] = useState(() => new Set());
-	const inUseOffer = selectInUseOffer(rows, fallbackOnTerminal);
+	// バージョン（variant_label）ごとに 1 件ずつ使用中になる（カードに 1 行ずつ並ぶ）。
+	const inUseOffers = selectInUseOffers(rows, fallbackOnTerminal);
 
 	// 描画は配列の並びではなく PHP の OfferSelector と同じ並び（display_order 昇順・
 	// 同値は出現順）で行う。配列順で描くと、外部パイプラインが書いた listing や
@@ -534,7 +574,7 @@ function OffersEditor({ offers, fallbackOnTerminal, platform, onChange }) {
 				// 常に rows と同じ長さ・同じ並びのはず。念のため index にフォールバックする。
 				// 引くのは描画位置ではなく元の配列での位置（i）。
 				const key = uids[i] ?? `pos:${i}`;
-				const isInUse = inUseOffer === offer;
+				const isInUse = inUseOffers.includes(offer);
 				const statusLabel = offerStatusLabel(offer.fetch_status);
 				return (
 					<div
@@ -670,6 +710,18 @@ function OffersEditor({ offers, fallbackOnTerminal, platform, onChange }) {
 									'affilicard'
 								)}
 								onChange={(v) => updateOffer(i, { plan_label: v })}
+							/>
+							<TextControl
+								label={__('バージョン', 'affilicard')}
+								value={offer.variant_label ?? ''}
+								placeholder={__('例: 字幕版', 'affilicard')}
+								help={__(
+									'字幕版・吹替版・ディレクターズカット版など、同じ作品が別の商品ページになっているときの名前。バージョンの違う購入リンクはカードに 1 行ずつ並びます。同じバージョン（空欄どうしも同じ）の購入リンクは、表示順で 1 つだけが使われます。',
+									'affilicard'
+								)}
+								onChange={(v) =>
+									updateOffer(i, { variant_label: v })
+								}
 							/>
 							<TextControl
 								label={__('バッジ', 'affilicard')}

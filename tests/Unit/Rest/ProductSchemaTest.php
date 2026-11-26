@@ -132,6 +132,7 @@ final class ProductSchemaTest extends TestCase {
 		$this->assertSame( '', $offer['list_price_label'] );
 		$this->assertSame( '', $offer['badge'] );
 		$this->assertSame( '', $offer['plan_label'] );
+		$this->assertSame( '', $offer['variant_label'] );
 		$this->assertSame( '', $offer['points'] );
 		$this->assertSame( '', $offer['adult'] );
 		$this->assertSame( '', $offer['image_url'] );
@@ -153,6 +154,28 @@ final class ProductSchemaTest extends TestCase {
 			)
 		);
 		$this->assertSame( '見放題', $result[0]['offers'][0]['plan_label'] );
+	}
+
+	public function test_sanitize_listings_バージョン名を保存する(): void {
+		$result = ProductSchema::sanitizeListings(
+			array(
+				array(
+					'platform' => 'prime-video',
+					'offers'   => array(
+						array(
+							'external_id'   => 'B0SUB00001',
+							'variant_label' => ' 字幕版 ',
+						),
+						array(
+							'external_id'   => 'B0DUB00001',
+							'variant_label' => '吹替版',
+						),
+					),
+				),
+			)
+		);
+		$this->assertSame( '字幕版', $result[0]['offers'][0]['variant_label'] );
+		$this->assertSame( '吹替版', $result[0]['offers'][1]['variant_label'] );
 	}
 
 	public function test_sanitize_listings_参考価格のラベルを保存する(): void {
