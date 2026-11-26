@@ -72,13 +72,32 @@ final class AccountPause {
 
 	/**
 	 * 停止中なら再開してよい時刻（UNIX 秒）、停止していなければ 0。
+	 *
+	 * @param bool $fresh リクエスト内のキャッシュを捨てて読み直す。別のワーカー（別のプロセス）が
+	 *                    書いた停止を見落とさないため、API を呼ぶ直前の判定で使う。永続オブジェクト
+	 *                    キャッシュが無いと、WP は「option が無い」ことまでリクエストの間覚えている。
 	 */
-	public static function until( string $account, int $now ): int {
+	public static function until( string $account, int $now, bool $fresh = false ): int {
+		if ( $fresh ) {
+			self::forgetCached( self::OPTION_PREFIX . $account );
+		}
 		$record = self::get( $account );
 		if ( null === $record ) {
 			return 0;
 		}
 		return $record['until'] > $now ? $record['until'] : 0;
+	}
+
+	/**
+	 * option のリクエスト内キャッシュ（値と「無い」という記録の両方）を捨てる。
+	 */
+	private static function forgetCached( string $key ): void {
+		wp_cache_delete( $key, 'options' );
+		$notoptions = wp_cache_get( 'notoptions', 'options' );
+		if ( is_array( $notoptions ) && isset( $notoptions[ $key ] ) ) {
+			unset( $notoptions[ $key ] );
+			wp_cache_set( 'notoptions', $notoptions, 'options' );
+		}
 	}
 
 	/**

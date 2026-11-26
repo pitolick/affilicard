@@ -261,7 +261,9 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 		$now     = $this->now();
 		// 上限（429）・適格販売の不足（403）で止めている間は呼ばない。呼んでも同じ失敗が返るうえ、
 		// 1 日の上限を消費して回復を遅らせる（AccountPause 参照）。
-		if ( AccountPause::until( $account, $now ) > 0 ) {
+		// 別のワーカーが止めた直後でも見落とさないよう、リクエスト内のキャッシュを使わずに読む
+		// （呼び出し 1 回につき 1 回だけなので、DB を読むコストは HTTP に比べて小さい）。
+		if ( AccountPause::until( $account, $now, true ) > 0 ) {
 			return array_fill_keys( $asins, FetchResult::error() );
 		}
 
@@ -303,14 +305,14 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 	 * 短い停止が切れてしまう。停止を解くかどうかはリクエストを送った時刻（$startedAt）で決める
 	 * （AccountPause::recordSuccess）。
 	 *
-	 * @param array{error: bool, code: int, decoded: array<string, mixed>|null} $res
+	 * @param array{error: bool, code: int, decoded: array<string, mixed>|null, requests?: int} $res
 	 */
 	private function recordUsage( string $account, int $startedAt, int $respondedAt, array $res ): void {
 		$now = $respondedAt;
 		if ( $res['error'] ) {
 			return;
 		}
-		ApiUsage::record( $account, ApiUsage::KIND_CALLS, $now );
+		ApiUsage::record( $account, ApiUsage::KIND_CALLS, $now, (int) ( $res['requests'] ?? 1 ) );
 		$code    = $res['code'];
 		$decoded = $res['decoded'];
 		if ( 429 === $code ) {

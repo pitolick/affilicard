@@ -106,6 +106,34 @@ final class AccountPauseTest extends TestCase {
 		$this->assertSame( 1060, AccountPause::until( 'amazon', 1000 ) );
 	}
 
+	/**
+	 * 別のワーカーが書いた停止を見落とさないよう、$fresh なら option の値と「無い」という記録の
+	 * 両方のキャッシュを捨ててから読む（WP は無い option もリクエストの間覚えている）。
+	 */
+	public function test_freshならリクエスト内のキャッシュを捨ててから読む(): void {
+		$key = AccountPause::OPTION_PREFIX . 'amazon';
+		WP_Mock::userFunction( 'wp_cache_delete' )->once()->with( $key, 'options' )->andReturn( true );
+		WP_Mock::userFunction( 'wp_cache_get' )->once()->with( 'notoptions', 'options' )->andReturn(
+			array(
+				$key            => true,
+				'other_missing' => true,
+			)
+		);
+		WP_Mock::userFunction( 'wp_cache_set' )
+			->once()
+			->with( 'notoptions', array( 'other_missing' => true ), 'options' )
+			->andReturn( true );
+		$this->options[ $key ] = array(
+			'until'   => 1060,
+			'reason'  => AccountPause::REASON_RATE_LIMITED,
+			'since'   => 1000,
+			'streak'  => 1,
+			'updated' => 1000,
+		);
+
+		$this->assertSame( 1060, AccountPause::until( 'amazon', 1000, true ) );
+	}
+
 	public function test_403は6時間止める(): void {
 		$record = AccountPause::recordNotEligible( 'amazon', 1000 );
 		$this->assertSame( 1000 + 21600, $record['until'] );

@@ -171,6 +171,8 @@ final class AmazonCreatorsClientTest extends TestCase {
 
 		$this->assertSame( 200, $res['code'] );
 		$this->assertSame( array( 'Bearer stale', 'Bearer fresh' ), $auths );
+		// API には 2 回届いている（呼び出し回数の集計に使う）。
+		$this->assertSame( 2, $res['requests'] );
 	}
 
 	public function test_トークンを取得できなければ_HTTPせずerrorを返す(): void {

@@ -25,7 +25,10 @@ final class ApiUsage {
 
 	private const KEEP_DAYS = 7;
 
-	public static function record( string $account, string $kind, int $now ): void {
+	/**
+	 * @param int $count 足す回数（401 でトークンを取り直して再送したときは 2 回ぶん）。
+	 */
+	public static function record( string $account, string $kind, int $now, int $count = 1 ): void {
 		if ( ! in_array( $kind, self::KINDS, true ) ) {
 			return;
 		}
@@ -34,7 +37,7 @@ final class ApiUsage {
 		if ( ! isset( $days[ $date ] ) ) {
 			$days[ $date ] = self::empty();
 		}
-		++$days[ $date ][ $kind ];
+		$days[ $date ][ $kind ] += max( 1, $count );
 		krsort( $days );
 		$days = array_slice( $days, 0, self::KEEP_DAYS, true );
 		update_option( self::OPTION_PREFIX . $account, $days, false );

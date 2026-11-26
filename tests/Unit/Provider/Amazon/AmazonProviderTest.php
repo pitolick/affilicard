@@ -51,6 +51,9 @@ final class AmazonProviderTest extends TestCase {
 	/** @var array<string, mixed> 停止の記録・日次集計を保存する option（テストの中だけのメモリ上の保存先）。 */
 	private array $options = array();
 
+	/** @var list<string> 捨てたキャッシュ（group:key）。 */
+	private array $cacheDeletes = array();
+
 	/** @var list<array{0: string, 1: string}> 送ったメール（宛先・件名）。 */
 	private array $mails = array();
 
@@ -60,6 +63,14 @@ final class AmazonProviderTest extends TestCase {
 				->with( $key, \Mockery::any() )
 				->andReturnUsing( fn( $k, $default ) => $this->options[ $k ] ?? $default );
 		}
+		// 呼ぶ直前の停止の判定は、リクエスト内のキャッシュを捨てて読み直す（AccountPause::until の $fresh）。
+		WP_Mock::userFunction( 'wp_cache_delete' )->andReturnUsing(
+			function ( $key, $group ) {
+				$this->cacheDeletes[] = $group . ':' . $key;
+				return true;
+			}
+		);
+		WP_Mock::userFunction( 'wp_cache_get' )->andReturn( false );
 		WP_Mock::userFunction( 'get_option' )->with( 'admin_email', '' )->andReturn( 'admin@example.test' );
 		WP_Mock::userFunction( 'get_option' )->with( 'blogname', '' )->andReturn( 'Demo' );
 		WP_Mock::userFunction( 'update_option' )->andReturnUsing(
@@ -653,6 +664,32 @@ final class AmazonProviderTest extends TestCase {
 
 		$this->assertTrue( ( new AmazonProvider( $client ) )->testConnection( self::CREDS )['ok'] );
 		$this->assertNull( AccountPause::get( 'amazon' ) );
+	}
+
+	/**
+	 * 呼ぶ直前の停止の判定は、リクエスト内のキャッシュを捨てて読み直す（別のワーカーが止めた直後を見落とさない）。
+	 */
+	public function test_呼ぶ前に停止の記録をキャッシュを使わずに読む(): void {
+		$this->stubCredentials();
+		$client = $this->client();
+		$client->shouldReceive( 'getItems' )->once()->andReturn( self::ok( array( self::item() ) ) );
+
+		( new AmazonProvider( $client ) )->fetch( 'B008ODF84I', array() );
+
+		$this->assertContains( 'options:' . AccountPause::OPTION_PREFIX . 'amazon', $this->cacheDeletes );
+	}
+
+	/**
+	 * 401 でトークンを取り直して再送したときは、API に 2 回届いているので 2 回と数える。
+	 */
+	public function test_401で再送した呼び出しは2回と数える(): void {
+		$this->stubCredentials();
+		$client = $this->client();
+		$client->shouldReceive( 'getItems' )->once()->andReturn( self::ok( array( self::item() ) ) + array( 'requests' => 2 ) );
+
+		( new AmazonProvider( $client ) )->fetch( 'B008ODF84I', array() );
+
+		$this->assertSame( 2, ApiUsage::forDay( 'amazon', time() )['calls'] );
 	}
 
 	/**

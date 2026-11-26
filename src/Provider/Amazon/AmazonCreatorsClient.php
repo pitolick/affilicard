@@ -54,11 +54,12 @@ class AmazonCreatorsClient {
 	 *
 	 * 戻り値の error=true は「HTTP の手前で失敗した」（通信断・トークン取得失敗）ことを表し、
 	 * そのとき code は 0。HTTP 応答を得たら error=false で code に status を入れる。
+	 * requests は API に送った回数（401 でトークンを取り直して再送したら 2）。呼び出し回数の集計に使う。
 	 *
 	 * @param array<string, string> $credentials
 	 * @param list<string>          $itemIds
 	 * @param list<string>          $resources
-	 * @return array{error: bool, code: int, decoded: array<string, mixed>|null}
+	 * @return array{error: bool, code: int, decoded: array<string, mixed>|null, requests: int}
 	 */
 	public function getItems( array $credentials, array $itemIds, array $resources ): array {
 		$marketplace = self::marketplace( $credentials );
@@ -74,18 +75,18 @@ class AmazonCreatorsClient {
 
 		$token = $this->token( $credentials, false );
 		if ( null === $token ) {
-			return self::failure();
+			return self::failure() + array( 'requests' => 0 );
 		}
 		$res = $this->post( $token, $marketplace, $body );
 		if ( ! $res['error'] && 401 === $res['code'] ) {
 			// 期限内のはずのトークンが失効していた（取り消し・認証情報の差し替え等）。1 回だけ取り直す。
 			$token = $this->token( $credentials, true );
 			if ( null === $token ) {
-				return self::failure();
+				return self::failure() + array( 'requests' => 1 );
 			}
-			$res = $this->post( $token, $marketplace, $body );
+			return $this->post( $token, $marketplace, $body ) + array( 'requests' => 2 );
 		}
-		return $res;
+		return $res + array( 'requests' => 1 );
 	}
 
 	/**
