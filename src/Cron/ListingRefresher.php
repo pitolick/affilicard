@@ -322,8 +322,11 @@ class ListingRefresher {
 		$offers  = LegacyOffer::offersWithFallback( $listing );
 		$targets = OfferSelector::selectForRefresh( $offers, GeneralSettings::fallbackOnTerminal() );
 
-		$results   = array();
-		$calledApi = false;
+		$results = array();
+		// 1 件目の呼び出しの枠はハンドラが取っている。まとめ取得の先取り（BatchRefreshHandler）が
+		// その枠を使っていれば、手元に結果の無い最初の ID（1 リクエストに載らなかった 11 件目など）も
+		// 「2 件目以降」として枠を取ってから叩く。
+		$calledApi = $this->prefetchUsedSlot( $listing, $targets );
 		foreach ( $targets as $offer ) {
 			$results[] = $this->refreshOffer( $listing, $offer, $productTitle, $calledApi );
 		}
@@ -471,6 +474,28 @@ class ListingRefresher {
 		}
 
 		return array( $patch, WorkOutcome::SUCCESS, $targetIdentity, true );
+	}
+
+	/**
+	 * この更新の対象のうち、まとめ取得の先取りで結果が手元にあるものがあるか（＝先取りの
+	 * リクエストがハンドラの枠を使った）。
+	 *
+	 * @param array<string, mixed>       $listing
+	 * @param list<array<string, mixed>> $targets
+	 */
+	private function prefetchUsedSlot( array $listing, array $targets ): bool {
+		$definition = PlatformConfig::find( ScalarField::string( $listing, 'platform' ) );
+		$provider   = null !== $definition ? $this->registry->get( $definition->provider ) : null;
+		if ( ! $provider instanceof BatchFetchingProvider ) {
+			return false;
+		}
+		foreach ( $targets as $offer ) {
+			$externalId = ScalarField::string( $offer, 'external_id' );
+			if ( '' !== $externalId && $provider->hasPrefetched( $externalId ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

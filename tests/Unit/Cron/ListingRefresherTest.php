@@ -1822,4 +1822,49 @@ final class ListingRefresherTest extends TestCase {
 		$this->assertSame( FetchStatus::TRANSIENT, $this->saves[1]['patch']['fetch_status'] );
 		$this->assertCount( 5, $intervals );
 	}
+
+	/**
+	 * まとめ取得の先取り（BatchRefreshHandler）がハンドラの枠を使ったあと、手元に結果の無い
+	 * 最初の ID（1 リクエストに載らなかった 11 件目など）を叩くときも枠を取る（CodeRabbit #207）。
+	 */
+	public function test_先取りのあと結果の無い最初のIDも枠を取ってから叩く(): void {
+		$this->stubRakutenPlatform();
+		$intervals = array();
+		$this->stubLimiterWpdb( $intervals, 1 );
+		$p = Mockery::mock( ProviderInterface::class, BatchFetchingProvider::class );
+		$p->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$p->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$p->shouldReceive( 'accountCode' )->andReturn( 'rakuten' );
+		$p->shouldReceive( 'minRequestIntervalMs' )->andReturn( 1100 );
+		// 1 つ目（theatrical）は先取り済み、2 つ目（extended）は手元に無い。
+		$p->shouldReceive( 'hasPrefetched' )->andReturnUsing( static fn( string $id ): bool => 'theatrical' === $id );
+		$p->shouldReceive( 'fetch' )->twice()->andReturn( FetchResult::hit( array( 'price' => '400' ) ) );
+		$registry = new ProviderRegistry();
+		$registry->register( $p );
+
+		( new ListingRefresher( $registry, $this->repoWithVariants( self::twoVariants() ), static function (): void {}, new RateLimiter() ) )
+			->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertSame( array( 1100 ), $intervals );
+	}
+
+	public function test_先取りが無ければ最初のHTTPはハンドラの枠を使う(): void {
+		$this->stubRakutenPlatform();
+		$intervals = array();
+		$this->stubLimiterWpdb( $intervals, 1 );
+		$p = Mockery::mock( ProviderInterface::class, BatchFetchingProvider::class );
+		$p->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$p->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$p->shouldReceive( 'accountCode' )->andReturn( 'rakuten' );
+		$p->shouldReceive( 'minRequestIntervalMs' )->andReturn( 1100 );
+		$p->shouldReceive( 'hasPrefetched' )->andReturn( false );
+		$p->shouldReceive( 'fetch' )->once()->andReturn( FetchResult::hit( array( 'price' => '400' ) ) );
+		$registry = new ProviderRegistry();
+		$registry->register( $p );
+
+		( new ListingRefresher( $registry, $this->repoWithVariants( array( self::twoVariants()[0] ) ), static function (): void {}, new RateLimiter() ) )
+			->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertSame( array(), $intervals );
+	}
 }
