@@ -59,7 +59,7 @@
 - give-up の判定（`RefreshHandler::isGivenUpAll()`）は全バージョンが恒久失敗のときだけ止める
 - 掃引は `PriceFreshness::anyNeedsRefetch()`（どれか 1 つでも古ければ積む）
 - まとめ取得できる Provider（Amazon）は、`fetchTargetExternalIds()` が全バージョンの ID を返すので、`BatchRefreshHandler` の先取りで 1 リクエストにまとまる。先取りは 1 リクエストに載る件数（10）までにする（`prefetch()` は複数のリクエストを間を空けずに送るため）
-- **レート制限の枠は呼び出しごとに取る。** ハンドラ（`ThrottledActionHandler`・`BatchRefreshHandler`）が取るのは 1 件目の枠だけで、2 件目以降（まとめ取得できない Provider と、Amazon の 11 件目以降）は `ListingRefresher` が叩く直前に `RateLimiter::tryAcquire()` で取る。間隔はハンドラと同じ有効間隔（Provider の下限と管理画面の上書きの大きいほう）。取れなければ叩かずに一時失敗にする
+- **レート制限の枠は呼び出しごとに取る。** ハンドラ（`ThrottledActionHandler`・`BatchRefreshHandler`）が取るのは 1 件目の枠だけで、2 件目以降（まとめ取得できない Provider と、Amazon の 11 件目以降）は `ListingRefresher` が叩く直前に `RateLimiter::tryAcquire()` で取る。`BatchRefreshHandler` は、先取りに枠を使ったとき・先取りの結果だけで処理するとき（この listing のために枠を取っていない）に `refreshOne( …, $firstSlotUsed = true )` を渡し、`ListingRefresher` は最初の呼び出しから枠を取る（対象 ID から推し量らない。先取りと再読込の間に対象が変わりうるため）。間隔はハンドラと同じ有効間隔（Provider の下限と管理画面の上書きの大きいほう）。取れなければ叩かずに一時失敗にする
   - 以前の「ハンドラが interval × 件数を見込む」は、枠が取った時刻しか記録しないため、ジョブの最後の呼び出しと次のジョブとの間隔を守れなかった（CodeRabbit #207 の指摘）
 - `BatchRefreshHandler` の所要時間の見込みは、叩く回数（まとめ取得できない Provider は件数、できる Provider は 1 ＋ 10 件を超えた分）に比例させる
 

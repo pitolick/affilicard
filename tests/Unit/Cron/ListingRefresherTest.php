@@ -1824,10 +1824,11 @@ final class ListingRefresherTest extends TestCase {
 	}
 
 	/**
-	 * まとめ取得の先取り（BatchRefreshHandler）がハンドラの枠を使ったあと、手元に結果の無い
-	 * 最初の ID（1 リクエストに載らなかった 11 件目など）を叩くときも枠を取る（CodeRabbit #207）。
+	 * ハンドラが「1 件目の枠は使った（または取っていない）」と伝えたら、最初の外部 API 呼び出しから
+	 * 枠を取る。まとめ取得の先取りに枠を使ったあと、手元に結果の無い ID（11 件目・先取りのあとに
+	 * 対象が変わった ID）を叩く場合（CodeRabbit #207）。
 	 */
-	public function test_先取りのあと結果の無い最初のIDも枠を取ってから叩く(): void {
+	public function test_1件目の枠を使ったと伝えられたら最初の呼び出しから枠を取る(): void {
 		$this->stubRakutenPlatform();
 		$intervals = array();
 		$this->stubLimiterWpdb( $intervals, 1 );
@@ -1836,31 +1837,23 @@ final class ListingRefresherTest extends TestCase {
 		$p->shouldReceive( 'isAutomatic' )->andReturn( true );
 		$p->shouldReceive( 'accountCode' )->andReturn( 'rakuten' );
 		$p->shouldReceive( 'minRequestIntervalMs' )->andReturn( 1100 );
-		// 1 つ目（theatrical）は先取り済み、2 つ目（extended）は手元に無い。
-		$p->shouldReceive( 'hasPrefetched' )->andReturnUsing( static fn( string $id ): bool => 'theatrical' === $id );
-		$p->shouldReceive( 'fetch' )->twice()->andReturn( FetchResult::hit( array( 'price' => '400' ) ) );
-		$registry = new ProviderRegistry();
-		$registry->register( $p );
-
-		( new ListingRefresher( $registry, $this->repoWithVariants( self::twoVariants() ), static function (): void {}, new RateLimiter() ) )
-			->refreshOne( 20, 'rakuten-kobo' );
-
-		$this->assertSame( array( 1100 ), $intervals );
-	}
-
-	public function test_先取りが無ければ最初のHTTPはハンドラの枠を使う(): void {
-		$this->stubRakutenPlatform();
-		$intervals = array();
-		$this->stubLimiterWpdb( $intervals, 1 );
-		$p = Mockery::mock( ProviderInterface::class, BatchFetchingProvider::class );
-		$p->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
-		$p->shouldReceive( 'isAutomatic' )->andReturn( true );
-		$p->shouldReceive( 'accountCode' )->andReturn( 'rakuten' );
-		$p->shouldReceive( 'minRequestIntervalMs' )->andReturn( 1100 );
+		// 先取りの結果は手元に無い（先取りのあとで対象が変わった）。
 		$p->shouldReceive( 'hasPrefetched' )->andReturn( false );
 		$p->shouldReceive( 'fetch' )->once()->andReturn( FetchResult::hit( array( 'price' => '400' ) ) );
 		$registry = new ProviderRegistry();
 		$registry->register( $p );
+
+		( new ListingRefresher( $registry, $this->repoWithVariants( array( self::twoVariants()[0] ) ), static function (): void {}, new RateLimiter() ) )
+			->refreshOne( 20, 'rakuten-kobo', true );
+
+		$this->assertSame( array( 1100 ), $intervals );
+	}
+
+	public function test_伝えられなければ最初のHTTPはハンドラの枠を使う(): void {
+		$this->stubRakutenPlatform();
+		$intervals = array();
+		$this->stubLimiterWpdb( $intervals, 1 );
+		$registry = $this->providerReturning( array( 'theatrical' => FetchResult::hit( array( 'price' => '400' ) ) ) );
 
 		( new ListingRefresher( $registry, $this->repoWithVariants( array( self::twoVariants()[0] ) ), static function (): void {}, new RateLimiter() ) )
 			->refreshOne( 20, 'rakuten-kobo' );

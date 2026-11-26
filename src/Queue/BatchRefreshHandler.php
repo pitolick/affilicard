@@ -147,7 +147,9 @@ final class BatchRefreshHandler {
 						return;
 					}
 					$processedAny = true;
-					$outcome      = $this->refresher->refreshOne( $postId, $platform );
+					// この listing のためには枠を取っていない。再読込で対象が変わって外部 API を叩くことに
+					// なったら、ListingRefresher が枠を取ってから叩く。
+					$outcome = $this->refresher->refreshOne( $postId, $platform, true );
 					if ( WorkOutcome::TRANSIENT_FAILURE === $outcome && $this->requeueIfPaused( $account, $items, $index ) ) {
 						return;
 					}
@@ -247,7 +249,9 @@ final class BatchRefreshHandler {
 				$batchProvider->prefetch( $prefetchIds );
 			}
 
-			$outcome = $this->refresher->refreshOne( $postId, $platform );
+			// 先取りに枠を使ったら、手元に結果の無い ID（1 リクエストに載らなかった 11 件目、
+			// 先取りのあとに対象が変わった ID）は ListingRefresher が枠を取ってから叩く。
+			$outcome = $this->refresher->refreshOne( $postId, $platform, null !== $batchProvider && array() !== $prefetchIds );
 			// この listing の取得で account が止まった（429 / 403）なら、この listing を含む残りを
 			// 再開時刻までまとめて積み直す。
 			if ( WorkOutcome::TRANSIENT_FAILURE === $outcome && $this->requeueIfPaused( $account, $items, $index ) ) {

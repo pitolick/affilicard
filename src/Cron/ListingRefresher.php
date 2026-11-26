@@ -73,7 +73,14 @@ class ListingRefresher {
 	 * fetch 前の写しで巻き戻してしまう。渡す単位を「今回 fetch した offer 1 件」まで
 	 * 絞り込むことで、古い値そのものを保存経路へ持ち込まない。
 	 */
-	public function refreshOne( int $postId, string $platform ): WorkOutcome {
+	/**
+	 * @param bool $firstSlotUsed 呼び出し元が取った 1 件目の呼び出しの枠を、既に使っている（または
+	 *                            枠を取っていない）か。true なら、この更新の最初の外部 API 呼び出しから
+	 *                            枠を取ってから叩く。BatchRefreshHandler が、まとめ取得の先取りに枠を
+	 *                            使ったとき・先取りの結果だけで処理するとき（枠を取らない）に渡す。
+	 *                            対象 ID から推し量らないのは、先取りと再読込の間に対象が変わりうるため。
+	 */
+	public function refreshOne( int $postId, string $platform, bool $firstSlotUsed = false ): WorkOutcome {
 		$product = $this->repository->find( $postId );
 		if ( null === $product || ! is_array( $product['listings'] ?? null ) ) {
 			// 削除済み商品・listing 無し＝対象なし（no-op）。deleted 商品で failed 化させない。
@@ -94,7 +101,7 @@ class ListingRefresher {
 				// 試行回数を焼き、移行が長引くインストールで failed が積み上がる。
 				return WorkOutcome::SUCCESS;
 			}
-			$results = $this->refreshListing( $listing, (string) $product['title'] );
+			$results = $this->refreshListing( $listing, (string) $product['title'], $firstSlotUsed );
 			if ( array() === $results ) {
 				// 更新すべき購入リンクが無い＝保存するものも無い。ここで listing を書き戻すと、
 				// fetch もしていないのに fetch 前の写しで管理画面の編集を巻き戻す。リトライで
@@ -298,7 +305,7 @@ class ListingRefresher {
 	 * @return list<array{0: array<string, mixed>, 1: WorkOutcome, 2: string, 3: bool}> 購入リンクごとの
 	 *   パッチ、outcome、取得前に確定させたマージ先 identity、外部 API を試みたか
 	 */
-	private function refreshListing( array $listing, string $productTitle ): array {
+	private function refreshListing( array $listing, string $productTitle, bool $firstSlotUsed = false ): array {
 		// flat な listing（offers を持たず取得結果フィールドが listing 直下に並ぶ v3 以前の
 		// 形）も取得対象にする。offers を直接読むと、そういう listing は一度も fetch されず
 		// TRANSIENT_FAILURE を返してリトライ枠だけを焼く。読み取り側（CardRenderer 等）と
@@ -323,10 +330,9 @@ class ListingRefresher {
 		$targets = OfferSelector::selectForRefresh( $offers, GeneralSettings::fallbackOnTerminal() );
 
 		$results = array();
-		// 1 件目の呼び出しの枠はハンドラが取っている。まとめ取得の先取り（BatchRefreshHandler）が
-		// その枠を使っていれば、手元に結果の無い最初の ID（1 リクエストに載らなかった 11 件目など）も
-		// 「2 件目以降」として枠を取ってから叩く。
-		$calledApi = $this->prefetchUsedSlot( $listing, $targets );
+		// 1 件目の呼び出しの枠はハンドラが取っている。ハンドラがその枠を既に使った（まとめ取得の先取り）
+		// か取っていないと伝えてきたら、最初の外部 API 呼び出しから枠を取ってから叩く。
+		$calledApi = $firstSlotUsed;
 		foreach ( $targets as $offer ) {
 			$results[] = $this->refreshOffer( $listing, $offer, $productTitle, $calledApi );
 		}
@@ -474,28 +480,6 @@ class ListingRefresher {
 		}
 
 		return array( $patch, WorkOutcome::SUCCESS, $targetIdentity, true );
-	}
-
-	/**
-	 * この更新の対象のうち、まとめ取得の先取りで結果が手元にあるものがあるか（＝先取りの
-	 * リクエストがハンドラの枠を使った）。
-	 *
-	 * @param array<string, mixed>       $listing
-	 * @param list<array<string, mixed>> $targets
-	 */
-	private function prefetchUsedSlot( array $listing, array $targets ): bool {
-		$definition = PlatformConfig::find( ScalarField::string( $listing, 'platform' ) );
-		$provider   = null !== $definition ? $this->registry->get( $definition->provider ) : null;
-		if ( ! $provider instanceof BatchFetchingProvider ) {
-			return false;
-		}
-		foreach ( $targets as $offer ) {
-			$externalId = ScalarField::string( $offer, 'external_id' );
-			if ( '' !== $externalId && $provider->hasPrefetched( $externalId ) ) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	/**

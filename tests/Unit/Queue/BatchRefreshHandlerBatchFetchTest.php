@@ -11,6 +11,7 @@ use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\RateLimiter;
 use Affilicard\Queue\RunnerClock;
 use Affilicard\Queue\WorkOutcome;
+use Affilicard\Repository\ProductRepositoryInterface;
 use Affilicard\Settings\GeneralSettings;
 use Mockery;
 use WP_Mock;
@@ -301,5 +302,68 @@ final class BatchRefreshHandlerBatchFetchTest extends TestCase {
 		$this->assertSame( 12, $scheduled[0][1] );
 		// 応答を待つ間に別のワーカーが止めた場合も見落とさないよう、一時失敗の後はキャッシュを捨てて読む。
 		$this->assertGreaterThan( $purgesBeforeFailure, $this->pauseCachePurges );
+	}
+
+	/**
+	 * ハンドラ経路の結合テスト（実際の ListingRefresher）: 1 つの listing にバージョン違いが 11 件ある。
+	 * 枠は 2 回取る（ハンドラが先取りの 1 回、ListingRefresher が 1 リクエストに載らなかった 11 件目の 1 回）。
+	 * 先取りは 10 件、個別の HTTP は 11 件目の 1 回だけ（CodeRabbit #207）。
+	 */
+	public function test_バージョン違いが11件のlistingは先取り10件と11件目で2回枠を取る(): void {
+		$this->expectRateAcquisitions( 2 );
+		$provider = new FakeBatchProvider();
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+		WP_Mock::userFunction( 'get_option' )
+			->with( \Affilicard\Platform\PlatformConfig::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					array(
+						'code'            => 'amazon-kindle',
+						'name'            => 'Amazon',
+						'provider'        => 'fake-batch',
+						'displayOrder'    => 1,
+						'enabled'         => true,
+						'applicableTypes' => array( 'ebook' ),
+					),
+				)
+			);
+		WP_Mock::userFunction( 'get_option' )
+			->with( \Affilicard\Upgrade\PluginUpgrade::OPTION_MIGRATION_CURSOR, false )
+			->andReturn( false );
+
+		$offers = array();
+		foreach ( range( 1, 11 ) as $n ) {
+			$offers[] = array(
+				'display_order' => 100,
+				'external_id'   => sprintf( 'B0VARIANT%02d', $n ),
+				'variant_label' => '版' . $n,
+			);
+		}
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 1 )->andReturn(
+			array(
+				'id'       => 1,
+				'title'    => '11 バージョン',
+				'listings' => array(
+					array(
+						'platform'    => 'amazon-kindle',
+						'enabled'     => true,
+						'auto_update' => true,
+						'update_mode' => 'auto',
+						'offers'      => $offers,
+					),
+				),
+			)
+		);
+		$repo->shouldReceive( 'updateListingOffer' )->times( 11 )->andReturn( true );
+
+		$refresher = new ListingRefresher( $registry, $repo, static function (): void {}, new RateLimiter() );
+		$handler   = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $registry, 30, 5 );
+		$handler->handle( self::args( array( 1 ) ) );
+
+		$this->assertCount( 1, $provider->prefetchCalls );
+		$this->assertCount( 10, $provider->prefetchCalls[0] );
+		$this->assertSame( 1, $provider->singleFetches );
 	}
 }
