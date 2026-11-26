@@ -1262,10 +1262,11 @@ final class BatchRefreshHandlerTest extends TestCase {
 	}
 
 	/**
-	 * まとめ取得できない Provider（楽天）では、1 件の listing がバージョン違いで 2 件を取りに行くなら
-	 * レート制限の枠も 2 件ぶん確保する（ListingRefresher は 2 件目の前に最小間隔を空ける）。
+	 * バージョン違いで 2 件を取りに行く listing でも、ハンドラが取るのは 1 件目の枠だけ
+	 * （2 件目は ListingRefresher が呼び出しごとに取る）。枠は取った時刻しか記録しないので、
+	 * ここで件数ぶん見込んでも次の listing との間隔は守れない（CodeRabbit #207）。
 	 */
-	public function test_まとめ取得できないProviderはバージョン違いの件数ぶん枠を取る(): void {
+	public function test_バージョン違いでもハンドラは1件目の枠だけを取る(): void {
 		$this->stubGeneralSettings();
 		$intervals     = array();
 		$wpdb          = Mockery::mock();
@@ -1304,6 +1305,6 @@ final class BatchRefreshHandlerTest extends TestCase {
 
 		$this->assertCount( 2, $intervals );
 		$this->assertGreaterThan( 0, $intervals[0] );
-		$this->assertSame( $intervals[0] * 2, $intervals[1] );
+		$this->assertSame( $intervals[0], $intervals[1] );
 	}
 }

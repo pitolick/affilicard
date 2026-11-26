@@ -9,6 +9,7 @@ use Affilicard\Provider\BatchFetchingProvider;
 use Affilicard\Provider\FetchResult;
 use Affilicard\Provider\ProviderInterface;
 use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Queue\RateLimiter;
 use Affilicard\Queue\WorkOutcome;
 use Affilicard\Repository\ProductRepositoryInterface;
 use Affilicard\Settings\GeneralSettings;
@@ -1601,6 +1602,7 @@ final class ListingRefresherTest extends TestCase {
 		$p = Mockery::mock( ProviderInterface::class );
 		$p->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
 		$p->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$p->shouldReceive( 'accountCode' )->andReturn( 'rakuten' );
 		$p->shouldReceive( 'minRequestIntervalMs' )->andReturn( 1100 );
 		$p->shouldReceive( 'fetch' )->andReturnUsing(
 			static fn( string $id ): FetchResult => $byId[ $id ]
@@ -1648,7 +1650,7 @@ final class ListingRefresherTest extends TestCase {
 		$this->assertSame( '1', $this->saves[0]['patch']['price_from'] );
 		$this->assertSame( '', $this->saves[0]['patch']['plan_label'] );
 		$this->assertSame( '見放題', $this->saves[1]['patch']['plan_label'] );
-		// まとめ取得できない Provider は、2 件目の前に最小間隔だけ待つ。
+		// リミッタを渡さないときは、2 件目の前に有効間隔だけ待つ（Plugin はリミッタを渡す。下のテスト）。
 		$this->assertSame( array( 1100 ), $sleeps );
 	}
 
@@ -1669,6 +1671,7 @@ final class ListingRefresherTest extends TestCase {
 		$p->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
 		$p->shouldReceive( 'isAutomatic' )->andReturn( true );
 		$p->shouldReceive( 'minRequestIntervalMs' )->andReturn( 1100 );
+		$p->shouldReceive( 'accountCode' )->andReturn( 'rakuten' );
 		$p->shouldReceive( 'hasPrefetched' )->andReturn( true );
 		$p->shouldReceive( 'fetch' )->twice()->andReturn( FetchResult::hit( array( 'price' => '400' ) ) );
 		$registry = new ProviderRegistry();
@@ -1754,5 +1757,69 @@ final class ListingRefresherTest extends TestCase {
 
 		$this->assertSame( 2, $refresher->targetCount( 20, 'rakuten-kobo' ) );
 		$this->assertSame( array( 'theatrical', 'extended' ), $refresher->fetchTargetExternalIds( 20, 'rakuten-kobo' ) );
+	}
+
+	/**
+	 * RateLimiter::tryAcquire() の条件付き UPDATE を stub し、取ろうとした間隔（now − 閾値）を記録する。
+	 *
+	 * @param list<int> $intervals
+	 */
+	private function stubLimiterWpdb( array &$intervals, int ...$results ): void {
+		$wpdb          = Mockery::mock();
+		$wpdb->options = 'wp_options';
+		$wpdb->shouldReceive( 'prepare' )->andReturnUsing(
+			static function ( string $query, ...$args ) use ( &$intervals ) {
+				$intervals[] = (int) $args[0] - (int) $args[2];
+				return $query;
+			}
+		);
+		$wpdb->shouldReceive( 'query' )->andReturn( ...$results );
+		$GLOBALS['wpdb'] = $wpdb;
+		WP_Mock::userFunction( 'add_option' )->andReturn( true );
+		WP_Mock::userFunction( 'wp_cache_delete' )->andReturn( true );
+	}
+
+	public function test_2件目以降は呼び出しごとにレート制限の枠を取る(): void {
+		$this->stubRakutenPlatform();
+		$intervals = array();
+		$this->stubLimiterWpdb( $intervals, 1 );
+		$registry = $this->providerReturning(
+			array(
+				'theatrical' => FetchResult::hit( array( 'price' => '400' ) ),
+				'extended'   => FetchResult::hit( array( 'price' => '500' ) ),
+			)
+		);
+
+		$outcome = ( new ListingRefresher( $registry, $this->repoWithVariants( self::twoVariants() ), static function (): void {}, new RateLimiter() ) )
+			->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertSame( WorkOutcome::SUCCESS, $outcome );
+		// 1 件目の枠はハンドラが取る。ここで取るのは 2 件目の 1 回だけ（間隔は Provider の下限）。
+		$this->assertSame( array( 1100 ), $intervals );
+	}
+
+	public function test_2件目の枠が取れなければ叩かずに一時失敗にする(): void {
+		$this->stubRakutenPlatform();
+		$intervals = array();
+		$this->stubLimiterWpdb( $intervals, 0 );
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_ratelimit_rakuten', 0 )
+			->andReturn( (string) ( (int) round( microtime( true ) * 1000 ) + 60000 ) );
+		$p = Mockery::mock( ProviderInterface::class );
+		$p->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$p->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$p->shouldReceive( 'accountCode' )->andReturn( 'rakuten' );
+		$p->shouldReceive( 'minRequestIntervalMs' )->andReturn( 1100 );
+		// 1 件目だけ叩く。2 件目は枠が取れないので叩かない。
+		$p->shouldReceive( 'fetch' )->once()->andReturn( FetchResult::hit( array( 'price' => '400' ) ) );
+		$registry = new ProviderRegistry();
+		$registry->register( $p );
+
+		$outcome = ( new ListingRefresher( $registry, $this->repoWithVariants( self::twoVariants() ), static function (): void {}, new RateLimiter() ) )
+			->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertSame( WorkOutcome::TRANSIENT_FAILURE, $outcome );
+		$this->assertSame( FetchStatus::TRANSIENT, $this->saves[1]['patch']['fetch_status'] );
+		$this->assertCount( 5, $intervals );
 	}
 }

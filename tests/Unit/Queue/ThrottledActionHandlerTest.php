@@ -14,7 +14,7 @@ use WP_Mock;
 use WP_Mock\Tools\TestCase;
 
 /**
- * ThrottledActionHandler::run() のレート制限の枠確保（interval × refreshTargetCount()）を
+ * ThrottledActionHandler::run() のレート制限の枠確保（1 件目の呼び出しの枠。対象 0 件なら取らない）を
  * 検証する。
  *
  * RateLimiter は final class のため Mockery でモック不可（RefreshHandlerTest/
@@ -175,10 +175,11 @@ final class ThrottledActionHandlerTest extends TestCase {
 	}
 
 	/**
-	 * 将来「複数の購入リンクを同時に見せる」へ進んだとき、表示を増やした瞬間にレート制限を
-	 * 超える事故が起きないことを固定する回帰テスト。対象件数が 2 なら枠も interval × 2 になる。
+	 * 対象が 2 件（バージョン違い）でも、ハンドラが取るのは 1 件目の枠だけ。2 件目は
+	 * ListingRefresher が呼び出しごとに取る（ListingRefresherTest）。枠は取った時刻しか
+	 * 記録しないため、ここで interval × 2 を見込んでも次のジョブとの間隔は守れない。
 	 */
-	public function test_対象が2件なら枠も2倍になる(): void {
+	public function test_対象が2件でもハンドラは1件目の枠だけを取る(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
 			->andReturn( array() );
@@ -189,7 +190,7 @@ final class ThrottledActionHandlerTest extends TestCase {
 		$handler = $this->handlerWithTargetCount( 2, new RateLimiter(), $this->registry() );
 		$handler->trigger( array() );
 
-		$this->assertSame( 2200, $captured[0] - $captured[1] );
+		$this->assertSame( 1100, $captured[0] - $captured[1] );
 	}
 
 	/**

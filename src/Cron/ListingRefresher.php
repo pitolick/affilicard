@@ -11,6 +11,7 @@ use Affilicard\Pricing\OfferIdentity;
 use Affilicard\Pricing\OfferSelector;
 use Affilicard\Provider\BatchFetchingProvider;
 use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Queue\RateLimiter;
 use Affilicard\Queue\WorkOutcome;
 use Affilicard\Repository\ProductRepositoryInterface;
 use Affilicard\Settings\GeneralSettings;
@@ -36,13 +37,19 @@ use Affilicard\Util\ScalarField;
  */
 class ListingRefresher {
 
+	/** 2 件目以降の呼び出しの枠を待つ回数の上限（取れなければ一時失敗にして、あとで取り直す）。 */
+	private const MAX_ACQUIRE_ATTEMPTS = 5;
+
 	/**
-	 * @param \Closure(int): void|null $sleepMs 続けて外部 API を叩くときの待ち（ミリ秒）。テストで差し替える。既定は usleep()。
+	 * @param \Closure(int): void|null $sleepMs 枠を待つときの待ち（ミリ秒）。テストで差し替える。既定は usleep()。
+	 * @param RateLimiter|null         $limiter 1 回の更新で 2 件目以降の外部 API を叩くとき、1 回ごとに枠を取る。
+	 *                                          無ければ有効間隔だけ待つ（テスト・単体利用向け）。
 	 */
 	public function __construct(
 		private ProviderRegistry $registry,
 		private ProductRepositoryInterface $repository,
-		private ?\Closure $sleepMs = null
+		private ?\Closure $sleepMs = null,
+		private ?RateLimiter $limiter = null
 	) {}
 
 	/**
@@ -330,8 +337,8 @@ class ListingRefresher {
 	 * - 1 件でも一時失敗・保存失敗 ＝一時失敗（再試行は全件を取り直す。まとめ取得なら 1 リクエスト）
 	 * - 全件が恒久失敗 ＝恒久失敗（give-up マーカーが立つ）
 	 * - それ以外（成功と恒久失敗が混ざる）＝成功。恒久失敗したバージョンは offer の
-	 *   fetch_status=terminal で表示から外れ（代わりのリンクがあれば繰り上がる）、
-	 *   生きているバージョンの更新は止めない
+	 *   fetch_status=terminal で価格を出さなくなり（PriceFreshness。行と購入ボタンは残る）、
+	 *   代わりのリンクがあれば繰り上がる。生きているバージョンの更新は止めない
 	 *
 	 * @param list<array{0: WorkOutcome, 1: bool}> $outcomes outcome と「外部 API を試みたか」の組
 	 */
@@ -356,9 +363,10 @@ class ListingRefresher {
 	/**
 	 * 購入リンク 1 件を fetch し、取得が変えたフィールドだけのパッチを作る。
 	 *
-	 * 続けて外部 API を叩くとき（まとめ取得の結果が手元に無い 2 件目以降）は、Provider の
-	 * 最小間隔だけ待つ。ハンドラはレート制限の枠を件数ぶん確保している（targetCount()）が、
-	 * 枠は「次の呼び出しをいつ許すか」を進めるだけで、1 ジョブの中の呼び出しを間引かない。
+	 * 1 回の更新で 2 件目以降の外部 API を叩くとき（まとめ取得の結果が手元に無いとき）は、
+	 * **呼び出しごとにレート制限の枠を取る**（{@see self::acquireNextCall()}）。ハンドラが取るのは
+	 * 1 件目の枠だけで、枠は取った時刻しか記録しないため、ハンドラ側で件数ぶん見込んでも
+	 * 次のジョブとの間隔は守れない。
 	 *
 	 * @param array<string, mixed> $listing
 	 * @param array<string, mixed> $offer
@@ -410,8 +418,11 @@ class ListingRefresher {
 		);
 
 		$needsHttp = ! ( $provider instanceof BatchFetchingProvider && $provider->hasPrefetched( $externalId ) );
-		if ( $needsHttp && $calledApi ) {
-			$this->sleepMs( $provider->minRequestIntervalMs() );
+		if ( $needsHttp && $calledApi && ! $this->acquireNextCall( $provider ) ) {
+			// 枠が取れない（同じ account を別のジョブが使い続けている）。叩かずに一時失敗にし、
+			// ハンドラの再試行に任せる（last_verified_at は据え置き）。
+			$patch['fetch_status'] = FetchStatus::TRANSIENT;
+			return array( $patch, WorkOutcome::TRANSIENT_FAILURE, $targetIdentity, true );
 		}
 		if ( $needsHttp ) {
 			$calledApi = true;
@@ -460,6 +471,31 @@ class ListingRefresher {
 		}
 
 		return array( $patch, WorkOutcome::SUCCESS, $targetIdentity, true );
+	}
+
+	/**
+	 * 1 回の更新の中で、2 件目以降の外部 API 呼び出しの枠を取る。
+	 *
+	 * 間隔はハンドラが枠を取るのと同じ有効間隔（Provider の下限と管理画面の上書きの大きいほう）。
+	 * リミッタが無いときはその間隔だけ待つ。
+	 */
+	private function acquireNextCall( \Affilicard\Provider\ProviderInterface $provider ): bool {
+		$account  = (string) $provider->accountCode();
+		$override = '' !== $account ? GeneralSettings::throttleOverrideMs( $account ) : 0;
+		$interval = $override > 0 ? max( $provider->minRequestIntervalMs(), $override ) : $provider->minRequestIntervalMs();
+		if ( null === $this->limiter || '' === $account ) {
+			$this->sleepMs( $interval );
+			return true;
+		}
+		for ( $attempt = 0; $attempt < self::MAX_ACQUIRE_ATTEMPTS; $attempt++ ) {
+			$nowMs   = (int) round( microtime( true ) * 1000 );
+			$acquire = $this->limiter->tryAcquire( $account, $interval, $nowMs );
+			if ( $acquire['ok'] ) {
+				return true;
+			}
+			$this->sleepMs( max( 1, min( (int) $acquire['next_ms'] - $nowMs, $interval ) ) );
+		}
+		return false;
 	}
 
 	private function sleepMs( int $ms ): void {

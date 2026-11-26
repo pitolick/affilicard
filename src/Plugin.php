@@ -260,7 +260,8 @@ final class Plugin {
 		$refreshHandler = new RefreshHandler(
 			$enqueuer,
 			new RateLimiter(),
-			new ListingRefresher( $providers, $repository ),
+			// バージョン違いで 2 件目以降を叩くとき、呼び出しごとにレート制限の枠を取る。
+			new ListingRefresher( $providers, $repository, null, new RateLimiter() ),
 			$providers
 		);
 		add_action( Enqueuer::HOOK_REFRESH, array( $refreshHandler, 'handle' ), 10, 2 );
@@ -273,7 +274,8 @@ final class Plugin {
 		$batchHandler = new BatchRefreshHandler(
 			$enqueuer,
 			new RateLimiter(),
-			new ListingRefresher( $providers, $repository ),
+			// バージョン違いで 2 件目以降を叩くとき、呼び出しごとにレート制限の枠を取る。
+			new ListingRefresher( $providers, $repository, null, new RateLimiter() ),
 			$providers
 		);
 		add_action(

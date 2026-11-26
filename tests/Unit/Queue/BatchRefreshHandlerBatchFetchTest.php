@@ -136,6 +136,28 @@ final class BatchRefreshHandlerBatchFetchTest extends TestCase {
 		$this->assertFalse( $provider->hasPrefetched( self::asin( 1 ) ) );
 	}
 
+	/**
+	 * バージョン違いが 1 リクエストに載る件数（10）より多い listing は、先取りを 10 件までにする。
+	 * prefetch() は複数のリクエストを間を空けずに送るので、上限を超えて渡すと 2 回目が
+	 * レート制限の枠なしで出てしまう。残りは ListingRefresher が 1 件ずつ枠を取って取る。
+	 */
+	public function test_1つのlistingのバージョン違いが10件を超えても先取りは10件まで(): void {
+		$this->expectRateAcquisitions( 1 );
+		$provider = new FakeBatchProvider();
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+
+		$ids       = array_map( array( self::class, 'asin' ), range( 101, 112 ) );
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'fetchTargetExternalIds' )->andReturn( $ids );
+		$refresher->shouldReceive( 'refreshOne' )->once()->andReturn( WorkOutcome::SUCCESS );
+
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $registry, 30, 5 );
+		$handler->handle( self::args( array( 1 ) ) );
+
+		$this->assertSame( array( array_slice( $ids, 0, 10 ) ), $provider->prefetchCalls );
+	}
+
 	public function test_外部IDの無いlistingはまとめ取得に含めない(): void {
 		$this->expectRateAcquisitions( 2 ); // 外部 ID の無い 2 は従来どおり枠を取る
 		$provider = new FakeBatchProvider();
