@@ -75,9 +75,7 @@ final class UninstallTest extends TestCase {
 		WP_Mock::userFunction( 'delete_option' )
 			->withArgs(
 				static function ( string $key ): bool {
-					return str_starts_with( $key, 'affilicard_ratelimit_' )
-						|| str_starts_with( $key, 'affilicard_account_pause_' )
-						|| str_starts_with( $key, 'affilicard_api_usage_' );
+					return str_starts_with( $key, 'affilicard_ratelimit_' );
 				}
 			)
 			->andReturn( true );
@@ -257,7 +255,7 @@ final class UninstallTest extends TestCase {
 
 		Uninstall::run();
 
-		$this->assertCount( 2, $captured, 'provider credentials と account credentials の DELETE がそれぞれ 1 回ずつ実行されること' );
+		$this->assertCount( 5, $captured, 'credentials 2 種と、API 停止・通知時刻・日次集計の DELETE がそれぞれ 1 回ずつ実行されること' );
 		$this->assertStringContainsString( 'DELETE FROM wp_options', $captured[0] );
 		$this->assertStringContainsString( 'affilicard', $captured[0] );
 		$this->assertStringContainsString( 'provider', $captured[0] );
@@ -275,7 +273,7 @@ final class UninstallTest extends TestCase {
 
 		Uninstall::run();
 
-		$this->assertCount( 2, $captured, 'provider credentials と account credentials の DELETE がそれぞれ 1 回ずつ実行されること' );
+		$this->assertCount( 5, $captured, 'credentials 2 種と、API 停止・通知時刻・日次集計の DELETE がそれぞれ 1 回ずつ実行されること' );
 		$this->assertStringContainsString( 'DELETE FROM wp_options', $captured[1] );
 		$this->assertStringContainsString( 'affilicard', $captured[1] );
 		$this->assertStringContainsString( 'account', $captured[1] );
@@ -359,17 +357,6 @@ final class UninstallTest extends TestCase {
 			->once()
 			->with( 'affilicard_ratelimit_rakuten' )
 			->andReturn( true );
-		// API の上限での一時停止（AccountPause）と日次集計（ApiUsage）も account 別に消す。
-		foreach ( array( 'dmm', 'rakuten' ) as $account ) {
-			WP_Mock::userFunction( 'delete_option' )
-				->once()
-				->with( 'affilicard_account_pause_' . $account )
-				->andReturn( true );
-			WP_Mock::userFunction( 'delete_option' )
-				->once()
-				->with( 'affilicard_api_usage_' . $account )
-				->andReturn( true );
-		}
 		// 'manual' provider は isAutomatic()===false のため ratelimit option を持たず対象外。
 		WP_Mock::userFunction( 'delete_option' )
 			->with( 'affilicard_ratelimit_manual' )
@@ -379,5 +366,26 @@ final class UninstallTest extends TestCase {
 		Uninstall::run();
 
 		$this->assertConditionsMet();
+	}
+
+	/**
+	 * API の上限での一時停止・その通知の時刻・日次集計は、登録から外れた account のぶんも残さないよう
+	 * 前方一致でまとめて消す。
+	 */
+	public function test_run_はAPI停止と通知時刻と日次集計を前方一致で消す(): void {
+		$captured = array();
+		$this->mockWpdb( $captured );
+		$this->stubQueueCleanup();
+		WP_Mock::userFunction( 'delete_option' )->andReturn( true );
+		WP_Mock::userFunction( 'get_posts' )->andReturn( array() );
+
+		Uninstall::run();
+
+		$likes = array_slice( $captured, 2 );
+		$this->assertCount( 3, $likes );
+		foreach ( array( 'affilicard_account_pause_', 'affilicard_pause_notified_', 'affilicard_api_usage_' ) as $i => $prefix ) {
+			// esc_like で `_` をエスケープしたうえで、末尾にだけ % を付ける。
+			$this->assertStringContainsString( 'LIKE ' . addcslashes( $prefix, '_' ) . '%', $likes[ $i ] );
+		}
 	}
 }

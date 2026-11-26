@@ -50,11 +50,10 @@ final class AccountPauseNoticeTest extends TestCase {
 
 	private function pause( string $account, int $until, string $reason ): void {
 		$this->options[ AccountPause::OPTION_PREFIX . $account ] = array(
-			'until'    => $until,
-			'reason'   => $reason,
-			'since'    => time() - 60,
-			'streak'   => 1,
-			'notified' => true,
+			'until'  => $until,
+			'reason' => $reason,
+			'since'  => time() - 60,
+			'streak' => 1,
 		);
 	}
 

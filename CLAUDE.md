@@ -34,7 +34,7 @@
 | `Affilicard\Provider\Rakuten\RakutenProvider` | 楽天Kobo 電子書籍検索 API |
 | `Affilicard\Provider\Amazon\AmazonProvider` | Amazon Creators API（`getItems`・最大 10 ASIN/リクエスト。トークンは `AmazonCreatorsClient` が transient にキャッシュ） |
 | `Affilicard\Provider\BatchFetchingProvider` | 複数商品を 1 リクエストで取れる Provider の任意インターフェース（`BatchRefreshHandler` がまとめ取得に使う） |
-| `Affilicard\Queue\AccountPause` | API の上限（429）・利用条件（403）で account の価格更新を止める期間の記録（`affilicard_account_pause_{account}`）。Provider が書き、キューのハンドラ・掃引が読んで呼び出しを止める。停止に入ったときに管理者へ 1 回メール |
+| `Affilicard\Queue\AccountPause` | API の上限（429）・利用条件（403）で account の価格更新を止める期間の記録（`affilicard_account_pause_{account}`）。Provider が書き、キューのハンドラ・掃引が読んで呼び出しを止める。停止に入ったら管理者へメール（同じ理由では 24 時間に 1 回まで） |
 | `Affilicard\Queue\ApiUsage` | account ごとの日別 API 呼び出し回数・429/403 回数（`affilicard_api_usage_{account}`・7 日分）。更新キューのパネルに出す |
 | `Affilicard\Rest\RestController` | `affilicard/v1` 名前空間のルート集約 |
 | `Affilicard\Rest\ProductSchema` | Product CRUD の REST schema + sanitize |

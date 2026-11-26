@@ -137,12 +137,6 @@ final class BatchRefreshHandler {
 				continue;
 			}
 
-			// account を止めている（429 / 403。AccountPause）なら、残りを再開時刻までまとめて
-			// 積み直す。1 件ずつのジョブへは回さない（回すと止めている間に呼び出しが膨らむ）。
-			if ( $this->requeueIfPaused( $account, $items, $index ) ) {
-				return;
-			}
-
 			$prefetchIds = array();
 			if ( null !== $batchProvider ) {
 				$ids = $this->targetIds( $idsByIndex, $index, $item );
@@ -163,6 +157,14 @@ final class BatchRefreshHandler {
 				if ( array() !== $ids ) {
 					$prefetchIds = $this->collectPrefetchIds( $batchProvider, $items, $index, $idsByIndex );
 				}
+			}
+
+			// ここから先は外部 API を呼ぶ。account を止めている（429 / 403。AccountPause）なら、
+			// 残りを再開時刻までまとめて積み直す。1 件ずつのジョブへは回さない（回すと止めている間に
+			// 呼び出しが膨らむ）。手元にまとめ取得の結果がある上の経路では確かめない（取得済みの
+			// 結果を捨てて、再開後に取り直すことになるため）。
+			if ( $this->requeueIfPaused( $account, $items, $index ) ) {
+				return;
 			}
 
 			$mustAttempt = ! $processedAny;

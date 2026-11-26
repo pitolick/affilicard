@@ -16,7 +16,10 @@ jest.mock( '../../../src/Admin/api/refresh', () => ( {
 jest.mock( '../../../src/Admin/api/queue' );
 
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { SettingsApp } from '../../../src/Admin/settings';
+import {
+	SettingsApp,
+	initialTabFromSearch,
+} from '../../../src/Admin/settings';
 import { fetchSettings } from '../../../src/Admin/api/settings';
 import { fetchPlatforms } from '../../../src/Admin/api/platforms';
 import { fetchCredentials } from '../../../src/Admin/api/credentials';
@@ -86,6 +89,35 @@ describe( 'SettingsApp', () => {
 		await waitFor( () =>
 			expect( fetchQueueStats ).toHaveBeenCalled()
 		);
+	} );
+} );
+
+describe( '最初に開くタブ（URL の tab）', () => {
+	afterEach( () => {
+		window.history.pushState( {}, '', '/' );
+	} );
+
+	test( '知っているタブ名だけを返す', () => {
+		expect( initialTabFromSearch( '?page=affilicard-settings&tab=queue' ) ).toBe(
+			'queue'
+		);
+		expect( initialTabFromSearch( '?tab=unknown' ) ).toBeUndefined();
+		expect( initialTabFromSearch( '' ) ).toBeUndefined();
+	} );
+
+	test( 'tab=queue なら更新キューを開いた状態で始まる', async () => {
+		window.history.pushState(
+			{},
+			'',
+			'/wp-admin/edit.php?page=affilicard-settings&tab=queue'
+		);
+		render( <SettingsApp /> );
+		await waitFor( () =>
+			expect( fetchQueueStats ).toHaveBeenCalled()
+		);
+		expect(
+			screen.getByRole( 'tab', { name: '更新キュー' } )
+		).toHaveAttribute( 'aria-selected', 'true' );
 	} );
 } );
 

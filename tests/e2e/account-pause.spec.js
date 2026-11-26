@@ -31,7 +31,7 @@ function wpEval( code ) {
 
 function pauseAmazon() {
 	wpEval(
-		"update_option( 'affilicard_account_pause_amazon', array( 'until' => time() + 3600, 'reason' => 'rate_limited', 'since' => time() - 60, 'streak' => 1, 'notified' => true ), false );" +
+		"update_option( 'affilicard_account_pause_amazon', array( 'until' => time() + 3600, 'reason' => 'rate_limited', 'since' => time() - 60, 'streak' => 1, 'updated' => time() - 60 ), false );" +
 			" update_option( 'affilicard_api_usage_amazon', array( wp_date( 'Y-m-d' ) => array( 'calls' => 12, 'rate_limited' => 3, 'not_eligible' => 0 ) ), false );"
 	);
 }
@@ -80,7 +80,15 @@ test.describe( 'API の上限で account を止めている間の表示', () => 
 		);
 		await expect(
 			notice.getByRole( 'link', { name: '設定 → 更新キューで確認' } )
-		).toHaveAttribute( 'href', /page=affilicard-settings/ );
+		).toHaveAttribute( 'href', /page=affilicard-settings&tab=queue/ );
+
+		// リンクから開くと、最初から「更新キュー」タブが開いている。
+		await notice
+			.getByRole( 'link', { name: '設定 → 更新キューで確認' } )
+			.click();
+		await expect(
+			page.getByRole( 'heading', { name: '更新キュー管理' } )
+		).toBeVisible( { timeout: 15_000 } );
 	} );
 
 	test( '止めていなければダッシュボードにもパネルにも出ない', async ( {

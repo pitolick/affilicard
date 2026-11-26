@@ -171,11 +171,10 @@ final class QueueControllerTest extends TestCase {
 			),
 		);
 		$this->options['affilicard_account_pause_rakuten'] = array(
-			'until'    => $until,
-			'reason'   => 'rate_limited',
-			'since'    => $now - 300,
-			'streak'   => 2,
-			'notified' => true,
+			'until'  => $until,
+			'reason' => 'rate_limited',
+			'since'  => $now - 300,
+			'streak' => 2,
 		);
 
 		$data = $this->controller()->stats( new WP_REST_Request() )->get_data();

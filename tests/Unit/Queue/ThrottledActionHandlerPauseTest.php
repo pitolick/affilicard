@@ -48,11 +48,10 @@ final class ThrottledActionHandlerPauseTest extends TestCase {
 
 	private function pauseAmazonUntil( int $until ): void {
 		$this->options[ AccountPause::OPTION_PREFIX . 'amazon' ] = array(
-			'until'    => $until,
-			'reason'   => AccountPause::REASON_RATE_LIMITED,
-			'since'    => time() - 60,
-			'streak'   => 1,
-			'notified' => true,
+			'until'  => $until,
+			'reason' => AccountPause::REASON_RATE_LIMITED,
+			'since'  => time() - 60,
+			'streak' => 1,
 		);
 	}
 

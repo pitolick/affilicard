@@ -485,11 +485,10 @@ final class QueueMaintenanceTest extends TestCase {
 		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
 		// 429 で rakuten account を 10 分止めている。
 		$this->pauseOptions[ AccountPause::OPTION_PREFIX . 'rakuten' ] = array(
-			'until'    => time() + 600,
-			'reason'   => AccountPause::REASON_RATE_LIMITED,
-			'since'    => time() - 60,
-			'streak'   => 1,
-			'notified' => true,
+			'until'  => time() + 600,
+			'reason' => AccountPause::REASON_RATE_LIMITED,
+			'since'  => time() - 60,
+			'streak' => 1,
 		);
 
 		$repo = Mockery::mock( ProductRepositoryInterface::class );

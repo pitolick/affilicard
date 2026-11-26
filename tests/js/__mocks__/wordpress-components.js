@@ -131,8 +131,10 @@ function Notice( { children, status } ) {
 	);
 }
 
-function TabPanel( { tabs, children, className } ) {
-	const [ active, setActive ] = React.useState( tabs[ 0 ]?.name );
+function TabPanel( { tabs, children, className, initialTabName } ) {
+	const [ active, setActive ] = React.useState(
+		initialTabName ?? tabs[ 0 ]?.name
+	);
 	const activeTab = tabs.find( ( t ) => t.name === active ) ?? tabs[ 0 ];
 	return React.createElement(
 		'div',

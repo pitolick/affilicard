@@ -142,11 +142,10 @@ final class BatchRefreshHandlerBatchFetchTest extends TestCase {
 
 	private function pauseAmazonUntil( int $until ): void {
 		$this->pauseOptions[ AccountPause::OPTION_PREFIX . 'amazon' ] = array(
-			'until'    => $until,
-			'reason'   => AccountPause::REASON_RATE_LIMITED,
-			'since'    => time() - 60,
-			'streak'   => 1,
-			'notified' => true,
+			'until'  => $until,
+			'reason' => AccountPause::REASON_RATE_LIMITED,
+			'since'  => time() - 60,
+			'streak' => 1,
 		);
 	}
 
@@ -158,6 +157,9 @@ final class BatchRefreshHandlerBatchFetchTest extends TestCase {
 		$registry = new ProviderRegistry();
 		$registry->register( $provider );
 		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'fetchTargetExternalIds' )->andReturnUsing(
+			static fn( int $postId ) => array( self::asin( $postId ) )
+		);
 		$refresher->shouldReceive( 'refreshOne' )->never();
 		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 );
 		// 1 件ずつのジョブへは回さない。
@@ -177,6 +179,52 @@ final class BatchRefreshHandlerBatchFetchTest extends TestCase {
 		$this->assertCount( 1, $scheduled );
 		$this->assertSame( $until, $scheduled[0][0] );
 		$this->assertSame( 12, $scheduled[0][1] );
+	}
+
+	/**
+	 * まとめ取得の結果が手元にある購入リンクは、その後に（別のジョブが受けた 429 で）止まっても
+	 * そのまま使う。捨てて積み直すと、再開後に同じものを取り直して上限を無駄に使う。
+	 * 手元に結果が無い残りだけを再開時刻へ積み直す。
+	 */
+	public function test_止まっても手元にあるまとめ取得の結果は使い_無い残りだけ積み直す(): void {
+		$this->expectRateAcquisitions( 1 );
+		$until    = time() + 300;
+		$provider = new FakeBatchProvider();
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'fetchTargetExternalIds' )->andReturnUsing(
+			static fn( int $postId ) => array( self::asin( $postId ) )
+		);
+		$refreshed = array();
+		$refresher->shouldReceive( 'refreshOne' )->andReturnUsing(
+			function ( int $postId ) use ( &$refreshed, $until ) {
+				$refreshed[] = $postId;
+				if ( 1 === $postId ) {
+					// 1 件目（10 件をまとめて取った直後）の最中に、別のジョブが 429 を受けて止めた。
+					$this->pauseAmazonUntil( $until );
+				}
+				return WorkOutcome::SUCCESS;
+			}
+		);
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 );
+		WP_Mock::userFunction( 'as_enqueue_async_action' )->never();
+		$scheduled = array();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->andReturnUsing(
+			static function ( $when, $hook, $args ) use ( &$scheduled ) {
+				$scheduled[] = array( $when, count( $args[0]['items'] ?? $args['items'] ?? array() ) );
+				return 1;
+			}
+		);
+
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $registry, 30, 5 );
+		$handler->handle( self::args( range( 1, 12 ) ) );
+
+		$this->assertCount( 1, $provider->prefetchCalls );
+		$this->assertSame( range( 1, 10 ), $refreshed );
+		$this->assertCount( 1, $scheduled );
+		$this->assertSame( $until, $scheduled[0][0] );
+		$this->assertSame( 2, $scheduled[0][1] );
 	}
 
 	public function test_取得の途中で止まったら_その件を含む残りを再開時刻にまとめて積み直す(): void {

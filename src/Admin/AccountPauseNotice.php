@@ -56,7 +56,7 @@ final class AccountPauseNotice {
 		if ( array() === $rows ) {
 			return;
 		}
-		$queue_url = admin_url( 'edit.php?post_type=affilicard_product&page=affilicard-settings' );
+		$queue_url = admin_url( 'edit.php?post_type=affilicard_product&page=affilicard-settings&tab=queue' );
 		foreach ( $rows as $row ) {
 			$reason = AccountPause::REASON_NOT_ELIGIBLE === $row['reason']
 				? __( 'API の利用条件（直近 30 日の適格販売）を満たしていません', 'affilicard' )

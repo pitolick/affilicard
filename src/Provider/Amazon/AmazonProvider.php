@@ -199,7 +199,11 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 				'message' => __( 'アクセストークンを取得できませんでした。Credential ID と Credential Secret を確認してください', 'affilicard' ),
 			);
 		}
-		$res = $client->getItems( $credentials, array( self::TEST_ASIN ), array( 'itemInfo.title' ) );
+		$startedAt = time();
+		$res       = $client->getItems( $credentials, array( self::TEST_ASIN ), array( 'itemInfo.title' ) );
+		// 接続テストも上限を消費する。結果を数え、200 なら止めている停止を解く（403 から戻ったことを
+		// 管理者が接続テストで確かめたとき、パネルと通知に「利用条件を満たしていません」を残さない）。
+		$this->recordUsage( (string) $this->accountCode(), $startedAt, time(), $res );
 		if ( $res['error'] ) {
 			return array(
 				'ok'      => false,
@@ -235,7 +239,7 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 		}
 
 		$res = $this->client()->getItems( $credentials, $asins, self::RESOURCES );
-		$this->recordUsage( $account, $now, $res );
+		$this->recordUsage( $account, $now, time(), $res );
 
 		// 通信断・トークン取得失敗・非 200（403 AssociateNotEligible / 429 / 5xx / 400 等）は
 		// すべて一時失敗。特に 403 は、売上要件（直近 30 日）を割ると返り、要件を満たせば
@@ -268,9 +272,14 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 	 * API に届いた呼び出しを日次集計に足し、429 / 403（適格販売の不足）なら account を止め、
 	 * 200 なら停止を解く。通信断・認証前の失敗（API の上限を消費しない）は数えない。
 	 *
+	 * 停止の起点は応答を受け取った時刻（$respondedAt）。呼ぶ前の時刻を使うと、応答を待つ間に
+	 * 短い停止が切れてしまう。停止を解くかどうかはリクエストを送った時刻（$startedAt）で決める
+	 * （AccountPause::recordSuccess）。
+	 *
 	 * @param array{error: bool, code: int, decoded: array<string, mixed>|null} $res
 	 */
-	private function recordUsage( string $account, int $now, array $res ): void {
+	private function recordUsage( string $account, int $startedAt, int $respondedAt, array $res ): void {
+		$now = $respondedAt;
 		if ( $res['error'] ) {
 			return;
 		}
@@ -291,7 +300,7 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 			return;
 		}
 		if ( 200 === $code ) {
-			AccountPause::recordSuccess( $account );
+			AccountPause::recordSuccess( $account, $startedAt );
 		}
 	}
 
