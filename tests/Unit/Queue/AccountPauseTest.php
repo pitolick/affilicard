@@ -17,7 +17,7 @@ final class AccountPauseTest extends TestCase {
 	/** @var list<array{0: string, 1: string}> */
 	private array $mails = array();
 
-	/** wp_mail が例外を投げるか（送信の失敗を再現する）。 */
+	/** @var bool wp_mail が例外を投げるか（送信の失敗を再現する）。 */
 	private bool $mailThrows = false;
 
 	public function setUp(): void {
