@@ -126,7 +126,8 @@ abstract class ThrottledActionHandler {
 		// API の上限（429）・利用条件（403）で account を止めている間は、API を呼ばずに再開時刻まで
 		// 後ろへ積み直す。試行回数（backoff）も競合待ちの回数も増やさない＝failed にならない
 		// （止めている間に失敗を積み上げると、再開後に「失敗を再試行」が必要になる）。
-		$pausedUntil = AccountPause::until( $account, time() );
+		// 別のワーカーが止めた直後を見落とさないよう、キャッシュを使わずに読む（ジョブ 1 回につき 1 回）。
+		$pausedUntil = AccountPause::until( $account, time(), true );
 		if ( $pausedUntil > 0 ) {
 			$this->reschedule( $pausedUntil, $args );
 			return;

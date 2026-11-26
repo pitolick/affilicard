@@ -89,6 +89,19 @@ final class AccountPause {
 	}
 
 	/**
+	 * リクエスト内のキャッシュを捨てて、保存されている最新の記録を読む。
+	 *
+	 * 記録を書き換える前（429 / 403 で延ばす・200 で消す）はこれで読む。キャッシュに残った古い記録を
+	 * 元に判定すると、別のワーカーが後から書いた新しい停止を、古い記録とみなして消してしまう。
+	 *
+	 * @return array{until: int, reason: string, since: int, streak: int, updated: int}|null
+	 */
+	private static function getFresh( string $account ): ?array {
+		self::forgetCached( self::OPTION_PREFIX . $account );
+		return self::get( $account );
+	}
+
+	/**
 	 * option のリクエスト内キャッシュ（値と「無い」という記録の両方）を捨てる。
 	 */
 	private static function forgetCached( string $key ): void {
@@ -127,7 +140,7 @@ final class AccountPause {
 	 * @return array{until: int, reason: string, since: int, streak: int, updated: int}
 	 */
 	public static function recordRateLimited( string $account, int $now, ?int $retryAfterSeconds = null ): array {
-		$previous = self::continuing( self::get( $account ), self::REASON_RATE_LIMITED, $now );
+		$previous = self::continuing( self::getFresh( $account ), self::REASON_RATE_LIMITED, $now );
 		$streak   = ( $previous['streak'] ?? 0 ) + 1;
 		$delay    = null !== $retryAfterSeconds && $retryAfterSeconds > 0
 			? max( self::BASE_DELAY_SECONDS, min( $retryAfterSeconds, self::MAX_DELAY_SECONDS ) )
@@ -142,7 +155,7 @@ final class AccountPause {
 	 * @return array{until: int, reason: string, since: int, streak: int, updated: int}
 	 */
 	public static function recordNotEligible( string $account, int $now ): array {
-		$previous = self::continuing( self::get( $account ), self::REASON_NOT_ELIGIBLE, $now );
+		$previous = self::continuing( self::getFresh( $account ), self::REASON_NOT_ELIGIBLE, $now );
 		$streak   = ( $previous['streak'] ?? 0 ) + 1;
 		return self::store( $account, $now, $now + self::NOT_ELIGIBLE_DELAY_SECONDS, self::REASON_NOT_ELIGIBLE, $streak, $previous );
 	}
@@ -156,7 +169,7 @@ final class AccountPause {
 	 * @param int $requestStartedAt 成功したリクエストを送った時刻。
 	 */
 	public static function recordSuccess( string $account, int $requestStartedAt ): void {
-		$record = self::get( $account );
+		$record = self::getFresh( $account );
 		if ( null === $record || $record['updated'] >= $requestStartedAt ) {
 			return;
 		}

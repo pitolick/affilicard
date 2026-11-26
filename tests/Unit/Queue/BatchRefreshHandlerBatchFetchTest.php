@@ -252,9 +252,12 @@ final class BatchRefreshHandlerBatchFetchTest extends TestCase {
 			static fn( int $postId ) => array( self::asin( $postId ) )
 		);
 		// 1 件目の取得で 429 を受けて account が止まった、という状況を作る。
+		$purgesBeforeFailure = 0;
 		$refresher->shouldReceive( 'refreshOne' )->once()->andReturnUsing(
-			function () use ( $until ) {
+			function () use ( $until, &$purgesBeforeFailure ) {
 				$this->pauseAmazonUntil( $until );
+				// API を呼ぶ前の読み直しと区別するため、失敗した時点の回数を覚えておく。
+				$purgesBeforeFailure = $this->pauseCachePurges;
 				return WorkOutcome::TRANSIENT_FAILURE;
 			}
 		);
@@ -275,6 +278,6 @@ final class BatchRefreshHandlerBatchFetchTest extends TestCase {
 		$this->assertSame( $until, $scheduled[0][0] );
 		$this->assertSame( 12, $scheduled[0][1] );
 		// 応答を待つ間に別のワーカーが止めた場合も見落とさないよう、一時失敗の後はキャッシュを捨てて読む。
-		$this->assertGreaterThan( 0, $this->pauseCachePurges );
+		$this->assertGreaterThan( $purgesBeforeFailure, $this->pauseCachePurges );
 	}
 }

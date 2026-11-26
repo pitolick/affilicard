@@ -144,6 +144,8 @@ final class ThrottledActionHandlerPauseTest extends TestCase {
 
 		$this->assertSame( 0, $handler->worked );
 		$this->assertSame( array( $until ), $handler->rescheduledAt );
+		// ジョブを始める前の判定も、別のワーカーが止めた直後を見落とさないようキャッシュを捨てて読む。
+		$this->assertGreaterThan( 0, $this->pauseCachePurges );
 	}
 
 	public function test_その呼び出しで止まったら_backoffではなく再開時刻へ積み直す(): void {

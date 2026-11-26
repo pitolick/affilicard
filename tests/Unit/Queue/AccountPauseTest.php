@@ -20,12 +20,25 @@ final class AccountPauseTest extends TestCase {
 	/** @var bool wp_mail が例外を投げるか（送信の失敗を再現する）。 */
 	private bool $mailThrows = false;
 
+	/**
+	 * WP のリクエスト内キャッシュを模したもの。get_option は、ここに値があれば DB（$options）より
+	 * 優先して返し、読んだ値をここに覚える（無い option は notoptions に覚える）。
+	 *
+	 * @var array<string, mixed>
+	 */
+	private array $cached = array();
+
+	/** @var array<string, bool> 「無い」と覚えている option（WP の notoptions）。 */
+	private array $notoptions = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
 		$this->options    = array();
 		$this->mails      = array();
 		$this->mailThrows = false;
+		$this->cached     = array();
+		$this->notoptions = array();
 		WP_Mock::userFunction( '__' )->andReturnUsing( static fn( $text ) => $text );
 		WP_Mock::userFunction( 'get_option' )->andReturnUsing(
 			function ( $key, $default = false ) {
@@ -35,18 +48,50 @@ final class AccountPauseTest extends TestCase {
 				if ( 'blogname' === $key ) {
 					return 'Demo';
 				}
-				return $this->options[ $key ] ?? $default;
+				if ( isset( $this->notoptions[ $key ] ) ) {
+					return $default;
+				}
+				if ( array_key_exists( $key, $this->cached ) ) {
+					return $this->cached[ $key ];
+				}
+				if ( ! array_key_exists( $key, $this->options ) ) {
+					$this->notoptions[ $key ] = true;
+					return $default;
+				}
+				$this->cached[ $key ] = $this->options[ $key ];
+				return $this->options[ $key ];
 			}
 		);
 		WP_Mock::userFunction( 'update_option' )->andReturnUsing(
 			function ( $key, $value ) {
 				$this->options[ $key ] = $value;
+				$this->cached[ $key ]  = $value;
+				unset( $this->notoptions[ $key ] );
 				return true;
 			}
 		);
 		WP_Mock::userFunction( 'delete_option' )->andReturnUsing(
 			function ( $key ) {
-				unset( $this->options[ $key ] );
+				unset( $this->options[ $key ], $this->cached[ $key ] );
+				return true;
+			}
+		);
+		WP_Mock::userFunction( 'wp_cache_delete' )->andReturnUsing(
+			function ( $key, $group ) {
+				if ( 'options' === $group ) {
+					unset( $this->cached[ $key ] );
+				}
+				return true;
+			}
+		);
+		WP_Mock::userFunction( 'wp_cache_get' )->andReturnUsing(
+			fn( $key, $group ) => ( 'notoptions' === $key && 'options' === $group ) ? $this->notoptions : false
+		);
+		WP_Mock::userFunction( 'wp_cache_set' )->andReturnUsing(
+			function ( $key, $value, $group ) {
+				if ( 'notoptions' === $key && 'options' === $group ) {
+					$this->notoptions = $value;
+				}
 				return true;
 			}
 		);
@@ -112,26 +157,44 @@ final class AccountPauseTest extends TestCase {
 	 */
 	public function test_freshならリクエスト内のキャッシュを捨ててから読む(): void {
 		$key = AccountPause::OPTION_PREFIX . 'amazon';
-		WP_Mock::userFunction( 'wp_cache_delete' )->once()->with( $key, 'options' )->andReturn( true );
-		WP_Mock::userFunction( 'wp_cache_get' )->once()->with( 'notoptions', 'options' )->andReturn(
-			array(
-				$key            => true,
-				'other_missing' => true,
-			)
-		);
-		WP_Mock::userFunction( 'wp_cache_set' )
-			->once()
-			->with( 'notoptions', array( 'other_missing' => true ), 'options' )
-			->andReturn( true );
-		$this->options[ $key ] = array(
+		// このワーカーは先に「停止の記録は無い」と読んで覚えている。
+		$this->assertSame( 0, AccountPause::until( 'amazon', 1000 ) );
+		// その後、別のワーカー（別のプロセス）が停止を保存した。こちらのキャッシュは古いまま。
+		$this->options[ $key ]             = array(
 			'until'   => 1060,
 			'reason'  => AccountPause::REASON_RATE_LIMITED,
 			'since'   => 1000,
 			'streak'  => 1,
 			'updated' => 1000,
 		);
+		$this->notoptions['other_missing'] = true;
 
+		$this->assertSame( 0, AccountPause::until( 'amazon', 1000 ), 'キャッシュを使う読み方では古いまま' );
 		$this->assertSame( 1060, AccountPause::until( 'amazon', 1000, true ) );
+		// 捨てるのは停止の記録の印だけ。
+		$this->assertSame( array( 'other_missing' => true ), $this->notoptions );
+	}
+
+	/**
+	 * 200 で停止を解くときは最新の記録で判定する。キャッシュに残った古い記録（updated が古い）を
+	 * 見ると、別のワーカーが後から書いた新しい停止を消してしまう。
+	 */
+	public function test_200で解くときはキャッシュに残った古い記録ではなく最新の記録で判定する(): void {
+		$key = AccountPause::OPTION_PREFIX . 'amazon';
+		AccountPause::recordRateLimited( 'amazon', 100 );
+		// 別のワーカーが 200 の時点で新しい停止を記録した（こちらのキャッシュは 100 のまま）。
+		$this->options[ $key ] = array(
+			'until'   => 260,
+			'reason'  => AccountPause::REASON_RATE_LIMITED,
+			'since'   => 200,
+			'streak'  => 1,
+			'updated' => 200,
+		);
+
+		// こちらは 150 に送ったリクエストの 200。新しい停止（200 に記録）は消さない。
+		AccountPause::recordSuccess( 'amazon', 150 );
+
+		$this->assertSame( 260, AccountPause::until( 'amazon', 200, true ) );
 	}
 
 	public function test_403は6時間止める(): void {
