@@ -129,8 +129,11 @@ test.describe( '商品タイプ（PHP の定義から出す）', () => {
 		// 電子書籍に切り替えると、提供形態の欄は消え、ストアに注意が出る。
 		await typeSelect.selectOption( 'ebook' );
 		await expect( page.getByLabel( '提供形態' ) ).toHaveCount( 0 );
+		// Notice は読み上げ用の領域にも同じ文言を出すので、Notice 本体に絞る。
 		await expect(
-			page.getByText( /この商品タイプ向けのストアではありません/ )
+			page
+				.locator( '.components-notice' )
+				.filter( { hasText: /この商品タイプ向けのストアではありません/ } )
 		).toBeVisible();
 	} );
 
