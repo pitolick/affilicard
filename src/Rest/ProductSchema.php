@@ -437,6 +437,9 @@ final class ProductSchema {
 				// 提供形態のラベル（例「見放題」「レンタル」「読み放題」）。価格に依存しないので、
 				// 価格の鮮度に関係なくカードに出す（割引の badge とは別物）。
 				'plan_label'       => (string) sanitize_text_field( self::stringField( $offer, 'plan_label' ) ),
+				// バージョンの名前（例「字幕版」「吹替版」「ディレクターズカット版」）。同じ listing の中で
+				// 名前の違う購入リンクは、カードに 1 行ずつ並べる（OfferSelector::selectPerVariant()）。
+				'variant_label'    => (string) sanitize_text_field( self::stringField( $offer, 'variant_label' ) ),
 				// 付与ポイント（整数）。数字以外は空にする（カードは数字だけを「◯pt還元」と出す）。
 				'points'           => self::pointsField( $offer ),
 				// ストアの成人向け判定（'1' / '0' / '' ＝未確認）。R18 表示の自動判定に使う。

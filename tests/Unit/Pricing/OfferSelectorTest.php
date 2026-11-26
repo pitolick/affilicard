@@ -178,4 +178,63 @@ final class OfferSelectorTest extends TestCase {
 		$this->assertCount( 1, $got );
 		$this->assertSame( 'ok', $got[0]['external_id'] );
 	}
+
+	/** @return array<string, mixed> */
+	private function variant( int $order, string $id, string $label, string $status = FetchStatus::NONE ): array {
+		return $this->offer( $order, $id, $status ) + array( 'variant_label' => $label );
+	}
+
+	public function test_バージョンごとに1件ずつ表示順で返す(): void {
+		$offers = array(
+			$this->variant( 30, 'dub', '吹替版' ),
+			$this->variant( 10, 'sub', '字幕版' ),
+			$this->variant( 20, 'sub-alt', '字幕版' ),
+		);
+		$got    = OfferSelector::selectPerVariant( $offers, false );
+		$this->assertSame( array( 'sub', 'dub' ), array_column( $got, 'external_id' ) );
+	}
+
+	public function test_バージョン名が無ければselectと同じ1件になる(): void {
+		$offers = array( $this->offer( 20, 'b' ), $this->offer( 10, 'a' ) );
+		$this->assertSame( OfferSelector::select( $offers, false ), OfferSelector::selectPerVariant( $offers, false ) );
+		$this->assertSame( array(), OfferSelector::selectPerVariant( array(), true ) );
+	}
+
+	public function test_バージョンの中では恒久失敗を飛ばして次の購入リンクを使う(): void {
+		$offers = array(
+			$this->variant( 10, 'sub-dead', '字幕版', FetchStatus::TERMINAL ),
+			$this->variant( 20, 'sub-alive', '字幕版' ),
+			$this->variant( 30, 'dub', '吹替版' ),
+		);
+		$got    = OfferSelector::selectPerVariant( $offers, true );
+		$this->assertSame( array( 'sub-alive', 'dub' ), array_column( $got, 'external_id' ) );
+	}
+
+	public function test_バージョン名の前後の空白は無視し数字の名前も文字列のまま区別する(): void {
+		$offers = array(
+			$this->variant( 10, 'a', ' 字幕版 ' ),
+			$this->variant( 20, 'b', '字幕版' ),
+			$this->variant( 30, 'one', '1' ),
+			$this->variant( 40, 'zero-one', '01' ),
+		);
+		$got    = OfferSelector::selectPerVariant( $offers, false );
+		$this->assertSame( array( 'a', 'one', 'zero-one' ), array_column( $got, 'external_id' ) );
+	}
+
+	public function test_バージョン名のある購入リンクと無い購入リンクは別のまとまりになる(): void {
+		$offers = array(
+			$this->offer( 10, 'plain' ),
+			$this->variant( 20, 'dc', 'ディレクターズカット版' ),
+		);
+		$got    = OfferSelector::selectPerVariant( $offers, false );
+		$this->assertSame( array( 'plain', 'dc' ), array_column( $got, 'external_id' ) );
+	}
+
+	public function test_非スカラーのバージョン名は空として扱う(): void {
+		$offers = array(
+			$this->offer( 10, 'a' ) + array( 'variant_label' => array( 'x' ) ),
+			$this->offer( 20, 'b' ),
+		);
+		$this->assertSame( array( 'a' ), array_column( OfferSelector::selectPerVariant( $offers, false ), 'external_id' ) );
+	}
 }

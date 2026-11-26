@@ -504,7 +504,42 @@ $p_vod_fallback = $repo->save(
 	)
 );
 
+// バージョン違い（字幕版・吹替版・ディレクターズカット版）が別の商品ページになっている作品。
+// 購入リンクの variant_label が違うものは、同じストアの中で 1 行ずつ並ぶ（v4.3.0）。
+// 字幕版には「代わりのリンク」（同じバージョン・表示順が後ろ）も持たせ、1 件だけが出ることを確かめる。
+$vod_offer = static function ( int $order, string $regular, string $variant, string $plan_label ): array {
+	return array(
+		'display_order' => $order,
+		'regular_url'   => $regular,
+		'variant_label' => $variant,
+		'plan_label'    => $plan_label,
+	);
+};
+$p_vod_variants = $repo->save(
+	array(
+		'title'        => 'サンプル洋画 バージョンズ',
+		'status'       => 'publish',
+		'product_type' => 'vod',
+		'stock_status' => 'available',
+		'listings'     => array(
+			array(
+				'platform' => 'prime-video',
+				'enabled'  => true,
+				'offers'   => array(
+					$vod_offer( 10, 'https://www.amazon.co.jp/gp/video/detail/B0DEMOSUB1', '字幕版', '見放題' ),
+					$vod_offer( 20, 'https://www.amazon.co.jp/gp/video/detail/B0DEMODUB1', '吹替版', '見放題' ),
+					$vod_offer( 30, 'https://www.amazon.co.jp/gp/video/detail/B0DEMODC01', 'ディレクターズカット版', 'レンタル' ),
+					$vod_offer( 40, 'https://www.amazon.co.jp/gp/video/detail/B0DEMOSUB2', '字幕版', 'レンタル' ),
+				),
+			),
+			$vod_listing( 'hulu', 'https://www.hulu.jp/the-versions', '見放題' ),
+		),
+		'extras'       => $vod_extras( '架空 監督', '架空 俳優', '2021', 'サンプル配給' ),
+	)
+);
+
 $set_demo_cover( (int) $p_vod_all, 'THE DEMONSTRATION', '#1d2b53', 'square' );
+$set_demo_cover( (int) $p_vod_variants, 'THE VERSIONS', '#008751', 'square' );
 $set_demo_cover( (int) $p_vod_single, 'ANIME MOVIE', '#7e2553', 'square' );
 $set_demo_cover( (int) $p_vod_fallback, 'FALLBACK', '#5f574f', 'square' );
 
@@ -522,6 +557,9 @@ $content = implode(
 		$block( $p_vod_single ),
 		'<!-- wp:paragraph --><p>対照：テンプレートも上書きも無い購入リンク（作品ページの URL がそのままリンク先になり、管理画面ではフォールバックとして警告が出ます）。</p><!-- /wp:paragraph -->',
 		$block( $p_vod_fallback ),
+		'<!-- wp:heading {"level":3} --><h3>バージョン違い（字幕版・吹替版）カード確認</h3><!-- /wp:heading -->',
+		'<!-- wp:paragraph --><p>同じ作品が字幕版・吹替版・ディレクターズカット版で別の商品ページになっているとき、購入リンクの「バージョン」を分けると、同じストアの中で 1 行ずつ並びます（2 行目以降はストア名を省き、区切り線を点線にしています）。Prime Video の字幕版にはもう 1 つ「代わりのリンク」（同じバージョン・表示順が後ろのレンタル）がありますが、カードに出るのは表示順が先の 1 件だけです。バージョンを持たない Hulu は従来どおり 1 行です。</p><!-- /wp:paragraph -->',
+		$block( $p_vod_variants ),
 		'<!-- wp:heading {"level":3} --><h3>各種カード表示</h3><!-- /wp:heading -->',
 		$block(
 			$p_ebook,

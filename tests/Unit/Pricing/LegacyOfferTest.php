@@ -77,6 +77,17 @@ final class LegacyOfferTest extends TestCase {
 		$this->assertSame( '見放題', $offer['plan_label'] );
 	}
 
+	public function test_バージョン名をofferへ写す(): void {
+		$offer = LegacyOffer::toOffer(
+			array(
+				'regular_url'   => 'https://www.amazon.co.jp/gp/video/detail/B0SUB00001',
+				'variant_label' => '字幕版',
+			)
+		);
+
+		$this->assertSame( '字幕版', $offer['variant_label'] );
+	}
+
 	/**
 	 * 取得状態も他のフィールドと同じく非スカラーを捨てる。
 	 *

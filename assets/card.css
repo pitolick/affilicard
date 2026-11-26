@@ -360,6 +360,32 @@
 	color: var(--affilicard-text-light);
 }
 
+/* バージョンの名前（字幕版・吹替版など）。同じストアの行の見出しとして、ラベルより先に文字で示す。 */
+.affilicard-card__variant {
+	font-size: 13px;
+	font-weight: 700;
+	color: var(--affilicard-text);
+	white-space: nowrap;
+}
+
+/* 同じストアのバージョン違いは 1 まとまりに見せる。間の区切り線を点線にし、2 行目以降は
+   ストア名を目で見える形では繰り返さない（スクリーンリーダー向けには残す）。 */
+.affilicard-card__row--variant-next {
+	border-bottom-style: dashed;
+}
+
+.affilicard-card__sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
 /* 提供形態のラベル（見放題・レンタルなど）。割引（%OFF）と見分けられるよう、塗りつぶしで示す。 */
 .affilicard-card__plan {
 	font-size: 11px;
@@ -521,6 +547,16 @@
 
 	.affilicard-card__platform {
 		width: auto;
+	}
+
+	/* 縦積みの狭い幅では、ストア名を繰り返さない行に空の段を作らない。display: none に
+	   すると中のスクリーンリーダー向けのストア名まで読まれなくなるため、流れから外して隠す。 */
+	.affilicard-card__platform--continued {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
 	}
 
 	/* 狭い幅では店舗行が縦積みで価格の列が広いので、両方あっても価格の横に並べる。 */

@@ -443,7 +443,11 @@ final class CardRenderer {
 	/**
 	 * 表示対象（platform 既知・hide 非該当・only 許可・platform/listing 有効）の listing について、
 	 * platform の displayOrder 昇順（同値は元の出現順）で並べたうえで、各 listing に対して
-	 * OfferSelector::select() が選んだ購入リンク（offer）を組にして返す。
+	 * OfferSelector::selectPerVariant() が選んだ購入リンク（offer）を組にして返す。
+	 *
+	 * **1 つの listing から複数の組が出ることがある。** 字幕版・吹替版のようにバージョン
+	 * （variant_label）の違う購入リンクは、バージョンごとに 1 組ずつ返す（同じ listing の組は
+	 * 隣り合って並ぶ）。バージョンを持たない listing は従来どおり 0 組か 1 組。
 	 *
 	 * **購入リンクの選択はここ 1 箇所でしか行わない。** CTA ボタン（renderListings）・書影
 	 * （selectCardImage）・日時フッター（renderTimestamp）は全員この戻り値の offer だけを見る
@@ -458,7 +462,7 @@ final class CardRenderer {
 	 * @param list<string>                      $only                 許可リスト（空 = 全表示）
 	 * @param bool                              $fallback_on_terminal GeneralSettings::fallbackOnTerminal()（呼び出し元が解決して渡す。
 	 *                                                                CardRenderer 自身は option を読まない）
-	 * @return list<array{listing: array<string, mixed>, offer: array<string, mixed>, platform: PlatformDefinition}>
+	 * @return list<array{listing: array<string, mixed>, offer: array<string, mixed>, platform: PlatformDefinition, variant: string, group: int}>
 	 */
 	private function visibleListings( array $listings, array $by_code, array $hide, array $only, bool $fallback_on_terminal ): array {
 		$filtered = array();
@@ -485,25 +489,25 @@ final class CardRenderer {
 		$sorted = $this->sortByDisplayOrder( $filtered, $by_code );
 
 		$out = array();
-		foreach ( $sorted as $listing ) {
+		foreach ( $sorted as $group => $listing ) {
 			$offers   = LegacyOffer::offersWithFallback( $listing );
-			$selected = OfferSelector::select( $offers, $fallback_on_terminal );
-			if ( array() === $selected ) {
-				// 選べる購入リンクが無い listing は CTA 行を出さない＝非表示扱い。
-				continue;
-			}
-			$offer = $selected[0];
-			// URL が無い offer は CTA 行を出さない＝非表示扱い。
-			// renderListings の行と renderTimestamp の日付計算を同一集合に揃える。
 			$platform = $by_code[ (string) $listing['platform'] ];
-			if ( '' === OfferUrl::ctaHref( $offer, $platform ) ) {
-				continue;
+			// 選べる購入リンクが無い listing は CTA 行を出さない＝非表示扱い。
+			foreach ( OfferSelector::selectPerVariant( $offers, $fallback_on_terminal ) as $offer ) {
+				// URL が無い offer は CTA 行を出さない＝非表示扱い。
+				// renderListings の行と renderTimestamp の日付計算を同一集合に揃える。
+				if ( '' === OfferUrl::ctaHref( $offer, $platform ) ) {
+					continue;
+				}
+				$out[] = array(
+					'listing'  => $listing,
+					'offer'    => $offer,
+					'platform' => $platform,
+					'variant'  => OfferSelector::variantLabel( $offer ),
+					// どの listing から出た組か（同じ listing のバージョン違いを 1 まとまりに描くため）。
+					'group'    => (int) $group,
+				);
 			}
-			$out[] = array(
-				'listing'  => $listing,
-				'offer'    => $offer,
-				'platform' => $platform,
-			);
 		}
 		return $out;
 	}
@@ -609,17 +613,27 @@ final class CardRenderer {
 	}
 
 	/**
-	 * @param list<array{listing: array<string, mixed>, offer: array<string, mixed>, platform: PlatformDefinition}> $visible_listings visibleListings() の戻り（render() から渡される。ここで選択をやり直さない）
-	 * @param array<string, string>                                                                                 $cta_overrides    ブロック属性由来の CTA ラベル上書き（code→label）
+	 * @param list<array{listing: array<string, mixed>, offer: array<string, mixed>, platform: PlatformDefinition, variant: string, group: int}> $visible_listings visibleListings() の戻り（render() から渡される。ここで選択をやり直さない）
+	 * @param array<string, string>                                                                                                              $cta_overrides    ブロック属性由来の CTA ラベル上書き（code→label）
 	 */
 	private function renderListings( array $visible_listings, array $cta_overrides = array(), bool $is_preorder = false, array $tracking = array() ): string {
-		$rows   = '';
-		$now_ts = $this->nowTs;
-		foreach ( $visible_listings as $entry ) {
+		$rows    = '';
+		$now_ts  = $this->nowTs;
+		$entries = array_values( $visible_listings );
+		$count   = count( $entries );
+		foreach ( $entries as $index => $entry ) {
 			$listing  = $entry['listing'];
 			$offer    = $entry['offer'];
 			$platform = $entry['platform'];
 			$code     = $platform->code;
+			$variant  = $entry['variant'] ?? '';
+
+			// 同じ listing のバージョン違いは隣り合って並ぶ（visibleListings()）。2 行目以降は
+			// ストア名を目で見える形では繰り返さず（スクリーンリーダーには読ませる）、
+			// 次の行が同じ listing のバージョン違いなら区切り線を弱めて 1 まとまりに見せる。
+			$group          = $entry['group'] ?? $index;
+			$continues_prev = $index > 0 && ( $entries[ $index - 1 ]['group'] ?? null ) === $group;
+			$continues_next = $index + 1 < $count && ( $entries[ $index + 1 ]['group'] ?? null ) === $group;
 
 			$url = OfferUrl::ctaHref( $offer, $platform );
 
@@ -651,7 +665,11 @@ final class CardRenderer {
 			// 手動入力／未確認／TTL 期限切れの listing は CTA ボタンのみを残す。
 			// 提供形態のラベル（見放題・レンタルなど）。価格の主張ではないため、価格の鮮度に
 			// 関係なく出す（手入力で価格を持たない VOD でも出る）。割引の badge とは別物。
-			$pricing    = '';
+			$pricing = '';
+			// バージョンの名前（字幕版・吹替版など）。提供形態のラベルより前に置き、行の見出しにする。
+			if ( '' !== $variant ) {
+				$pricing .= '<span class="affilicard-card__variant">' . esc_html( $variant ) . '</span>';
+			}
 			$plan_label = trim( ScalarField::string( $offer, 'plan_label' ) );
 			if ( '' !== $plan_label ) {
 				$pricing .= '<span class="affilicard-card__plan">' . esc_html( $plan_label ) . '</span>';
@@ -709,10 +727,21 @@ final class CardRenderer {
 				}
 			}
 
-			$cta_tracking = array_merge( array( 'platform' => $code ), $tracking );
+			$cta_tracking = array_merge( array( 'platform' => $code ), $tracking, array( 'variant' => $variant ) );
 
-			$rows .= '<li class="affilicard-card__row">'
-				. '<div class="affilicard-card__platform">' . esc_html( $platform->name ) . '</div>'
+			$row_class = 'affilicard-card__row';
+			if ( $continues_prev ) {
+				$row_class .= ' affilicard-card__row--variant-continued';
+			}
+			if ( $continues_next ) {
+				$row_class .= ' affilicard-card__row--variant-next';
+			}
+			$platform_html = $continues_prev
+				? '<div class="affilicard-card__platform affilicard-card__platform--continued"><span class="affilicard-card__sr-only">' . esc_html( $platform->name ) . '</span></div>'
+				: '<div class="affilicard-card__platform">' . esc_html( $platform->name ) . '</div>';
+
+			$rows .= '<li class="' . esc_attr( $row_class ) . '">'
+				. $platform_html
 				. '<div class="affilicard-card__pricing">' . $pricing . '</div>'
 				. '<a class="affilicard-card__cta"' . $this->trackingAttributes( $cta_tracking ) . ' href="' . esc_url( $url ) . '" target="_blank" rel="nofollow sponsored noopener" style="' . esc_attr( $btn_style ) . '">' . esc_html( $label ) . '</a>'
 				. '</li>';
