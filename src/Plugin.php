@@ -139,6 +139,11 @@ final class Plugin {
 		$accounts  = self::buildAccountRegistry();
 		self::buildProductTypeRegistry();
 
+		// API の上限・利用条件で account の価格更新を止めている間の通知（ダッシュボード・affilicard 画面）。
+		if ( is_admin() ) {
+			\Affilicard\Admin\AccountPauseNotice::register( $accounts );
+		}
+
 		// キューパネル（Task 15/16）・depth cap 集計（I1）共通: 自動更新対象 account コード
 		// （'manual' 等の非自動 provider を除く。v2.4.0: provider コードから account コードへ
 		// 統一。レート制限は共有 API＝account 単位でかかり、認証画面（楽天/DMM）と一致する）を

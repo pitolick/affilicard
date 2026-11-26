@@ -161,6 +161,24 @@ final class Uninstall {
 	}
 
 	/**
+	 * option_name が $prefix で始まる option を wp_options から一括削除する。
+	 */
+	private static function deleteOptionsByPrefix( string $prefix ): void {
+		global $wpdb;
+
+		if ( ! isset( $wpdb ) || ! is_object( $wpdb ) ) {
+			return;
+		}
+
+		$wpdb->query(
+			$wpdb->prepare(
+				"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+				$wpdb->esc_like( $prefix ) . '%'
+			)
+		);
+	}
+
+	/**
 	 * 自動更新対象 account の queue クリーンアップ（spec §9-7）。
 	 *
 	 * v2.4.0: account 別 group（`affilicard-{account}`）の Action Scheduler スケジュールを
@@ -185,6 +203,13 @@ final class Uninstall {
 				as_unschedule_all_actions( '', array(), 'affilicard-' . $account );
 			}
 			delete_option( 'affilicard_ratelimit_' . $account );
+		}
+
+		// API の上限での一時停止（Queue\AccountPause）・その通知の時刻・日次集計（Queue\ApiUsage）。
+		// 登録から外れた account のぶんも残さないよう、前方一致でまとめて消す。リテラルで持つ理由は
+		// 上と同じ（vendor/ 不在フォールバックでは当該クラスが未 autoload）。
+		foreach ( array( 'affilicard_account_pause_', 'affilicard_pause_notified_', 'affilicard_api_usage_' ) as $prefix ) {
+			self::deleteOptionsByPrefix( $prefix );
 		}
 
 		if ( $canUnschedule ) {

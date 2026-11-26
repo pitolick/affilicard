@@ -34,6 +34,8 @@
 | `Affilicard\Provider\Rakuten\RakutenProvider` | 楽天Kobo 電子書籍検索 API |
 | `Affilicard\Provider\Amazon\AmazonProvider` | Amazon Creators API（`getItems`・最大 10 ASIN/リクエスト。トークンは `AmazonCreatorsClient` が transient にキャッシュ） |
 | `Affilicard\Provider\BatchFetchingProvider` | 複数商品を 1 リクエストで取れる Provider の任意インターフェース（`BatchRefreshHandler` がまとめ取得に使う） |
+| `Affilicard\Queue\AccountPause` | API の上限（429）・利用条件（403）で account の価格更新を止める期間の記録（`affilicard_account_pause_{account}`）。Provider が書き、キューのハンドラ・掃引が読んで呼び出しを止める。停止に入ったら管理者へメール（同じ理由では 24 時間に 1 回まで） |
+| `Affilicard\Queue\ApiUsage` | account ごとの日別 API 呼び出し回数・429/403 回数（`affilicard_api_usage_{account}`・7 日分）。更新キューのパネルに出す |
 | `Affilicard\Rest\RestController` | `affilicard/v1` 名前空間のルート集約 |
 | `Affilicard\Rest\ProductSchema` | Product CRUD の REST schema + sanitize |
 | `Affilicard\Rest\ProductsController` | `/products` CRUD + search |
@@ -43,6 +45,7 @@
 | `Affilicard\Settings\GeneralSettings` | `affilicard_general` option ハンドリング |
 | `Affilicard\Settings\PlatformsSettings` | `PlatformConfig` の REST wrapper |
 | `Affilicard\Settings\DashboardWidget` | WP ダッシュボードに Fallback 件数表示 |
+| `Affilicard\Admin\AccountPauseNotice` | `AccountPause` で止めている間、ダッシュボードと affilicard の画面に出す管理画面通知（`manage_options` のみ） |
 | `Affilicard\Block\Block` | Gutenberg block `affilicard/product-card` の登録 + サーバサイド render（商品解決 → 色 CSS 変数注入 → CardRenderer 委譲） |
 | `Affilicard\Content\AdultDetection` | ストアの成人向け判定（購入リンクの `adult`）から、成人向けと判定したストアを返す。どれか 1 つでも該当なら R18 表示（`CardHtmlBuilder::resolveMask`。サイト設定 `store_adult_r18` とブロックの `storeR18` で外せる） |
 | `Affilicard\Renderer\CardRenderer` | 商品データ + PlatformDefinition から商品カード HTML を生成する純粋レンダラ（type 非依存・色は sanitize_hex_color 経由） |

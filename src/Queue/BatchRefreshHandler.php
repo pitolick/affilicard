@@ -147,12 +147,24 @@ final class BatchRefreshHandler {
 						return;
 					}
 					$processedAny = true;
-					$this->applyOutcome( $postId, $platform, $account, $this->refresher->refreshOne( $postId, $platform ) );
+					$outcome      = $this->refresher->refreshOne( $postId, $platform );
+					if ( WorkOutcome::TRANSIENT_FAILURE === $outcome && $this->requeueIfPaused( $account, $items, $index ) ) {
+						return;
+					}
+					$this->applyOutcome( $postId, $platform, $account, $outcome );
 					continue;
 				}
 				if ( array() !== $ids ) {
 					$prefetchIds = $this->collectPrefetchIds( $batchProvider, $items, $index, $idsByIndex );
 				}
+			}
+
+			// ここから先は外部 API を呼ぶ。account を止めている（429 / 403。AccountPause）なら、
+			// 残りを再開時刻までまとめて積み直す。1 件ずつのジョブへは回さない（回すと止めている間に
+			// 呼び出しが膨らむ）。手元にまとめ取得の結果がある上の経路では確かめない（取得済みの
+			// 結果を捨てて、再開後に取り直すことになるため）。
+			if ( $this->requeueIfPaused( $account, $items, $index ) ) {
+				return;
 			}
 
 			$mustAttempt = ! $processedAny;
@@ -230,8 +242,37 @@ final class BatchRefreshHandler {
 				$batchProvider->prefetch( $prefetchIds );
 			}
 
-			$this->applyOutcome( $postId, $platform, $account, $this->refresher->refreshOne( $postId, $platform ) );
+			$outcome = $this->refresher->refreshOne( $postId, $platform );
+			// この listing の取得で account が止まった（429 / 403）なら、この listing を含む残りを
+			// 再開時刻までまとめて積み直す。
+			if ( WorkOutcome::TRANSIENT_FAILURE === $outcome && $this->requeueIfPaused( $account, $items, $index ) ) {
+				return;
+			}
+			$this->applyOutcome( $postId, $platform, $account, $outcome );
 		}
+	}
+
+	/**
+	 * account を止めていれば、$fromIndex 以降の listing を再開時刻（＋ゆらぎ）にまとめて積み直して
+	 * true を返す。止めていなければ何もせず false。
+	 *
+	 * 停止はキャッシュを使わずに読む。API の応答を待つ間に別のワーカーが止め、こちらの応答が
+	 * 5xx などだった場合に、古い「停止の記録は無い」を見て 1 件ずつのジョブへ分けないため。
+	 * 呼ぶのは API を呼ぶ前と一時失敗の後だけなので、DB を読む回数は API の呼び出しと同程度。
+	 *
+	 * @param list<array{post_id:int, platform:string}> $items
+	 */
+	private function requeueIfPaused( string $account, array $items, int $fromIndex ): bool {
+		$until = AccountPause::until( $account, time(), true );
+		if ( $until <= 0 ) {
+			return false;
+		}
+		$this->requeueOrFallback(
+			$account,
+			array_slice( $items, $fromIndex ),
+			$until + wp_rand( 0, Enqueuer::RESCHEDULE_JITTER_SECONDS )
+		);
+		return true;
 	}
 
 	private function applyOutcome( int $postId, string $platform, string $account, WorkOutcome $outcome ): void {

@@ -13,7 +13,11 @@ jest.mock('../../../src/Admin/api/queue');
 jest.mock('../../../src/Admin/api/settings');
 
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { QueuePanel } from '../../../src/Admin/components/QueuePanel';
+import {
+	QueuePanel,
+	apiPauseText,
+	apiUsageText,
+} from '../../../src/Admin/components/QueuePanel';
 import {
 	fetchQueueStats,
 	setPaused,
@@ -343,5 +347,70 @@ describe('QueuePanel', () => {
 			'href',
 			'edit.php?post_type=affilicard_product&page=affilicard-queue-jobs'
 		);
+	});
+
+	test("shows the API pause and today's API usage for a paused account", async () => {
+		fetchQueueStats.mockResolvedValue({
+			...baseStats,
+			summary: {
+				...baseStats.summary,
+				amazon: {
+					code: 'amazon',
+					label: 'Amazon',
+					pending: 0,
+					in_progress: 0,
+					failed: 0,
+					complete: 5,
+					api_usage_today: {
+						calls: 120,
+						rate_limited: 2,
+						not_eligible: 0,
+					},
+					api_pause: {
+						until: '2026-11-26T03:00:00+00:00',
+						reason: 'rate_limited',
+						since: '2026-11-26T02:50:00+00:00',
+					},
+				},
+			},
+		});
+		render(<QueuePanel />);
+		await waitFor(() =>
+			expect(screen.getByText('Amazon')).toBeInTheDocument()
+		);
+		expect(
+			screen.getByText('今日の API 呼び出し: 120 / 上限 (429): 2')
+		).toBeInTheDocument();
+		expect(
+			screen.getByText(
+				/一時停止中（API の呼び出し回数の上限に達しました。/
+			)
+		).toBeInTheDocument();
+		// 呼び出しも停止も無い account には出さない。
+		expect(screen.queryAllByText(/今日の API 呼び出し/)).toHaveLength(1);
+	});
+});
+
+describe('apiPauseText / apiUsageText', () => {
+	test('returns empty text when the account is not paused or has no calls', () => {
+		expect(apiPauseText(null)).toBe('');
+		expect(
+			apiUsageText({ calls: 0, rate_limited: 0, not_eligible: 0 }, null)
+		).toBe('');
+		expect(apiUsageText(undefined, null)).toBe('');
+	});
+
+	test('describes the 403 not-eligible pause', () => {
+		expect(
+			apiPauseText({
+				until: '2026-11-26T09:00:00+00:00',
+				reason: 'not_eligible',
+			})
+		).toMatch(
+			/^一時停止中（API の利用条件（直近 30 日の適格販売）を満たしていません。.+ごろ再開）$/
+		);
+		expect(
+			apiUsageText({ calls: 3, rate_limited: 0, not_eligible: 1 }, {})
+		).toBe('今日の API 呼び出し: 3 / 利用条件 (403): 1');
 	});
 });

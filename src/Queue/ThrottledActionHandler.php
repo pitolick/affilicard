@@ -123,6 +123,16 @@ abstract class ThrottledActionHandler {
 		// で既に弾いているため通常到達しない）の場合は provider コードへフォールバックする。
 		$account = $provider->accountCode() ?? $providerCode;
 
+		// API の上限（429）・利用条件（403）で account を止めている間は、API を呼ばずに再開時刻まで
+		// 後ろへ積み直す。試行回数（backoff）も競合待ちの回数も増やさない＝failed にならない
+		// （止めている間に失敗を積み上げると、再開後に「失敗を再試行」が必要になる）。
+		// 別のワーカーが止めた直後を見落とさないよう、キャッシュを使わずに読む（ジョブ 1 回につき 1 回）。
+		$pausedUntil = AccountPause::until( $account, time(), true );
+		if ( $pausedUntil > 0 ) {
+			$this->reschedule( $pausedUntil, $args );
+			return;
+		}
+
 		$interval = $this->limiter->effectiveIntervalMs(
 			$provider->minRequestIntervalMs(),
 			GeneralSettings::throttleOverrideMs( $account )
@@ -162,6 +172,13 @@ abstract class ThrottledActionHandler {
 			// する（backoff せず・例外も投げない）。failed 記録は無意味なため作らない。
 			delete_transient( $this->attemptKey( $args ) );
 			$this->onTerminalFailure( $args );
+			return;
+		}
+		// この呼び出しで account が止まった（429 / 403）なら、backoff ではなく再開時刻まで積み直す。
+		// 応答を待つ間に別のワーカーが止めた場合も見落とさないよう、キャッシュを使わずに読む。
+		$pausedUntil = AccountPause::until( $account, time(), true );
+		if ( $pausedUntil > 0 ) {
+			$this->reschedule( $pausedUntil, $args );
 			return;
 		}
 		// 一時失敗（TRANSIENT_FAILURE）: backoff でリトライ。MAX_ATTEMPTS 到達時は failed 化するが

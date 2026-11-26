@@ -6,6 +6,7 @@ namespace Affilicard\Tests\Unit\Queue;
 use Affilicard\PostType\ProductPostType;
 use Affilicard\Provider\ProviderRegistry;
 use Affilicard\Provider\Rakuten\RakutenProvider;
+use Affilicard\Queue\AccountPause;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\QueueMaintenance;
 use Affilicard\Queue\SweepCursor;
@@ -29,9 +30,16 @@ use WP_Mock\Tools\TestCase;
  */
 final class QueueMaintenanceTest extends TestCase {
 
+	/** @var array<string, mixed> account の一時停止（AccountPause）の記録。 */
+	private array $pauseOptions = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		// account の一時停止（AccountPause）。既定は記録なし＝止めていない。
+		WP_Mock::userFunction( 'get_option' )
+			->with( \Mockery::pattern( '/^affilicard_account_pause_/' ), null )
+			->andReturnUsing( fn( $key ) => $this->pauseOptions[ $key ] ?? null );
 	}
 
 	public function tearDown(): void {
@@ -458,6 +466,52 @@ final class QueueMaintenanceTest extends TestCase {
 			->once()
 			->with( 'affilicard_refresh_gaveup_16_rakuten-kobo' )
 			->andReturn( 1 );
+		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
+
+		$result = ( new QueueMaintenance( $repo, new Enqueuer(), $this->registry(), new SweepCursor() ) )->sweep();
+
+		$this->assertTrue( $result );
+		$this->assertConditionsMet();
+	}
+
+	public function test_sweep_止めているaccountのlistingはバッチ投入しない(): void {
+		$this->stubCursor( 0 );
+		$this->stubGeneralSettings();
+		$this->stubQueueDepth( 0 );
+		$this->stubFilterCleanup();
+		$this->stubCompletion();
+		WP_Mock::userFunction( 'get_posts' )->andReturn( array( 12 ) );
+		$this->stubRakutenPlatform();
+		WP_Mock::userFunction( 'get_transient' )->andReturn( false );
+		// 429 で rakuten account を 10 分止めている。
+		$this->pauseOptions[ AccountPause::OPTION_PREFIX . 'rakuten' ] = array(
+			'until'  => time() + 600,
+			'reason' => AccountPause::REASON_RATE_LIMITED,
+			'since'  => time() - 60,
+			'streak' => 1,
+		);
+
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->once()->with( 12 )->andReturn(
+			$this->product(
+				12,
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'update_mode' => 'auto',
+						'auto_update' => true,
+						'offers'      => array(
+							array(
+								'external_id'     => 'deadbeef01',
+								'price'           => '500',
+								'last_fetched_at' => gmdate( 'c', time() - 25 * 3600 ),
+							),
+						),
+					),
+				)
+			)
+		);
 		WP_Mock::userFunction( 'as_schedule_single_action' )->never();
 
 		$result = ( new QueueMaintenance( $repo, new Enqueuer(), $this->registry(), new SweepCursor() ) )->sweep();

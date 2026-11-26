@@ -32,6 +32,9 @@ use WP_REST_Request;
  */
 final class QueueControllerTest extends TestCase {
 
+	/** @var array<string, mixed> 一時停止・日次集計の option。 */
+	private array $options = array();
+
 	private const RAKUTEN_GROUP = 'affilicard-rakuten';
 	private const DMM_GROUP     = 'affilicard-dmm';
 	// Task 12・Ruling 8: 掃引トリガー（affilicard_sweep）の group。account ではないため
@@ -44,6 +47,11 @@ final class QueueControllerTest extends TestCase {
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		// account の一時停止（AccountPause）と日次集計（ApiUsage）。既定は記録なし。
+		WP_Mock::userFunction( 'get_option' )
+			->with( \Mockery::pattern( '/^affilicard_(account_pause|api_usage)_/' ), \Mockery::any() )
+			->andReturnUsing( fn( $key, $default ) => $this->options[ $key ] ?? $default );
+		WP_Mock::userFunction( 'wp_date' )->andReturnUsing( static fn( $format, $ts ) => gmdate( $format, $ts ) );
 		WP_Mock::userFunction( '__' )
 			->andReturnUsing(
 				static function ( $text ) {
@@ -143,6 +151,53 @@ final class QueueControllerTest extends TestCase {
 		$this->assertTrue( $data['paused'] );
 		// cron 健全性の可視化（Task 12）: 最後に掃引が完走した時刻。
 		$this->assertSame( '2026-08-26T00:00:00+00:00', $data['last_sweep_completed_at'] );
+	}
+
+	public function test_stats_account行に今日のAPI呼び出しと一時停止を載せる(): void {
+		$this->stubEmptyQueueForAllProviders();
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'get_option' )
+			->with( QueueMaintenance::OPTION_LAST_COMPLETED, '' )
+			->andReturn( '' );
+		$now   = time();
+		$until = $now + 600;
+		$this->options['affilicard_api_usage_rakuten']     = array(
+			gmdate( 'Y-m-d', $now ) => array(
+				'calls'        => 42,
+				'rate_limited' => 3,
+				'not_eligible' => 0,
+			),
+		);
+		$this->options['affilicard_account_pause_rakuten'] = array(
+			'until'  => $until,
+			'reason' => 'rate_limited',
+			'since'  => $now - 300,
+			'streak' => 2,
+		);
+
+		$data = $this->controller()->stats( new WP_REST_Request() )->get_data();
+
+		$this->assertSame(
+			array(
+				'calls'        => 42,
+				'rate_limited' => 3,
+				'not_eligible' => 0,
+			),
+			$data['summary']['rakuten']['api_usage_today']
+		);
+		$this->assertSame(
+			array(
+				'until'  => gmdate( 'c', $until ),
+				'reason' => 'rate_limited',
+				'since'  => gmdate( 'c', $now - 300 ),
+			),
+			$data['summary']['rakuten']['api_pause']
+		);
+		// 止めていない account は null・呼び出し 0 回。
+		$this->assertNull( $data['summary']['dmm']['api_pause'] );
+		$this->assertSame( 0, $data['summary']['dmm']['api_usage_today']['calls'] );
 	}
 
 	/**

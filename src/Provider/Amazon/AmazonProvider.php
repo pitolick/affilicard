@@ -10,6 +10,8 @@ use Affilicard\Provider\DisplayPolicy;
 use Affilicard\Provider\DisplayPolicyProvider;
 use Affilicard\Provider\FetchResult;
 use Affilicard\Provider\ProviderInterface;
+use Affilicard\Queue\AccountPause;
+use Affilicard\Queue\ApiUsage;
 
 /**
  * Amazon Creators API（PA-API 5 の後継）を使った自動取得 Provider。
@@ -53,7 +55,14 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 	 */
 	private array $prefetched = array();
 
-	public function __construct( private ?AmazonCreatorsClient $client = null ) {}
+	/**
+	 * @param \Closure(): int|null $clock 現在時刻（UNIX 秒）。テストで呼び出しの前後の時刻を固定するため。既定は time()。
+	 */
+	public function __construct( private ?AmazonCreatorsClient $client = null, private ?\Closure $clock = null ) {}
+
+	private function now(): int {
+		return null !== $this->clock ? (int) ( $this->clock )() : time();
+	}
 
 	public function code(): string {
 		return 'amazon-creators';
@@ -197,7 +206,16 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 				'message' => __( 'アクセストークンを取得できませんでした。Credential ID と Credential Secret を確認してください', 'affilicard' ),
 			);
 		}
-		$res = $client->getItems( $credentials, array( self::TEST_ASIN ), array( 'itemInfo.title' ) );
+		$startedAt = $this->now();
+		$res       = $client->getItems( $credentials, array( self::TEST_ASIN ), array( 'itemInfo.title' ) );
+		// 接続テストも上限を消費する。結果を数え、200 なら止めている停止を解く（403 から戻ったことを
+		// 管理者が接続テストで確かめたとき、パネルと通知に「利用条件を満たしていません」を残さない）。
+		// ただし保存済みの認証情報と同じ相手（Credential ID・トラッキング ID・マーケットプレイス）を
+		// 試したときだけ。まだ保存していない別のアソシエイトの結果で、動いている account を止めたり、
+		// 止まっている account を解いたりしない。
+		if ( self::isSameAssociate( $credentials, AccountCredentials::get( (string) $this->accountCode() ) ) ) {
+			$this->recordUsage( (string) $this->accountCode(), $startedAt, $this->now(), $res );
+		}
 		if ( $res['error'] ) {
 			return array(
 				'ok'      => false,
@@ -217,6 +235,21 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 	}
 
 	/**
+	 * 2 つの認証情報が同じアソシエイト・同じマーケットプレイスを指すか（呼び出しの上限と利用条件を共有するか）。
+	 *
+	 * @param array<string, string> $a
+	 * @param array<string, string> $b
+	 */
+	private static function isSameAssociate( array $a, array $b ): bool {
+		foreach ( array( 'credential_id', 'partner_tag' ) as $key ) {
+			if ( '' === trim( (string) ( $a[ $key ] ?? '' ) ) || trim( (string) ( $a[ $key ] ?? '' ) ) !== trim( (string) ( $b[ $key ] ?? '' ) ) ) {
+				return false;
+			}
+		}
+		return AmazonCreatorsClient::marketplace( $a ) === AmazonCreatorsClient::marketplace( $b );
+	}
+
+	/**
 	 * 1 リクエスト（最大 10 ASIN）で取得し、ASIN ごとの結果を返す。
 	 *
 	 * @param list<string>          $asins 正規化・検証済みの ASIN
@@ -224,7 +257,18 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 	 * @return array<string, FetchResult>
 	 */
 	private function fetchMany( array $asins, array $credentials ): array {
+		$account = (string) $this->accountCode();
+		$now     = $this->now();
+		// 上限（429）・適格販売の不足（403）で止めている間は呼ばない。呼んでも同じ失敗が返るうえ、
+		// 1 日の上限を消費して回復を遅らせる（AccountPause 参照）。
+		// 別のワーカーが止めた直後でも見落とさないよう、リクエスト内のキャッシュを使わずに読む
+		// （呼び出し 1 回につき 1 回だけなので、DB を読むコストは HTTP に比べて小さい）。
+		if ( AccountPause::until( $account, $now, true ) > 0 ) {
+			return array_fill_keys( $asins, FetchResult::error() );
+		}
+
 		$res = $this->client()->getItems( $credentials, $asins, self::RESOURCES );
+		$this->recordUsage( $account, $now, $this->now(), $res );
 
 		// 通信断・トークン取得失敗・非 200（403 AssociateNotEligible / 429 / 5xx / 400 等）は
 		// すべて一時失敗。特に 403 は、売上要件（直近 30 日）を割ると返り、要件を満たせば
@@ -251,6 +295,47 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 				: FetchResult::miss();
 		}
 		return $results;
+	}
+
+	/**
+	 * API に届いた呼び出しを日次集計に足し、429 / 403（適格販売の不足）なら account を止め、
+	 * 200 なら停止を解く。API から応答を受け取らなかった呼び出し（通信断・認証前の失敗。上限を消費しない）は数えない。
+	 *
+	 * 停止の起点は応答を受け取った時刻（$respondedAt）。呼ぶ前の時刻を使うと、応答を待つ間に
+	 * 短い停止が切れてしまう。停止を解くかどうかはリクエストを送った時刻（$startedAt）で決める
+	 * （AccountPause::recordSuccess）。
+	 *
+	 * @param array{error: bool, code: int, decoded: array<string, mixed>|null, requests?: int} $res
+	 */
+	private function recordUsage( string $account, int $startedAt, int $respondedAt, array $res ): void {
+		$now = $respondedAt;
+		// API から応答を受け取った回数だけ数える。最終的に通信断・トークン取得失敗でも、その前に
+		// 401 を受けていれば上限を消費しているので数える。
+		$requests = (int) ( $res['requests'] ?? ( $res['error'] ? 0 : 1 ) );
+		if ( $requests > 0 ) {
+			ApiUsage::record( $account, ApiUsage::KIND_CALLS, $now, $requests );
+		}
+		if ( $res['error'] ) {
+			return;
+		}
+		$code    = $res['code'];
+		$decoded = $res['decoded'];
+		if ( 429 === $code ) {
+			ApiUsage::record( $account, ApiUsage::KIND_RATE_LIMITED, $now );
+			$retryAfter = is_array( $decoded ) && is_numeric( $decoded['retryAfterSeconds'] ?? null )
+				? (int) $decoded['retryAfterSeconds']
+				: null;
+			AccountPause::recordRateLimited( $account, $now, $retryAfter );
+			return;
+		}
+		if ( 403 === $code && is_array( $decoded ) && 'AssociateNotEligible' === ( $decoded['reason'] ?? '' ) ) {
+			ApiUsage::record( $account, ApiUsage::KIND_NOT_ELIGIBLE, $now );
+			AccountPause::recordNotEligible( $account, $now );
+			return;
+		}
+		if ( 200 === $code ) {
+			AccountPause::recordSuccess( $account, $startedAt );
+		}
 	}
 
 	/**
