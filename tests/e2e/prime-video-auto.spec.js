@@ -159,12 +159,13 @@ test.describe( 'Prime Video の自動取得', () => {
 				.dispatch( 'core/preferences' )
 				.set( 'core/edit-post', 'welcomeGuide', false );
 		} );
-		const listingsPanel = page.getByRole( 'button', {
-			name: 'プラットフォーム listing',
-		} );
-		await expect( listingsPanel ).toBeVisible( { timeout: 15_000 } );
-		if ( ( await listingsPanel.getAttribute( 'aria-expanded' ) ) === 'false' ) {
-			await listingsPanel.click();
+		// 商品設定のパネル → その中の listing のパネルの順に開く（product-type-ui.spec.js と同じ）。
+		for ( const name of [ 'Affilicard 商品設定', 'プラットフォーム listing' ] ) {
+			const panel = page.getByRole( 'button', { name } );
+			await expect( panel ).toBeVisible( { timeout: 15_000 } );
+			if ( ( await panel.getAttribute( 'aria-expanded' ) ) === 'false' ) {
+				await panel.click();
+			}
 		}
 		await page.getByRole( 'button', { name: /B0E2EPV001/ } ).first().click();
 		await expect(
