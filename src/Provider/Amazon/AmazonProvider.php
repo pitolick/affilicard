@@ -299,7 +299,7 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 
 	/**
 	 * API に届いた呼び出しを日次集計に足し、429 / 403（適格販売の不足）なら account を止め、
-	 * 200 なら停止を解く。通信断・認証前の失敗（API の上限を消費しない）は数えない。
+	 * 200 なら停止を解く。API から応答を受け取らなかった呼び出し（通信断・認証前の失敗。上限を消費しない）は数えない。
 	 *
 	 * 停止の起点は応答を受け取った時刻（$respondedAt）。呼ぶ前の時刻を使うと、応答を待つ間に
 	 * 短い停止が切れてしまう。停止を解くかどうかはリクエストを送った時刻（$startedAt）で決める
@@ -309,10 +309,15 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 	 */
 	private function recordUsage( string $account, int $startedAt, int $respondedAt, array $res ): void {
 		$now = $respondedAt;
+		// API から応答を受け取った回数だけ数える。最終的に通信断・トークン取得失敗でも、その前に
+		// 401 を受けていれば上限を消費しているので数える。
+		$requests = (int) ( $res['requests'] ?? ( $res['error'] ? 0 : 1 ) );
+		if ( $requests > 0 ) {
+			ApiUsage::record( $account, ApiUsage::KIND_CALLS, $now, $requests );
+		}
 		if ( $res['error'] ) {
 			return;
 		}
-		ApiUsage::record( $account, ApiUsage::KIND_CALLS, $now, (int) ( $res['requests'] ?? 1 ) );
 		$code    = $res['code'];
 		$decoded = $res['decoded'];
 		if ( 429 === $code ) {

@@ -693,6 +693,28 @@ final class AmazonProviderTest extends TestCase {
 	}
 
 	/**
+	 * 401 のあとトークンを取り直せず最終的に失敗しても、最初の 401 は API に届いているので数える。
+	 */
+	public function test_401のあと失敗しても届いた1回は数える(): void {
+		$this->stubCredentials();
+		$client = $this->client();
+		$client->shouldReceive( 'getItems' )->once()->andReturn(
+			array(
+				'error'    => true,
+				'code'     => 0,
+				'decoded'  => null,
+				'requests' => 1,
+			)
+		);
+
+		$result = ( new AmazonProvider( $client ) )->fetch( 'B008ODF84I', array() );
+		$this->assertFalse( $result->isHit() );
+		$this->assertFalse( $result->isTerminalMiss() );
+		$this->assertSame( 1, ApiUsage::forDay( 'amazon', time() )['calls'] );
+		$this->assertNull( AccountPause::get( 'amazon' ) );
+	}
+
+	/**
 	 * 保存していない別のアソシエイトを接続テストで試した結果では、保存済みの account を止めも解きもしない。
 	 */
 	public function test_testConnectionで保存済みと別のアソシエイトを試しても停止を変えない(): void {

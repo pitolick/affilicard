@@ -175,6 +175,51 @@ final class AmazonCreatorsClientTest extends TestCase {
 		$this->assertSame( 2, $res['requests'] );
 	}
 
+	/**
+	 * 401 のあとトークンを取り直せなかった・再送が通信断だったときも、最初の 401 は API に
+	 * 届いているので requests は 1。
+	 *
+	 * @dataProvider provideRetryFailures
+	 */
+	public function test_401のあと取り直しや再送に失敗してもrequestsは1( bool $tokenFails ): void {
+		WP_Mock::userFunction( 'get_transient' )->once()->andReturn( Crypto::encrypt( 'stale' ) );
+		WP_Mock::userFunction( 'delete_transient' )->andReturn( true );
+		WP_Mock::userFunction( 'set_transient' )->andReturn( true );
+		WP_Mock::userFunction( 'wp_remote_post' )->andReturnUsing(
+			static function ( $url, $args ) use ( $tokenFails ) {
+				if ( str_contains( $url, '/auth/o2/token' ) ) {
+					return $tokenFails
+						? self::response( 401, array( 'error' => 'invalid_client' ) )
+						: self::response(
+							200,
+							array(
+								'access_token' => 'fresh',
+								'expires_in'   => 3600,
+							)
+						);
+				}
+				return 'Bearer stale' === $args['headers']['Authorization']
+					? self::response( 401, array( 'reason' => 'InvalidToken' ) )
+					: new \WP_Error( 'http_request_failed', 'timeout' );
+			}
+		);
+
+		$res = ( new AmazonCreatorsClient() )->getItems( self::CREDS, array( 'B008ODF84I' ), array() );
+
+		$this->assertTrue( $res['error'] );
+		$this->assertSame( 1, $res['requests'] );
+	}
+
+	/**
+	 * @return array<string, array{0: bool}>
+	 */
+	public static function provideRetryFailures(): array {
+		return array(
+			'トークンを取り直せない' => array( true ),
+			'再送が通信断'      => array( false ),
+		);
+	}
+
 	public function test_トークンを取得できなければ_HTTPせずerrorを返す(): void {
 		WP_Mock::userFunction( 'get_transient' )->once()->andReturn( false );
 		WP_Mock::userFunction( 'set_transient' )->never();
@@ -186,6 +231,7 @@ final class AmazonCreatorsClientTest extends TestCase {
 
 		$this->assertTrue( $res['error'] );
 		$this->assertSame( 0, $res['code'] );
+		$this->assertSame( 0, $res['requests'] );
 	}
 
 	public function test_通信断はerrorを返す(): void {
