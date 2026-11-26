@@ -62,6 +62,7 @@ final class LegacyOffer {
 			'regular_url'      => ScalarField::string( $listing, 'regular_url' ),
 			'affiliate_url'    => ScalarField::string( $listing, 'affiliate_url' ),
 			'price'            => ScalarField::string( $listing, 'price' ),
+			'price_from'       => ScalarField::string( $listing, 'price_from' ),
 			'list_price'       => ScalarField::string( $listing, 'list_price' ),
 			'badge'            => ScalarField::string( $listing, 'badge' ),
 			'plan_label'       => ScalarField::string( $listing, 'plan_label' ),

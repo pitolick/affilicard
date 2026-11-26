@@ -174,6 +174,7 @@ final class PlatformConfig {
 				__( 'Prime Videoで見る', 'affilicard' ),
 				'#00a8e1',
 				'#ffffff',
+				eligibleProvider: 'amazon-creators',
 				priceTtlHours: 24,
 				linkHosts: array( 'amazon.co.jp' )
 			),

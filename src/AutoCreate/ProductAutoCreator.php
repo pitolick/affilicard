@@ -177,6 +177,8 @@ final class ProductAutoCreator {
 							'regular_url'      => isset( $fetched['regular_url'] ) ? (string) $fetched['regular_url'] : '',
 							'affiliate_url'    => isset( $fetched['affiliate_url'] ) ? (string) $fetched['affiliate_url'] : '',
 							'price'            => isset( $fetched['price'] ) ? (string) $fetched['price'] : '',
+							'price_from'       => isset( $fetched['price_from'] ) ? (string) $fetched['price_from'] : '',
+							'plan_label'       => isset( $fetched['plan_label'] ) ? (string) $fetched['plan_label'] : '',
 							'list_price'       => isset( $fetched['list_price'] ) ? (string) $fetched['list_price'] : '',
 							'list_price_label' => isset( $fetched['list_price_label'] ) ? (string) $fetched['list_price_label'] : '',
 							'badge'            => isset( $fetched['badge'] ) ? (string) $fetched['badge'] : '',

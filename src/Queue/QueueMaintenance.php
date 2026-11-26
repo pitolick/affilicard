@@ -266,7 +266,7 @@ final class QueueMaintenance {
 				// 完走するまで毎周回ここで積み直される（その間ハンドラは no-op で
 				// 返すだけで外部 API も叩かない）。ここで flat を拾わなくすると、
 				// 見送られた更新がそのまま失われる。
-				$targets = OfferSelector::select(
+				$targets = OfferSelector::selectForRefresh(
 					LegacyOffer::offersWithFallback( $listing ),
 					GeneralSettings::fallbackOnTerminal()
 				);
@@ -280,13 +280,15 @@ final class QueueMaintenance {
 				// RefreshHandler::isGivenUp() に委ねる（選択の後に置くのはそのため）。
 				// そうしないと、恒久失敗した購入リンクのマーカーが、繰り上げた別の
 				// 購入リンク（一度も失敗していない）まで TTL のあいだ止めてしまう。
-				if ( RefreshHandler::isGivenUp( $id, $platform, $targets[0] ) ) {
+				if ( RefreshHandler::isGivenUpAll( $id, $platform, $targets ) ) {
 					continue;
 				}
 
 				// 直近の試行から TTL（リード分だけ前倒し）を経過していない購入リンクは
 				// まだ積まない（perpetual retry の抑止）。
-				if ( ! PriceFreshness::needsRefetch( $targets[0], $def, $now, $this->sweepLeadSeconds ) ) {
+				// バージョン違い（selectForRefresh() が返す複数件）は 1 回の更新でまとめて取り直すので、
+				// どれか 1 つでも古ければ積む。
+				if ( ! PriceFreshness::anyNeedsRefetch( $targets, $def, $now, $this->sweepLeadSeconds ) ) {
 					continue;
 				}
 

@@ -430,6 +430,9 @@ final class ProductSchema {
 				'regular_url'      => $regular,
 				'affiliate_url'    => (string) esc_url_raw( self::stringField( $offer, 'affiliate_url' ) ),
 				'price'            => (string) sanitize_text_field( self::stringField( $offer, 'price' ) ),
+				// 価格が最低価格（ほかにも高い価格がある）か。'1' ならカードで「¥400〜」と出す。
+				// Prime Video のように 1 つの商品に価格が複数返り、どれが何か分からないストアで使う。
+				'price_from'       => '1' === self::stringField( $offer, 'price_from' ) ? '1' : '',
 				'list_price'       => (string) sanitize_text_field( self::stringField( $offer, 'list_price' ) ),
 				// 基準価格の種類を示すラベル（例「過去価格:」）。取り消し線の価格が何と比べた値かを示す。
 				'list_price_label' => (string) sanitize_text_field( self::stringField( $offer, 'list_price_label' ) ),

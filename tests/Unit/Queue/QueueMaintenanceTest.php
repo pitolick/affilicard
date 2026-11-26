@@ -1679,6 +1679,41 @@ final class QueueMaintenanceTest extends TestCase {
 		$this->assertSame( array( 'rakuten-kobo' ), $enqueued );
 	}
 
+	/**
+	 * v4.6.0: バージョン違い（variant_label）はバージョンごとに 1 件ずつ更新する。2 つ目のバージョンが
+	 * 古ければ、1 つ目が新しくても積む（積まないと 2 つ目の価格が 24 時間で消える）。
+	 */
+	public function test_掃引はどれか1つのバージョンが古ければ投入する(): void {
+		$now      = time();
+		$listings = array(
+			array(
+				'platform'    => 'rakuten-kobo',
+				'enabled'     => true,
+				'auto_update' => true,
+				'offers'      => array(
+					array(
+						'display_order'   => 100,
+						'external_id'     => 'theatrical',
+						'variant_label'   => '劇場公開版',
+						'last_fetched_at' => gmdate( 'c', $now ),
+					),
+					array(
+						'display_order'   => 100,
+						'external_id'     => 'extended',
+						'variant_label'   => 'エクステンデッド版',
+						'last_fetched_at' => gmdate( 'c', $now - 30 * 3600 ),
+					),
+				),
+			),
+		);
+
+		$this->assertSame( array( 'rakuten-kobo' ), $this->sweepAndCollectEnqueued( $listings, $now ) );
+
+		// 両方とも新しければ積まない。
+		$listings[0]['offers'][1]['last_fetched_at'] = gmdate( 'c', $now );
+		$this->assertSame( array(), $this->sweepAndCollectEnqueued( $listings, $now ) );
+	}
+
 	/** 選択された購入リンク（先頭・表示中）自体が鮮度内なら投入しない。 */
 	public function test_選択された購入リンクが新しければ投入しない(): void {
 		$now      = time();

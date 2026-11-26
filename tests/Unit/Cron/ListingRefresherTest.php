@@ -5,9 +5,11 @@ namespace Affilicard\Tests\Unit\Cron;
 
 use Affilicard\Cron\ListingRefresher;
 use Affilicard\Pricing\FetchStatus;
+use Affilicard\Provider\BatchFetchingProvider;
 use Affilicard\Provider\FetchResult;
 use Affilicard\Provider\ProviderInterface;
 use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Queue\RateLimiter;
 use Affilicard\Queue\WorkOutcome;
 use Affilicard\Repository\ProductRepositoryInterface;
 use Affilicard\Settings\GeneralSettings;
@@ -1531,5 +1533,331 @@ final class ListingRefresherTest extends TestCase {
 		// repoWithOffers() の商品タイトル。
 		$this->assertSame( '対象巻', $seen['search_key'] );
 		$this->assertSame( '', $seen['regular_url'] );
+	}
+
+	/**
+	 * 全保存（updateListingOffer の引数）を記録するリポジトリ。
+	 *
+	 * @var list<array{identity: string, patch: array<string, mixed>}>
+	 */
+	private array $saves = array();
+
+	/**
+	 * バージョン違い（variant_label）を持つ listing のリポジトリモック。
+	 *
+	 * @param list<array<string, mixed>> $offers
+	 */
+	private function repoWithVariants( array $offers, bool $saveOk = true ): ProductRepositoryInterface {
+		$this->saves = array();
+		/** @var ProductRepositoryInterface&\Mockery\MockInterface $repo */
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'find' )->with( 20 )->andReturn(
+			$this->product(
+				20,
+				array(
+					array(
+						'platform'    => 'rakuten-kobo',
+						'enabled'     => true,
+						'auto_update' => true,
+						'update_mode' => 'auto',
+						'offers'      => $offers,
+					),
+				)
+			)
+		);
+		$repo->shouldReceive( 'updateListingOffer' )->andReturnUsing(
+			function ( int $postId, string $platform, array $patch, string $identity ) use ( $saveOk ): bool {
+				$this->saves[] = array(
+					'identity' => $identity,
+					'patch'    => $patch,
+				);
+				return $saveOk;
+			}
+		);
+		return $repo;
+	}
+
+	/**
+	 * @return list<array<string, mixed>>
+	 */
+	private static function twoVariants(): array {
+		return array(
+			array(
+				'display_order' => 100,
+				'external_id'   => 'theatrical',
+				'variant_label' => '劇場公開版',
+			),
+			array(
+				'display_order' => 100,
+				'external_id'   => 'extended',
+				'variant_label' => 'エクステンデッド版',
+			),
+		);
+	}
+
+	/**
+	 * @param array<string, FetchResult> $byId
+	 */
+	private function providerReturning( array $byId ): ProviderRegistry {
+		$p = Mockery::mock( ProviderInterface::class );
+		$p->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$p->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$p->shouldReceive( 'accountCode' )->andReturn( 'rakuten' );
+		$p->shouldReceive( 'minRequestIntervalMs' )->andReturn( 1100 );
+		$p->shouldReceive( 'fetch' )->andReturnUsing(
+			static fn( string $id ): FetchResult => $byId[ $id ]
+		);
+		$r = new ProviderRegistry();
+		$r->register( $p );
+		return $r;
+	}
+
+	public function test_バージョン違いはすべて取得して1件ずつ保存する(): void {
+		$this->stubRakutenPlatform();
+		$registry = $this->providerReturning(
+			array(
+				'theatrical' => FetchResult::hit(
+					array(
+						'price'      => '400',
+						'price_from' => '1',
+						'plan_label' => '',
+					)
+				),
+				'extended'   => FetchResult::hit(
+					array(
+						'price'      => '',
+						'price_from' => '',
+						'plan_label' => '見放題',
+					)
+				),
+			)
+		);
+		$repo     = $this->repoWithVariants( self::twoVariants() );
+		$sleeps   = array();
+
+		$outcome = ( new ListingRefresher(
+			$registry,
+			$repo,
+			static function ( int $ms ) use ( &$sleeps ): void {
+				$sleeps[] = $ms;
+			}
+		) )->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertSame( WorkOutcome::SUCCESS, $outcome );
+		$this->assertSame( array( 'external_id:theatrical', 'external_id:extended' ), array_column( $this->saves, 'identity' ) );
+		// 最低価格の印と提供形態は、Provider が返したら上書きする（見放題から外れたら空に戻す）。
+		$this->assertSame( '400', $this->saves[0]['patch']['price'] );
+		$this->assertSame( '1', $this->saves[0]['patch']['price_from'] );
+		$this->assertSame( '', $this->saves[0]['patch']['plan_label'] );
+		$this->assertSame( '見放題', $this->saves[1]['patch']['plan_label'] );
+		// リミッタを渡さないときは、2 件目の前に有効間隔だけ待つ（Plugin はリミッタを渡す。下のテスト）。
+		$this->assertSame( array( 1100 ), $sleeps );
+	}
+
+	public function test_Providerが提供形態を返さなければ手入力の値を残す(): void {
+		$this->stubRakutenPlatform();
+		$registry = $this->providerReturning( array( 'theatrical' => FetchResult::hit( array( 'price' => '660' ) ) ) );
+		$repo     = $this->repoWithVariants( array( self::twoVariants()[0] ) );
+
+		( new ListingRefresher( $registry, $repo ) )->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertArrayNotHasKey( 'plan_label', $this->saves[0]['patch'] );
+		$this->assertArrayNotHasKey( 'price_from', $this->saves[0]['patch'] );
+	}
+
+	public function test_まとめ取得の結果が手元にあれば待たない(): void {
+		$this->stubRakutenPlatform();
+		$p = Mockery::mock( ProviderInterface::class, BatchFetchingProvider::class );
+		$p->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$p->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$p->shouldReceive( 'minRequestIntervalMs' )->andReturn( 1100 );
+		$p->shouldReceive( 'accountCode' )->andReturn( 'rakuten' );
+		$p->shouldReceive( 'hasPrefetched' )->andReturn( true );
+		$p->shouldReceive( 'fetch' )->twice()->andReturn( FetchResult::hit( array( 'price' => '400' ) ) );
+		$registry = new ProviderRegistry();
+		$registry->register( $p );
+		$sleeps = array();
+
+		( new ListingRefresher(
+			$registry,
+			$this->repoWithVariants( self::twoVariants() ),
+			static function ( int $ms ) use ( &$sleeps ): void {
+				$sleeps[] = $ms;
+			}
+		) )->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertSame( array(), $sleeps );
+		$this->assertCount( 2, $this->saves );
+	}
+
+	/**
+	 * @return array<string, array{FetchResult, FetchResult, WorkOutcome}>
+	 */
+	public static function variantOutcomeCases(): array {
+		return array(
+			'両方成功'                      => array( FetchResult::hit( array() ), FetchResult::hit( array() ), WorkOutcome::SUCCESS ),
+			'片方が該当なしなら成功（生きているほうは止めない）' => array( FetchResult::hit( array() ), FetchResult::miss(), WorkOutcome::SUCCESS ),
+			'片方が一時失敗なら一時失敗（全件を取り直す）'    => array( FetchResult::hit( array() ), FetchResult::error(), WorkOutcome::TRANSIENT_FAILURE ),
+			'両方とも該当なしなら恒久失敗'            => array( FetchResult::miss(), FetchResult::miss(), WorkOutcome::TERMINAL_FAILURE ),
+			'該当なしと一時失敗なら一時失敗'           => array( FetchResult::miss(), FetchResult::error(), WorkOutcome::TRANSIENT_FAILURE ),
+		);
+	}
+
+	/**
+	 * @dataProvider variantOutcomeCases
+	 */
+	public function test_バージョン違いの結果をまとめる( FetchResult $first, FetchResult $second, WorkOutcome $expected ): void {
+		$this->stubRakutenPlatform();
+		$registry = $this->providerReturning(
+			array(
+				'theatrical' => $first,
+				'extended'   => $second,
+			)
+		);
+
+		$outcome = ( new ListingRefresher( $registry, $this->repoWithVariants( self::twoVariants() ), static function (): void {} ) )
+			->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertSame( $expected, $outcome );
+		$this->assertCount( 2, $this->saves );
+	}
+
+	public function test_外部IDの無いバージョンは結果のまとめに数えない(): void {
+		$this->stubRakutenPlatform();
+		$registry = $this->providerReturning( array( 'theatrical' => FetchResult::hit( array( 'price' => '400' ) ) ) );
+		$offers   = self::twoVariants();
+		// 2 つ目は手入力（外部 ID 無し・通常 URL だけ）。自動取得の対象外。
+		$offers[1]['external_id'] = '';
+		$offers[1]['regular_url'] = 'https://example.test/extended';
+
+		$outcome = ( new ListingRefresher( $registry, $this->repoWithVariants( $offers ) ) )->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertSame( WorkOutcome::SUCCESS, $outcome );
+		$this->assertSame( FetchStatus::UNSUPPORTED, $this->saves[1]['patch']['fetch_status'] );
+	}
+
+	public function test_保存に失敗したバージョンがあれば一時失敗(): void {
+		$this->stubRakutenPlatform();
+		$registry = $this->providerReturning(
+			array(
+				'theatrical' => FetchResult::hit( array() ),
+				'extended'   => FetchResult::hit( array() ),
+			)
+		);
+
+		$outcome = ( new ListingRefresher( $registry, $this->repoWithVariants( self::twoVariants(), false ), static function (): void {} ) )
+			->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertSame( WorkOutcome::TRANSIENT_FAILURE, $outcome );
+	}
+
+	public function test_targetCount_バージョン違いはバージョンの数だけ数える(): void {
+		$this->stubRakutenPlatform();
+		$refresher = new ListingRefresher( $this->providerReturning( array() ), $this->repoWithVariants( self::twoVariants() ) );
+
+		$this->assertSame( 2, $refresher->targetCount( 20, 'rakuten-kobo' ) );
+		$this->assertSame( array( 'theatrical', 'extended' ), $refresher->fetchTargetExternalIds( 20, 'rakuten-kobo' ) );
+	}
+
+	/**
+	 * RateLimiter::tryAcquire() の条件付き UPDATE を stub し、取ろうとした間隔（now − 閾値）を記録する。
+	 *
+	 * @param list<int> $intervals
+	 */
+	private function stubLimiterWpdb( array &$intervals, int ...$results ): void {
+		$wpdb          = Mockery::mock();
+		$wpdb->options = 'wp_options';
+		$wpdb->shouldReceive( 'prepare' )->andReturnUsing(
+			static function ( string $query, ...$args ) use ( &$intervals ) {
+				$intervals[] = (int) $args[0] - (int) $args[2];
+				return $query;
+			}
+		);
+		$wpdb->shouldReceive( 'query' )->andReturn( ...$results );
+		$GLOBALS['wpdb'] = $wpdb;
+		WP_Mock::userFunction( 'add_option' )->andReturn( true );
+		WP_Mock::userFunction( 'wp_cache_delete' )->andReturn( true );
+	}
+
+	public function test_2件目以降は呼び出しごとにレート制限の枠を取る(): void {
+		$this->stubRakutenPlatform();
+		$intervals = array();
+		$this->stubLimiterWpdb( $intervals, 1 );
+		$registry = $this->providerReturning(
+			array(
+				'theatrical' => FetchResult::hit( array( 'price' => '400' ) ),
+				'extended'   => FetchResult::hit( array( 'price' => '500' ) ),
+			)
+		);
+
+		$outcome = ( new ListingRefresher( $registry, $this->repoWithVariants( self::twoVariants() ), static function (): void {}, new RateLimiter() ) )
+			->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertSame( WorkOutcome::SUCCESS, $outcome );
+		// 1 件目の枠はハンドラが取る。ここで取るのは 2 件目の 1 回だけ（間隔は Provider の下限）。
+		$this->assertSame( array( 1100 ), $intervals );
+	}
+
+	public function test_2件目の枠が取れなければ叩かずに一時失敗にする(): void {
+		$this->stubRakutenPlatform();
+		$intervals = array();
+		$this->stubLimiterWpdb( $intervals, 0 );
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_ratelimit_rakuten', 0 )
+			->andReturn( (string) ( (int) round( microtime( true ) * 1000 ) + 60000 ) );
+		$p = Mockery::mock( ProviderInterface::class );
+		$p->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$p->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$p->shouldReceive( 'accountCode' )->andReturn( 'rakuten' );
+		$p->shouldReceive( 'minRequestIntervalMs' )->andReturn( 1100 );
+		// 1 件目だけ叩く。2 件目は枠が取れないので叩かない。
+		$p->shouldReceive( 'fetch' )->once()->andReturn( FetchResult::hit( array( 'price' => '400' ) ) );
+		$registry = new ProviderRegistry();
+		$registry->register( $p );
+
+		$outcome = ( new ListingRefresher( $registry, $this->repoWithVariants( self::twoVariants() ), static function (): void {}, new RateLimiter() ) )
+			->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertSame( WorkOutcome::TRANSIENT_FAILURE, $outcome );
+		$this->assertSame( FetchStatus::TRANSIENT, $this->saves[1]['patch']['fetch_status'] );
+		$this->assertCount( 5, $intervals );
+	}
+
+	/**
+	 * ハンドラが「1 件目の枠は使った（または取っていない）」と伝えたら、最初の外部 API 呼び出しから
+	 * 枠を取る。まとめ取得の先取りに枠を使ったあと、手元に結果の無い ID（11 件目・先取りのあとに
+	 * 対象が変わった ID）を叩く場合（CodeRabbit #207）。
+	 */
+	public function test_1件目の枠を使ったと伝えられたら最初の呼び出しから枠を取る(): void {
+		$this->stubRakutenPlatform();
+		$intervals = array();
+		$this->stubLimiterWpdb( $intervals, 1 );
+		$p = Mockery::mock( ProviderInterface::class, BatchFetchingProvider::class );
+		$p->shouldReceive( 'code' )->andReturn( 'rakuten-kobo' );
+		$p->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$p->shouldReceive( 'accountCode' )->andReturn( 'rakuten' );
+		$p->shouldReceive( 'minRequestIntervalMs' )->andReturn( 1100 );
+		// 先取りの結果は手元に無い（先取りのあとで対象が変わった）。
+		$p->shouldReceive( 'hasPrefetched' )->andReturn( false );
+		$p->shouldReceive( 'fetch' )->once()->andReturn( FetchResult::hit( array( 'price' => '400' ) ) );
+		$registry = new ProviderRegistry();
+		$registry->register( $p );
+
+		( new ListingRefresher( $registry, $this->repoWithVariants( array( self::twoVariants()[0] ) ), static function (): void {}, new RateLimiter() ) )
+			->refreshOne( 20, 'rakuten-kobo', true );
+
+		$this->assertSame( array( 1100 ), $intervals );
+	}
+
+	public function test_伝えられなければ最初のHTTPはハンドラの枠を使う(): void {
+		$this->stubRakutenPlatform();
+		$intervals = array();
+		$this->stubLimiterWpdb( $intervals, 1 );
+		$registry = $this->providerReturning( array( 'theatrical' => FetchResult::hit( array( 'price' => '400' ) ) ) );
+
+		( new ListingRefresher( $registry, $this->repoWithVariants( array( self::twoVariants()[0] ) ), static function (): void {}, new RateLimiter() ) )
+			->refreshOne( 20, 'rakuten-kobo' );
+
+		$this->assertSame( array(), $intervals );
 	}
 }

@@ -436,6 +436,14 @@ final class CardRenderer {
 				}
 			}
 		}
+		// API が返した提供形態（Prime Video の「見放題」など）も、そのストアのテキストのコンテンツ。
+		// 価格を出さない行でも提供元の表記が要る。
+		foreach ( $entries as $entry ) {
+			if ( '' !== trim( ScalarField::string( $entry['offer'], 'last_verified_at' ) )
+				&& '' !== $this->displayablePlanLabel( $entry['offer'], $entry['platform'], $this->nowTs ) ) {
+				$codes[ $entry['platform']->code ] = true;
+			}
+		}
 
 		$texts = array();
 		foreach ( array_keys( $codes ) as $code ) {
@@ -561,6 +569,33 @@ final class CardRenderer {
 			$sorted[] = $entry['listing'];
 		}
 		return $sorted;
+	}
+
+	/**
+	 * カードに出す提供形態（見放題・レンタルなど）。出さないなら空文字。
+	 *
+	 * - 商品タイプが提供形態を使わない（動画配信以外）なら出さない
+	 * - **API が確かめた値（last_verified_at を持つ購入リンク）は、価格と同じ鮮度のあいだだけ出す。**
+	 *   自動取得（Amazon の動画）は毎回この値を上書きする。取得が止まったまま古い「見放題」を
+	 *   出し続けると、見放題から外れた作品を見放題と案内してしまう（ライセンスの (n)・(g) も
+	 *   24 時間を超えたコンテンツの表示を認めていない）
+	 * - 手入力（last_verified_at が無い）は従来どおり、いつでも出す
+	 *
+	 * @param array<string, mixed> $offer
+	 */
+	private function displayablePlanLabel( array $offer, PlatformDefinition $platform, int $nowTs ): string {
+		if ( ! $this->allowsOfferField( 'plan_label' ) ) {
+			return '';
+		}
+		$label = trim( ScalarField::string( $offer, 'plan_label' ) );
+		if ( '' === $label ) {
+			return '';
+		}
+		if ( '' !== trim( ScalarField::string( $offer, 'last_verified_at' ) )
+			&& ! PriceFreshness::isVerifiedFresh( $offer, $platform, $nowTs ) ) {
+			return '';
+		}
+		return $label;
 	}
 
 	/**
@@ -692,7 +727,7 @@ final class CardRenderer {
 				$pricing .= '<span class="affilicard-card__variant">' . esc_html( $variant ) . '</span>';
 			}
 			// 提供形態（見放題・レンタルなど）は、それを持つ商品タイプ（動画配信）のときだけ出す。
-			$plan_label = $this->allowsOfferField( 'plan_label' ) ? trim( ScalarField::string( $offer, 'plan_label' ) ) : '';
+			$plan_label = $this->displayablePlanLabel( $offer, $platform, $now_ts );
 			if ( '' !== $plan_label ) {
 				$pricing .= '<span class="affilicard-card__plan">' . esc_html( $plan_label ) . '</span>';
 			}
@@ -720,8 +755,12 @@ final class CardRenderer {
 				if ( '' !== $price ) {
 					// 先頭の半角¥(U+00A5)/全角￥(U+FFE5)/空白のみを安全に除去（ltrim のバイト単位破壊を回避）。
 					$price_no_yen = (string) preg_replace( '/^[\x{00A5}\x{FFE5}\s]+/u', '', $price );
-					$pricing     .= '<span class="affilicard-card__price">¥' . esc_html( $price_no_yen ) . '</span>';
-					$pricing     .= '<span class="affilicard-card__tax">' . esc_html__( '（税込）', 'affilicard' ) . '</span>';
+					// 最低価格（ほかにも高い価格がある）なら「〜」を添える（Prime Video の購入・レンタル等）。
+					$price_from = '1' === ScalarField::string( $offer, 'price_from' )
+						? '<span class="affilicard-card__price-from">' . esc_html__( '〜', 'affilicard' ) . '</span>'
+						: '';
+					$pricing   .= '<span class="affilicard-card__price">¥' . esc_html( $price_no_yen ) . $price_from . '</span>';
+					$pricing   .= '<span class="affilicard-card__tax">' . esc_html__( '（税込）', 'affilicard' ) . '</span>';
 				}
 				// 割引率のバッジと付与ポイントは 1 つのまとまりにする。両方あるときは
 				// `--both` を付け、広い幅では販売価格の下の段にまとめて送る（CSS）。

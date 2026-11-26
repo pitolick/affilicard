@@ -62,6 +62,26 @@ final class RefreshHandler extends ThrottledActionHandler {
 		return FetchStatus::isTerminal( ScalarField::string( $selectedOffer, 'fetch_status' ) );
 	}
 
+	/**
+	 * 価格更新が取りに行く購入リンク（バージョンごとに 1 件）の **すべて** が恒久失敗で、
+	 * give-up マーカーが立っているか。ListingRefresher は全件が恒久失敗のときだけ
+	 * TERMINAL_FAILURE を返す（マーカーが立つ）ので、判定も全件で揃える。1 件でも生きて
+	 * いるバージョンがあれば止めない。
+	 *
+	 * @param list<array<string, mixed>> $targets OfferSelector::selectForRefresh() の戻り。
+	 */
+	public static function isGivenUpAll( int $postId, string $platform, array $targets ): bool {
+		if ( array() === $targets ) {
+			return false;
+		}
+		foreach ( $targets as $offer ) {
+			if ( ! is_array( $offer ) || ! self::isGivenUp( $postId, $platform, $offer ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	public function __construct(
 		private Enqueuer $enqueuer,
 		RateLimiter $limiter,

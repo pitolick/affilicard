@@ -114,6 +114,7 @@ function emptyOffer() {
 		regular_url: '',
 		affiliate_url: '',
 		price: '',
+		price_from: '',
 		list_price: '',
 		list_price_label: '',
 		badge: '',
@@ -207,6 +208,7 @@ function legacyOffer(listing) {
 		regular_url: scalarString(listing.regular_url),
 		affiliate_url: scalarString(listing.affiliate_url),
 		price: scalarString(listing.price),
+		price_from: scalarString(listing.price_from),
 		list_price: scalarString(listing.list_price),
 		badge: scalarString(listing.badge),
 		plan_label: scalarString(listing.plan_label),
@@ -765,6 +767,20 @@ function OffersEditor({
 								placeholder={__('例: 660', 'affilicard')}
 								onChange={(v) => updateOffer(i, { price: v })}
 							/>
+							<ToggleControl
+								label={__(
+									'最低価格として出す（「〜」を付ける）',
+									'affilicard'
+								)}
+								help={__(
+									'価格が複数ある商品（購入・レンタルなど）で、いちばん安い価格だけを出しているときに使います。Prime Video の自動取得では取得結果で上書きされます。',
+									'affilicard'
+								)}
+								checked={offer.price_from === '1'}
+								onChange={(v) =>
+									updateOffer(i, { price_from: v ? '1' : '' })
+								}
+							/>
 							<TextControl
 								label={__('参考価格', 'affilicard')}
 								value={offer.list_price ?? ''}
@@ -794,7 +810,7 @@ function OffersEditor({
 									help={
 										planLabelAllowed
 											? __(
-													'見放題・レンタル・購入など、このストアでの提供形態。価格の有無に関係なくカードに出ます。',
+													'見放題・レンタル・購入など、このストアでの提供形態。価格の有無に関係なくカードに出ます。Prime Video の自動取得では取得結果（見放題か空）で上書きされます。',
 													'affilicard'
 												)
 											: __(

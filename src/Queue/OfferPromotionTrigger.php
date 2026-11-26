@@ -214,7 +214,7 @@ final class OfferPromotionTrigger {
 		// 移行前の flat な listing も対象にする。ListingRefresher / QueueMaintenance は
 		// 既に LegacyOffer::offersWithFallback() を通しており、ここだけ offers を直読み
 		// すると「掃引と価格更新は扱えるのに繰り上がりだけ拾わない」不整合になる。
-		$targets = OfferSelector::select(
+		$targets = OfferSelector::selectForRefresh(
 			LegacyOffer::offersWithFallback( $listing ),
 			GeneralSettings::fallbackOnTerminal()
 		);
@@ -240,7 +240,7 @@ final class OfferPromotionTrigger {
 		// 「今使う購入リンク自身が terminal か」まで含めて RefreshHandler::isGivenUp()
 		// に委ねる。そうしないと、恒久失敗した購入リンクのマーカーが、繰り上げた
 		// 別の購入リンク（一度も失敗していない）まで TTL のあいだ止めてしまう。
-		if ( RefreshHandler::isGivenUp( $postId, $platform, $targets[0] ) ) {
+		if ( RefreshHandler::isGivenUpAll( $postId, $platform, $targets ) ) {
 			return;
 		}
 
@@ -251,7 +251,7 @@ final class OfferPromotionTrigger {
 
 		// needsRefetch() のクールダウン（last_fetched_at 起点）をそのまま使う。ここが、
 		// 失敗し続ける購入リンクを本フックが毎回再投入しない理由そのもの。
-		if ( ! PriceFreshness::needsRefetch( $targets[0], $def, $now ) ) {
+		if ( ! PriceFreshness::anyNeedsRefetch( $targets, $def, $now ) ) {
 			return;
 		}
 

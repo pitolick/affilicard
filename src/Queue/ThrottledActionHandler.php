@@ -137,10 +137,10 @@ abstract class ThrottledActionHandler {
 			$provider->minRequestIntervalMs(),
 			GeneralSettings::throttleOverrideMs( $account )
 		);
-		// v4.0.0: performWork() が実際に fetch する対象（購入リンク）の件数ぶん、レート制限の
-		// 枠を確保する。今日は refreshTargetCount() の既定 1 で従来と同じ挙動だが、選択係
-		// （OfferSelector）が複数件を返すようになったとき、ここを直さなくても枠が自動的に
-		// 広がる（表示を増やした瞬間に 429 を起こす事故を防ぐ）。
+		// ここで取るのは **1 件目の呼び出しの枠だけ**。performWork() がバージョン違いで 2 件目
+		// 以降を叩くときは、ListingRefresher が呼び出しごとに枠を取る（v4.6.0）。枠は取った時刻
+		// しか記録しないので、ここで件数ぶんの間隔を見込んでも、このジョブの最後の呼び出しと
+		// 次のジョブとの間隔は守れない（以前の interval × 件数はその点で効いていなかった）。
 		//
 		// **0 件なら枠を取らない。** refreshTargetCount() が 0 を返すのは「listing が
 		// 削除済み・無効・fetch 不要」のときで、performWork() は API を一度も呼ばない。
@@ -150,7 +150,7 @@ abstract class ThrottledActionHandler {
 		$slots = $this->refreshTargetCount( $args );
 		if ( $slots > 0 ) {
 			$nowMs   = (int) round( microtime( true ) * 1000 );
-			$acquire = $this->limiter->tryAcquire( $account, $interval * $slots, $nowMs );
+			$acquire = $this->limiter->tryAcquire( $account, $interval, $nowMs );
 			if ( ! $acquire['ok'] ) {
 				$this->throttleWait( $args, (int) ceil( $acquire['next_ms'] / 1000 ) );
 				return;

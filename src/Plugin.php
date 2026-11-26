@@ -135,6 +135,7 @@ final class Plugin {
 			add_action( 'admin_init', array( self::class, 'purgeLegacyProviderCredentials' ) );
 			add_action( 'admin_init', array( self::class, 'backfillEligibleProviders' ) );
 			add_action( 'admin_init', array( self::class, 'backfillAmazonEligibleProvider' ) );
+			add_action( 'admin_init', array( self::class, 'backfillPrimeVideoEligibleProvider' ) );
 		}
 
 		// ProductType レジストリ（Block の type 解決でも buildProductTypeRegistry() を参照）
@@ -259,7 +260,8 @@ final class Plugin {
 		$refreshHandler = new RefreshHandler(
 			$enqueuer,
 			new RateLimiter(),
-			new ListingRefresher( $providers, $repository ),
+			// バージョン違いで 2 件目以降を叩くとき、呼び出しごとにレート制限の枠を取る。
+			new ListingRefresher( $providers, $repository, null, new RateLimiter() ),
 			$providers
 		);
 		add_action( Enqueuer::HOOK_REFRESH, array( $refreshHandler, 'handle' ), 10, 2 );
@@ -272,7 +274,8 @@ final class Plugin {
 		$batchHandler = new BatchRefreshHandler(
 			$enqueuer,
 			new RateLimiter(),
-			new ListingRefresher( $providers, $repository ),
+			// バージョン違いで 2 件目以降を叩くとき、呼び出しごとにレート制限の枠を取る。
+			new ListingRefresher( $providers, $repository, null, new RateLimiter() ),
 			$providers
 		);
 		add_action(
@@ -578,6 +581,9 @@ final class Plugin {
 	/** {@see self::backfillAmazonEligibleProvider()} の一度きりフラグ。 */
 	public const AMAZON_ELIGIBLE_BACKFILLED_OPTION = 'affilicard_amazon_eligible_provider_backfilled';
 
+	/** {@see self::backfillPrimeVideoEligibleProvider()} の一度きりフラグ。 */
+	public const PRIME_VIDEO_ELIGIBLE_BACKFILLED_OPTION = 'affilicard_prime_video_eligible_provider_backfilled';
+
 	/**
 	 * 既存インストールの `amazon-kindle` platform に、自動取得の候補 `amazon-creators` を一度だけ補完する。
 	 *
@@ -587,10 +593,26 @@ final class Plugin {
 	 * （手動のまま。自動取得を始めるかは管理者が決める）。既に値がある platform は上書きしない。
 	 */
 	public static function backfillAmazonEligibleProvider(): void {
+		self::backfillEligibleProviderOnce( 'amazon-kindle', 'amazon-creators', self::AMAZON_ELIGIBLE_BACKFILLED_OPTION );
+	}
+
+	/**
+	 * 既存インストールの `prime-video` platform に、自動取得の候補 `amazon-creators` を一度だけ補完する
+	 * （v4.6.0。Amazon の動画も Creators API で取れるようになった）。考え方は
+	 * {@see self::backfillAmazonEligibleProvider()} と同じ。
+	 */
+	public static function backfillPrimeVideoEligibleProvider(): void {
+		self::backfillEligibleProviderOnce( 'prime-video', 'amazon-creators', self::PRIME_VIDEO_ELIGIBLE_BACKFILLED_OPTION );
+	}
+
+	/**
+	 * platform $platformCode の `eligibleProvider` が空なら $providerCode を入れる（一度きり）。
+	 */
+	private static function backfillEligibleProviderOnce( string $platformCode, string $providerCode, string $flag ): void {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
-		if ( get_option( self::AMAZON_ELIGIBLE_BACKFILLED_OPTION ) ) {
+		if ( get_option( $flag ) ) {
 			return;
 		}
 
@@ -598,8 +620,8 @@ final class Plugin {
 		$out     = array();
 		foreach ( PlatformConfig::all() as $definition ) {
 			$arr = $definition->toArray();
-			if ( 'amazon-kindle' === $definition->code && '' === $definition->eligibleProvider ) {
-				$arr['eligibleProvider'] = 'amazon-creators';
+			if ( $platformCode === $definition->code && '' === $definition->eligibleProvider ) {
+				$arr['eligibleProvider'] = $providerCode;
 				$changed                 = true;
 			}
 			$out[] = $arr;
@@ -609,13 +631,13 @@ final class Plugin {
 			PlatformConfig::save( $out );
 			// save() は保存の成否を返さない（update_option() の失敗は false で黙って返る）。
 			// 読み直して入っていなければ印を立てず、次の管理画面表示で再試行する。
-			$saved = PlatformConfig::find( 'amazon-kindle' );
+			$saved = PlatformConfig::find( $platformCode );
 			if ( null === $saved || '' === $saved->eligibleProvider ) {
 				return;
 			}
 		}
 
-		update_option( self::AMAZON_ELIGIBLE_BACKFILLED_OPTION, 1, false );
+		update_option( $flag, 1, false );
 	}
 
 	public static function registerSettingsPage(): void {

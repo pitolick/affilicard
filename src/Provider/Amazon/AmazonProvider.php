@@ -38,6 +38,8 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 		'images.primary.large',
 		'itemInfo.title',
 		'itemInfo.byLineInfo',
+		// 動画（Prime Video）かどうかの判定に使う（productGroup「Video On Demand」・binding「Prime Video」）。
+		'itemInfo.classifications',
 		'itemInfo.contentInfo',
 		'itemInfo.productInfo',
 		'offersV2.listings.availability',
@@ -354,6 +356,9 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 	 * @return array<string, mixed>
 	 */
 	public static function normalizeItem( array $item, string $marketplace = AmazonCreatorsClient::DEFAULT_MARKETPLACE ): array {
+		if ( self::isVideo( $item ) ) {
+			return self::normalizeVideoItem( $item, $marketplace );
+		}
 		$asin = strtoupper( (string) $item['asin'] );
 		$data = array(
 			'regular_url' => 'https://' . $marketplace . '/dp/' . $asin,
@@ -405,6 +410,93 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 			'release_date' => self::datePart( self::stringAt( $item, array( 'itemInfo', 'productInfo', 'releaseDate', 'displayValue' ) ) ),
 			'author'       => self::authors( $item ),
 			'publisher'    => self::stringAt( $item, array( 'itemInfo', 'byLineInfo', 'manufacturer', 'displayValue' ) ),
+		);
+		$data['raw']             = $item;
+
+		return $data;
+	}
+
+	/**
+	 * 動画（Prime Video）の item か。種類（classifications）で見分ける。
+	 *
+	 * @param array<string, mixed> $item
+	 */
+	public static function isVideo( array $item ): bool {
+		return 'Video On Demand' === self::stringAt( $item, array( 'itemInfo', 'classifications', 'productGroup', 'displayValue' ) )
+			|| 'Prime Video' === self::stringAt( $item, array( 'itemInfo', 'classifications', 'binding', 'displayValue' ) );
+	}
+
+	/**
+	 * 動画（Prime Video）の item を listing のフィールドへ写す（spec 2026-11-26-prime-video-creators-design.md）。
+	 *
+	 * Prime Video の出品は 1 つの ASIN に価格が複数返り（購入・レンタル・画質違い）、どれが何かのラベルが
+	 * 付かない。書籍と同じく「カートを取っている出品」を使うと、購入価格（高いほう）を出してしまう。
+	 *
+	 * - ¥0 の出品がある＝プライム会員の見放題。提供形態を「見放題」にし、価格は出さない
+	 *   （¥0 と出すと、会員でない読者には誤り）
+	 * - 有料の出品だけ＝いちばん安い価格を出す。値が 2 種類以上あれば `price_from` を立て、
+	 *   カードで「¥400〜」と出す（どれがレンタルかは分からないので、最低価格としてだけ示す）
+	 * - 価格が 1 件も無い（配信停止 `UNAVAILABLE` など）＝価格も提供形態も出さない
+	 *
+	 * 提供形態（`plan_label`）は毎回この結果で上書きする（見放題に入った・外れたを追うため）。
+	 * 返さないと古い「見放題」が残る。
+	 *
+	 * @param array<string, mixed> $item
+	 * @return array<string, mixed>
+	 */
+	private static function normalizeVideoItem( array $item, string $marketplace ): array {
+		$asin = strtoupper( (string) $item['asin'] );
+		$data = array(
+			'regular_url'      => 'https://' . $marketplace . '/dp/' . $asin,
+			'price'            => '',
+			'price_from'       => '',
+			'plan_label'       => '',
+			'list_price'       => '',
+			'list_price_label' => '',
+			'badge'            => '',
+			'points'           => '',
+		);
+
+		$title = self::stringAt( $item, array( 'itemInfo', 'title', 'displayValue' ) );
+		if ( '' !== $title ) {
+			$data['title'] = $title;
+		}
+
+		$amounts  = array();
+		$listings = $item['offersV2']['listings'] ?? null;
+		if ( is_array( $listings ) ) {
+			foreach ( $listings as $listing ) {
+				$amount = is_array( $listing ) ? ( $listing['price']['money']['amount'] ?? null ) : null;
+				if ( self::isAmount( $amount ) && (float) $amount >= 0 ) {
+					$amounts[] = (float) $amount;
+				}
+			}
+		}
+		if ( array() !== $amounts ) {
+			if ( in_array( 0.0, $amounts, true ) ) {
+				$data['plan_label'] = __( '見放題', 'affilicard' );
+			} else {
+				$lowest        = min( $amounts );
+				$data['price'] = self::formatAmount( $lowest );
+				if ( count( array_unique( $amounts ) ) > 1 ) {
+					$data['price_from'] = '1';
+				}
+			}
+		}
+
+		$data['image_url'] = self::stringAt( $item, array( 'images', 'primary', 'large', 'url' ) );
+
+		$adult         = $item['itemInfo']['productInfo']['isAdultProduct']['displayValue'] ?? null;
+		$data['adult'] = is_bool( $adult ) ? ( $adult ? AdultDetection::YES : AdultDetection::NO ) : AdultDetection::UNKNOWN;
+
+		$detail = isset( $item['detailPageURL'] ) && is_string( $item['detailPageURL'] ) ? $item['detailPageURL'] : '';
+		if ( '' !== $detail ) {
+			$data['affiliate_url'] = $detail;
+		}
+
+		$data['platform_extras'] = array(
+			'director' => self::contributors( $item, 'director' ),
+			'cast'     => self::contributors( $item, 'actor', 5 ),
 		);
 		$data['raw']             = $item;
 
@@ -477,13 +569,23 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 	 * @param array<string, mixed> $item
 	 */
 	private static function authors( array $item ): string {
+		return self::contributors( $item, 'author' );
+	}
+
+	/**
+	 * byLineInfo の contributors から、役割（roleType）が一致する人の名前を「、」でつなぐ。
+	 *
+	 * @param array<string, mixed> $item
+	 * @param int                  $limit 0 なら全員。
+	 */
+	private static function contributors( array $item, string $roleType, int $limit = 0 ): string {
 		$contributors = $item['itemInfo']['byLineInfo']['contributors'] ?? null;
 		if ( ! is_array( $contributors ) ) {
 			return '';
 		}
 		$names = array();
 		foreach ( $contributors as $contributor ) {
-			if ( ! is_array( $contributor ) || 'author' !== ( $contributor['roleType'] ?? '' ) ) {
+			if ( ! is_array( $contributor ) || ( $contributor['roleType'] ?? '' ) !== $roleType ) {
 				continue;
 			}
 			$name = isset( $contributor['name'] ) && is_string( $contributor['name'] ) ? trim( $contributor['name'] ) : '';
@@ -491,7 +593,11 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 				$names[] = $name;
 			}
 		}
-		return implode( '、', array_values( array_unique( $names ) ) );
+		$names = array_values( array_unique( $names ) );
+		if ( $limit > 0 ) {
+			$names = array_slice( $names, 0, $limit );
+		}
+		return implode( '、', $names );
 	}
 
 	private static function datePart( string $iso ): string {

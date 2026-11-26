@@ -64,9 +64,8 @@ final class OfferSelector {
 	 * `variant_label` を誰も持たない listing は 1 グループになり、{@see self::select()} と
 	 * 同じ結果（0 件または 1 件）になる。
 	 *
-	 * **価格更新はまだこちらを使わない。** 更新キューは (商品, platform) 単位で 1 件を
-	 * 取りに行く作りのため、2 つ目以降のバージョンは自動更新の対象にならない
-	 * （spec 2026-11-26-offer-variant-label-design.md §5）。
+	 * 価格更新も同じ選び方をする（{@see self::selectForRefresh()}）。カードに並ぶバージョンは
+	 * どれも価格を持つので、1 つ目だけ更新すると 2 つ目以降の価格が鮮度切れで消える。
 	 *
 	 * @param array<int, mixed> $offers
 	 * @return list<array<string, mixed>>
@@ -85,6 +84,20 @@ final class OfferSelector {
 			}
 		}
 		return $out;
+	}
+
+	/**
+	 * 価格更新（ListingRefresher・掃引・繰り上がり）が取りに行く購入リンク。カードに並ぶものと同じ
+	 * （バージョンごとに 1 件。{@see self::selectPerVariant()}）。
+	 *
+	 * 価格更新の各所はここだけを呼ぶ。描画と更新で選び方が割れると、表示しているのに更新されない
+	 * （24 時間で価格が消える）購入リンクができる（spec 2026-11-26-prime-video-creators-design.md）。
+	 *
+	 * @param array<int, mixed> $offers
+	 * @return list<array<string, mixed>>
+	 */
+	public static function selectForRefresh( array $offers, bool $fallbackEnabled ): array {
+		return self::selectPerVariant( $offers, $fallbackEnabled );
 	}
 
 	/**

@@ -580,6 +580,45 @@ describe( 'ListingsEditor 購入リンク（offers）', () => {
 		).toBe( '字幕版' );
 	} );
 
+	test( '最低価格の切り替えで購入リンクの price_from が 1 と空を行き来する', async () => {
+		const onChange = jest.fn();
+		const { rerender } = render(
+			<ListingsEditor
+				listings={ listingWithOffers( [
+					{ display_order: 100, external_id: 'a', price_from: '' },
+				] ) }
+				platforms={ platforms }
+				onChange={ onChange }
+			/>
+		);
+
+		await userEvent.click( screen.getByRole( 'button', { name: 'a' } ) );
+		const toggle = screen.getByLabelText(
+			'最低価格として出す（「〜」を付ける）'
+		);
+		expect( toggle ).not.toBeChecked();
+		await userEvent.click( toggle );
+		expect(
+			onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].price_from
+		).toBe( '1' );
+
+		rerender(
+			<ListingsEditor
+				listings={ listingWithOffers( [
+					{ display_order: 100, external_id: 'a', price_from: '1' },
+				] ) }
+				platforms={ platforms }
+				onChange={ onChange }
+			/>
+		);
+		await userEvent.click(
+			screen.getByLabelText( '最低価格として出す（「〜」を付ける）' )
+		);
+		expect(
+			onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].price_from
+		).toBe( '' );
+	} );
+
 	test( '追加した購入リンクは付与ポイントが空で始まる', async () => {
 		const onChange = jest.fn();
 		render(

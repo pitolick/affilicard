@@ -9,7 +9,9 @@ use Affilicard\Pricing\LegacyOffer;
 use Affilicard\Pricing\ListingEligibility;
 use Affilicard\Pricing\OfferIdentity;
 use Affilicard\Pricing\OfferSelector;
+use Affilicard\Provider\BatchFetchingProvider;
 use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Queue\RateLimiter;
 use Affilicard\Queue\WorkOutcome;
 use Affilicard\Repository\ProductRepositoryInterface;
 use Affilicard\Settings\GeneralSettings;
@@ -26,17 +28,28 @@ use Affilicard\Util\ScalarField;
  * （Phase 1 の同期スイープ実装）は死コードとして削除済み。
  *
  * v4.0.0（listing の複数購入リンク化）以降、実際に fetch→反映するのは listing
- * 自身ではなく OfferSelector::select() が選んだ購入リンク（offer）1件のみ。
+ * 自身ではなく OfferSelector が選んだ購入リンク（offer）。v4.6.0 からはバージョン
+ * ごとに 1 件ずつ（OfferSelector::selectForRefresh()。カードに並ぶものと同じ）。
  * どの購入リンクを使うかの判定は OfferSelector に一元化されており、ここでは
- * その結果を信頼して選ばれた offer だけを更新する。**保存に渡すのもその 1 件だけ**
+ * その結果を信頼して選ばれた offer だけを更新する。**保存に渡すのも購入リンク 1 件ずつ**
  * ——listing 全体を渡すと、fetch のあいだに入った管理画面の編集を fetch 前の写しで
  * 巻き戻す（{@see ProductRepositoryInterface::updateListingOffer()}）。
  */
 class ListingRefresher {
 
+	/** 2 件目以降の呼び出しの枠を待つ回数の上限（取れなければ一時失敗にして、あとで取り直す）。 */
+	private const MAX_ACQUIRE_ATTEMPTS = 5;
+
+	/**
+	 * @param \Closure(int): void|null $sleepMs 枠を待つときの待ち（ミリ秒）。テストで差し替える。既定は usleep()。
+	 * @param RateLimiter|null         $limiter 1 回の更新で 2 件目以降の外部 API を叩くとき、1 回ごとに枠を取る。
+	 *                                          無ければ有効間隔だけ待つ（テスト・単体利用向け）。
+	 */
 	public function __construct(
 		private ProviderRegistry $registry,
-		private ProductRepositoryInterface $repository
+		private ProductRepositoryInterface $repository,
+		private ?\Closure $sleepMs = null,
+		private ?RateLimiter $limiter = null
 	) {}
 
 	/**
@@ -60,7 +73,14 @@ class ListingRefresher {
 	 * fetch 前の写しで巻き戻してしまう。渡す単位を「今回 fetch した offer 1 件」まで
 	 * 絞り込むことで、古い値そのものを保存経路へ持ち込まない。
 	 */
-	public function refreshOne( int $postId, string $platform ): WorkOutcome {
+	/**
+	 * @param bool $firstSlotUsed 呼び出し元が取った 1 件目の呼び出しの枠を、既に使っている（または
+	 *                            枠を取っていない）か。true なら、この更新の最初の外部 API 呼び出しから
+	 *                            枠を取ってから叩く。BatchRefreshHandler が、まとめ取得の先取りに枠を
+	 *                            使ったとき・先取りの結果だけで処理するとき（枠を取らない）に渡す。
+	 *                            対象 ID から推し量らないのは、先取りと再読込の間に対象が変わりうるため。
+	 */
+	public function refreshOne( int $postId, string $platform, bool $firstSlotUsed = false ): WorkOutcome {
 		$product = $this->repository->find( $postId );
 		if ( null === $product || ! is_array( $product['listings'] ?? null ) ) {
 			// 削除済み商品・listing 無し＝対象なし（no-op）。deleted 商品で failed 化させない。
@@ -81,25 +101,35 @@ class ListingRefresher {
 				// 試行回数を焼き、移行が長引くインストールで failed が積み上がる。
 				return WorkOutcome::SUCCESS;
 			}
-			list( $patch, $outcome, $targetIdentity ) = $this->refreshListing( $listing, (string) $product['title'] );
-			if ( null === $patch ) {
+			$results = $this->refreshListing( $listing, (string) $product['title'], $firstSlotUsed );
+			if ( array() === $results ) {
 				// 更新すべき購入リンクが無い＝保存するものも無い。ここで listing を書き戻すと、
-				// fetch もしていないのに fetch 前の写しで管理画面の編集を巻き戻す。
-				return $outcome;
+				// fetch もしていないのに fetch 前の写しで管理画面の編集を巻き戻す。リトライで
+				// 解決し得るため give-up はせず transient 扱いにする。
+				return WorkOutcome::TRANSIENT_FAILURE;
 			}
+			// バージョン違い（OfferSelector::selectForRefresh() が返す複数件）は、取得した
+			// 購入リンクごとに保存する。保存は 1 件ずつ listing を読み直して差し込むため、
+			// 前の保存を巻き戻さない。
+			//
 			// updateListingOffer() の戻り値を必ず反映する。find() から再読込までの間（外部
 			// API fetch 中）に対象 platform の listing、または対象の購入リンクそのものが
 			// 削除されると false（未保存）が返る。ここで false を握り潰すと、取得済みの
 			// 新しい価格が保存されないまま成功扱いになり、ハンドラが再試行もしない＝サイレントな
-			// データロスになる。保存失敗はリトライで解決し得るため TRANSIENT_FAILURE を返す。
+			// データロスになる。保存失敗はリトライで解決し得るため一時失敗に数える。
 			// 削除された購入リンクを取りこぼしても、リトライでは OfferSelector が「そのとき
 			// 現存する」購入リンクを選び直すため自然に解消する（無限には回らない——
 			// ThrottledActionHandler::backoff() が MAX_ATTEMPTS で打ち切る）。
-			$saved = $this->repository->updateListingOffer( $postId, $platform, $patch, $targetIdentity );
-			if ( ! $saved ) {
-				return WorkOutcome::TRANSIENT_FAILURE;
+			$outcomes = array();
+			foreach ( $results as list( $patch, $outcome, $targetIdentity, $fetched ) ) {
+				$saved = $this->repository->updateListingOffer( $postId, $platform, $patch, $targetIdentity );
+				if ( ! $saved ) {
+					$outcome = WorkOutcome::TRANSIENT_FAILURE;
+					$fetched = true;
+				}
+				$outcomes[] = array( $outcome, $fetched );
 			}
-			return $outcome;
+			return self::combineOutcomes( $outcomes );
 		}
 		// platform 該当 listing なし＝対象なし（no-op）＝SUCCESS。
 		return WorkOutcome::SUCCESS;
@@ -167,7 +197,7 @@ class ListingRefresher {
 			// 確保しない」というズレが生まれる（移行の見送り中も同じ理由で数える——
 			// 見送りが解けたあとに叩く件数は、この flat な listing を変換した 1 件）。
 			$offers   = LegacyOffer::offersWithFallback( $listing );
-			$selected = OfferSelector::select( $offers, GeneralSettings::fallbackOnTerminal() );
+			$selected = OfferSelector::selectForRefresh( $offers, GeneralSettings::fallbackOnTerminal() );
 
 			// 選ばれても実際に外部 API を叩かない購入リンク（自動 Provider 未対応・
 			// external_id 無し）はレート制限の枠を使わない。判定は refreshListing() と
@@ -262,20 +292,20 @@ class ListingRefresher {
 	}
 
 	/**
-	 * listing の中から OfferSelector が選んだ購入リンク（offer）1件を fetch→反映し、
-	 * 更新後の offer と WorkOutcome のタプルを返す。
+	 * listing の中から価格更新の対象（OfferSelector::selectForRefresh()。バージョンごとに 1 件）を
+	 * 選び、それぞれを fetch→反映した結果を返す。
 	 *
-	 * 返すのは選ばれた offer 1 件だけで、listing は返さない――保存経路（Repository::
-	 * updateListingOffer()）が listing を読み直して差し込むため、ここで listing を組み立てて
-	 * 持ち回ると、その写しが古くなった状態で保存へ渡ってしまう。
+	 * 返すのは購入リンクごとの「取得が変えたフィールドだけ」のパッチで、listing は返さない――
+	 * 保存経路（Repository::updateListingOffer()）が listing を読み直して差し込むため、ここで
+	 * listing を組み立てて持ち回ると、その写しが古くなった状態で保存へ渡ってしまう。
 	 *
-	 * 更新すべき購入リンクが無いときは offer に null を返す（保存を行わせない）。
+	 * 更新すべき購入リンクが無いときは空配列を返す（保存を行わせない）。
 	 *
 	 * @param array<string, mixed> $listing
-	 * @return array{0: array<string, mixed>|null, 1: WorkOutcome, 2: string} 取得が変えた
-	 *   フィールドだけの差分、outcome、取得前に確定させたマージ先 identity のタプル
+	 * @return list<array{0: array<string, mixed>, 1: WorkOutcome, 2: string, 3: bool}> 購入リンクごとの
+	 *   パッチ、outcome、取得前に確定させたマージ先 identity、外部 API を試みたか
 	 */
-	private function refreshListing( array $listing, string $productTitle ): array {
+	private function refreshListing( array $listing, string $productTitle, bool $firstSlotUsed = false ): array {
 		// flat な listing（offers を持たず取得結果フィールドが listing 直下に並ぶ v3 以前の
 		// 形）も取得対象にする。offers を直接読むと、そういう listing は一度も fetch されず
 		// TRANSIENT_FAILURE を返してリトライ枠だけを焼く。読み取り側（CardRenderer 等）と
@@ -297,13 +327,63 @@ class ListingRefresher {
 		// （isHeldForMigration() の PHPDoc 参照）。移行が諦めた商品では、温存も通知も
 		// もう起こらないことが確定しているため、見送る意味が無い。
 		$offers  = LegacyOffer::offersWithFallback( $listing );
-		$targets = OfferSelector::select( $offers, GeneralSettings::fallbackOnTerminal() );
-		if ( array() === $targets ) {
-			// 更新すべき購入リンクが無い（offers が空）＝何もしない。リトライで解決し得るため
-			// give-up はせず transient 扱いにする。
-			return array( null, WorkOutcome::TRANSIENT_FAILURE, '' );
+		$targets = OfferSelector::selectForRefresh( $offers, GeneralSettings::fallbackOnTerminal() );
+
+		$results = array();
+		// 1 件目の呼び出しの枠はハンドラが取っている。ハンドラがその枠を既に使った（まとめ取得の先取り）
+		// か取っていないと伝えてきたら、最初の外部 API 呼び出しから枠を取ってから叩く。
+		$calledApi = $firstSlotUsed;
+		foreach ( $targets as $offer ) {
+			$results[] = $this->refreshOffer( $listing, $offer, $productTitle, $calledApi );
 		}
-		$offer = $targets[0];
+		return $results;
+	}
+
+	/**
+	 * 結果をまとめて、ハンドラへ返す 1 つの outcome にする。
+	 *
+	 * - 取得した購入リンクが 1 件も無い（全件が自動取得の対象外）＝一時失敗（従来どおり）
+	 * - 1 件でも一時失敗・保存失敗 ＝一時失敗（再試行は全件を取り直す。まとめ取得なら 1 リクエスト）
+	 * - 全件が恒久失敗 ＝恒久失敗（give-up マーカーが立つ）
+	 * - それ以外（成功と恒久失敗が混ざる）＝成功。恒久失敗したバージョンは offer の
+	 *   fetch_status=terminal で価格を出さなくなり（PriceFreshness。行と購入ボタンは残る）、
+	 *   代わりのリンクがあれば繰り上がる。生きているバージョンの更新は止めない
+	 *
+	 * @param list<array{0: WorkOutcome, 1: bool}> $outcomes outcome と「外部 API を試みたか」の組
+	 */
+	private static function combineOutcomes( array $outcomes ): WorkOutcome {
+		$tried = array();
+		foreach ( $outcomes as list( $outcome, $fetched ) ) {
+			if ( $fetched ) {
+				$tried[] = $outcome;
+			}
+		}
+		if ( array() === $tried || in_array( WorkOutcome::TRANSIENT_FAILURE, $tried, true ) ) {
+			return WorkOutcome::TRANSIENT_FAILURE;
+		}
+		foreach ( $tried as $outcome ) {
+			if ( WorkOutcome::TERMINAL_FAILURE !== $outcome ) {
+				return WorkOutcome::SUCCESS;
+			}
+		}
+		return WorkOutcome::TERMINAL_FAILURE;
+	}
+
+	/**
+	 * 購入リンク 1 件を fetch し、取得が変えたフィールドだけのパッチを作る。
+	 *
+	 * 1 回の更新で 2 件目以降の外部 API を叩くとき（まとめ取得の結果が手元に無いとき）は、
+	 * **呼び出しごとにレート制限の枠を取る**（{@see self::acquireNextCall()}）。ハンドラが取るのは
+	 * 1 件目の枠だけで、枠は取った時刻しか記録しないため、ハンドラ側で件数ぶん見込んでも
+	 * 次のジョブとの間隔は守れない。
+	 *
+	 * @param array<string, mixed> $listing
+	 * @param array<string, mixed> $offer
+	 * @param bool                 $calledApi この更新の中で既に外部 API を叩いたか（書き換える）
+	 * @return array{0: array<string, mixed>, 1: WorkOutcome, 2: string, 3: bool} パッチ、outcome、
+	 *   取得前に確定させたマージ先 identity、外部 API を試みたか
+	 */
+	private function refreshOffer( array $listing, array $offer, string $productTitle, bool &$calledApi ): array {
 		// **マージ先の identity は fetch の前に確定させる。** 取得結果は regular_url を
 		// 上書きしうるので、external_id を持たない購入リンクでは取得後に identity が
 		// 変わる。取得後の値で探すと保存側が相手を見失い、価格が永久に入らなくなる。
@@ -334,7 +414,7 @@ class ListingRefresher {
 			// 状態としては恒久的だが、リトライ分類（give-up するかどうか）はここでは変えない
 			// ――give-up するのは「該当なし・無効 ID」（TERMINAL）のときだけ。
 			$patch['fetch_status'] = FetchStatus::UNSUPPORTED;
-			return array( $patch, WorkOutcome::TRANSIENT_FAILURE, $targetIdentity );
+			return array( $patch, WorkOutcome::TRANSIENT_FAILURE, $targetIdentity, false );
 		}
 
 		// **trim() は判定にだけ使い、渡すのは元の値。** 前後の空白を含む検索語を
@@ -346,17 +426,28 @@ class ListingRefresher {
 			'external_id' => $externalId,
 		);
 
+		$needsHttp = ! ( $provider instanceof BatchFetchingProvider && $provider->hasPrefetched( $externalId ) );
+		if ( $needsHttp && $calledApi && ! $this->acquireNextCall( $provider ) ) {
+			// 枠が取れない（同じ account を別のジョブが使い続けている）。叩かずに一時失敗にし、
+			// ハンドラの再試行に任せる（last_verified_at は据え置き）。
+			$patch['fetch_status'] = FetchStatus::TRANSIENT;
+			return array( $patch, WorkOutcome::TRANSIENT_FAILURE, $targetIdentity, true );
+		}
+		if ( $needsHttp ) {
+			$calledApi = true;
+		}
+
 		$result = $provider->fetch( $externalId, $context );
 		if ( $result->isTerminalMiss() ) {
 			// 恒久失敗（該当なし・無効 ID）。last_verified_at は更新せず（表示鮮度据え置き）、
 			// TERMINAL_FAILURE を返してハンドラに give-up させる。
 			$patch['fetch_status'] = FetchStatus::TERMINAL;
-			return array( $patch, WorkOutcome::TERMINAL_FAILURE, $targetIdentity );
+			return array( $patch, WorkOutcome::TERMINAL_FAILURE, $targetIdentity, true );
 		}
 		if ( ! $result->isHit() ) {
 			// 一時失敗（API 到達不可・エラー・認証未設定等）。リトライで解決し得るため give-up しない。
 			$patch['fetch_status'] = FetchStatus::TRANSIENT;
-			return array( $patch, WorkOutcome::TRANSIENT_FAILURE, $targetIdentity );
+			return array( $patch, WorkOutcome::TRANSIENT_FAILURE, $targetIdentity, true );
 		}
 
 		$fetched               = $result->data;
@@ -370,7 +461,9 @@ class ListingRefresher {
 		// **取得が返さなかった項目はパッチに入れない。** 以前は取得前の値を書き戻していたが、
 		// それでは fetch 中に管理者が編集した値を古い写しで上書きしてしまう。キーを落とせば
 		// 保存側のマージで最新の値がそのまま残る。
-		foreach ( array( 'price', 'list_price', 'list_price_label', 'badge', 'points', 'adult', 'image_url' ) as $field ) {
+		// price_from・plan_label は返す Provider（Amazon の動画）だけが上書きする。返さない Provider
+		// （書籍など）では手入力の提供形態がそのまま残る。
+		foreach ( array( 'price', 'price_from', 'list_price', 'list_price_label', 'badge', 'points', 'adult', 'image_url', 'plan_label' ) as $field ) {
 			if ( isset( $fetched[ $field ] ) ) {
 				$patch[ $field ] = (string) $fetched[ $field ];
 			}
@@ -386,6 +479,42 @@ class ListingRefresher {
 			}
 		}
 
-		return array( $patch, WorkOutcome::SUCCESS, $targetIdentity );
+		return array( $patch, WorkOutcome::SUCCESS, $targetIdentity, true );
+	}
+
+	/**
+	 * 1 回の更新の中で、2 件目以降の外部 API 呼び出しの枠を取る。
+	 *
+	 * 間隔はハンドラが枠を取るのと同じ有効間隔（Provider の下限と管理画面の上書きの大きいほう）。
+	 * リミッタが無いときはその間隔だけ待つ。
+	 */
+	private function acquireNextCall( \Affilicard\Provider\ProviderInterface $provider ): bool {
+		$account  = (string) $provider->accountCode();
+		$override = '' !== $account ? GeneralSettings::throttleOverrideMs( $account ) : 0;
+		$interval = $override > 0 ? max( $provider->minRequestIntervalMs(), $override ) : $provider->minRequestIntervalMs();
+		if ( null === $this->limiter || '' === $account ) {
+			$this->sleepMs( $interval );
+			return true;
+		}
+		for ( $attempt = 0; $attempt < self::MAX_ACQUIRE_ATTEMPTS; $attempt++ ) {
+			$nowMs   = (int) round( microtime( true ) * 1000 );
+			$acquire = $this->limiter->tryAcquire( $account, $interval, $nowMs );
+			if ( $acquire['ok'] ) {
+				return true;
+			}
+			$this->sleepMs( max( 1, min( (int) $acquire['next_ms'] - $nowMs, $interval ) ) );
+		}
+		return false;
+	}
+
+	private function sleepMs( int $ms ): void {
+		if ( $ms <= 0 ) {
+			return;
+		}
+		if ( null !== $this->sleepMs ) {
+			( $this->sleepMs )( $ms );
+			return;
+		}
+		usleep( $ms * 1000 );
 	}
 }

@@ -450,4 +450,17 @@ final class RefreshHandlerTest extends TestCase {
 			RefreshHandler::isGivenUp( 12, 'rakuten-kobo', array( 'fetch_status' => FetchStatus::NONE ) )
 		);
 	}
+
+	public function test_isGivenUpAll_全バージョンがterminalのときだけ抑止する(): void {
+		WP_Mock::userFunction( 'get_transient' )
+			->with( 'affilicard_refresh_gaveup_12_rakuten-kobo' )
+			->andReturn( 1 );
+
+		$terminal = array( 'fetch_status' => FetchStatus::TERMINAL );
+		$alive    = array( 'fetch_status' => FetchStatus::NONE );
+		$this->assertTrue( RefreshHandler::isGivenUpAll( 12, 'rakuten-kobo', array( $terminal, $terminal ) ) );
+		// 1 つでも生きているバージョンがあれば止めない。
+		$this->assertFalse( RefreshHandler::isGivenUpAll( 12, 'rakuten-kobo', array( $terminal, $alive ) ) );
+		$this->assertFalse( RefreshHandler::isGivenUpAll( 12, 'rakuten-kobo', array() ) );
+	}
 }

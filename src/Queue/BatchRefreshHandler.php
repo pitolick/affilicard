@@ -147,7 +147,9 @@ final class BatchRefreshHandler {
 						return;
 					}
 					$processedAny = true;
-					$outcome      = $this->refresher->refreshOne( $postId, $platform );
+					// この listing のためには枠を取っていない。再読込で対象が変わって外部 API を叩くことに
+					// なったら、ListingRefresher が枠を取ってから叩く。
+					$outcome = $this->refresher->refreshOne( $postId, $platform, true );
 					if ( WorkOutcome::TRANSIENT_FAILURE === $outcome && $this->requeueIfPaused( $account, $items, $index ) ) {
 						return;
 					}
@@ -169,11 +171,16 @@ final class BatchRefreshHandler {
 
 			$mustAttempt = ! $processedAny;
 
+			// ここで取るのは 1 件目の呼び出しの枠だけ。バージョン違いで 2 件目以降を叩くときは、
+			// ListingRefresher が呼び出しごとに枠を取る（枠は取った時刻しか記録しないため、ここで
+			// 件数ぶん見込んでも次のジョブとの間隔は守れない）。所要時間だけ件数ぶん見込む。
+			$itemSeconds = $perItemSeconds * $this->httpCallsFor( $batchProvider, $idsByIndex, $index, $item, $postId, $platform );
+
 			// 待機に入る「前に」期限を確認する。賄えないなら未処理分を積み直して終了する
 			// （待機に入ってから期限を超えると AS ランナーの時間予算を食い潰したうえ、
 			// 積み直しも行われずそのバッチの残りが失われる）。前進保証が働く 1 件目は
 			// このゲートを素通りする。
-			if ( ! $mustAttempt && ! $deadline->canAfford( time(), $perItemSeconds ) ) {
+			if ( ! $mustAttempt && ! $deadline->canAfford( time(), $itemSeconds ) ) {
 				$this->requeueRemaining( $account, $items, $index );
 				return;
 			}
@@ -224,7 +231,7 @@ final class BatchRefreshHandler {
 					usleep( $waitSec * 1000000 );
 				}
 				// 待った後に期限が賄えるか再確認する（usleep で消費した実時間を反映する）。
-				if ( ! $mustAttempt && ! $deadline->canAfford( time(), $perItemSeconds ) ) {
+				if ( ! $mustAttempt && ! $deadline->canAfford( time(), $itemSeconds ) ) {
 					$this->requeueRemaining( $account, $items, $index );
 					return;
 				}
@@ -242,7 +249,9 @@ final class BatchRefreshHandler {
 				$batchProvider->prefetch( $prefetchIds );
 			}
 
-			$outcome = $this->refresher->refreshOne( $postId, $platform );
+			// 先取りに枠を使ったら、手元に結果の無い ID（1 リクエストに載らなかった 11 件目、
+			// 先取りのあとに対象が変わった ID）は ListingRefresher が枠を取ってから叩く。
+			$outcome = $this->refresher->refreshOne( $postId, $platform, null !== $batchProvider && array() !== $prefetchIds );
 			// この listing の取得で account が止まった（429 / 403）なら、この listing を含む残りを
 			// 再開時刻までまとめて積み直す。
 			if ( WorkOutcome::TRANSIENT_FAILURE === $outcome && $this->requeueIfPaused( $account, $items, $index ) ) {
@@ -334,6 +343,12 @@ final class BatchRefreshHandler {
 		$max     = max( 1, $provider->maxBatchSize() );
 		$collect = array();
 		foreach ( $this->targetIds( $idsByIndex, $fromIndex, $items[ $fromIndex ] ) as $id ) {
+			// 1 リクエストに載る件数まで。バージョン違いがそれより多い listing の残りは、
+			// ListingRefresher が 1 件ずつ枠を取って取る（prefetch() は複数のリクエストを
+			// 間を空けずに送るため、ここで上限を超えて渡さない）。
+			if ( count( $collect ) >= $max ) {
+				break;
+			}
 			if ( ! $provider->hasPrefetched( $id ) ) {
 				$collect[ $id ] = true;
 			}
@@ -358,6 +373,23 @@ final class BatchRefreshHandler {
 			$collect += $new;
 		}
 		return array_map( 'strval', array_keys( $collect ) );
+	}
+
+	/**
+	 * この listing の更新で外部 API を叩く回数の見込み（所要時間の見積もりに使う）。
+	 *
+	 * - まとめ取得できない Provider: 価格更新の対象（バージョンごとに 1 件）の数
+	 * - まとめ取得できる Provider: 先取りの 1 回 ＋ 1 リクエストに載らなかった残り
+	 *
+	 * @param array<int, list<string>>                $idsByIndex
+	 * @param array{post_id?: int, platform?: string} $item
+	 */
+	private function httpCallsFor( ?BatchFetchingProvider $provider, array &$idsByIndex, int $index, array $item, int $postId, string $platform ): int {
+		if ( null === $provider ) {
+			return max( 1, $this->refresher->targetCount( $postId, $platform ) );
+		}
+		$ids = $this->targetIds( $idsByIndex, $index, $item );
+		return 1 + max( 0, count( $ids ) - max( 1, $provider->maxBatchSize() ) );
 	}
 
 	/**

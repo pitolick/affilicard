@@ -187,4 +187,33 @@ final class PriceFreshnessTest extends TestCase {
 		);
 		$this->assertFalse( PriceFreshness::needsRefetch( $offer, $platform, $now ) );
 	}
+
+	public function test_isVerifiedFresh_価格が無くても確認から鮮度内なら真(): void {
+		$now   = 1_800_000_000;
+		$offer = array(
+			'plan_label'       => '見放題',
+			'last_verified_at' => gmdate( 'c', $now - 3600 ),
+		);
+		$this->assertTrue( PriceFreshness::isVerifiedFresh( $offer, $this->platform( 24 ), $now ) );
+		// 価格が無いので、価格の表示はしない。
+		$this->assertFalse( PriceFreshness::isPriceDisplayable( $offer, $this->platform( 24 ), $now ) );
+
+		$offer['last_verified_at'] = gmdate( 'c', $now - 25 * 3600 );
+		$this->assertFalse( PriceFreshness::isVerifiedFresh( $offer, $this->platform( 24 ), $now ) );
+
+		$offer['last_verified_at'] = gmdate( 'c', $now - 3600 );
+		$offer['fetch_status']     = FetchStatus::TERMINAL;
+		$this->assertFalse( PriceFreshness::isVerifiedFresh( $offer, $this->platform( 24 ), $now ) );
+		$this->assertFalse( PriceFreshness::isVerifiedFresh( array(), $this->platform( 24 ), $now ) );
+		$this->assertFalse( PriceFreshness::isVerifiedFresh( $offer, null, $now ) );
+	}
+
+	public function test_anyNeedsRefetch_どれか1つでも古ければ真(): void {
+		$now   = 1_800_000_000;
+		$fresh = array( 'last_fetched_at' => gmdate( 'c', $now - 3600 ) );
+		$stale = array( 'last_fetched_at' => gmdate( 'c', $now - 30 * 3600 ) );
+		$this->assertFalse( PriceFreshness::anyNeedsRefetch( array( $fresh, $fresh ), $this->platform( 24 ), $now ) );
+		$this->assertTrue( PriceFreshness::anyNeedsRefetch( array( $fresh, $stale ), $this->platform( 24 ), $now ) );
+		$this->assertFalse( PriceFreshness::anyNeedsRefetch( array(), $this->platform( 24 ), $now ) );
+	}
 }
