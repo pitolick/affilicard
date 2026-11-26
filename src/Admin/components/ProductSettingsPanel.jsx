@@ -13,11 +13,7 @@ import { ExtrasEditor } from './ExtrasEditor';
 import { StockStatusSelect } from './StockStatusSelect';
 import { fetchEditorSettings } from '../api/settings';
 import { fetchPlatforms } from '../api/platforms';
-
-const PRODUCT_TYPE_OPTIONS = [
-	{ value: 'generic', label: __('汎用', 'affilicard') },
-	{ value: 'ebook', label: __('電子書籍', 'affilicard') },
-];
+import { productTypeOptions } from '../productTypes';
 
 const asArray = (v) => (Array.isArray(v) ? v : []);
 
@@ -96,7 +92,7 @@ export function ProductSettingsPanel() {
 				<SelectControl
 					label={__('商品タイプ', 'affilicard')}
 					value={productType}
-					options={PRODUCT_TYPE_OPTIONS}
+					options={productTypeOptions(productType)}
 					onChange={(v) => patch({ affilicard_product_type: v })}
 				/>
 				<StockStatusSelect
@@ -154,6 +150,7 @@ export function ProductSettingsPanel() {
 			>
 				<ListingsEditor
 					listings={listings}
+					productType={productType}
 					fallbackOnTerminal={fallbackOnTerminal}
 					onChange={(next) => patch({ affilicard_listings: next })}
 				/>

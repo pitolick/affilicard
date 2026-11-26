@@ -89,6 +89,22 @@ describe( 'ProductSettingsPanel', () => {
 		expect( screen.getByDisplayValue( 'https://a' ) ).toBeInTheDocument();
 	} );
 
+	test( '商品タイプは PHP が注入したタイプから選べる（動画配信を含む）', async () => {
+		setEntityMeta( {
+			affilicard_product_type: 'vod',
+			affilicard_stock_status: 'available',
+			affilicard_listings: [],
+			affilicard_extras: [],
+		} );
+		render( <ProductSettingsPanel /> );
+		await waitFor( () => expect( fetchPlatforms ).toHaveBeenCalled() );
+		const select = screen.getByLabelText( '商品タイプ' );
+		expect( select ).toHaveValue( 'vod' );
+		expect(
+			Array.from( select.options ).map( ( o ) => o.textContent )
+		).toEqual( [ '汎用', '電子書籍', '動画配信' ] );
+	} );
+
 	test( 'meta が未定義/非配列でも空配列で安全に描画する', async () => {
 		setEntityMeta( { affilicard_listings: undefined, affilicard_extras: null } );
 		render( <ProductSettingsPanel /> );

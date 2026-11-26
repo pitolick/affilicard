@@ -10,6 +10,7 @@ import { __ } from '@wordpress/i18n';
 import { fetchSettings, updateSettings } from '../api/settings';
 import { triggerRefresh } from '../api/refresh';
 import { refreshIntervalOptions } from '../refreshIntervals';
+import { productTypeOptions } from '../productTypes';
 import { CronHelpBox } from './CronHelpBox';
 
 // 運用ドキュメント（WP-Cron のままで足りるかの判断基準／サーバー cron への移行手順）
@@ -142,10 +143,13 @@ export function GeneralPanel() {
 				<SelectControl
 					label={__('デフォルト商品タイプ', 'affilicard')}
 					value={settings.default_product_type ?? 'generic'}
-					options={[
-						{ label: '汎用', value: 'generic' },
-						{ label: '電子書籍', value: 'ebook' },
-					]}
+					options={productTypeOptions(
+						settings.default_product_type ?? 'generic'
+					)}
+					help={__(
+						'商品編集画面で新しく作る商品のタイプです。ストアの URL から自動で作る商品は、ストアの対象タイプにこのタイプが無ければストアの対象タイプを使います。',
+						'affilicard'
+					)}
 					onChange={(v) => update({ default_product_type: v })}
 				/>
 

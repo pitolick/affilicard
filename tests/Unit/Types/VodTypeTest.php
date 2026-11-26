@@ -31,6 +31,10 @@ final class VodTypeTest extends TestCase {
 		$this->assertSame( '動画配信', $type->label() );
 	}
 
+	public function test_offer_fields_has_plan_label(): void {
+		$this->assertSame( array( 'plan_label' ), ( new VodType() )->offerFields() );
+	}
+
 	public function test_extras_schema_returns_four_recommended_fields(): void {
 		$type   = new VodType();
 		$schema = $type->extrasSchema();

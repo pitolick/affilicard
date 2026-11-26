@@ -174,6 +174,67 @@ final class ProductAutoCreatorTest extends TestCase {
 		$this->assertSame( WorkOutcome::SUCCESS, $creator->create( 'dmm-books', 'ext-1' ) );
 	}
 
+	/**
+	 * 自動で作る商品のタイプ: 設定「既定の商品タイプ」がストアの対象タイプに無ければ、
+	 * ストアの対象タイプの先頭（電子書籍ストアなら電子書籍）。
+	 *
+	 * @dataProvider productTypeCases
+	 */
+	public function test_自動作成する商品のタイプは既定とストアの対象タイプで決まる( string $configured, array $applicable, string $expected ): void {
+		WP_Mock::userFunction( '__' )->andReturnUsing( static fn( $text ) => $text );
+		WP_Mock::userFunction( 'get_option' )->andReturnUsing(
+			static function ( $key ) use ( $configured, $applicable ) {
+				if ( 'affilicard_platforms' === $key ) {
+					return array(
+						array(
+							'code'            => 'dmm-books',
+							'name'            => 'DMM Books',
+							'provider'        => 'dmm-ebook',
+							'displayOrder'    => 1,
+							'enabled'         => true,
+							'applicableTypes' => $applicable,
+						),
+					);
+				}
+				if ( 'affilicard_general' === $key ) {
+					return array( 'default_product_type' => $configured );
+				}
+				return array();
+			}
+		);
+		$provider = Mockery::mock( ProviderInterface::class );
+		$provider->shouldReceive( 'code' )->andReturn( 'dmm-ebook' );
+		$provider->shouldReceive( 'isAutomatic' )->andReturn( true );
+		$provider->shouldReceive( 'fetch' )->andReturn( FetchResult::hit( array( 'title' => '架空のサンプル作品' ) ) );
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+		$repo = Mockery::mock( ProductRepositoryInterface::class );
+		$repo->shouldReceive( 'findByExternalId' )->andReturn( null );
+		$saved = null;
+		$repo->shouldReceive( 'save' )->once()->andReturnUsing(
+			static function ( array $data ) use ( &$saved ) {
+				$saved = $data;
+				return 1;
+			}
+		);
+
+		( new ProductAutoCreator( $registry, $repo ) )->create( 'dmm-books', 'ext-1' );
+
+		$this->assertSame( $expected, $saved['product_type'] ?? null );
+	}
+
+	/**
+	 * @return array<string, array{string, list<string>, string}>
+	 */
+	public static function productTypeCases(): array {
+		return array(
+			'既定がストアの対象に含まれる' => array( 'ebook', array( 'ebook' ), 'ebook' ),
+			'既定がストアの対象に無い'   => array( 'vod', array( 'ebook' ), 'ebook' ),
+			// 対象タイプ未設定のストアは PlatformDefinition が汎用だけにする。
+			'ストアの対象タイプが未設定'  => array( 'vod', array(), 'generic' ),
+		);
+	}
+
 	public function test_create_returns_terminal_when_provider_not_automatic(): void {
 		WP_Mock::userFunction( 'get_option' )->andReturn(
 			array(

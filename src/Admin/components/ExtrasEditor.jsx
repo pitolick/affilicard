@@ -1,33 +1,18 @@
 import { TextControl, Button } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
-
-// Schemas keyed by product_type. Keep in sync with PHP side (EbookType / GenericType).
-const SCHEMAS = {
-	generic: [],
-	ebook: [
-		{
-			key: 'author',
-			label: __('著者', 'affilicard'),
-			placeholder: __('著者名', 'affilicard'),
-		},
-		{
-			key: 'publisher',
-			label: __('出版社', 'affilicard'),
-			placeholder: __('出版社名', 'affilicard'),
-		},
-		{
-			key: 'isbn',
-			label: __('ISBN', 'affilicard'),
-			placeholder: __('例: 978-4-XX-XXXXXX-X', 'affilicard'),
-		},
-	],
-};
+import { extrasSchemaFor } from '../productTypes';
 
 export function ExtrasEditor({ productType, extras, onChange }) {
-	const schema = SCHEMAS[productType] ?? [];
+	// 推奨項目は商品タイプの定義（PHP の extrasSchema）から作る。
+	const schema = extrasSchemaFor(productType);
+	const schemaKeys = new Set(schema.map((s) => s.key));
 	const rows = Array.isArray(extras) ? extras : [];
 
-	const customRows = rows.filter((r) => !r.key);
+	// 今のタイプの推奨項目に無い行は、key があってもカスタム項目として出す。
+	// タイプを切り替えた後に前のタイプの値（例: 電子書籍の著者）が見えないまま
+	// 残らないようにするため。key は保つ（タイプを戻せば推奨項目に戻る）。
+	const isSchemaRow = (r) => !!r.key && schemaKeys.has(r.key);
+	const customRows = rows.filter((r) => !isSchemaRow(r));
 	const findSchemaRow = (key) => rows.find((r) => r.key === key);
 
 	const replaceSchemaValue = (key, value) => {
@@ -42,7 +27,7 @@ export function ExtrasEditor({ productType, extras, onChange }) {
 	const replaceCustomRow = (index, patch) => {
 		const customs = [...customRows];
 		customs[index] = { ...customs[index], ...patch };
-		onChange([...rows.filter((r) => r.key), ...customs]);
+		onChange([...rows.filter(isSchemaRow), ...customs]);
 	};
 
 	const addCustomRow = () => {
@@ -51,7 +36,7 @@ export function ExtrasEditor({ productType, extras, onChange }) {
 
 	const removeCustomRow = (index) => {
 		const customs = customRows.filter((_, i) => i !== index);
-		onChange([...rows.filter((r) => r.key), ...customs]);
+		onChange([...rows.filter(isSchemaRow), ...customs]);
 	};
 
 	return (

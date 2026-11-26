@@ -22,35 +22,48 @@ final class VodType extends AbstractProductType {
 	}
 
 	/**
-	 * @return list<array{key: string, label: string, card?: string}>
+	 * @return list<array{key: string, label: string, card?: string, placeholder?: string}>
 	 */
 	public function extrasSchema(): array {
 		return array(
 			array(
-				'key'   => 'director',
-				'label' => __( '監督', 'affilicard' ),
-				'card'  => 'header',
+				'key'         => 'director',
+				'label'       => __( '監督', 'affilicard' ),
+				'card'        => 'header',
+				'placeholder' => __( '監督名', 'affilicard' ),
 			),
 			array(
-				'key'   => 'cast',
-				'label' => __( '出演', 'affilicard' ),
-				'card'  => 'header',
+				'key'         => 'cast',
+				'label'       => __( '出演', 'affilicard' ),
+				'card'        => 'header',
+				'placeholder' => __( '例: 俳優A、俳優B', 'affilicard' ),
 			),
 			array(
-				'key'   => 'release_year',
-				'label' => __( '公開年', 'affilicard' ),
-				'card'  => 'header',
+				'key'         => 'release_year',
+				'label'       => __( '公開年', 'affilicard' ),
+				'card'        => 'header',
+				'placeholder' => __( '例: 2022', 'affilicard' ),
 			),
 			array(
-				'key'   => 'distributor',
-				'label' => __( '配給', 'affilicard' ),
-				'card'  => 'detail',
+				'key'         => 'distributor',
+				'label'       => __( '配給', 'affilicard' ),
+				'card'        => 'detail',
+				'placeholder' => __( '配給会社名', 'affilicard' ),
 			),
 		);
 	}
 
 	public function cardMediaLabel(): string {
 		return __( 'キービジュアル', 'affilicard' );
+	}
+
+	/**
+	 * 提供形態（見放題・レンタル・購入など）のラベルは動画配信だけが持つ。
+	 *
+	 * @return list<string>
+	 */
+	public function offerFields(): array {
+		return array( 'plan_label' );
 	}
 
 	/**

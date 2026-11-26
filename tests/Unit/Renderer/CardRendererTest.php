@@ -1312,6 +1312,32 @@ final class CardRendererTest extends TestCase {
 		$this->assertStringNotContainsString( 'affilicard-card__discount', $html );
 	}
 
+	/**
+	 * 提供形態は動画配信など、そのタイプの offerFields に plan_label があるときだけ出す。
+	 * CardHtmlBuilder が商品タイプの offerFields を `offer_fields` で渡す。
+	 * 渡されない（CardRenderer を直接使う）ときは従来どおり表示する。
+	 */
+	public function test_提供形態はタイプのofferFieldsに無ければ出さない(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					$this->toListing(
+						array(
+							'platform'      => 'example-store',
+							'enabled'       => true,
+							'affiliate_url' => 'https://x',
+							'plan_label'    => '見放題',
+						)
+					),
+				),
+			)
+		);
+		$hidden  = ( new CardRenderer() )->render( $product, array( $this->store() ), array( 'offer_fields' => array() ) );
+		$shown   = ( new CardRenderer() )->render( $product, array( $this->store() ), array( 'offer_fields' => array( 'plan_label' ) ) );
+		$this->assertStringNotContainsString( 'affilicard-card__plan', $hidden );
+		$this->assertStringContainsString( '<span class="affilicard-card__plan">見放題</span>', $shown );
+	}
+
 	public function test_提供形態のラベルが空なら枠を出さない(): void {
 		$product = $this->product(
 			array(

@@ -21,9 +21,24 @@ interface ProductTypeInterface {
 	/**
 	 * extras（追加情報）の推奨フィールドのスキーマ。
 	 *
-	 * @return list<array{key: string, label: string, card?: string}>
+	 * placeholder は商品編集画面の入力欄の例文（任意）。管理画面はこのスキーマを
+	 * そのまま受け取って入力欄を作る（{@see ProductTypeUiList}）。
+	 *
+	 * @return list<array{key: string, label: string, card?: string, placeholder?: string}>
 	 */
 	public function extrasSchema(): array;
+
+	/**
+	 * このタイプの購入リンク（offer）だけが持つ項目のキー。
+	 *
+	 * 例: 動画配信の `plan_label`（見放題・レンタルなどの提供形態）。ここに無い項目は、
+	 * 保存はされていても商品編集画面に入力欄を出さず、カードにも出さない
+	 * （タイプを切り替えても値は消さない）。どのタイプにも共通の項目
+	 * （価格・URL・バージョン名の variant_label など）はここに書かない。
+	 *
+	 * @return list<string>
+	 */
+	public function offerFields(): array;
 
 	/**
 	 * 書誌ヘッダに昇格する extras キー（extrasSchema の card='header'）。

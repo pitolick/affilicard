@@ -76,6 +76,15 @@ abstract class AbstractProductType implements ProductTypeInterface {
 	}
 
 	/**
+	 * タイプ固有の購入リンクの項目は既定で持たない。
+	 *
+	 * @return list<string>
+	 */
+	public function offerFields(): array {
+		return array();
+	}
+
+	/**
 	 * extrasSchema の card 区分に一致するキー一覧を返す（既定 'detail'）。
 	 *
 	 * @return list<string>
