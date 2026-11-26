@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from '@wordpress/element';
-import { Button, Notice, TextControl, ToggleControl } from '@wordpress/components';
+import {
+	Button,
+	Notice,
+	TextControl,
+	ToggleControl,
+} from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import {
 	fetchQueueStats,
@@ -38,6 +43,63 @@ function hoursSinceSweep(lastCompletedAt, now = Date.now()) {
 	return Math.max(0, (now - then) / (1000 * 60 * 60));
 }
 
+/**
+ * API の上限（429）・利用条件（403）で account を止めているときの表示文言。
+ * until は ISO8601（UTC）。表示はブラウザのローカル時刻。
+ *
+ * @param {{until: string, reason: string}|null|undefined} pause
+ * @return {string} 止めていなければ空文字。
+ */
+export function apiPauseText(pause) {
+	if (!pause || !pause.until) {
+		return '';
+	}
+	const until = new Date(pause.until);
+	const time = Number.isNaN(until.getTime())
+		? pause.until
+		: until.toLocaleString('ja-JP', {
+				month: 'numeric',
+				day: 'numeric',
+				hour: '2-digit',
+				minute: '2-digit',
+		  });
+	const reason =
+		pause.reason === 'not_eligible'
+			? __(
+					'API の利用条件（直近 30 日の適格販売）を満たしていません',
+					'affilicard'
+			  )
+			: __('API の呼び出し回数の上限に達しました', 'affilicard');
+	return `${__('一時停止中', 'affilicard')}（${reason}。${time} ${__(
+		'ごろ再開',
+		'affilicard'
+	)}）`;
+}
+
+/**
+ * 今日の API 呼び出しの表示文言。呼び出しも停止も無い account（API を使っていない等）は空文字。
+ *
+ * @param {{calls: number, rate_limited: number, not_eligible: number}|undefined} usage
+ * @param {object|null|undefined}                                                 pause
+ * @return {string} 表示しないときは空文字。
+ */
+export function apiUsageText(usage, pause) {
+	const calls = usage?.calls ?? 0;
+	if (calls === 0 && !pause) {
+		return '';
+	}
+	const parts = [`${__('今日の API 呼び出し', 'affilicard')}: ${calls}`];
+	if ((usage?.rate_limited ?? 0) > 0) {
+		parts.push(`${__('上限 (429)', 'affilicard')}: ${usage.rate_limited}`);
+	}
+	if ((usage?.not_eligible ?? 0) > 0) {
+		parts.push(
+			`${__('利用条件 (403)', 'affilicard')}: ${usage.not_eligible}`
+		);
+	}
+	return parts.join(' / ');
+}
+
 export function QueuePanel() {
 	const [stats, setStats] = useState(null);
 	const [settings, setSettings] = useState(null);
@@ -65,7 +127,8 @@ export function QueuePanel() {
 				})
 				.catch((error) => {
 					setStats(
-						(prev) => prev ?? { summary: {}, depth: 0, paused: false }
+						(prev) =>
+							prev ?? { summary: {}, depth: 0, paused: false }
 					);
 					setStatsError(true);
 					throw error;
@@ -186,7 +249,10 @@ export function QueuePanel() {
 		runAction(retryFailed, __('失敗分を再試行しました', 'affilicard'));
 
 	const onCancelPending = () =>
-		runAction(cancelPending, __('未処理分をキャンセルしました', 'affilicard'));
+		runAction(
+			cancelPending,
+			__('未処理分をキャンセルしました', 'affilicard')
+		);
 
 	const updateSetting = (patch) => setSettings({ ...settings, ...patch });
 
@@ -306,10 +372,39 @@ export function QueuePanel() {
 							key={code}
 						>
 							<strong>{label}</strong>
-							<span>{__('未処理', 'affilicard')}: {row.pending ?? 0}</span>
-							<span>{__('処理中', 'affilicard')}: {row.in_progress ?? 0}</span>
-							<span>{__('失敗', 'affilicard')}: {row.failed ?? 0}</span>
-							<span>{__('完了', 'affilicard')}: {row.complete ?? 0}</span>
+							<span>
+								{__('未処理', 'affilicard')}: {row.pending ?? 0}
+							</span>
+							<span>
+								{__('処理中', 'affilicard')}:{' '}
+								{row.in_progress ?? 0}
+							</span>
+							<span>
+								{__('失敗', 'affilicard')}: {row.failed ?? 0}
+							</span>
+							<span>
+								{__('完了', 'affilicard')}: {row.complete ?? 0}
+							</span>
+							{apiUsageText(
+								row.api_usage_today,
+								row.api_pause
+							) && (
+								<span className="affilicard-queue-panel__api-usage">
+									{apiUsageText(
+										row.api_usage_today,
+										row.api_pause
+									)}
+								</span>
+							)}
+							{row.api_pause && (
+								<Notice
+									status="warning"
+									isDismissible={false}
+									className="affilicard-queue-panel__api-pause"
+								>
+									{apiPauseText(row.api_pause)}
+								</Notice>
+							)}
 							<TextControl
 								label={`${label} ${__(
 									'throttle上書き (ms)',
@@ -321,9 +416,12 @@ export function QueuePanel() {
 								)}
 								type="number"
 								value={String(
-									(settings.throttle_overrides ?? {})[code] ?? 0
+									(settings.throttle_overrides ?? {})[code] ??
+										0
 								)}
-								onChange={(v) => updateThrottleOverride(code, v)}
+								onChange={(v) =>
+									updateThrottleOverride(code, v)
+								}
 							/>
 						</div>
 					);

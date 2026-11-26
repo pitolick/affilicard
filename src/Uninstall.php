@@ -185,6 +185,10 @@ final class Uninstall {
 				as_unschedule_all_actions( '', array(), 'affilicard-' . $account );
 			}
 			delete_option( 'affilicard_ratelimit_' . $account );
+			// API の上限での一時停止（Queue\AccountPause）と日次集計（Queue\ApiUsage）。
+			// リテラルで持つ理由は上と同じ（vendor/ 不在フォールバックでは当該クラスが未 autoload）。
+			delete_option( 'affilicard_account_pause_' . $account );
+			delete_option( 'affilicard_api_usage_' . $account );
 		}
 
 		if ( $canUnschedule ) {

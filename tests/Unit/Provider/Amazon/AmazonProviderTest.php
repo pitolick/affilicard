@@ -9,6 +9,8 @@ use Affilicard\Provider\Amazon\AmazonProvider;
 use Affilicard\Util\Crypto;
 use Mockery;
 use Mockery\MockInterface;
+use Affilicard\Queue\AccountPause;
+use Affilicard\Queue\ApiUsage;
 use WP_Mock;
 use WP_Mock\Tools\TestCase;
 
@@ -43,6 +45,42 @@ final class AmazonProviderTest extends TestCase {
 		WP_Mock::userFunction( 'get_option' )
 			->with( AccountCredentials::optionKey( 'amazon' ), '' )
 			->andReturn( array() === $creds ? '' : Crypto::encrypt( (string) json_encode( $creds ) ) );
+		$this->stubPauseStore();
+	}
+
+	/** @var array<string, mixed> 停止の記録・日次集計を保存する option（テストの中だけのメモリ上の保存先）。 */
+	private array $options = array();
+
+	/** @var list<array{0: string, 1: string}> 送ったメール（宛先・件名）。 */
+	private array $mails = array();
+
+	private function stubPauseStore(): void {
+		foreach ( array( AccountPause::OPTION_PREFIX . 'amazon', ApiUsage::OPTION_PREFIX . 'amazon' ) as $key ) {
+			WP_Mock::userFunction( 'get_option' )
+				->with( $key, \Mockery::any() )
+				->andReturnUsing( fn( $k, $default ) => $this->options[ $k ] ?? $default );
+		}
+		WP_Mock::userFunction( 'get_option' )->with( 'admin_email', '' )->andReturn( 'admin@example.test' );
+		WP_Mock::userFunction( 'get_option' )->with( 'blogname', '' )->andReturn( 'Demo' );
+		WP_Mock::userFunction( 'update_option' )->andReturnUsing(
+			function ( $k, $v ) {
+				$this->options[ $k ] = $v;
+				return true;
+			}
+		);
+		WP_Mock::userFunction( 'delete_option' )->andReturnUsing(
+			function ( $k ) {
+				unset( $this->options[ $k ] );
+				return true;
+			}
+		);
+		WP_Mock::userFunction( 'wp_date' )->andReturnUsing( static fn( $format, $ts ) => gmdate( $format, $ts ) );
+		WP_Mock::userFunction( 'wp_mail' )->andReturnUsing(
+			function ( $to, $subject ) {
+				$this->mails[] = array( $to, $subject );
+				return true;
+			}
+		);
 	}
 
 	/**
@@ -351,6 +389,96 @@ final class AmazonProviderTest extends TestCase {
 		// 恒久失敗にすると give-up され、要件を満たし直しても戻らない。
 		$this->assertFalse( $result->isHit() );
 		$this->assertFalse( $result->isTerminalMiss() );
+	}
+
+	public function test_429を受けたらaccountを止め_止めている間は呼ばない(): void {
+		$this->stubCredentials();
+		$client = $this->client();
+		// 2 回目の fetch は API を呼ばない（呼ぶと once に反する）。
+		$client->shouldReceive( 'getItems' )->once()->andReturn(
+			array(
+				'error'   => false,
+				'code'    => 429,
+				'decoded' => array(
+					'type'              => 'ThrottleException',
+					'retryAfterSeconds' => 120,
+				),
+			)
+		);
+		$provider = new AmazonProvider( $client );
+
+		$this->assertFalse( $provider->fetch( 'B008ODF84I', array() )->isHit() );
+		$pause = AccountPause::get( 'amazon' );
+		$this->assertSame( AccountPause::REASON_RATE_LIMITED, $pause['reason'] );
+		// retryAfterSeconds に従う。
+		$this->assertEqualsWithDelta( time() + 120, $pause['until'], 2 );
+
+		$second = $provider->fetch( 'B000000002', array() );
+		$this->assertFalse( $second->isHit() );
+		$this->assertFalse( $second->isTerminalMiss() );
+
+		$usage = ApiUsage::forDay( 'amazon', time() );
+		$this->assertSame( 1, $usage['calls'] );
+		$this->assertSame( 1, $usage['rate_limited'] );
+		// 停止に入ったことを 1 回だけメールで知らせる。
+		$this->assertCount( 1, $this->mails );
+		$this->assertSame( 'admin@example.test', $this->mails[0][0] );
+	}
+
+	public function test_403の適格販売不足は6時間止める(): void {
+		$this->stubCredentials();
+		$client = $this->client();
+		$client->shouldReceive( 'getItems' )->once()->andReturn(
+			array(
+				'error'   => false,
+				'code'    => 403,
+				'decoded' => array( 'reason' => 'AssociateNotEligible' ),
+			)
+		);
+		( new AmazonProvider( $client ) )->fetch( 'B008ODF84I', array() );
+
+		$pause = AccountPause::get( 'amazon' );
+		$this->assertSame( AccountPause::REASON_NOT_ELIGIBLE, $pause['reason'] );
+		$this->assertEqualsWithDelta( time() + 21600, $pause['until'], 2 );
+		$this->assertSame( 1, ApiUsage::forDay( 'amazon', time() )['not_eligible'] );
+	}
+
+	public function test_止める時刻を過ぎて取れたら停止の記録を消す(): void {
+		$this->stubCredentials();
+		$this->options[ AccountPause::OPTION_PREFIX . 'amazon' ] = array(
+			'until'    => time() - 1,
+			'reason'   => AccountPause::REASON_RATE_LIMITED,
+			'since'    => time() - 600,
+			'streak'   => 2,
+			'notified' => true,
+		);
+		$client = $this->client();
+		$client->shouldReceive( 'getItems' )->once()->andReturn(
+			array(
+				'error'   => false,
+				'code'    => 200,
+				'decoded' => array( 'itemsResult' => array( 'items' => array( self::item() ) ) ),
+			)
+		);
+
+		$this->assertTrue( ( new AmazonProvider( $client ) )->fetch( 'B008ODF84I', array() )->isHit() );
+		$this->assertNull( AccountPause::get( 'amazon' ) );
+	}
+
+	public function test_通信断は数えず_止めもしない(): void {
+		$this->stubCredentials();
+		$client = $this->client();
+		$client->shouldReceive( 'getItems' )->once()->andReturn(
+			array(
+				'error'   => true,
+				'code'    => 0,
+				'decoded' => null,
+			)
+		);
+		( new AmazonProvider( $client ) )->fetch( 'B008ODF84I', array() );
+
+		$this->assertNull( AccountPause::get( 'amazon' ) );
+		$this->assertSame( 0, ApiUsage::forDay( 'amazon', time() )['calls'] );
 	}
 
 	public function test_200でitemsに無いASINは恒久失敗(): void {

@@ -75,7 +75,9 @@ final class UninstallTest extends TestCase {
 		WP_Mock::userFunction( 'delete_option' )
 			->withArgs(
 				static function ( string $key ): bool {
-					return str_starts_with( $key, 'affilicard_ratelimit_' );
+					return str_starts_with( $key, 'affilicard_ratelimit_' )
+						|| str_starts_with( $key, 'affilicard_account_pause_' )
+						|| str_starts_with( $key, 'affilicard_api_usage_' );
 				}
 			)
 			->andReturn( true );
@@ -357,6 +359,17 @@ final class UninstallTest extends TestCase {
 			->once()
 			->with( 'affilicard_ratelimit_rakuten' )
 			->andReturn( true );
+		// API の上限での一時停止（AccountPause）と日次集計（ApiUsage）も account 別に消す。
+		foreach ( array( 'dmm', 'rakuten' ) as $account ) {
+			WP_Mock::userFunction( 'delete_option' )
+				->once()
+				->with( 'affilicard_account_pause_' . $account )
+				->andReturn( true );
+			WP_Mock::userFunction( 'delete_option' )
+				->once()
+				->with( 'affilicard_api_usage_' . $account )
+				->andReturn( true );
+		}
 		// 'manual' provider は isAutomatic()===false のため ratelimit option を持たず対象外。
 		WP_Mock::userFunction( 'delete_option' )
 			->with( 'affilicard_ratelimit_manual' )

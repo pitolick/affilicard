@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace Affilicard\Rest;
 
 use Affilicard\Account\AccountRegistry;
+use Affilicard\Queue\AccountPause;
+use Affilicard\Queue\ApiUsage;
 use Affilicard\Queue\ActionStoreInterface;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\QueueMaintenance;
@@ -133,6 +135,7 @@ final class QueueController {
 	 * ハードコードせずに済む（QueuePanel.jsx はこの label をそのまま描画する）。
 	 */
 	public function stats( WP_REST_Request $request ): WP_REST_Response {
+		$now     = time();
 		$summary = array();
 		foreach ( $this->queueStats->summary() as $account => $counts ) {
 			$accountDefinition   = $this->accountRegistry->get( $account );
@@ -141,7 +144,13 @@ final class QueueController {
 					'code'  => $account,
 					'label' => null !== $accountDefinition ? $accountDefinition->label() : $account,
 				),
-				$counts
+				$counts,
+				array(
+					// 今日（サイトのタイムゾーン）の API 呼び出しの集計と、上限・利用条件での一時停止。
+					// 1 日の上限がある API（Amazon）で、上限に当たっていることに気づけるようにする。
+					'api_usage_today' => ApiUsage::forDay( $account, $now ),
+					'api_pause'       => self::pauseFor( $account, $now ),
+				)
 			);
 		}
 
@@ -156,6 +165,24 @@ final class QueueController {
 				'last_sweep_completed_at' => (string) get_option( QueueMaintenance::OPTION_LAST_COMPLETED, '' ),
 			),
 			200
+		);
+	}
+
+	/**
+	 * 止めていれば { until（ISO8601 UTC）, reason, since（ISO8601 UTC） }、止めていなければ null。
+	 *
+	 * @return array{until: string, reason: string, since: string}|null
+	 */
+	private static function pauseFor( string $account, int $now ): ?array {
+		$until = AccountPause::until( $account, $now );
+		if ( 0 === $until ) {
+			return null;
+		}
+		$record = AccountPause::get( $account );
+		return array(
+			'until'  => gmdate( 'c', $until ),
+			'reason' => (string) ( $record['reason'] ?? AccountPause::REASON_RATE_LIMITED ),
+			'since'  => gmdate( 'c', (int) ( $record['since'] ?? $now ) ),
 		);
 	}
 

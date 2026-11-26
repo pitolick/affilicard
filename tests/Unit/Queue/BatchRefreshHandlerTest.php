@@ -36,6 +36,10 @@ final class BatchRefreshHandlerTest extends TestCase {
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		// account の一時停止（AccountPause）は記録なし＝止めていない。
+		WP_Mock::userFunction( 'get_option' )
+			->with( \Mockery::pattern( '/^affilicard_account_pause_/' ), null )
+			->andReturn( null );
 		// RunnerClock はプロセス内の静的状態を持つ。他のテストクラスから漏れた状態で
 		// 本ファイルの大半のテスト（RunnerClock 未使用＝startedAt()==null 前提）が
 		// 非決定的に失敗しないよう、既定状態（未記録）へ戻す。

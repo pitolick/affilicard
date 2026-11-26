@@ -10,6 +10,8 @@ use Affilicard\Provider\DisplayPolicy;
 use Affilicard\Provider\DisplayPolicyProvider;
 use Affilicard\Provider\FetchResult;
 use Affilicard\Provider\ProviderInterface;
+use Affilicard\Queue\AccountPause;
+use Affilicard\Queue\ApiUsage;
 
 /**
  * Amazon Creators API（PA-API 5 の後継）を使った自動取得 Provider。
@@ -224,7 +226,16 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 	 * @return array<string, FetchResult>
 	 */
 	private function fetchMany( array $asins, array $credentials ): array {
+		$account = (string) $this->accountCode();
+		$now     = time();
+		// 上限（429）・適格販売の不足（403）で止めている間は呼ばない。呼んでも同じ失敗が返るうえ、
+		// 1 日の上限を消費して回復を遅らせる（AccountPause 参照）。
+		if ( AccountPause::until( $account, $now ) > 0 ) {
+			return array_fill_keys( $asins, FetchResult::error() );
+		}
+
 		$res = $this->client()->getItems( $credentials, $asins, self::RESOURCES );
+		$this->recordUsage( $account, $now, $res );
 
 		// 通信断・トークン取得失敗・非 200（403 AssociateNotEligible / 429 / 5xx / 400 等）は
 		// すべて一時失敗。特に 403 は、売上要件（直近 30 日）を割ると返り、要件を満たせば
@@ -251,6 +262,37 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 				: FetchResult::miss();
 		}
 		return $results;
+	}
+
+	/**
+	 * API に届いた呼び出しを日次集計に足し、429 / 403（適格販売の不足）なら account を止め、
+	 * 200 なら停止を解く。通信断・認証前の失敗（API の上限を消費しない）は数えない。
+	 *
+	 * @param array{error: bool, code: int, decoded: array<string, mixed>|null} $res
+	 */
+	private function recordUsage( string $account, int $now, array $res ): void {
+		if ( $res['error'] ) {
+			return;
+		}
+		ApiUsage::record( $account, ApiUsage::KIND_CALLS, $now );
+		$code    = $res['code'];
+		$decoded = $res['decoded'];
+		if ( 429 === $code ) {
+			ApiUsage::record( $account, ApiUsage::KIND_RATE_LIMITED, $now );
+			$retryAfter = is_array( $decoded ) && is_numeric( $decoded['retryAfterSeconds'] ?? null )
+				? (int) $decoded['retryAfterSeconds']
+				: null;
+			AccountPause::recordRateLimited( $account, $now, $retryAfter );
+			return;
+		}
+		if ( 403 === $code && is_array( $decoded ) && 'AssociateNotEligible' === ( $decoded['reason'] ?? '' ) ) {
+			ApiUsage::record( $account, ApiUsage::KIND_NOT_ELIGIBLE, $now );
+			AccountPause::recordNotEligible( $account, $now );
+			return;
+		}
+		if ( 200 === $code ) {
+			AccountPause::recordSuccess( $account );
+		}
 	}
 
 	/**

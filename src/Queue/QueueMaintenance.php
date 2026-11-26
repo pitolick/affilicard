@@ -244,6 +244,13 @@ final class QueueMaintenance {
 					continue;
 				}
 
+				// API の上限（429）・利用条件（403）で止めている account は積まない。積んでも
+				// ハンドラが再開時刻まで積み直すだけで、掃引のたびに同じ listing の積み直しが
+				// 溜まる。再開後の掃引（カーソルが一周して戻ってきたとき）で拾い直す。
+				if ( AccountPause::until( $account, $now ) > 0 ) {
+					continue;
+				}
+
 				// v4.0.0: 判定対象は listing 自身ではなく OfferSelector が選んだ購入リンク
 				// （表示中の offer）。選択結果が空（offers が空）なら更新すべき購入リンクが
 				// 無いためスキップする。

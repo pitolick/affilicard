@@ -26,6 +26,10 @@ final class ThrottledActionHandlerTest extends TestCase {
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		// account の一時停止（AccountPause）は記録なし＝止めていない。
+		WP_Mock::userFunction( 'get_option' )
+			->with( \Mockery::pattern( '/^affilicard_account_pause_/' ), null )
+			->andReturn( null );
 	}
 
 	public function tearDown(): void {

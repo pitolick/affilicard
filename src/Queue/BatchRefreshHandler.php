@@ -137,6 +137,12 @@ final class BatchRefreshHandler {
 				continue;
 			}
 
+			// account を止めている（429 / 403。AccountPause）なら、残りを再開時刻までまとめて
+			// 積み直す。1 件ずつのジョブへは回さない（回すと止めている間に呼び出しが膨らむ）。
+			if ( $this->requeueIfPaused( $account, $items, $index ) ) {
+				return;
+			}
+
 			$prefetchIds = array();
 			if ( null !== $batchProvider ) {
 				$ids = $this->targetIds( $idsByIndex, $index, $item );
@@ -147,7 +153,11 @@ final class BatchRefreshHandler {
 						return;
 					}
 					$processedAny = true;
-					$this->applyOutcome( $postId, $platform, $account, $this->refresher->refreshOne( $postId, $platform ) );
+					$outcome      = $this->refresher->refreshOne( $postId, $platform );
+					if ( WorkOutcome::TRANSIENT_FAILURE === $outcome && $this->requeueIfPaused( $account, $items, $index ) ) {
+						return;
+					}
+					$this->applyOutcome( $postId, $platform, $account, $outcome );
 					continue;
 				}
 				if ( array() !== $ids ) {
@@ -230,8 +240,33 @@ final class BatchRefreshHandler {
 				$batchProvider->prefetch( $prefetchIds );
 			}
 
-			$this->applyOutcome( $postId, $platform, $account, $this->refresher->refreshOne( $postId, $platform ) );
+			$outcome = $this->refresher->refreshOne( $postId, $platform );
+			// この listing の取得で account が止まった（429 / 403）なら、この listing を含む残りを
+			// 再開時刻までまとめて積み直す。
+			if ( WorkOutcome::TRANSIENT_FAILURE === $outcome && $this->requeueIfPaused( $account, $items, $index ) ) {
+				return;
+			}
+			$this->applyOutcome( $postId, $platform, $account, $outcome );
 		}
+	}
+
+	/**
+	 * account を止めていれば、$fromIndex 以降の listing を再開時刻（＋ゆらぎ）にまとめて積み直して
+	 * true を返す。止めていなければ何もせず false。
+	 *
+	 * @param list<array{post_id:int, platform:string}> $items
+	 */
+	private function requeueIfPaused( string $account, array $items, int $fromIndex ): bool {
+		$until = AccountPause::until( $account, time() );
+		if ( $until <= 0 ) {
+			return false;
+		}
+		$this->requeueOrFallback(
+			$account,
+			array_slice( $items, $fromIndex ),
+			$until + wp_rand( 0, Enqueuer::RESCHEDULE_JITTER_SECONDS )
+		);
+		return true;
 	}
 
 	private function applyOutcome( int $postId, string $platform, string $account, WorkOutcome $outcome ): void {

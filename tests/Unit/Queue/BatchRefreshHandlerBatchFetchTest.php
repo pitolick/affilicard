@@ -5,6 +5,7 @@ namespace Affilicard\Tests\Unit\Queue;
 
 use Affilicard\Cron\ListingRefresher;
 use Affilicard\Provider\ProviderRegistry;
+use Affilicard\Queue\AccountPause;
 use Affilicard\Queue\BatchRefreshHandler;
 use Affilicard\Queue\Enqueuer;
 use Affilicard\Queue\RateLimiter;
@@ -21,9 +22,16 @@ use WP_Mock\Tools\TestCase;
  */
 final class BatchRefreshHandlerBatchFetchTest extends TestCase {
 
+	/** @var array<string, mixed> account の一時停止（AccountPause）の記録。 */
+	private array $pauseOptions = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		// account の一時停止（AccountPause）は記録なし＝止めていない。
+		WP_Mock::userFunction( 'get_option' )
+			->with( \Mockery::pattern( '/^affilicard_account_pause_/' ), null )
+			->andReturnUsing( fn( $key ) => $this->pauseOptions[ $key ] ?? null );
 		RunnerClock::set( null );
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
@@ -130,5 +138,79 @@ final class BatchRefreshHandlerBatchFetchTest extends TestCase {
 		$handler->handle( self::args( array( 1, 2, 3 ) ) );
 
 		$this->assertSame( array( array( self::asin( 1 ), self::asin( 3 ) ) ), $provider->prefetchCalls );
+	}
+
+	private function pauseAmazonUntil( int $until ): void {
+		$this->pauseOptions[ AccountPause::OPTION_PREFIX . 'amazon' ] = array(
+			'until'    => $until,
+			'reason'   => AccountPause::REASON_RATE_LIMITED,
+			'since'    => time() - 60,
+			'streak'   => 1,
+			'notified' => true,
+		);
+	}
+
+	public function test_止めている間は1件も取らず_全件を再開時刻にまとめて積み直す(): void {
+		$this->expectRateAcquisitions( 0 );
+		$until = time() + 600;
+		$this->pauseAmazonUntil( $until );
+		$provider = new FakeBatchProvider();
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'refreshOne' )->never();
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 );
+		// 1 件ずつのジョブへは回さない。
+		WP_Mock::userFunction( 'as_enqueue_async_action' )->never();
+		$scheduled = array();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->andReturnUsing(
+			static function ( $when, $hook, $args ) use ( &$scheduled ) {
+				$scheduled[] = array( $when, count( $args[0]['items'] ?? $args['items'] ?? array() ) );
+				return 1;
+			}
+		);
+
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $registry, 30, 5 );
+		$handler->handle( self::args( range( 1, 12 ) ) );
+
+		$this->assertSame( array(), $provider->prefetchCalls );
+		$this->assertCount( 1, $scheduled );
+		$this->assertSame( $until, $scheduled[0][0] );
+		$this->assertSame( 12, $scheduled[0][1] );
+	}
+
+	public function test_取得の途中で止まったら_その件を含む残りを再開時刻にまとめて積み直す(): void {
+		$this->expectRateAcquisitions( 1 );
+		$until    = time() + 120;
+		$provider = new FakeBatchProvider();
+		$registry = new ProviderRegistry();
+		$registry->register( $provider );
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'fetchTargetExternalIds' )->andReturnUsing(
+			static fn( int $postId ) => array( self::asin( $postId ) )
+		);
+		// 1 件目の取得で 429 を受けて account が止まった、という状況を作る。
+		$refresher->shouldReceive( 'refreshOne' )->once()->andReturnUsing(
+			function () use ( $until ) {
+				$this->pauseAmazonUntil( $until );
+				return WorkOutcome::TRANSIENT_FAILURE;
+			}
+		);
+		WP_Mock::userFunction( 'wp_rand' )->andReturn( 0 );
+		WP_Mock::userFunction( 'as_enqueue_async_action' )->never();
+		$scheduled = array();
+		WP_Mock::userFunction( 'as_schedule_single_action' )->andReturnUsing(
+			static function ( $when, $hook, $args ) use ( &$scheduled ) {
+				$scheduled[] = array( $when, count( $args[0]['items'] ?? $args['items'] ?? array() ) );
+				return 1;
+			}
+		);
+
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $registry, 30, 5 );
+		$handler->handle( self::args( range( 1, 12 ) ) );
+
+		$this->assertCount( 1, $scheduled );
+		$this->assertSame( $until, $scheduled[0][0] );
+		$this->assertSame( 12, $scheduled[0][1] );
 	}
 }
