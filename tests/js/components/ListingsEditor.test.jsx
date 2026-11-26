@@ -10,6 +10,7 @@ import { useState } from '@wordpress/element';
 import {
 	ListingsEditor,
 	selectInUseOffer,
+	selectInUseOffers,
 	withNormalisedOffers,
 } from '../../../src/Admin/components/ListingsEditor';
 import { fetchPlatforms } from '../../../src/Admin/api/platforms';
@@ -452,6 +453,28 @@ describe( 'ListingsEditor 購入リンク（offers）', () => {
 		).toBe( '見放題' );
 	} );
 
+	test( 'バージョンを入力すると購入リンクの variant_label に入る', async () => {
+		const onChange = jest.fn();
+		render(
+			<ListingsEditor
+				listings={ listingWithOffers( [
+					{ display_order: 100, external_id: 'a', variant_label: '' },
+				] ) }
+				platforms={ platforms }
+				onChange={ onChange }
+			/>
+		);
+
+		await userEvent.click( screen.getByRole( 'button', { name: 'a' } ) );
+		fireEvent.change( screen.getByLabelText( 'バージョン' ), {
+			target: { value: '字幕版' },
+		} );
+
+		expect(
+			onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].variant_label
+		).toBe( '字幕版' );
+	} );
+
 	test( '追加した購入リンクは付与ポイントが空で始まる', async () => {
 		const onChange = jest.fn();
 		render(
@@ -469,6 +492,9 @@ describe( 'ListingsEditor 購入リンク（offers）', () => {
 		expect( onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].points ).toBe( '' );
 		expect(
 			onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].plan_label
+		).toBe( '' );
+		expect(
+			onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].variant_label
 		).toBe( '' );
 	} );
 
@@ -652,6 +678,26 @@ describe( 'ListingsEditor 購入リンク（offers）', () => {
 
 		const marks = screen.getAllByText( '使用中' );
 		expect( marks ).toHaveLength( 1 );
+	} );
+
+	test( 'バージョンの違う購入リンクにはそれぞれ使用中の印が付く', () => {
+		const offers = [
+			{ display_order: 10, external_id: 'sub', regular_url: 'https://example.test/sub', variant_label: '字幕版' },
+			{ display_order: 20, external_id: 'sub-alt', regular_url: 'https://example.test/sub-alt', variant_label: '字幕版' },
+			{ display_order: 30, external_id: 'dub', regular_url: 'https://example.test/dub', variant_label: '吹替版' },
+		];
+		render(
+			<ListingsEditor
+				listings={ listingWithOffers( offers ) }
+				platforms={ platforms }
+				onChange={ jest.fn() }
+			/>
+		);
+
+		expect( screen.getAllByText( '使用中' ) ).toHaveLength( 2 );
+		expect( screen.getByTestId( 'offer-sub' ) ).toHaveTextContent( '使用中' );
+		expect( screen.getByTestId( 'offer-dub' ) ).toHaveTextContent( '使用中' );
+		expect( screen.getByTestId( 'offer-sub-alt' ) ).not.toHaveTextContent( '使用中' );
 	} );
 
 	test( '設定 ON のとき terminal を飛ばした先に使用中が付く', () => {
@@ -1287,5 +1333,50 @@ describe( 'ListingsEditor 移行前の flat な listing', () => {
 		expect( next[ 0 ].external_id ).toBe( 'flat-19' );
 		expect( next[ 0 ].affiliate_url ).toBe( 'https://example.test/aff' );
 		expect( next[ 0 ].price ).toBe( '700' );
+	} );
+} );
+
+describe( 'selectInUseOffers（Affilicard\\Pricing\\OfferSelector::selectPerVariant() と同じ規則であることの固定）', () => {
+	// tests/Unit/Pricing/OfferSelectorTest.php の selectPerVariant のケースと同じものを置く。
+	const variant = ( order, id, label, status = '' ) => ( {
+		display_order: order,
+		external_id: id,
+		regular_url: `https://example.test/${ id }`,
+		fetch_status: status,
+		variant_label: label,
+	} );
+	const ids = ( offers ) => offers.map( ( offer ) => offer.external_id );
+
+	test( 'バージョンごとに 1 件ずつ表示順で返す', () => {
+		const offers = [
+			variant( 30, 'dub', '吹替版' ),
+			variant( 10, 'sub', '字幕版' ),
+			variant( 20, 'sub-alt', '字幕版' ),
+		];
+		expect( ids( selectInUseOffers( offers, false ) ) ).toEqual( [ 'sub', 'dub' ] );
+	} );
+
+	test( 'バージョン名が無ければ selectInUseOffer と同じ 1 件になる', () => {
+		const offers = [ variant( 20, 'b', '' ), variant( 10, 'a', '' ) ];
+		expect( selectInUseOffers( offers, false ) ).toEqual( [ selectInUseOffer( offers, false ) ] );
+		expect( selectInUseOffers( [], true ) ).toEqual( [] );
+	} );
+
+	test( 'バージョンの中では恒久失敗を飛ばして次の購入リンクを使う', () => {
+		const offers = [
+			variant( 10, 'sub-dead', '字幕版', 'terminal' ),
+			variant( 20, 'sub-alive', '字幕版' ),
+			variant( 30, 'dub', '吹替版' ),
+		];
+		expect( ids( selectInUseOffers( offers, true ) ) ).toEqual( [ 'sub-alive', 'dub' ] );
+	} );
+
+	test( 'バージョン名の前後の半角空白は無視するが全角空白は PHP の trim と同じく残す', () => {
+		const offers = [
+			variant( 10, 'a', ' 字幕版 ' ),
+			variant( 20, 'b', '字幕版' ),
+			variant( 30, 'c', '字幕版　' ),
+		];
+		expect( ids( selectInUseOffers( offers, false ) ) ).toEqual( [ 'a', 'c' ] );
 	} );
 } );

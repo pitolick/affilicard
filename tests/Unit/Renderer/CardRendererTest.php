@@ -130,6 +130,7 @@ final class CardRendererTest extends TestCase {
 			'list_price_label',
 			'badge',
 			'plan_label',
+			'variant_label',
 			'image_url',
 			'search_key',
 			'fetch_status',
@@ -1328,6 +1329,172 @@ final class CardRendererTest extends TestCase {
 		);
 		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
 		$this->assertStringNotContainsString( 'affilicard-card__plan', $html );
+	}
+
+	/**
+	 * バージョン（variant_label）の違う購入リンクは、同じストアの中で 1 行ずつ並ぶ。
+	 * 2 行目以降はストア名を目に見える形では繰り返さず（スクリーンリーダー向けには残す）、
+	 * 計測用にバージョン名を CTA の data 属性へ出す。
+	 */
+	public function test_バージョン違いの購入リンクは同じストアの中で1行ずつ並ぶ(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform' => 'example-store',
+						'enabled'  => true,
+						'offers'   => array(
+							array(
+								'display_order' => 20,
+								'affiliate_url' => 'https://x/dub',
+								'variant_label' => '吹替版',
+								'plan_label'    => '見放題',
+							),
+							array(
+								'display_order' => 10,
+								'affiliate_url' => 'https://x/sub',
+								'variant_label' => '字幕版',
+								'plan_label'    => '見放題',
+							),
+						),
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+
+		$this->assertSame( 2, substr_count( $html, 'class="affilicard-card__cta"' ) );
+		// 表示順（display_order）どおり字幕版 → 吹替版。
+		$sub = strpos( $html, 'https://x/sub' );
+		$dub = strpos( $html, 'https://x/dub' );
+		$this->assertNotFalse( $sub );
+		$this->assertNotFalse( $dub );
+		$this->assertLessThan( $dub, $sub );
+		$this->assertStringContainsString( '<span class="affilicard-card__variant">字幕版</span>', $html );
+		$this->assertStringContainsString( '<span class="affilicard-card__variant">吹替版</span>', $html );
+		// 1 行目はストア名を見せ、次の行が同じストアなので区切りを弱める。
+		$this->assertStringContainsString( '<li class="affilicard-card__row affilicard-card__row--variant-next"><div class="affilicard-card__platform">サンプルストア</div>', $html );
+		// 2 行目はストア名をスクリーンリーダー向けにだけ残す。
+		$this->assertStringContainsString( '<li class="affilicard-card__row affilicard-card__row--variant-continued"><div class="affilicard-card__platform affilicard-card__platform--continued"><span class="affilicard-card__sr-only">サンプルストア</span></div>', $html );
+		$this->assertStringContainsString( 'data-affilicard-variant="字幕版"', $html );
+		$this->assertStringContainsString( 'data-affilicard-variant="吹替版"', $html );
+	}
+
+	/**
+	 * バージョン名の無い購入リンクは従来どおり「優先順位つきの代わりのリンク」で、カードには 1 件だけ出る。
+	 */
+	public function test_バージョン名の無い購入リンクは従来どおり1件だけ出す(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform' => 'example-store',
+						'enabled'  => true,
+						'offers'   => array(
+							array(
+								'display_order' => 10,
+								'affiliate_url' => 'https://x/first',
+							),
+							array(
+								'display_order' => 20,
+								'affiliate_url' => 'https://x/second',
+							),
+						),
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ) );
+
+		$this->assertSame( 1, substr_count( $html, 'class="affilicard-card__cta"' ) );
+		$this->assertStringContainsString( 'https://x/first', $html );
+		$this->assertStringNotContainsString( 'https://x/second', $html );
+		$this->assertStringNotContainsString( 'affilicard-card__variant', $html );
+		$this->assertStringNotContainsString( 'variant-next', $html );
+		$this->assertStringNotContainsString( 'data-affilicard-variant', $html );
+	}
+
+	/**
+	 * 同じバージョンの中では代わりのリンクの動きがそのまま残る（恒久失敗した先頭を飛ばす）。
+	 * URL の無いバージョンは、そのバージョンの行だけを出さない。
+	 */
+	public function test_同じバージョンの中では代わりのリンクに切り替わりURLの無いバージョンは出さない(): void {
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform' => 'example-store',
+						'enabled'  => true,
+						'offers'   => array(
+							array(
+								'display_order' => 10,
+								'affiliate_url' => 'https://x/sub-dead',
+								'variant_label' => '字幕版',
+								'fetch_status'  => 'terminal',
+							),
+							array(
+								'display_order' => 20,
+								'affiliate_url' => 'https://x/sub-alive',
+								'variant_label' => '字幕版',
+							),
+							array(
+								'display_order' => 30,
+								'variant_label' => '吹替版',
+							),
+						),
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store() ), array( 'fallback_on_terminal' => true ) );
+
+		$this->assertSame( 1, substr_count( $html, 'class="affilicard-card__cta"' ) );
+		$this->assertStringContainsString( 'https://x/sub-alive', $html );
+		$this->assertStringNotContainsString( 'https://x/sub-dead', $html );
+		$this->assertStringNotContainsString( '吹替版', $html );
+		// 1 行だけになったので、まとまりの装飾も付けない。
+		$this->assertStringNotContainsString( 'variant-next', $html );
+		$this->assertStringNotContainsString( 'variant-continued', $html );
+	}
+
+	/**
+	 * 別のストアの行とは 1 まとまりにしない（ストア名を省くのは同じ listing のバージョン違いだけ）。
+	 */
+	public function test_別のストアの行はバージョンのまとまりにしない(): void {
+		$other   = new PlatformDefinition( 'other-store', 'ほかのストア', 'manual', 2, true, array( 'generic' ), 'ほかで見る', '#000000', '#ffffff' );
+		$product = $this->product(
+			array(
+				'listings' => array(
+					array(
+						'platform' => 'example-store',
+						'enabled'  => true,
+						'offers'   => array(
+							array(
+								'affiliate_url' => 'https://x/a',
+								'variant_label' => '字幕版',
+							),
+						),
+					),
+					array(
+						'platform' => 'other-store',
+						'enabled'  => true,
+						'offers'   => array(
+							array(
+								'affiliate_url' => 'https://y/a',
+								'variant_label' => '字幕版',
+							),
+						),
+					),
+				),
+			)
+		);
+		$html    = ( new CardRenderer() )->render( $product, array( $this->store(), $other ) );
+
+		$this->assertSame( 2, substr_count( $html, 'class="affilicard-card__cta"' ) );
+		$this->assertStringContainsString( '<div class="affilicard-card__platform">サンプルストア</div>', $html );
+		$this->assertStringContainsString( '<div class="affilicard-card__platform">ほかのストア</div>', $html );
+		$this->assertStringNotContainsString( 'variant-next', $html );
+		$this->assertStringNotContainsString( 'variant-continued', $html );
 	}
 
 	public function test_ignores_non_date_last_verified_at(): void {

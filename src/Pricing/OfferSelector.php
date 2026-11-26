@@ -50,6 +50,63 @@ final class OfferSelector {
 	}
 
 	/**
+	 * バージョン（`variant_label`）ごとに使う購入リンクを 1 件ずつ返す（カードの描画用）。
+	 *
+	 * 同じ作品が字幕版・吹替版・ディレクターズカット版のように**別の商品ページ**で
+	 * 売られているとき、カードにはそれぞれを並べたい。一方で listing の offers は
+	 * 「優先順位つきの代わりのリンク」（期間限定版が消えたら通常版へ切り替える）にも
+	 * 使われており、こちらは 1 件だけを見せる。両者を `variant_label` で分ける:
+	 *
+	 * - 同じ `variant_label`（空文字どうしも同じ）の offers は 1 つのグループで、
+	 *   その中から {@see self::select()} の規則で 1 件を選ぶ（代わりのリンクの動きはそのまま）
+	 * - グループの並びは、表示順で最初に現れた offer の位置で決める
+	 *
+	 * `variant_label` を誰も持たない listing は 1 グループになり、{@see self::select()} と
+	 * 同じ結果（0 件または 1 件）になる。
+	 *
+	 * **価格更新はまだこちらを使わない。** 更新キューは (商品, platform) 単位で 1 件を
+	 * 取りに行く作りのため、2 つ目以降のバージョンは自動更新の対象にならない
+	 * （spec 2026-11-26-offer-variant-label-design.md §5）。
+	 *
+	 * @param array<int, mixed> $offers
+	 * @return list<array<string, mixed>>
+	 */
+	public static function selectPerVariant( array $offers, bool $fallbackEnabled ): array {
+		$groups = array();
+		foreach ( self::sorted( $offers ) as $offer ) {
+			$groups[ self::variantKey( $offer ) ][] = $offer;
+		}
+
+		$out = array();
+		foreach ( $groups as $group ) {
+			// グループの中は既に表示順なので、select() の並べ替えは同じ順を保つ（安定ソート）。
+			foreach ( self::select( $group, $fallbackEnabled ) as $offer ) {
+				$out[] = $offer;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * offer のバージョン名（前後の空白は除く）。無ければ空文字。
+	 *
+	 * @param array<string, mixed> $offer
+	 */
+	public static function variantLabel( array $offer ): string {
+		return trim( ScalarField::string( $offer, 'variant_label' ) );
+	}
+
+	/**
+	 * グループ分けのキー。PHP の配列キーは数字の文字列を整数に変えるため、接頭辞を付けて
+	 * 文字列のまま扱う（「1」と「01」を別のバージョンとして保つ）。
+	 *
+	 * @param array<string, mixed> $offer
+	 */
+	private static function variantKey( array $offer ): string {
+		return 'v:' . self::variantLabel( $offer );
+	}
+
+	/**
 	 * display_order 昇順・同値は出現順（安定ソート）。
 	 *
 	 * PHP の usort は同値の順序を保証しないため、出現位置をタイブレークに使う。
