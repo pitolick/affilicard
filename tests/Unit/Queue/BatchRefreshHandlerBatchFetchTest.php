@@ -25,9 +25,23 @@ final class BatchRefreshHandlerBatchFetchTest extends TestCase {
 	/** @var array<string, mixed> account の一時停止（AccountPause）の記録。 */
 	private array $pauseOptions = array();
 
+	/** @var int 停止の記録のキャッシュを捨てた回数（別のワーカーが書いた停止を読み直したか）。 */
+	private int $pauseCachePurges = 0;
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		// 一時失敗の後などの停止の判定は、リクエスト内のキャッシュを捨ててから読む（AccountPause::until の $fresh）。
+		$this->pauseCachePurges = 0;
+		WP_Mock::userFunction( 'wp_cache_delete' )
+			->with( \Mockery::pattern( '/^affilicard_account_pause_/' ), 'options' )
+			->andReturnUsing(
+				function () {
+					++$this->pauseCachePurges;
+					return true;
+				}
+			);
+		WP_Mock::userFunction( 'wp_cache_get' )->with( 'notoptions', 'options' )->andReturn( false );
 		// account の一時停止（AccountPause）は記録なし＝止めていない。
 		WP_Mock::userFunction( 'get_option' )
 			->with( \Mockery::pattern( '/^affilicard_account_pause_/' ), null )
@@ -260,5 +274,7 @@ final class BatchRefreshHandlerBatchFetchTest extends TestCase {
 		$this->assertCount( 1, $scheduled );
 		$this->assertSame( $until, $scheduled[0][0] );
 		$this->assertSame( 12, $scheduled[0][1] );
+		// 応答を待つ間に別のワーカーが止めた場合も見落とさないよう、一時失敗の後はキャッシュを捨てて読む。
+		$this->assertGreaterThan( 0, $this->pauseCachePurges );
 	}
 }

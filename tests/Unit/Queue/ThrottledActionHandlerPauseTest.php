@@ -25,9 +25,23 @@ final class ThrottledActionHandlerPauseTest extends TestCase {
 	/** @var array<string, mixed> */
 	private array $options = array();
 
+	/** @var int 停止の記録のキャッシュを捨てた回数（別のワーカーが書いた停止を読み直したか）。 */
+	private int $pauseCachePurges = 0;
+
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		// 一時失敗の後などの停止の判定は、リクエスト内のキャッシュを捨ててから読む（AccountPause::until の $fresh）。
+		$this->pauseCachePurges = 0;
+		WP_Mock::userFunction( 'wp_cache_delete' )
+			->with( \Mockery::pattern( '/^affilicard_account_pause_/' ), 'options' )
+			->andReturnUsing(
+				function () {
+					++$this->pauseCachePurges;
+					return true;
+				}
+			);
+		WP_Mock::userFunction( 'wp_cache_get' )->with( 'notoptions', 'options' )->andReturn( false );
 		$this->options = array();
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )
@@ -147,6 +161,8 @@ final class ThrottledActionHandlerPauseTest extends TestCase {
 
 		$this->assertSame( 1, $handler->worked );
 		$this->assertSame( array( $until ), $handler->rescheduledAt );
+		// 応答を待つ間に別のワーカーが止めた場合も見落とさないよう、一時失敗の後はキャッシュを捨てて読む。
+		$this->assertGreaterThan( 0, $this->pauseCachePurges );
 	}
 
 	public function test_止まっていない一時失敗は従来どおりbackoff(): void {

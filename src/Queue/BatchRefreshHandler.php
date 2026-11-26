@@ -256,10 +256,14 @@ final class BatchRefreshHandler {
 	 * account を止めていれば、$fromIndex 以降の listing を再開時刻（＋ゆらぎ）にまとめて積み直して
 	 * true を返す。止めていなければ何もせず false。
 	 *
+	 * 停止はキャッシュを使わずに読む。API の応答を待つ間に別のワーカーが止め、こちらの応答が
+	 * 5xx などだった場合に、古い「停止の記録は無い」を見て 1 件ずつのジョブへ分けないため。
+	 * 呼ぶのは API を呼ぶ前と一時失敗の後だけなので、DB を読む回数は API の呼び出しと同程度。
+	 *
 	 * @param list<array{post_id:int, platform:string}> $items
 	 */
 	private function requeueIfPaused( string $account, array $items, int $fromIndex ): bool {
-		$until = AccountPause::until( $account, time() );
+		$until = AccountPause::until( $account, time(), true );
 		if ( $until <= 0 ) {
 			return false;
 		}

@@ -174,7 +174,8 @@ abstract class ThrottledActionHandler {
 			return;
 		}
 		// この呼び出しで account が止まった（429 / 403）なら、backoff ではなく再開時刻まで積み直す。
-		$pausedUntil = AccountPause::until( $account, time() );
+		// 応答を待つ間に別のワーカーが止めた場合も見落とさないよう、キャッシュを使わずに読む。
+		$pausedUntil = AccountPause::until( $account, time(), true );
 		if ( $pausedUntil > 0 ) {
 			$this->reschedule( $pausedUntil, $args );
 			return;

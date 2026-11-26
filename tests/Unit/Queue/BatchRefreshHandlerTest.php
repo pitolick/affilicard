@@ -36,6 +36,11 @@ final class BatchRefreshHandlerTest extends TestCase {
 	public function setUp(): void {
 		parent::setUp();
 		WP_Mock::setUp();
+		// 一時失敗の後などの停止の判定は、リクエスト内のキャッシュを捨ててから読む（AccountPause::until の $fresh）。
+		WP_Mock::userFunction( 'wp_cache_delete' )
+			->with( \Mockery::pattern( '/^affilicard_account_pause_/' ), 'options' )
+			->andReturn( true );
+		WP_Mock::userFunction( 'wp_cache_get' )->with( 'notoptions', 'options' )->andReturn( false );
 		// account の一時停止（AccountPause）は記録なし＝止めていない。
 		WP_Mock::userFunction( 'get_option' )
 			->with( \Mockery::pattern( '/^affilicard_account_pause_/' ), null )
