@@ -553,6 +553,8 @@ $p_ebook_plan = $repo->save(
 				'offers'   => array(
 					array(
 						'display_order' => 100,
+						// 身元（external_id か regular_url）が無い購入リンクは保存時に捨てられる。
+						'regular_url'   => 'https://example.com/product/plan-ebook',
 						'affiliate_url' => 'https://example.com/aff-plan-ebook',
 						'plan_label'    => '見放題',
 					),
