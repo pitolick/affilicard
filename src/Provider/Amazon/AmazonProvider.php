@@ -55,7 +55,14 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 	 */
 	private array $prefetched = array();
 
-	public function __construct( private ?AmazonCreatorsClient $client = null ) {}
+	/**
+	 * @param \Closure(): int|null $clock 現在時刻（UNIX 秒）。テストで呼び出しの前後の時刻を固定するため。既定は time()。
+	 */
+	public function __construct( private ?AmazonCreatorsClient $client = null, private ?\Closure $clock = null ) {}
+
+	private function now(): int {
+		return null !== $this->clock ? (int) ( $this->clock )() : time();
+	}
 
 	public function code(): string {
 		return 'amazon-creators';
@@ -199,11 +206,16 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 				'message' => __( 'アクセストークンを取得できませんでした。Credential ID と Credential Secret を確認してください', 'affilicard' ),
 			);
 		}
-		$startedAt = time();
+		$startedAt = $this->now();
 		$res       = $client->getItems( $credentials, array( self::TEST_ASIN ), array( 'itemInfo.title' ) );
 		// 接続テストも上限を消費する。結果を数え、200 なら止めている停止を解く（403 から戻ったことを
 		// 管理者が接続テストで確かめたとき、パネルと通知に「利用条件を満たしていません」を残さない）。
-		$this->recordUsage( (string) $this->accountCode(), $startedAt, time(), $res );
+		// ただし保存済みの認証情報と同じ相手（Credential ID・トラッキング ID・マーケットプレイス）を
+		// 試したときだけ。まだ保存していない別のアソシエイトの結果で、動いている account を止めたり、
+		// 止まっている account を解いたりしない。
+		if ( self::isSameAssociate( $credentials, AccountCredentials::get( (string) $this->accountCode() ) ) ) {
+			$this->recordUsage( (string) $this->accountCode(), $startedAt, $this->now(), $res );
+		}
 		if ( $res['error'] ) {
 			return array(
 				'ok'      => false,
@@ -223,6 +235,21 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 	}
 
 	/**
+	 * 2 つの認証情報が同じアソシエイト・同じマーケットプレイスを指すか（呼び出しの上限と利用条件を共有するか）。
+	 *
+	 * @param array<string, string> $a
+	 * @param array<string, string> $b
+	 */
+	private static function isSameAssociate( array $a, array $b ): bool {
+		foreach ( array( 'credential_id', 'partner_tag' ) as $key ) {
+			if ( '' === trim( (string) ( $a[ $key ] ?? '' ) ) || trim( (string) ( $a[ $key ] ?? '' ) ) !== trim( (string) ( $b[ $key ] ?? '' ) ) ) {
+				return false;
+			}
+		}
+		return AmazonCreatorsClient::marketplace( $a ) === AmazonCreatorsClient::marketplace( $b );
+	}
+
+	/**
 	 * 1 リクエスト（最大 10 ASIN）で取得し、ASIN ごとの結果を返す。
 	 *
 	 * @param list<string>          $asins 正規化・検証済みの ASIN
@@ -231,7 +258,7 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 	 */
 	private function fetchMany( array $asins, array $credentials ): array {
 		$account = (string) $this->accountCode();
-		$now     = time();
+		$now     = $this->now();
 		// 上限（429）・適格販売の不足（403）で止めている間は呼ばない。呼んでも同じ失敗が返るうえ、
 		// 1 日の上限を消費して回復を遅らせる（AccountPause 参照）。
 		if ( AccountPause::until( $account, $now ) > 0 ) {
@@ -239,7 +266,7 @@ final class AmazonProvider implements ProviderInterface, BatchFetchingProvider, 
 		}
 
 		$res = $this->client()->getItems( $credentials, $asins, self::RESOURCES );
-		$this->recordUsage( $account, $now, time(), $res );
+		$this->recordUsage( $account, $now, $this->now(), $res );
 
 		// 通信断・トークン取得失敗・非 200（403 AssociateNotEligible / 429 / 5xx / 400 等）は
 		// すべて一時失敗。特に 403 は、売上要件（直近 30 日）を割ると返り、要件を満たせば

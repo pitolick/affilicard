@@ -204,17 +204,23 @@ final class AccountPause {
 		$notified[ $record['reason'] ] = $now;
 		update_option( $key, $notified, false );
 		try {
-			self::send( $to, $account, $record );
+			$sent  = self::send( $to, $account, $record );
+			$error = $sent ? '' : 'wp_mail returned false';
 		} catch ( \Throwable $e ) {
 			// 通知の失敗で価格更新のジョブを落とさない（停止は保存済み）。
-			unset( $e );
+			$error = $e->getMessage();
+		}
+		if ( '' !== $error ) {
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- 送った印は付けたため 24 時間は送り直さない。失敗に気づけるようログに残す。
+			error_log( sprintf( 'affilicard: 一時停止の通知メールを送れませんでした（account=%s, reason=%s）: %s', $account, $record['reason'], $error ) );
 		}
 	}
 
 	/**
 	 * @param array{until: int, reason: string, since: int, streak: int, updated: int} $record
+	 * @return bool wp_mail が受け付けたか
 	 */
-	private static function send( string $to, string $account, array $record ): void {
+	private static function send( string $to, string $account, array $record ): bool {
 		$reason  = self::REASON_NOT_ELIGIBLE === $record['reason']
 			? __( 'API の利用条件（直近 30 日の適格販売）を満たしていません。売上が出荷されると 2 日ほどで戻ります。', 'affilicard' )
 			: __( 'API の呼び出し回数の上限（レート制限）に達しました。上限が戻ると自動で再開します。', 'affilicard' );
@@ -231,6 +237,6 @@ final class AccountPause {
 			$reason,
 			wp_date( 'Y-m-d H:i', $record['until'] )
 		);
-		wp_mail( $to, $subject, $body );
+		return (bool) wp_mail( $to, $subject, $body );
 	}
 }

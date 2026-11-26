@@ -156,10 +156,22 @@ final class AccountPauseTest extends TestCase {
 
 	public function test_通知の送信で例外が出ても停止は保存する(): void {
 		$this->mailThrows = true;
-		AccountPause::recordRateLimited( 'amazon', 1000 );
+		$log              = (string) tempnam( sys_get_temp_dir(), 'affilicard-log' );
+		// phpcs:ignore WordPress.PHP.IniSet.Risky -- テストの間だけ error_log の出力先を一時ファイルへ向け、書かれた内容を確かめる。
+		$previous = ini_set( 'error_log', $log );
+		try {
+			AccountPause::recordRateLimited( 'amazon', 1000 );
+		} finally {
+			// phpcs:ignore WordPress.PHP.IniSet.Risky -- 上で変えた出力先を元に戻す。
+			ini_set( 'error_log', (string) $previous );
+		}
 		$this->assertSame( 1060, AccountPause::until( 'amazon', 1000 ) );
-		// 送った印は付いている（次の 429 で送り直さない）。
+		// 送った印は付いている（次の 429 で送り直さない）。送れなかったことはログに残す。
 		$this->assertArrayHasKey( AccountPause::NOTIFIED_OPTION_PREFIX . 'amazon', $this->options );
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- ローカルの一時ファイルであり remote URL ではない。
+		$this->assertStringContainsString( '通知メールを送れませんでした', (string) file_get_contents( $log ) );
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- WP を読み込まない単体テストのため wp_delete_file は使えない。
+		unlink( $log );
 	}
 
 	public function test_フィルタでfalseを返すとメールを送らない(): void {
