@@ -157,4 +157,49 @@ final class AmazonRegistrationTest extends TestCase {
 
 		$this->assertConditionsMet();
 	}
+
+	public function test_既存インストールのprime_videoにも一度だけ補完する(): void {
+		WP_Mock::userFunction( 'current_user_can' )->with( 'manage_options' )->andReturn( true );
+		WP_Mock::userFunction( 'get_option' )
+			->with( Plugin::PRIME_VIDEO_ELIGIBLE_BACKFILLED_OPTION )
+			->andReturn( false );
+		WP_Mock::userFunction( 'get_option' )
+			->with( PlatformConfig::OPTION_KEY, array() )
+			->andReturn(
+				array(
+					self::platform( 'prime-video', array( 'applicableTypes' => array( 'vod' ) ) ),
+					self::platform( 'hulu', array( 'applicableTypes' => array( 'vod' ) ) ),
+				),
+				array(
+					self::platform(
+						'prime-video',
+						array(
+							'applicableTypes'  => array( 'vod' ),
+							'eligibleProvider' => 'amazon-creators',
+						)
+					),
+					self::platform( 'hulu', array( 'applicableTypes' => array( 'vod' ) ) ),
+				)
+			);
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->with( PlatformConfig::OPTION_KEY, WP_Mock\Functions::type( 'array' ), false )
+			->andReturnUsing(
+				function ( $key, $value ) {
+					$byCode = array_column( $value, null, 'code' );
+					$this->assertSame( 'amazon-creators', $byCode['prime-video']['eligibleProvider'] );
+					$this->assertSame( 'manual', $byCode['prime-video']['provider'] );
+					$this->assertSame( '', $byCode['hulu']['eligibleProvider'] );
+					return true;
+				}
+			);
+		WP_Mock::userFunction( 'update_option' )
+			->once()
+			->with( Plugin::PRIME_VIDEO_ELIGIBLE_BACKFILLED_OPTION, 1, false )
+			->andReturn( true );
+
+		Plugin::backfillPrimeVideoEligibleProvider();
+
+		$this->assertConditionsMet();
+	}
 }

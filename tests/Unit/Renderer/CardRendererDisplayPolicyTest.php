@@ -348,4 +348,46 @@ final class CardRendererDisplayPolicyTest extends TestCase {
 			'両方あり'   => array( '44%OFF', '28', '<span class="affilicard-card__perks affilicard-card__perks--both"><span class="affilicard-card__discount">44%OFF</span><span class="affilicard-card__points">28pt還元</span></span>' ),
 		);
 	}
+
+	public function test_APIが返した見放題を出すカードは価格が無くても提供元の表記を出す(): void {
+		$html = ( new CardRenderer() )->render(
+			self::product(
+				array(
+					'plan_label'       => '見放題',
+					'last_verified_at' => self::hoursAgo( 1 ),
+				)
+			),
+			self::platforms(),
+			self::options()
+		);
+
+		$this->assertStringContainsString( '<span class="affilicard-card__plan">見放題</span>', $html );
+		$this->assertStringContainsString( '<li class="affilicard-card__note affilicard-card__attribution">' . self::ATTRIBUTION . '</li>', $html );
+	}
+
+	public function test_APIが返した見放題は24時間を過ぎたら出さない(): void {
+		$html = ( new CardRenderer() )->render(
+			self::product(
+				array(
+					'plan_label'       => '見放題',
+					'last_verified_at' => self::hoursAgo( 25 ),
+				)
+			),
+			self::platforms(),
+			self::options()
+		);
+
+		$this->assertStringNotContainsString( 'affilicard-card__plan', $html );
+		$this->assertStringNotContainsString( self::ATTRIBUTION, $html );
+	}
+
+	public function test_手入力の提供形態は確認時刻が無くても出す(): void {
+		$html = ( new CardRenderer() )->render(
+			self::product( array( 'plan_label' => 'レンタル' ) ),
+			self::platforms(),
+			self::options()
+		);
+
+		$this->assertStringContainsString( '<span class="affilicard-card__plan">レンタル</span>', $html );
+	}
 }

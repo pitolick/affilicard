@@ -237,4 +237,17 @@ final class OfferSelectorTest extends TestCase {
 		);
 		$this->assertSame( array( 'a' ), array_column( OfferSelector::selectPerVariant( $offers, false ), 'external_id' ) );
 	}
+
+	public function test_価格更新はカードと同じくバージョンごとに1件ずつ取りに行く(): void {
+		$offers = array(
+			$this->variant( 30, 'dub', '吹替版' ),
+			$this->variant( 10, 'sub', '字幕版' ),
+			$this->variant( 20, 'sub-alt', '字幕版' ),
+		);
+		$this->assertSame(
+			OfferSelector::selectPerVariant( $offers, true ),
+			OfferSelector::selectForRefresh( $offers, true )
+		);
+		$this->assertSame( array( 'sub', 'dub' ), array_column( OfferSelector::selectForRefresh( $offers, false ), 'external_id' ) );
+	}
 }

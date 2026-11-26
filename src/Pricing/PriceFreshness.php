@@ -41,6 +41,22 @@ final class PriceFreshness {
 		if ( '' === $price ) {
 			return false;
 		}
+		return self::isVerifiedFresh( $offer, $platform, $nowTs );
+	}
+
+	/**
+	 * API が確かめた値を、まだ表示してよいか（恒久失敗でなく、最後の確認から TTL 以内）。
+	 * 価格に限らない（価格を持たない「見放題」の提供形態にも使う）。
+	 *
+	 * @param array<string, mixed> $offer
+	 */
+	public static function isVerifiedFresh( array $offer, ?PlatformDefinition $platform, int $nowTs ): bool {
+		if ( null === $platform ) {
+			return false;
+		}
+		if ( FetchStatus::isTerminal( ScalarField::string( $offer, 'fetch_status' ) ) ) {
+			return false;
+		}
 		$verified = trim( ScalarField::string( $offer, 'last_verified_at' ) );
 		if ( '' === $verified ) {
 			return false;
@@ -97,6 +113,24 @@ final class PriceFreshness {
 	 * 過剰な API 呼び出しを避けるため、しきい値は priceTtlHours の 1/2 未満には下げない
 	 * （＝再取得頻度は表示 TTL の 2 倍までにクランプ）。$leadSeconds 既定 0 は従来挙動（前倒しなし）。
 	 *
+	 * @param array<string, mixed> $offer
+	 */
+	/**
+	 * 価格更新が取りに行く購入リンク（バージョンごとに 1 件。OfferSelector::selectForRefresh()）の
+	 * どれか 1 つでも再取得が要るか。1 回の更新で全バージョンを取り直すので、1 つでも古ければ積む。
+	 *
+	 * @param list<array<string, mixed>> $offers
+	 */
+	public static function anyNeedsRefetch( array $offers, ?PlatformDefinition $platform, int $nowTs, int $leadSeconds = 0 ): bool {
+		foreach ( $offers as $offer ) {
+			if ( is_array( $offer ) && self::needsRefetch( $offer, $platform, $nowTs, $leadSeconds ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * @param array<string, mixed> $offer
 	 */
 	public static function needsRefetch( array $offer, ?PlatformDefinition $platform, int $nowTs, int $leadSeconds = 0 ): bool {

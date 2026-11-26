@@ -564,6 +564,47 @@ $p_ebook_plan = $repo->save(
 	)
 );
 
+// Prime Video の自動取得（v4.6.0・Amazon Creators API）。プレビューには API の認証情報が無いので、
+// 取得した直後の購入リンクを seed で再現する。¥0 の出品がある作品は「見放題」（価格は出さない）、
+// 有料の価格だけの作品はいちばん安い価格に「〜」（price_from）を付ける。確認時刻（last_verified_at）を
+// 持つ値は 24 時間で消えるので、対照として 25 時間前に確かめた「見放題」も並べる。
+$verified_now   = gmdate( 'c' );
+$verified_stale = gmdate( 'c', time() - 25 * HOUR_IN_SECONDS );
+$pv_offer       = static function ( string $asin, string $variant, string $price, string $price_from, string $plan, string $verified ): array {
+	return array(
+		'display_order'    => 100,
+		'external_id'      => $asin,
+		'regular_url'      => 'https://www.amazon.co.jp/dp/' . $asin,
+		'affiliate_url'    => 'https://www.amazon.co.jp/dp/' . $asin . '?tag=demo-22',
+		'variant_label'    => $variant,
+		'price'            => $price,
+		'price_from'       => $price_from,
+		'plan_label'       => $plan,
+		'last_fetched_at'  => $verified,
+		'last_verified_at' => $verified,
+	);
+};
+$p_pv_auto      = $repo->save(
+	array(
+		'title'        => 'サンプル洋画（Prime Video 自動取得）',
+		'status'       => 'publish',
+		'product_type' => 'vod',
+		'stock_status' => 'available',
+		'listings'     => array(
+			array(
+				'platform' => 'prime-video',
+				'enabled'  => true,
+				'offers'   => array(
+					$pv_offer( 'B0DEMOPV01', '劇場公開版', '400', '1', '', $verified_now ),
+					$pv_offer( 'B0DEMOPV02', 'エクステンデッド版', '', '', '見放題', $verified_now ),
+					$pv_offer( 'B0DEMOPV03', '4K 版', '', '', '見放題', $verified_stale ),
+				),
+			),
+		),
+		'extras'       => $vod_extras( '架空 監督', '架空 俳優', '2022', 'サンプル配給' ),
+	)
+);
+
 $set_demo_cover( (int) $p_vod_all, 'THE DEMONSTRATION', '#1d2b53', 'square' );
 $set_demo_cover( (int) $p_vod_variants, 'THE VERSIONS', '#008751', 'square' );
 $set_demo_cover( (int) $p_vod_single, 'ANIME MOVIE', '#7e2553', 'square' );
@@ -589,6 +630,9 @@ $content = implode(
 		'<!-- wp:heading {"level":3} --><h3>バージョン違い（字幕版・吹替版）カード確認</h3><!-- /wp:heading -->',
 		'<!-- wp:paragraph --><p>同じ作品が字幕版・吹替版・ディレクターズカット版で別の商品ページになっているとき、購入リンクの「バージョン」を分けると、同じストアの中で 1 行ずつ並びます（2 行目以降はストア名を省き、区切り線を点線にしています）。Prime Video の字幕版にはもう 1 つ「代わりのリンク」（同じバージョン・表示順が後ろのレンタル）がありますが、カードに出るのは表示順が先の 1 件だけです。バージョンを持たない Hulu は従来どおり 1 行です。</p><!-- /wp:paragraph -->',
 		$block( $p_vod_variants ),
+		'<!-- wp:heading {"level":3} --><h3>Prime Video の自動取得（見放題・最低価格「〜」）</h3><!-- /wp:heading -->',
+		'<!-- wp:paragraph --><p>Prime Video を「自動取得」にすると、Amazon Creators API の結果でバージョンごとに価格と提供形態を更新します。¥0 の出品がある作品は「見放題」とだけ出し、有料の価格だけの作品はいちばん安い価格に「〜」を付けます（購入・レンタルの区別は API が返さないため）。API が返した値は確かめてから 24 時間だけ出すので、25 時間前に確かめた 3 行目（4K 版）の「見放題」は出ません。どの行も Amazon の提供元の表記が付きます。値はプレビュー用に再現したものです。</p><!-- /wp:paragraph -->',
+		$block( $p_pv_auto ),
 		'<!-- wp:heading {"level":3} --><h3>各種カード表示</h3><!-- /wp:heading -->',
 		$block(
 			$p_ebook,

@@ -58,6 +58,8 @@ final class Uninstall {
 		'affilicard_derived_meta_unsynced_post_ids',
 		// Affilicard\Plugin::AMAZON_ELIGIBLE_BACKFILLED_OPTION のリテラル値。
 		'affilicard_amazon_eligible_provider_backfilled',
+		// Affilicard\Plugin::PRIME_VIDEO_ELIGIBLE_BACKFILLED_OPTION のリテラル値。
+		'affilicard_prime_video_eligible_provider_backfilled',
 	);
 
 	/**

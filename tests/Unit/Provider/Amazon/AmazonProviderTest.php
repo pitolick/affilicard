@@ -805,4 +805,164 @@ final class AmazonProviderTest extends TestCase {
 		unset( $item['itemInfo']['productInfo']['isAdultProduct'] );
 		$this->assertSame( '', AmazonProvider::normalizeItem( $item )['adult'] );
 	}
+
+	/**
+	 * Prime Video の item（2026-11-26 に実 API で取った形を縮めたもの）。価格は複数返り、
+	 * どれが購入・レンタルかのラベルは付かない。
+	 *
+	 * @param list<array<string, mixed>> $listings
+	 * @return array<string, mixed>
+	 */
+	private static function videoItem( array $listings ): array {
+		return array(
+			'asin'          => 'B0B5MR4X1T',
+			'detailPageURL' => 'https://www.amazon.co.jp/dp/B0B5MR4X1T?tag=demo-22&linkCode=ogi&th=1&psc=1',
+			'images'        => array( 'primary' => array( 'large' => array( 'url' => 'https://m.media-amazon.com/images/I/video.jpg' ) ) ),
+			'itemInfo'      => array(
+				'title'           => array( 'displayValue' => '架空の映画' ),
+				'classifications' => array(
+					'binding'      => array( 'displayValue' => 'Prime Video' ),
+					'productGroup' => array( 'displayValue' => 'Video On Demand' ),
+				),
+				'byLineInfo'      => array(
+					'contributors' => array(
+						array(
+							'name'     => '監督A',
+							'roleType' => 'director',
+						),
+						array(
+							'name'     => '製作B',
+							'roleType' => 'producer',
+						),
+						array(
+							'name'     => '俳優1',
+							'roleType' => 'actor',
+						),
+						array(
+							'name'     => '俳優2',
+							'roleType' => 'actor',
+						),
+						array(
+							'name'     => '俳優3',
+							'roleType' => 'actor',
+						),
+						array(
+							'name'     => '俳優4',
+							'roleType' => 'actor',
+						),
+						array(
+							'name'     => '俳優5',
+							'roleType' => 'actor',
+						),
+						array(
+							'name'     => '俳優6',
+							'roleType' => 'actor',
+						),
+					),
+				),
+				'productInfo'     => array( 'isAdultProduct' => array( 'displayValue' => false ) ),
+			),
+			'offersV2'      => array( 'listings' => $listings ),
+		);
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	private static function priced( int $amount, bool $buyBox = false ): array {
+		return array(
+			'isBuyBoxWinner' => $buyBox,
+			'price'          => array(
+				'money' => array(
+					'amount'   => $amount,
+					'currency' => 'JPY',
+				),
+			),
+		);
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	private static function unpriced( string $type = 'IN_STOCK' ): array {
+		return array(
+			'isBuyBoxWinner' => false,
+			'availability'   => array(
+				'type'    => $type,
+				'message' => '',
+			),
+		);
+	}
+
+	public function test_動画の判定に使う種類も同じリクエストで取る(): void {
+		$this->assertContains( 'itemInfo.classifications', AmazonProvider::RESOURCES );
+	}
+
+	public function test_種類で動画かどうかを見分ける(): void {
+		$this->assertTrue( AmazonProvider::isVideo( self::videoItem( array() ) ) );
+		$this->assertFalse( AmazonProvider::isVideo( self::item() ) );
+
+		// binding だけでも動画と分かる。
+		$item = self::videoItem( array() );
+		unset( $item['itemInfo']['classifications']['productGroup'] );
+		$this->assertTrue( AmazonProvider::isVideo( $item ) );
+	}
+
+	public function test_動画で0円の出品があれば見放題にし_価格は出さない(): void {
+		$data = AmazonProvider::normalizeItem(
+			self::videoItem( array( self::priced( 0, true ), self::priced( 2500 ), self::priced( 500 ), self::unpriced() ) )
+		);
+		$this->assertSame( '見放題', $data['plan_label'] );
+		$this->assertSame( '', $data['price'] );
+		$this->assertSame( '', $data['price_from'] );
+	}
+
+	public function test_動画で有料の価格だけなら最安値を出し_複数あれば最低価格の印を立てる(): void {
+		// カートを取っている出品（購入 1,500 円）ではなく、いちばん安い価格（400 円）を出す。
+		$data = AmazonProvider::normalizeItem(
+			self::videoItem( array( self::priced( 1500, true ), self::priced( 400 ), self::priced( 3000 ), self::unpriced() ) )
+		);
+		$this->assertSame( '400', $data['price'] );
+		$this->assertSame( '1', $data['price_from'] );
+		// 見放題でなくなったら提供形態を空にして、古い「見放題」を残さない。
+		$this->assertSame( '', $data['plan_label'] );
+	}
+
+	public function test_動画で価格が1種類なら最低価格の印を立てない(): void {
+		$data = AmazonProvider::normalizeItem( self::videoItem( array( self::priced( 1600, true ), self::priced( 1600 ) ) ) );
+		$this->assertSame( '1600', $data['price'] );
+		$this->assertSame( '', $data['price_from'] );
+	}
+
+	public function test_動画で価格が無ければ価格も提供形態も出さない(): void {
+		// 配信停止（UNAVAILABLE）。
+		$data = AmazonProvider::normalizeItem( self::videoItem( array( self::unpriced( 'UNAVAILABLE' ) ) ) );
+		$this->assertSame( '', $data['price'] );
+		$this->assertSame( '', $data['plan_label'] );
+		$this->assertSame( '', $data['price_from'] );
+		// 書影・リンクは返す（ボタンだけのカードになる）。
+		$this->assertSame( 'https://m.media-amazon.com/images/I/video.jpg', $data['image_url'] );
+		$this->assertSame( 'https://www.amazon.co.jp/dp/B0B5MR4X1T?tag=demo-22&linkCode=ogi&th=1&psc=1', $data['affiliate_url'] );
+	}
+
+	public function test_動画は割引やポイントの欄を空にし_監督と出演を入れる(): void {
+		$data = AmazonProvider::normalizeItem( self::videoItem( array( self::priced( 400 ) ) ) );
+		$this->assertSame( '', $data['list_price'] );
+		$this->assertSame( '', $data['list_price_label'] );
+		$this->assertSame( '', $data['badge'] );
+		$this->assertSame( '', $data['points'] );
+		$this->assertSame( '0', $data['adult'] );
+		$this->assertSame( 'https://www.amazon.co.jp/dp/B0B5MR4X1T', $data['regular_url'] );
+		$this->assertSame( '架空の映画', $data['title'] );
+		$this->assertSame( '監督A', $data['platform_extras']['director'] );
+		// 出演は先頭 5 人まで。
+		$this->assertSame( '俳優1、俳優2、俳優3、俳優4、俳優5', $data['platform_extras']['cast'] );
+	}
+
+	public function test_書籍は提供形態と最低価格の印を返さない(): void {
+		// 返さないキーは価格更新のパッチに入らず、手入力の提供形態が残る（ListingRefresher）。
+		$data = AmazonProvider::normalizeItem( self::item() );
+		$this->assertArrayNotHasKey( 'plan_label', $data );
+		$this->assertArrayNotHasKey( 'price_from', $data );
+	}
 }

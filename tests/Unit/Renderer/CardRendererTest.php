@@ -126,6 +126,7 @@ final class CardRendererTest extends TestCase {
 			'regular_url',
 			'affiliate_url',
 			'price',
+			'price_from',
 			'list_price',
 			'list_price_label',
 			'badge',
@@ -1336,6 +1337,23 @@ final class CardRendererTest extends TestCase {
 		$shown   = ( new CardRenderer() )->render( $product, array( $this->store() ), array( 'offer_fields' => array( 'plan_label' ) ) );
 		$this->assertStringNotContainsString( 'affilicard-card__plan', $hidden );
 		$this->assertStringContainsString( '<span class="affilicard-card__plan">見放題</span>', $shown );
+	}
+
+	public function test_最低価格の印があれば価格に「〜」を添える(): void {
+		$listing = array(
+			'platform'         => 'example-store',
+			'enabled'          => true,
+			'affiliate_url'    => 'https://x',
+			'price'            => '400',
+			'price_from'       => '1',
+			'last_verified_at' => gmdate( 'c', time() - 3600 ),
+		);
+		$with    = ( new CardRenderer() )->render( $this->product( array( 'listings' => array( $this->toListing( $listing ) ) ) ), array( $this->store() ) );
+		$this->assertStringContainsString( '<span class="affilicard-card__price">¥400<span class="affilicard-card__price-from">〜</span></span>', $with );
+
+		$listing['price_from'] = '';
+		$without               = ( new CardRenderer() )->render( $this->product( array( 'listings' => array( $this->toListing( $listing ) ) ) ), array( $this->store() ) );
+		$this->assertStringContainsString( '<span class="affilicard-card__price">¥400</span>', $without );
 	}
 
 	public function test_提供形態のラベルが空なら枠を出さない(): void {

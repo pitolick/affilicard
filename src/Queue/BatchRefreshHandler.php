@@ -169,11 +169,18 @@ final class BatchRefreshHandler {
 
 			$mustAttempt = ! $processedAny;
 
+			// まとめ取得できない Provider（DMM・楽天）は、バージョン違いの件数だけ外部 API を叩く
+			// （ListingRefresher は 1 件ずつ取り、2 件目以降は最小間隔を空ける）。枠と所要時間を件数ぶん見込む。
+			// まとめ取得できる Provider は、下で先に取る 1 リクエストで全件の結果が手元にそろう。
+			$slots        = null === $batchProvider ? max( 1, $this->refresher->targetCount( $postId, $platform ) ) : 1;
+			$itemSeconds  = $perItemSeconds * $slots;
+			$slotInterval = $intervalMs * $slots;
+
 			// 待機に入る「前に」期限を確認する。賄えないなら未処理分を積み直して終了する
 			// （待機に入ってから期限を超えると AS ランナーの時間予算を食い潰したうえ、
 			// 積み直しも行われずそのバッチの残りが失われる）。前進保証が働く 1 件目は
 			// このゲートを素通りする。
-			if ( ! $mustAttempt && ! $deadline->canAfford( time(), $perItemSeconds ) ) {
+			if ( ! $mustAttempt && ! $deadline->canAfford( time(), $itemSeconds ) ) {
 				$this->requeueRemaining( $account, $items, $index );
 				return;
 			}
@@ -181,7 +188,7 @@ final class BatchRefreshHandler {
 			$processedAny = true;
 
 			$nowMs   = (int) round( microtime( true ) * 1000 );
-			$acquire = $this->limiter->tryAcquire( $account, $intervalMs, $nowMs );
+			$acquire = $this->limiter->tryAcquire( $account, $slotInterval, $nowMs );
 			if ( ! $acquire['ok'] ) {
 				$rawWaitSec = max( 0, (int) ceil( $acquire['next_ms'] / 1000 ) - time() );
 				if ( $mustAttempt ) {
@@ -224,12 +231,12 @@ final class BatchRefreshHandler {
 					usleep( $waitSec * 1000000 );
 				}
 				// 待った後に期限が賄えるか再確認する（usleep で消費した実時間を反映する）。
-				if ( ! $mustAttempt && ! $deadline->canAfford( time(), $perItemSeconds ) ) {
+				if ( ! $mustAttempt && ! $deadline->canAfford( time(), $itemSeconds ) ) {
 					$this->requeueRemaining( $account, $items, $index );
 					return;
 				}
 				$nowMs   = (int) round( microtime( true ) * 1000 );
-				$acquire = $this->limiter->tryAcquire( $account, $intervalMs, $nowMs );
+				$acquire = $this->limiter->tryAcquire( $account, $slotInterval, $nowMs );
 				if ( ! $acquire['ok'] ) {
 					// 他ワーカーに取られた。この listing は per-listing へ委ねる。
 					$this->enqueuer->enqueueManual( $postId, $platform, $account );

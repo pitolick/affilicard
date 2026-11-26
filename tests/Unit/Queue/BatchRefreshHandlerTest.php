@@ -122,6 +122,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 		$this->mockRateLimiterWpdb( 1, 1 ); // 2件とも CAS 獲得成功（待たない）。
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->twice()->andReturn( WorkOutcome::SUCCESS );
 
 		// SUCCESS ごとに give-up マーカーを解除する。
@@ -158,6 +160,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 
 		// 不正な 3 件は refreshOne に到達せず、有効な 1 件だけが処理される。
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )
 			->once()
 			->with( 7, 'rakuten-kobo' )
@@ -202,6 +206,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 		$this->mockRateLimiterWpdb( 1, 1 ); // 2件とも CAS 獲得成功（待たない）。
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->with( 1, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
 		$refresher->shouldReceive( 'refreshOne' )->with( 2, 'rakuten-kobo' )->andReturn( WorkOutcome::TRANSIENT_FAILURE );
 
@@ -260,6 +266,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 		$this->stubGeneralSettings( array( 'queue_paused' => true ) );
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->never();
 
 		// 自己再投入（Enqueuer::enqueueBatch → HOOK_REFRESH_BATCH）で温存する。
@@ -321,6 +329,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 		$this->mockRateLimiterWpdb( 1 ); // 1件目は即座に CAS 獲得成功（待たない）。
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->once()->with( 1, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
 		$refresher->shouldReceive( 'refreshOne' )->with( 2, 'rakuten-kobo' )->never();
 
@@ -390,6 +400,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 			->andReturn( $nowMs + 48900 ); // next_ms ≈ 今+50秒 → raw waitSec は remaining(13秒) を大きく上回る。
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->once()->with( 1, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
 		$refresher->shouldReceive( 'refreshOne' )->with( 2, 'rakuten-kobo' )->never();
 
@@ -456,6 +468,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 			->andReturn( $nowMs - 1100 + 1000 ); // next_ms ≈ 今+1秒 → waitSec は小さい正の値。
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->once()->with( 9, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
 
 		WP_Mock::userFunction( 'delete_transient' )
@@ -490,6 +504,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 		$this->mockRateLimiterWpdb( 1 ); // 即座に CAS 獲得成功（待たない）。
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->once()->with( 3, 'rakuten-kobo' )->andReturn( WorkOutcome::TERMINAL_FAILURE );
 
 		WP_Mock::userFunction( 'set_transient' )
@@ -524,6 +540,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 		$this->stubGeneralSettings( array( 'queue_paused' => true ) );
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->never();
 
 		WP_Mock::userFunction( 'as_schedule_single_action' )
@@ -621,6 +639,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 			->andReturn( $nowMs - 1100 ); // next_ms = last + intervalMs(1100) ≈ 今。
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->never();
 
 		WP_Mock::userFunction( 'as_unschedule_all_actions' )
@@ -685,6 +705,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 			->reply( 5 );
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->once()->with( 1, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
 		$refresher->shouldReceive( 'refreshOne' )->with( 2, 'rakuten-kobo' )->never();
 
@@ -759,6 +781,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 		$this->mockRateLimiterWpdb( 1 ); // 1件目は即座に CAS 獲得成功（待たない）。
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->once()->with( 1, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
 		$refresher->shouldReceive( 'refreshOne' )->with( 2, 'rakuten-kobo' )->never();
 
@@ -823,6 +847,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 		$this->mockRateLimiterWpdb( 1, 1 ); // 2件とも CAS 獲得成功（待たない）。
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->twice()->andReturn( WorkOutcome::SUCCESS );
 
 		WP_Mock::userFunction( 'delete_transient' )
@@ -878,6 +904,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 		$this->mockRateLimiterWpdb( 1 ); // 1件目（前進保証）は即座に CAS 獲得成功。
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->once()->with( 1, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
 		$refresher->shouldReceive( 'refreshOne' )->with( 2, 'rakuten-kobo' )->never();
 		$refresher->shouldReceive( 'refreshOne' )->with( 3, 'rakuten-kobo' )->never();
@@ -991,6 +1019,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 			->andReturn( $nowMs - 1100 + 1000 ); // next_ms ≈ 今+1秒 → raw waitSec は1秒。
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->once()->with( 1, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
 
 		WP_Mock::userFunction( 'delete_transient' )
@@ -1038,6 +1068,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 			->andReturn( $nowMs - 1100 + 20000 ); // next_ms ≈ 今+20秒 → raw waitSec ≈ 20秒（上限10秒を超過）。
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->never();
 
 		WP_Mock::userFunction( 'delete_transient' )->never();
@@ -1116,6 +1148,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 			->andReturn( $nowMs - 1100 + 11000 ); // next_ms ≈ 今+10秒 → raw waitSec ≈ 10秒。
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->never();
 
 		WP_Mock::userFunction( 'delete_transient' )->never();
@@ -1174,6 +1208,8 @@ final class BatchRefreshHandlerTest extends TestCase {
 			->andReturn( $nowMs + 48900 ); // next_ms ≈ 今+50秒 → raw waitSec は remaining(13秒) を大きく上回る。
 
 		$refresher = Mockery::mock( ListingRefresher::class );
+		// まとめ取得できない Provider では、バージョン違いの件数（targetCount）ぶん枠を取る。既定は 1 件。
+		$refresher->shouldReceive( 'targetCount' )->andReturn( 1 )->byDefault();
 		$refresher->shouldReceive( 'refreshOne' )->once()->with( 1, 'rakuten-kobo' )->andReturn( WorkOutcome::SUCCESS );
 		$refresher->shouldReceive( 'refreshOne' )->with( 2, 'rakuten-kobo' )->never();
 
@@ -1223,5 +1259,51 @@ final class BatchRefreshHandlerTest extends TestCase {
 		);
 
 		$this->assertConditionsMet();
+	}
+
+	/**
+	 * まとめ取得できない Provider（楽天）では、1 件の listing がバージョン違いで 2 件を取りに行くなら
+	 * レート制限の枠も 2 件ぶん確保する（ListingRefresher は 2 件目の前に最小間隔を空ける）。
+	 */
+	public function test_まとめ取得できないProviderはバージョン違いの件数ぶん枠を取る(): void {
+		$this->stubGeneralSettings();
+		$intervals     = array();
+		$wpdb          = Mockery::mock();
+		$wpdb->options = 'wp_options';
+		$wpdb->shouldReceive( 'prepare' )->andReturnUsing(
+			static function ( string $query, ...$args ) use ( &$intervals ) {
+				// tryAcquire() は (now, key, now - interval) を渡す。
+				$intervals[] = (int) $args[0] - (int) $args[2];
+				return $query;
+			}
+		);
+		$wpdb->shouldReceive( 'query' )->andReturn( 1 );
+		$GLOBALS['wpdb'] = $wpdb;
+		WP_Mock::userFunction( 'add_option' )->andReturn( true );
+		WP_Mock::userFunction( 'wp_cache_delete' )->andReturn( true );
+		WP_Mock::userFunction( 'delete_transient' )->andReturn( true );
+
+		$refresher = Mockery::mock( ListingRefresher::class );
+		$refresher->shouldReceive( 'targetCount' )->with( 1, 'rakuten-kobo' )->andReturn( 1 );
+		$refresher->shouldReceive( 'targetCount' )->with( 2, 'rakuten-kobo' )->andReturn( 2 );
+		$refresher->shouldReceive( 'refreshOne' )->twice()->andReturn( WorkOutcome::SUCCESS );
+
+		$handler = new BatchRefreshHandler( new Enqueuer(), new RateLimiter(), $refresher, $this->registry(), 30, 5 );
+		$handler->handle(
+			$this->args(
+				array(
+					'post_id'  => 1,
+					'platform' => 'rakuten-kobo',
+				),
+				array(
+					'post_id'  => 2,
+					'platform' => 'rakuten-kobo',
+				)
+			)
+		);
+
+		$this->assertCount( 2, $intervals );
+		$this->assertGreaterThan( 0, $intervals[0] );
+		$this->assertSame( $intervals[0] * 2, $intervals[1] );
 	}
 }

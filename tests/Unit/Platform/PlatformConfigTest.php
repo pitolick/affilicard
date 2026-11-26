@@ -204,6 +204,10 @@ final class PlatformConfigTest extends TestCase {
 		}
 		$this->assertArrayNotHasKey( 'netflix', $by_code );
 		$this->assertArrayNotHasKey( 'danime', $by_code );
+
+		// Prime Video は Amazon Creators API で自動取得に切り替えられる（v4.6.0）。手動のまま始める。
+		$this->assertSame( 'amazon-creators', $by_code['prime-video']->eligibleProvider );
+		$this->assertSame( '', $by_code['u-next']->eligibleProvider );
 	}
 
 	public function test_defaults_電子書籍にはリンクテンプレートを持たせない(): void {
