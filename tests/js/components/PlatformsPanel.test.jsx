@@ -145,7 +145,7 @@ describe( 'PlatformsPanel', () => {
 			await screen.findByRole( 'tab', { name: '電子書籍' } )
 		).toBeInTheDocument();
 		expect(
-			screen.getByRole( 'tab', { name: 'VOD' } )
+			screen.getByRole( 'tab', { name: '動画配信' } )
 		).toBeInTheDocument();
 		expect(
 			screen.getByRole( 'tab', { name: 'API 認証' } )

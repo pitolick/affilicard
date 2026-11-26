@@ -5,7 +5,7 @@
 ## 主な機能 (v1.0.0)
 
 - カスタム投稿タイプ `affilicard_product` で 1 商品 = N プラットフォーム listing を管理
-- 商品タイプ拡張 (`Affilicard\Types\ProductTypeInterface`): 汎用 / 電子書籍 / VOD (4a-4)
+- 商品タイプ拡張 (`Affilicard\Types\ProductTypeInterface`): 汎用 / 電子書籍 / 動画配信
 - Provider 拡張 (`Affilicard\Provider\ProviderInterface`): 手動入力 / DMM ebook API / 楽天Kobo API / Amazon Creators API
 - React + `@wordpress/scripts` ベースの管理画面 (Settings + 商品編集 Metabox)
 - WP REST API (`/wp-json/affilicard/v1/*`) で外部ツールから商品 upsert 可能
@@ -256,19 +256,34 @@ curl -u 'username:xxxx xxxx xxxx xxxx xxxx xxxx' \
     - `'card' => 'header'`: 書誌ヘッダ（タイトル下）に昇格
     - `'card' => 'detail'`（既定）: カード詳細部に表示
     - `'card' => 'hidden'`: カード非表示（メタ情報のみ）
+    - `'placeholder' => '…'`: 商品編集画面の入力欄に出す例（任意）
 4. 画像プレースホルダ文言を変えるなら `cardMediaLabel()` を override
-5. 外部 API 連携があれば `extractExtrasFromProvider()` を実装（手動入力のみなら `return array();`）
-6. `Plugin::buildProductTypeRegistry()` に `$registry->register(new MyType())` を追加
+5. 購入リンクにタイプ固有の項目を使うなら `offerFields()` を override（今あるのは提供形態 `plan_label` だけ。既定は空で、動画配信が `array( 'plan_label' )` を返す）
+6. 外部 API 連携があれば `extractExtrasFromProvider()` を実装（手動入力のみなら `return array();`）
+7. `Plugin::buildProductTypeRegistry()` に `$registry->register(new MyType())` を追加
 
 実装例は `src/Types/EbookType.php`（API provider 連携あり）と `src/Types/VodType.php`（手動入力のみ・監督/出演を header に昇格）を参照。VOD のように provider 連携が無い場合は `extractExtrasFromProvider()` を空配列で返すだけでよい。新しいプラットフォームを使う場合は `PlatformConfig::defaults()` に `applicableTypes` を新タイプの code にした `PlatformDefinition` を追加する（`src/Platform/PlatformConfig.php` の VOD platform 群を参照）。
 
+**管理画面（React）にタイプを書く必要はない。** タイプの一覧・追加情報の入力欄・購入リンクの項目は PHP の定義（`ProductTypeUiList`）から `window.affilicardProductTypes` として渡され、商品編集画面のタイプの選択肢・設定の「デフォルト商品タイプ」・プラットフォーム設定のタブ名に使われる。
+
+#### 既定の商品タイプ
+
+設定 → 一般の「デフォルト商品タイプ」（`default_product_type`）は次の 2 か所で使う（`Affilicard\Types\DefaultProductType`）。
+
+- **商品編集画面で新しく作る商品**: そのタイプで作られる
+- **ストアの URL から自動で作る商品**（自動作成）: ストアの対象タイプ（`applicableTypes`）にこのタイプがあればそれを、無ければストアの対象タイプの先頭を使う（既定が「動画配信」のサイトで電子書籍ストアの商品を作ったとき、動画配信の商品にならないようにするため）
+
+REST（`POST /affilicard/v1/products`）で `product_type` を省いたときの既定は、この設定に関係なく `generic` のまま。
+
+商品編集画面のストアの選択肢は、商品タイプ向けのストアを先に、ほかのタイプ向けのストアを「（電子書籍 向け）」のように添えて後ろに並べる（選べなくはしない。カードもタイプでストアを絞らない）。
+
 ### 提供形態のラベル（見放題・レンタルなど）
 
-購入リンク（offer）の `plan_label` に入れた文字列（例「見放題」「レンタル」「読み放題」）は、カードの価格欄にラベルとして出る。価格の主張ではないため、**価格の鮮度に関係なく表示する**（手入力で価格を持たない VOD の購入リンクでも出る）。価格に紐づく割引の `badge`（「40%OFF」など）は従来どおり、価格を表示できるときだけ出す。
+購入リンク（offer）の `plan_label` に入れた文字列（例「見放題」「レンタル」「購入」）は、カードの価格欄にラベルとして出る。**提供形態は商品タイプ「動画配信」（`vod`）の商品だけが使う**（`ProductTypeInterface::offerFields()`）。ほかのタイプの商品では管理画面に入力欄が出ず、値が残っていてもカードには出ない。価格の主張ではないため、**価格の鮮度に関係なく表示する**（手入力で価格を持たない VOD の購入リンクでも出る）。価格に紐づく割引の `badge`（「40%OFF」など）は従来どおり、価格を表示できるときだけ出す。
 
-### バージョン違い（字幕版・吹替版など）を並べる
+### バージョン違い（通常版・特装版など）を並べる
 
-同じ作品が字幕版・吹替版・ディレクターズカット版のように**別の商品ページ**で売られているときは、1 つの listing の購入リンク（offer）にそれぞれを入れ、`variant_label`（管理画面の「バージョン」）に名前を付ける。カードでは同じストアの中にバージョンごとの行が並ぶ（2 行目以降はストア名を省き、区切り線を点線にする）。
+同じ商品が通常版・特装版、字幕版・吹替版のように**別の商品ページ**で売られているときは、1 つの listing の購入リンク（offer）にそれぞれを入れ、`variant_label`（管理画面の「バージョン」）に名前を付ける。カードでは同じストアの中にバージョンごとの行が並ぶ（2 行目以降はストア名を省き、区切り線を点線にする）。
 
 - 同じ `variant_label`（空欄どうしも同じ）の購入リンクは、従来どおり「優先順位つきの代わりのリンク」として扱い、表示順が先の 1 件だけを出す（設定「商品が見つからない購入リンクを飛ばして、次の購入リンクを表示する」（`fallback_on_terminal`）が有効なときだけ、恒久失敗した購入リンクを飛ばして次へ切り替わる）
 - バージョンの並びは、表示順（`display_order`）で各バージョンが最初に現れた位置で決まる

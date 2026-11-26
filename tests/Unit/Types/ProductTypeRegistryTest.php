@@ -94,6 +94,10 @@ final class ProductTypeRegistryTest extends TestCase {
 				return array();
 			}
 
+			public function offerFields(): array {
+				return array();
+			}
+
 			public function cardMediaLabel(): string {
 				return '';
 			}

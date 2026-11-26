@@ -1,7 +1,7 @@
 /**
  * E2E spec: プラットフォームのリンクテンプレート
  *
- * 1. 設定画面（VOD タブ）でリンクテンプレートと対象ドメインを入れて保存すると、
+ * 1. 設定画面（動画配信タブ）でリンクテンプレートと対象ドメインを入れて保存すると、
  *    REST（/affilicard/v1/platforms）に正規化された値で保存される
  * 2. 作品 URL（regular_url）だけを持つ VOD の購入リンクは、カードの CTA が
  *    テンプレートで組み立てたアフィリエイトリンクになる
@@ -89,7 +89,7 @@ test.describe( 'プラットフォームのリンクテンプレート', () => {
 	test( '設定画面で入れたテンプレートと対象ドメインが正規化されて保存される', async ( {
 		page,
 	} ) => {
-		// 設定画面の VOD タブに hulu が出るよう、まず定義を用意する（値は空）。
+		// 設定画面の動画配信タブに hulu が出るよう、まず定義を用意する（値は空）。
 		await api( 'PUT', '/affilicard/v1/platforms', {
 			platforms: withHulu( originalPlatforms, {
 				linkTemplate: '',
@@ -99,7 +99,7 @@ test.describe( 'プラットフォームのリンクテンプレート', () => {
 
 		await page.goto( SETTINGS_URL );
 		await page.getByRole( 'tab', { name: 'プラットフォーム' } ).click();
-		await page.getByRole( 'tab', { name: 'VOD' } ).click();
+		await page.getByRole( 'tab', { name: '動画配信' } ).click();
 		await page.getByRole( 'button', { name: /^Hulu \(hulu\)/ } ).click();
 
 		await page.getByLabel( 'リンクテンプレート' ).fill( TEMPLATE );

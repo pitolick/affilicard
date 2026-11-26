@@ -1,0 +1,29 @@
+[
+	{
+		"code": "generic",
+		"label": "汎用",
+		"extrasSchema": [],
+		"offerFields": []
+	},
+	{
+		"code": "ebook",
+		"label": "電子書籍",
+		"extrasSchema": [
+			{ "key": "author", "label": "著者", "placeholder": "著者名" },
+			{ "key": "publisher", "label": "出版社", "placeholder": "出版社名" },
+			{ "key": "isbn", "label": "ISBN", "placeholder": "例: 978-4-XX-XXXXXX-X" }
+		],
+		"offerFields": []
+	},
+	{
+		"code": "vod",
+		"label": "動画配信",
+		"extrasSchema": [
+			{ "key": "director", "label": "監督", "placeholder": "監督名" },
+			{ "key": "cast", "label": "出演", "placeholder": "例: 俳優A、俳優B" },
+			{ "key": "release_year", "label": "公開年", "placeholder": "例: 2022" },
+			{ "key": "distributor", "label": "配給", "placeholder": "配給会社名" }
+		],
+		"offerFields": [ "plan_label" ]
+	}
+]

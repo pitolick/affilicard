@@ -471,4 +471,69 @@ final class CardHtmlBuilderTest extends TestCase {
 		$html = $builder->build( $product, array() );
 		$this->assertStringContainsString( 'aspect-ratio: 2 / 3', $html );
 	}
+
+	/**
+	 * 提供形態（plan_label）は動画配信の商品だけカードに出る（VodType::offerFields()）。
+	 *
+	 * @dataProvider planLabelCases
+	 */
+	public function test_build_提供形態は商品タイプのofferFieldsで出し分ける( string $type, bool $shown ): void {
+		\WP_Mock::userFunction( 'get_option' )->andReturnUsing(
+			static fn( $key ) => 'affilicard_platforms' === $key
+				? array(
+					array(
+						'code'            => 'dmm-books',
+						'name'            => 'Example',
+						'provider'        => 'manual',
+						'displayOrder'    => 1,
+						'enabled'         => true,
+						'applicableTypes' => array( 'generic', 'ebook', 'vod' ),
+					),
+				)
+				: array()
+		);
+		\WP_Mock::userFunction( 'get_post_thumbnail_id' )->andReturn( 0 );
+		\WP_Mock::userFunction( 'sanitize_text_field' )->andReturnUsing(
+			static fn( $v ) => is_string( $v ) ? trim( $v ) : ''
+		);
+		WP_Mock::userFunction( 'current_time', array( 'return' => '2026-06-29' ) );
+
+		$product = $this->productWith(
+			array(
+				'product_type' => $type,
+				'listings'     => array(
+					array(
+						'platform' => 'dmm-books',
+						'enabled'  => true,
+						'offers'   => array(
+							array(
+								'affiliate_url' => 'https://al.dmm.com/x',
+								'plan_label'    => '見放題',
+							),
+						),
+					),
+				),
+			)
+		);
+
+		$html = ( new CardHtmlBuilder() )->build( $product, array() );
+		// 購入リンク自体はどのタイプでも出る（出し分けるのは提供形態のラベルだけ）。
+		$this->assertStringContainsString( 'affilicard-card__cta', $html );
+		if ( $shown ) {
+			$this->assertStringContainsString( 'affilicard-card__plan', $html );
+		} else {
+			$this->assertStringNotContainsString( 'affilicard-card__plan', $html );
+		}
+	}
+
+	/**
+	 * @return array<string, array{string, bool}>
+	 */
+	public static function planLabelCases(): array {
+		return array(
+			'動画配信は出す'   => array( 'vod', true ),
+			'電子書籍は出さない' => array( 'ebook', false ),
+			'汎用は出さない'   => array( 'generic', false ),
+		);
+	}
 }

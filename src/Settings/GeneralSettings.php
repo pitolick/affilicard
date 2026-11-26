@@ -62,6 +62,15 @@ final class GeneralSettings {
 	}
 
 	/**
+	 * 新しい商品の既定のタイプ（設定「既定の商品タイプ」）。
+	 *
+	 * 使い方は {@see \Affilicard\Types\DefaultProductType}（編集画面で作る商品・自動で作る商品）。
+	 */
+	public static function defaultProductType(): string {
+		return (string) self::get()['default_product_type'];
+	}
+
+	/**
 	 * すべてのカードで商品画像を描画しないか（既定 false）。
 	 *
 	 * ブロック属性 `hideMedia` が明示されていればそちらが優先される。
@@ -164,7 +173,8 @@ final class GeneralSettings {
 		}
 
 		$type = isset( $values['default_product_type'] ) ? (string) $values['default_product_type'] : self::DEFAULTS['default_product_type'];
-		if ( ! in_array( $type, array( 'generic', 'ebook' ), true ) ) {
+		// 選べるのは登録済みの商品タイプ（4.4.0 までは generic / ebook の直書きで、動画配信を捨てていた）。
+		if ( ! in_array( $type, \Affilicard\Plugin::buildProductTypeRegistry()->codes(), true ) ) {
 			$type = self::DEFAULTS['default_product_type'];
 		}
 

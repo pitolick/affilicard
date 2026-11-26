@@ -65,7 +65,13 @@ final class ProductAutoCreator {
 			return WorkOutcome::TRANSIENT_FAILURE;
 		}
 
-		return $this->createLocked( $definition->code, $definition->name, $externalId, $result->data );
+		$product_type = \Affilicard\Types\DefaultProductType::forPlatform(
+			\Affilicard\Settings\GeneralSettings::defaultProductType(),
+			$definition->applicableTypes,
+			\Affilicard\Plugin::buildProductTypeRegistry()
+		);
+
+		return $this->createLocked( $definition->code, $definition->name, $externalId, $result->data, $product_type );
 	}
 
 	/**
@@ -92,7 +98,7 @@ final class ProductAutoCreator {
 	 *
 	 * @param array<string, mixed> $fetched
 	 */
-	private function createLocked( string $platformCode, string $platformName, string $externalId, array $fetched ): WorkOutcome {
+	private function createLocked( string $platformCode, string $platformName, string $externalId, array $fetched, string $productType = 'generic' ): WorkOutcome {
 		global $wpdb;
 
 		// GET_LOCK の名前は 64 バイト以内。external ID は長さも文字種も外部由来なので
@@ -115,7 +121,7 @@ final class ProductAutoCreator {
 
 			try {
 				$post_id = $this->repository->save(
-					$this->buildProductData( $platformCode, $platformName, $externalId, $fetched )
+					$this->buildProductData( $platformCode, $platformName, $externalId, $fetched, $productType )
 				);
 			} catch ( ProductLockUnavailable $e ) {
 				// 商品ロック（自動作成ロックとは別物）を取れず listings を書かなかった。
@@ -145,7 +151,7 @@ final class ProductAutoCreator {
 	 * @param array<string, mixed> $fetched
 	 * @return array<string, mixed>
 	 */
-	private function buildProductData( string $platformCode, string $platformName, string $externalId, array $fetched ): array {
+	private function buildProductData( string $platformCode, string $platformName, string $externalId, array $fetched, string $productType = 'generic' ): array {
 		$title = isset( $fetched['title'] ) && '' !== (string) $fetched['title']
 			? (string) $fetched['title']
 			: trim( $platformName . ' ' . $externalId );
@@ -155,7 +161,8 @@ final class ProductAutoCreator {
 		return array(
 			'title'        => $title,
 			'status'       => 'publish',
-			'product_type' => 'generic',
+			// 設定「既定の商品タイプ」を、ストアの対象タイプに合わせて使う。
+			'product_type' => $productType,
 			'listings'     => array(
 				array(
 					'platform'        => $platformCode,

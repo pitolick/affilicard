@@ -47,6 +47,14 @@ final class ProductMetaBox {
 			$asset['version'],
 			true
 		);
+		// 商品タイプの一覧（選択肢・追加情報の入力欄・タイプ固有の購入リンクの項目）は PHP が正本。
+		wp_add_inline_script(
+			'affilicard-metabox',
+			'window.affilicardProductTypes=' . \Affilicard\Plugin::inlineJson(
+				\Affilicard\Types\ProductTypeUiList::build( \Affilicard\Plugin::buildProductTypeRegistry() )
+			) . ';',
+			'before'
+		);
 		wp_set_script_translations( 'affilicard-metabox', 'affilicard' );
 		wp_enqueue_style( 'wp-components' );
 		wp_enqueue_style(

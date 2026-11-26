@@ -24,8 +24,10 @@
 | `Affilicard\Platform\PlatformConfig` | `affilicard_platforms` option の get/save + `defaults()` |
 | `Affilicard\Types\ProductTypeInterface` | 商品タイプの拡張ポイント |
 | `Affilicard\Types\AbstractProductType` | Hybrid `validateExtras` の共通実装 |
-| `Affilicard\Types\GenericType` / `EbookType` | 汎用 / 電子書籍タイプ |
+| `Affilicard\Types\GenericType` / `EbookType` / `VodType` | 汎用 / 電子書籍 / 動画配信タイプ（提供形態 `plan_label` は `offerFields()` で動画配信だけ） |
 | `Affilicard\Types\ProductTypeRegistry` | 商品タイプのレジストリ |
+| `Affilicard\Types\ProductTypeUiList` | 管理画面(React)へ渡す商品タイプの一覧（`window.affilicardProductTypes`）。**タイプは PHP だけが持ち、JS に直書きしない** |
+| `Affilicard\Types\DefaultProductType` | 設定「デフォルト商品タイプ」から新しい商品のタイプを決める（編集画面で作る商品・自動で作る商品） |
 | `Affilicard\Provider\ProviderInterface` | Provider の拡張ポイント (`credentialsSchema` + `testConnection` 含む) |
 | `Affilicard\Provider\ProviderRegistry` | Provider のレジストリ |
 | `Affilicard\Provider\ProviderCredentials` | AES-256-CBC で認証情報を暗号化保存 (`patch` 的更新) |

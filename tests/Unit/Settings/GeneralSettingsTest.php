@@ -122,6 +122,24 @@ final class GeneralSettingsTest extends TestCase {
 		$this->assertSame( 'ebook', $result['default_product_type'] );
 	}
 
+	public function test_update_accepts_vod_as_default_product_type(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array() );
+		WP_Mock::userFunction( 'update_option' )->once()->andReturn( true );
+
+		$result = GeneralSettings::update( array( 'default_product_type' => 'vod' ) );
+		$this->assertSame( 'vod', $result['default_product_type'] );
+	}
+
+	public function test_defaultProductType_returns_saved_value(): void {
+		WP_Mock::userFunction( 'get_option' )
+			->with( GeneralSettings::OPTION_KEY, array() )
+			->andReturn( array( 'default_product_type' => 'vod' ) );
+
+		$this->assertSame( 'vod', GeneralSettings::defaultProductType() );
+	}
+
 	public function test_update_preserves_refresh_interval_hours(): void {
 		WP_Mock::userFunction( 'get_option' )
 			->with( GeneralSettings::OPTION_KEY, array() )

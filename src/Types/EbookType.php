@@ -17,24 +17,27 @@ final class EbookType extends AbstractProductType {
 	}
 
 	/**
-	 * @return list<array{key: string, label: string, card?: string}>
+	 * @return list<array{key: string, label: string, card?: string, placeholder?: string}>
 	 */
 	public function extrasSchema(): array {
 		return array(
 			array(
-				'key'   => 'author',
-				'label' => __( '著者', 'affilicard' ),
-				'card'  => 'header',
+				'key'         => 'author',
+				'label'       => __( '著者', 'affilicard' ),
+				'card'        => 'header',
+				'placeholder' => __( '著者名', 'affilicard' ),
 			),
 			array(
-				'key'   => 'publisher',
-				'label' => __( '出版社', 'affilicard' ),
-				'card'  => 'header',
+				'key'         => 'publisher',
+				'label'       => __( '出版社', 'affilicard' ),
+				'card'        => 'header',
+				'placeholder' => __( '出版社名', 'affilicard' ),
 			),
 			array(
-				'key'   => 'isbn',
-				'label' => __( 'ISBN', 'affilicard' ),
-				'card'  => 'hidden',
+				'key'         => 'isbn',
+				'label'       => __( 'ISBN', 'affilicard' ),
+				'card'        => 'hidden',
+				'placeholder' => __( '例: 978-4-XX-XXXXXX-X', 'affilicard' ),
 			),
 		);
 	}

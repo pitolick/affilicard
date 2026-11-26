@@ -538,6 +538,32 @@ $p_vod_variants = $repo->save(
 	)
 );
 
+// 対照：提供形態（plan_label）は動画配信の商品だけが使う（v4.5.0・VodType::offerFields()）。
+// 同じ「見放題」を入れた電子書籍の商品では、カードに提供形態が出ない。
+$p_ebook_plan = $repo->save(
+	array(
+		'title'        => 'サンプル作品（電子書籍・提供形態は出ない）',
+		'status'       => 'publish',
+		'product_type' => 'ebook',
+		'stock_status' => 'available',
+		'listings'     => array(
+			array(
+				'platform' => 'dmm-books',
+				'enabled'  => true,
+				'offers'   => array(
+					array(
+						'display_order' => 100,
+						// 身元（external_id か regular_url）が無い購入リンクは保存時に捨てられる。
+						'regular_url'   => 'https://example.com/product/plan-ebook',
+						'affiliate_url' => 'https://example.com/aff-plan-ebook',
+						'plan_label'    => '見放題',
+					),
+				),
+			),
+		),
+	)
+);
+
 $set_demo_cover( (int) $p_vod_all, 'THE DEMONSTRATION', '#1d2b53', 'square' );
 $set_demo_cover( (int) $p_vod_variants, 'THE VERSIONS', '#008751', 'square' );
 $set_demo_cover( (int) $p_vod_single, 'ANIME MOVIE', '#7e2553', 'square' );
@@ -557,6 +583,9 @@ $content = implode(
 		$block( $p_vod_single ),
 		'<!-- wp:paragraph --><p>対照：テンプレートも上書きも無い購入リンク（作品ページの URL がそのままリンク先になり、管理画面ではフォールバックとして警告が出ます）。</p><!-- /wp:paragraph -->',
 		$block( $p_vod_fallback ),
+		'<!-- wp:heading {"level":3} --><h3>提供形態は動画配信だけ（対照）</h3><!-- /wp:heading -->',
+		'<!-- wp:paragraph --><p>提供形態（見放題・レンタルなど）は商品タイプ「動画配信」だけが使う項目です。上の動画配信のカードには出ていますが、同じ「見放題」を購入リンクに入れた電子書籍の商品（下）では出ません。商品編集画面でも、動画配信以外では入力欄が出ません（値が残っているときだけ、消せるように出ます）。</p><!-- /wp:paragraph -->',
+		$block( $p_ebook_plan ),
 		'<!-- wp:heading {"level":3} --><h3>バージョン違い（字幕版・吹替版）カード確認</h3><!-- /wp:heading -->',
 		'<!-- wp:paragraph --><p>同じ作品が字幕版・吹替版・ディレクターズカット版で別の商品ページになっているとき、購入リンクの「バージョン」を分けると、同じストアの中で 1 行ずつ並びます（2 行目以降はストア名を省き、区切り線を点線にしています）。Prime Video の字幕版にはもう 1 つ「代わりのリンク」（同じバージョン・表示順が後ろのレンタル）がありますが、カードに出るのは表示順が先の 1 件だけです。バージョンを持たない Hulu は従来どおり 1 行です。</p><!-- /wp:paragraph -->',
 		$block( $p_vod_variants ),

@@ -8,9 +8,10 @@ import {
 	Panel,
 	PanelBody,
 } from '@wordpress/components';
-import { __ } from '@wordpress/i18n';
+import { __, sprintf } from '@wordpress/i18n';
 import { fetchPlatforms } from '../api/platforms';
 import { canApplyLinkTemplate } from '../linkTemplate';
+import { productTypeLabel, typeAllowsOfferField } from '../productTypes';
 
 // Affilicard\Pricing\OfferSelector::DEFAULT_ORDER と揃える。
 const DEFAULT_DISPLAY_ORDER = 100;
@@ -319,6 +320,77 @@ function hasLegacyFetchField(listing) {
 	return LEGACY_FETCH_FIELDS.some((field) => field in listing);
 }
 
+// ストアの対象タイプ。未設定なら汎用（PHP の PlatformDefinition::fromArray() と同じ）。
+function platformTypes(platform) {
+	const types = Array.isArray(platform?.applicableTypes)
+		? platform.applicableTypes.filter((t) => typeof t === 'string' && t)
+		: [];
+	return types.length > 0 ? types : ['generic'];
+}
+
+function isPlatformForType(platform, productType) {
+	return platformTypes(platform).includes(productType);
+}
+
+function platformTypesLabel(platform) {
+	return platformTypes(platform).map(productTypeLabel).join('・');
+}
+
+/**
+ * ストアの選択肢。商品タイプが分かっていれば、そのタイプ向けのストアを先に、
+ * 他のタイプ向けのストアは後ろに「（電子書籍 向け）」のように添えて並べる。
+ * 隠さないのは、電子書籍の原作を動画配信の商品に載せるような使い方もあるため
+ * （カードもタイプでストアを絞らない）。
+ *
+ * @param {Array<Object>}    platforms
+ * @param {string|undefined} productType
+ * @return {{value: string, label: string}[]} 選択肢。
+ */
+export function platformOptionsFor(platforms, productType) {
+	const list = Array.isArray(platforms) ? platforms : [];
+	if (productType === undefined) {
+		return list.map((p) => ({ value: p.code, label: p.name }));
+	}
+	const forType = list.filter((p) => isPlatformForType(p, productType));
+	const others = list.filter((p) => !isPlatformForType(p, productType));
+	return [
+		...forType.map((p) => ({ value: p.code, label: p.name })),
+		...others.map((p) => ({
+			value: p.code,
+			label: sprintf(
+				/* translators: 1: ストア名 2: ストアの対象タイプ名 */
+				__('%1$s（%2$s 向け）', 'affilicard'),
+				p.name,
+				platformTypesLabel(p)
+			),
+		})),
+	];
+}
+
+// 選んだストアが商品タイプ向けでないときの注意（選べなくはしない）。
+function PlatformTypeNotice({ platform, productType }) {
+	if (
+		productType === undefined ||
+		!platform ||
+		isPlatformForType(platform, productType)
+	) {
+		return null;
+	}
+	return (
+		<Notice status="warning" isDismissible={false}>
+			{sprintf(
+				/* translators: 1: 商品タイプ名 2: ストアの対象タイプ名 */
+				__(
+					'この商品タイプ向けのストアではありません（商品: %1$s／ストア: %2$s 向け）。カードには表示されます。',
+					'affilicard'
+				),
+				productTypeLabel(productType),
+				platformTypesLabel(platform)
+			)}
+		</Notice>
+	);
+}
+
 function platformName(platforms, code) {
 	const p = (platforms || []).find((x) => x.code === code);
 	return p ? p.name : '';
@@ -477,8 +549,20 @@ function offerTestId(offer, index) {
 	return id !== '' ? id : `pos-${index}`;
 }
 
-function OffersEditor({ offers, fallbackOnTerminal, platform, onChange }) {
+function OffersEditor({
+	offers,
+	fallbackOnTerminal,
+	platform,
+	productType,
+	onChange,
+}) {
 	const rows = Array.isArray(offers) ? offers : [];
+	// 提供形態（見放題・レンタルなど）は商品タイプの offerFields にあるときだけ使う
+	// （PHP の ProductTypeInterface::offerFields()。今は動画配信だけ）。
+	// productType を渡されない呼び出しは従来どおり出す（PHP の CardRenderer と同じ）。
+	const planLabelAllowed =
+		productType === undefined ||
+		typeAllowsOfferField(productType, 'plan_label');
 
 	// 行の身元（React key ＝ PanelBody の開閉キー）は、中身（external_id 等）から
 	// 導出してはいけない。導出すると、外部 ID を1文字打つたびに識別子が変わって
@@ -701,22 +785,34 @@ function OffersEditor({ offers, fallbackOnTerminal, platform, onChange }) {
 									updateOffer(i, { list_price_label: v })
 								}
 							/>
-							<TextControl
-								label={__('提供形態', 'affilicard')}
-								value={offer.plan_label ?? ''}
-								placeholder={__('例: 見放題', 'affilicard')}
-								help={__(
-									'見放題・レンタル・読み放題など、このストアでの提供形態。価格の有無に関係なくカードに出ます。',
-									'affilicard'
-								)}
-								onChange={(v) => updateOffer(i, { plan_label: v })}
-							/>
+							{(planLabelAllowed ||
+								String(offer.plan_label ?? '').trim() !== '') && (
+								<TextControl
+									label={__('提供形態', 'affilicard')}
+									value={offer.plan_label ?? ''}
+									placeholder={__('例: 見放題', 'affilicard')}
+									help={
+										planLabelAllowed
+											? __(
+													'見放題・レンタル・購入など、このストアでの提供形態。価格の有無に関係なくカードに出ます。',
+													'affilicard'
+												)
+											: __(
+													'この商品タイプではカードに表示されません。不要なら空にしてください。',
+													'affilicard'
+												)
+									}
+									onChange={(v) =>
+										updateOffer(i, { plan_label: v })
+									}
+								/>
+							)}
 							<TextControl
 								label={__('バージョン', 'affilicard')}
 								value={offer.variant_label ?? ''}
-								placeholder={__('例: 字幕版', 'affilicard')}
+								placeholder={__('例: 通常版', 'affilicard')}
 								help={__(
-									'字幕版・吹替版・ディレクターズカット版など、同じ作品が別の商品ページになっているときの名前。バージョンの違う購入リンクはカードに 1 行ずつ並びます。同じバージョン（空欄どうしも同じ）の購入リンクは、表示順で 1 つだけが使われます。',
+									'通常版・特装版、字幕版・吹替版など、同じ商品が別の商品ページになっているときの名前。バージョンの違う購入リンクはカードに 1 行ずつ並びます。同じバージョン（空欄どうしも同じ）の購入リンクは、表示順で 1 つだけが使われます。',
 									'affilicard'
 								)}
 								onChange={(v) =>
@@ -771,6 +867,7 @@ function OffersEditor({ offers, fallbackOnTerminal, platform, onChange }) {
 export function ListingsEditor({
 	listings,
 	platforms: platformsProp,
+	productType,
 	onChange,
 	fallbackOnTerminal = false,
 }) {
@@ -809,7 +906,7 @@ export function ListingsEditor({
 
 	const platformOptions = [
 		{ value: '', label: __('— 選択 —', 'affilicard') },
-		...platforms.map((p) => ({ value: p.code, label: p.name })),
+		...platformOptionsFor(platforms, productType),
 	];
 
 	return (
@@ -864,9 +961,16 @@ export function ListingsEditor({
 								updateRow(i, { button_label_override: v })
 							}
 						/>
+						<PlatformTypeNotice
+							platform={(platforms || []).find(
+								(p) => p.code === row.platform
+							)}
+							productType={productType}
+						/>
 						<OffersEditor
 							offers={row.offers}
 							fallbackOnTerminal={fallbackOnTerminal}
+							productType={productType}
 							platform={(platforms || []).find(
 								(p) => p.code === row.platform
 							)}

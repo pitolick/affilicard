@@ -31,6 +31,47 @@ final class PluginTest extends TestCase {
 		parent::tearDown();
 	}
 
+	private function post( string $type, string $status ): \WP_Post {
+		$post              = new \WP_Post( array() );
+		$post->post_type   = $type;
+		$post->post_status = $status;
+		return $post;
+	}
+
+	public function test_onInsertProduct_新しい商品に既定のタイプを書く(): void {
+		WP_Mock::userFunction( 'metadata_exists' )->andReturn( false );
+		WP_Mock::userFunction( 'get_option' )
+			->with( 'affilicard_general', array() )
+			->andReturn( array( 'default_product_type' => 'vod' ) );
+		WP_Mock::userFunction( 'update_post_meta' )
+			->once()
+			->with( 10, 'affilicard_product_type', 'vod' );
+
+		Plugin::onInsertProduct( 10, $this->post( 'affilicard_product', 'auto-draft' ), false );
+		$this->assertConditionsMet();
+	}
+
+	public function test_onInsertProduct_タイプが決まっている商品や他の投稿には書かない(): void {
+		WP_Mock::userFunction( 'metadata_exists' )->andReturn( true );
+		WP_Mock::userFunction( 'update_post_meta' )->never();
+
+		Plugin::onInsertProduct( 10, $this->post( 'affilicard_product', 'auto-draft' ), false );
+		Plugin::onInsertProduct( 10, $this->post( 'affilicard_product', 'publish' ), false );
+		Plugin::onInsertProduct( 10, $this->post( 'post', 'auto-draft' ), false );
+		Plugin::onInsertProduct( 10, $this->post( 'affilicard_product', 'auto-draft' ), true );
+		$this->assertConditionsMet();
+	}
+
+	public function test_inlineJson_scriptを閉じる文字を逃がす(): void {
+		WP_Mock::userFunction( 'wp_json_encode' )->andReturnUsing(
+			static fn( $data, $flags = 0 ) => json_encode( $data, $flags )
+		);
+		$json = Plugin::inlineJson( array( 'label' => '</script><b>&\'"' ) );
+		$this->assertStringNotContainsString( '</script>', $json );
+		$this->assertStringNotContainsString( '<', $json );
+		$this->assertSame( array( 'label' => '</script><b>&\'"' ), json_decode( $json, true ) );
+	}
+
 	public function test_buildProviderRegistry_includes_manual_and_dmm_ebook(): void {
 		$registry = Plugin::buildProviderRegistry();
 

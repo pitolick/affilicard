@@ -50,6 +50,20 @@ describe( 'GeneralPanel', () => {
 		).toBeInTheDocument();
 	} );
 
+	test( 'デフォルト商品タイプは PHP が注入したタイプから選べる（動画配信を含む）', async () => {
+		fetchSettings.mockResolvedValue( {
+			cache_ttl_seconds: 3600,
+			default_product_type: 'vod',
+			cron_enabled: false,
+		} );
+		render( <GeneralPanel /> );
+		const select = await screen.findByLabelText( /デフォルト商品タイプ/ );
+		expect( select ).toHaveValue( 'vod' );
+		expect(
+			Array.from( select.options ).map( ( o ) => o.value )
+		).toEqual( [ 'generic', 'ebook', 'vod' ] );
+	} );
+
 	test( 'shows CronHelpBox when cron_enabled is true', async () => {
 		fetchSettings.mockResolvedValue( {
 			cache_ttl_seconds: 86400,

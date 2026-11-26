@@ -53,6 +53,8 @@ use Affilicard\Types\EbookType;
 use Affilicard\Types\GenericType;
 use Affilicard\Types\ProductTypeRegistry;
 use Affilicard\Types\VodType;
+use Affilicard\Types\ProductTypeUiList;
+use Affilicard\Types\DefaultProductType;
 use Affilicard\Upgrade\PluginUpgrade;
 
 /**
@@ -105,6 +107,7 @@ final class Plugin {
 		// CPT 登録
 		add_action( 'init', array( ProductPostType::class, 'register' ) );
 		add_action( 'init', array( \Affilicard\PostType\ProductMeta::class, 'register' ) );
+		add_action( 'wp_insert_post', array( self::class, 'onInsertProduct' ), 10, 3 );
 
 		// Gutenberg Block 登録（フロント/エディタ両方で init 時に必要）
 		Block::register_hook();
@@ -443,6 +446,39 @@ final class Plugin {
 		return $registry;
 	}
 
+	/**
+	 * `<script>` の中へ埋め込む JSON。翻訳から入る文字列に `</script>` が混ざっても
+	 * スクリプトが閉じないよう、`<` `>` `&` と引用符を \u 表記にする。
+	 *
+	 * @param mixed $data
+	 */
+	public static function inlineJson( $data ): string {
+		$json = wp_json_encode( $data, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT );
+		return is_string( $json ) ? $json : 'null';
+	}
+
+	/**
+	 * 商品編集画面で新しく作る商品（auto-draft）に、設定の既定の商品タイプを入れる。
+	 *
+	 * meta の既定値（generic）を設定で変えると、タイプを持たない既存の商品の見え方まで
+	 * 変わるため、作られた瞬間に値として書く。REST や自動作成など auto-draft を経ない
+	 * 作り方には効かない（それぞれが自分でタイプを決める）。
+	 */
+	public static function onInsertProduct( int $postId, \WP_Post $post, bool $update ): void {
+		if ( $update || ProductPostType::POST_TYPE !== $post->post_type || 'auto-draft' !== $post->post_status ) {
+			return;
+		}
+		// get_post_meta() は登録時の default（generic）を返すため、行の有無で判定する。
+		if ( metadata_exists( 'post', $postId, ProductPostType::META_PRODUCT_TYPE ) ) {
+			return;
+		}
+		update_post_meta(
+			$postId,
+			ProductPostType::META_PRODUCT_TYPE,
+			DefaultProductType::forNewProduct( GeneralSettings::defaultProductType(), self::buildProductTypeRegistry() )
+		);
+	}
+
 	public static function buildProductTypeRegistry(): ProductTypeRegistry {
 		$registry = new ProductTypeRegistry();
 		$registry->register( new GenericType() );
@@ -669,8 +705,9 @@ final class Plugin {
 		);
 		wp_add_inline_script(
 			'affilicard-settings',
-			'window.affilicardAccounts=' . wp_json_encode( AccountUiList::build( self::buildAccountRegistry() ) ) . ';'
-			. 'window.affilicardProviders=' . wp_json_encode( ProviderUiList::build( self::buildProviderRegistry() ) ) . ';',
+			'window.affilicardAccounts=' . self::inlineJson( AccountUiList::build( self::buildAccountRegistry() ) ) . ';'
+			. 'window.affilicardProviders=' . self::inlineJson( ProviderUiList::build( self::buildProviderRegistry() ) ) . ';'
+			. 'window.affilicardProductTypes=' . self::inlineJson( ProductTypeUiList::build( self::buildProductTypeRegistry() ) ) . ';',
 			'before'
 		);
 		wp_set_script_translations( 'affilicard-settings', 'affilicard' );

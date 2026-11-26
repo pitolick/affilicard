@@ -49,13 +49,24 @@ final class CardRenderer {
 	private int $nowTs = 0;
 
 	/**
+	 * 商品タイプ固有の購入リンクの項目のうち、この描画で出してよいもの
+	 * （ProductTypeInterface::offerFields()。null は「タイプを知らない呼び出し」で制限しない）。
+	 *
+	 * @var list<string>|null
+	 */
+	private ?array $offerFields = null;
+
+	/**
 	 * @param array<string, mixed>     $product   ProductRepository::find() の戻り値形
 	 * @param list<PlatformDefinition> $platforms enabled な platform（displayOrder 昇順想定）
-	 * @param array<string, mixed>     $options   hide_platforms / image_url / colors / display_policies
+	 * @param array<string, mixed>     $options   hide_platforms / image_url / colors / display_policies / offer_fields
 	 */
 	public function render( array $product, array $platforms, array $options = array() ): string {
-		$this->nowTs    = time();
-		$this->policies = array();
+		$this->nowTs       = time();
+		$this->policies    = array();
+		$this->offerFields = isset( $options['offer_fields'] ) && is_array( $options['offer_fields'] )
+			? array_values( array_map( 'strval', $options['offer_fields'] ) )
+			: null;
 		if ( isset( $options['display_policies'] ) && is_array( $options['display_policies'] ) ) {
 			foreach ( $options['display_policies'] as $code => $policy ) {
 				if ( $policy instanceof DisplayPolicy ) {
@@ -445,7 +456,7 @@ final class CardRenderer {
 	 * platform の displayOrder 昇順（同値は元の出現順）で並べたうえで、各 listing に対して
 	 * OfferSelector::selectPerVariant() が選んだ購入リンク（offer）を組にして返す。
 	 *
-	 * **1 つの listing から複数の組が出ることがある。** 字幕版・吹替版のようにバージョン
+	 * **1 つの listing から複数の組が出ることがある。** 通常版・特装版のようにバージョン
 	 * （variant_label）の違う購入リンクは、バージョンごとに 1 組ずつ返す（同じ listing の組は
 	 * 隣り合って並ぶ）。バージョンを持たない listing は従来どおり 0 組か 1 組。
 	 *
@@ -550,6 +561,16 @@ final class CardRenderer {
 			$sorted[] = $entry['listing'];
 		}
 		return $sorted;
+	}
+
+	/**
+	 * 商品タイプ固有の購入リンクの項目（$field）を出してよいか。
+	 *
+	 * CardHtmlBuilder は商品タイプの offerFields() を必ず渡す。渡されないのは、タイプを
+	 * 知らずにこのクラスを直接使う呼び出しだけで、その場合は制限しない（従来どおり）。
+	 */
+	private function allowsOfferField( string $field ): bool {
+		return null === $this->offerFields || in_array( $field, $this->offerFields, true );
 	}
 
 	/**
@@ -666,11 +687,12 @@ final class CardRenderer {
 			// 提供形態のラベル（見放題・レンタルなど）。価格の主張ではないため、価格の鮮度に
 			// 関係なく出す（手入力で価格を持たない VOD でも出る）。割引の badge とは別物。
 			$pricing = '';
-			// バージョンの名前（字幕版・吹替版など）。提供形態のラベルより前に置き、行の見出しにする。
+			// バージョンの名前（通常版・特装版、字幕版・吹替版など）。提供形態のラベルより前に置き、行の見出しにする。
 			if ( '' !== $variant ) {
 				$pricing .= '<span class="affilicard-card__variant">' . esc_html( $variant ) . '</span>';
 			}
-			$plan_label = trim( ScalarField::string( $offer, 'plan_label' ) );
+			// 提供形態（見放題・レンタルなど）は、それを持つ商品タイプ（動画配信）のときだけ出す。
+			$plan_label = $this->allowsOfferField( 'plan_label' ) ? trim( ScalarField::string( $offer, 'plan_label' ) ) : '';
 			if ( '' !== $plan_label ) {
 				$pricing .= '<span class="affilicard-card__plan">' . esc_html( $plan_label ) . '</span>';
 			}

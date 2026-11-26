@@ -6,12 +6,7 @@ import { enabledRanks, movePlatform } from '../platformOrder';
 import { useFlipReorder } from '../useFlipReorder';
 import { PlatformEditor } from './PlatformEditor';
 import { ApiCredentialsPanel } from './ApiCredentialsPanel';
-
-const TYPE_LABELS = {
-	generic: __( '汎用', 'affilicard' ),
-	ebook: __( '電子書籍', 'affilicard' ),
-	vod: __( 'VOD', 'affilicard' ),
-};
+import { productTypeLabel } from '../productTypes';
 
 const API_TAB = '__api__';
 
@@ -118,7 +113,7 @@ export function PlatformsPanel() {
 	const tabs = [
 		...types.map( ( t ) => ( {
 			name: t,
-			title: TYPE_LABELS[ t ] ?? t,
+			title: productTypeLabel( t ),
 		} ) ),
 		{ name: API_TAB, title: __( 'API 認証', 'affilicard' ) },
 	];

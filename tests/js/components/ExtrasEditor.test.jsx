@@ -127,4 +127,54 @@ describe( 'ExtrasEditor', () => {
 			{ label: 'サイズ', value: 'M' },
 		] );
 	} );
+	test( 'renders vod schema rows from the injected types', () => {
+		render(
+			<ExtrasEditor
+				productType="vod"
+				extras={ [] }
+				onChange={ () => {} }
+			/>
+		);
+		expect( screen.getByText( '監督' ) ).toBeInTheDocument();
+		expect( screen.getByText( '配給' ) ).toBeInTheDocument();
+	} );
+
+	test( '今のタイプに無い key の行はカスタム項目として編集できる', () => {
+		const onChange = jest.fn();
+		render(
+			<ExtrasEditor
+				productType="vod"
+				extras={ [
+					{ key: 'author', label: '著者', value: '山田太郎' },
+					{ key: 'director', label: '監督', value: '監督A' },
+				] }
+				onChange={ onChange }
+			/>
+		);
+		// 電子書籍の「著者」は動画配信の推奨項目に無いので、カスタム項目の行に出る。
+		expect( screen.getByDisplayValue( '著者' ) ).toBeInTheDocument();
+		expect( screen.getByDisplayValue( '山田太郎' ) ).toBeInTheDocument();
+
+		fireEvent.click( screen.getByRole( 'button', { name: '削除' } ) );
+		expect( onChange ).toHaveBeenLastCalledWith( [
+			{ key: 'director', label: '監督', value: '監督A' },
+		] );
+	} );
+
+	test( 'key の残った行を編集しても key は保つ', () => {
+		const onChange = jest.fn();
+		render(
+			<ExtrasEditor
+				productType="generic"
+				extras={ [ { key: 'author', label: '著者', value: '山田太郎' } ] }
+				onChange={ onChange }
+			/>
+		);
+		fireEvent.change( screen.getByDisplayValue( '山田太郎' ), {
+			target: { value: '山田花子' },
+		} );
+		expect( onChange ).toHaveBeenLastCalledWith( [
+			{ key: 'author', label: '著者', value: '山田花子' },
+		] );
+	} );
 } );

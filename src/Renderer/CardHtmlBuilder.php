@@ -66,6 +66,8 @@ final class CardHtmlBuilder {
 		$hidden_keys  = null !== $type ? $type->cardHiddenKeys() : array();
 		$media_label  = null !== $type ? $type->cardMediaLabel() : (string) __( '商品画像', 'affilicard' );
 		$media_aspect = null !== $type ? $type->cardMediaAspectRatio() : '1 / 1';
+		// タイプ固有の購入リンクの項目（動画配信の提供形態など）。登録に無いタイプは持たない。
+		$offer_fields = null !== $type ? $type->offerFields() : array();
 
 		$release_date = isset( $product['release_date'] ) ? (string) $product['release_date'] : '';
 		$today        = (string) current_time( 'Y-m-d' );
@@ -85,6 +87,7 @@ final class CardHtmlBuilder {
 			'hidden_keys'          => $hidden_keys,
 			'media_label'          => $media_label,
 			'media_aspect_ratio'   => $media_aspect,
+			'offer_fields'         => $offer_fields,
 			'cta_label_overrides'  => $cta_overrides,
 			'is_preorder'          => $is_preorder,
 			'release_date_label'   => $is_preorder ? \Affilicard\Stock\ReleaseDate::label( $release_date ) : '',

@@ -9,6 +9,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from '@wordpress/element';
 import {
 	ListingsEditor,
+	platformOptionsFor,
 	selectInUseOffer,
 	selectInUseOffers,
 	withNormalisedOffers,
@@ -451,6 +452,110 @@ describe( 'ListingsEditor 購入リンク（offers）', () => {
 		expect(
 			onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].plan_label
 		).toBe( '見放題' );
+	} );
+
+	test( '提供形態は動画配信の商品でだけ入力欄を出す', async () => {
+		const { unmount } = render(
+			<ListingsEditor
+				listings={ listingWithOffers( [
+					{ display_order: 100, external_id: 'a', plan_label: '' },
+				] ) }
+				platforms={ platforms }
+				productType="ebook"
+				onChange={ () => {} }
+			/>
+		);
+		await userEvent.click( screen.getByRole( 'button', { name: 'a' } ) );
+		expect( screen.queryByLabelText( '提供形態' ) ).not.toBeInTheDocument();
+		unmount();
+
+		render(
+			<ListingsEditor
+				listings={ listingWithOffers( [
+					{ display_order: 100, external_id: 'a', plan_label: '' },
+				] ) }
+				platforms={ platforms }
+				productType="vod"
+				onChange={ () => {} }
+			/>
+		);
+		await userEvent.click( screen.getByRole( 'button', { name: 'a' } ) );
+		expect( screen.getByLabelText( '提供形態' ) ).toBeInTheDocument();
+	} );
+
+	test( '動画配信以外でも提供形態が入っていれば消せるように出す', async () => {
+		const onChange = jest.fn();
+		render(
+			<ListingsEditor
+				listings={ listingWithOffers( [
+					{ display_order: 100, external_id: 'a', plan_label: '見放題' },
+				] ) }
+				platforms={ platforms }
+				productType="ebook"
+				onChange={ onChange }
+			/>
+		);
+		await userEvent.click( screen.getByRole( 'button', { name: 'a' } ) );
+		expect(
+			screen.getByText(
+				'この商品タイプではカードに表示されません。不要なら空にしてください。'
+			)
+		).toBeInTheDocument();
+		fireEvent.change( screen.getByLabelText( '提供形態' ), {
+			target: { value: '' },
+		} );
+		expect(
+			onChange.mock.calls.at( -1 )[ 0 ][ 0 ].offers[ 0 ].plan_label
+		).toBe( '' );
+	} );
+
+	test( 'ストアの選択肢は商品タイプ向けを先に、他は「向け」を添えて後ろに並べる', () => {
+		const typed = [
+			{ code: 'dmm-books', name: 'DMMブックス', applicableTypes: [ 'ebook' ] },
+			{ code: 'hulu', name: 'Hulu', applicableTypes: [ 'vod' ] },
+			{ code: 'misc', name: 'ほか' },
+		];
+		expect( platformOptionsFor( typed, 'vod' ) ).toEqual( [
+			{ value: 'hulu', label: 'Hulu' },
+			{ value: 'dmm-books', label: 'DMMブックス（電子書籍 向け）' },
+			{ value: 'misc', label: 'ほか（汎用 向け）' },
+		] );
+		// タイプが分からない呼び出しは従来どおり。
+		expect( platformOptionsFor( typed, undefined ).map( ( o ) => o.label ) ).toEqual( [
+			'DMMブックス',
+			'Hulu',
+			'ほか',
+		] );
+	} );
+
+	test( '商品タイプ向けでないストアを選ぶと注意を出す', () => {
+		const typed = [
+			{ code: 'dmm-books', name: 'DMMブックス', applicableTypes: [ 'ebook' ] },
+			{ code: 'hulu', name: 'Hulu', applicableTypes: [ 'vod' ] },
+		];
+		const { rerender } = render(
+			<ListingsEditor
+				listings={ [ listingWith( { platform: 'dmm-books' } ) ] }
+				platforms={ typed }
+				productType="vod"
+				onChange={ () => {} }
+			/>
+		);
+		expect(
+			screen.getByText( /この商品タイプ向けのストアではありません/ )
+		).toBeInTheDocument();
+
+		rerender(
+			<ListingsEditor
+				listings={ [ listingWith( { platform: 'hulu' } ) ] }
+				platforms={ typed }
+				productType="vod"
+				onChange={ () => {} }
+			/>
+		);
+		expect(
+			screen.queryByText( /この商品タイプ向けのストアではありません/ )
+		).not.toBeInTheDocument();
 	} );
 
 	test( 'バージョンを入力すると購入リンクの variant_label に入る', async () => {
