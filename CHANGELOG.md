@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [4.6.0] - 2026-11-27
+
 ### Added
 
 - **Prime Video を Amazon Creators API で自動取得できるようにした。** Kindle と同じ `amazon-creators`（認証・呼び出しの上限・10 件のまとめ取得は Amazon で共通）が、応答の種類（`Video On Demand` / `Prime Video`）で動画を見分け、動画用の作り方で購入リンクを埋める。設定 → プラットフォームで Prime Video を「自動取得」に切り替えて使う（既存のインストールにも切り替えの候補を一度だけ補う。`provider` は手動のまま）
